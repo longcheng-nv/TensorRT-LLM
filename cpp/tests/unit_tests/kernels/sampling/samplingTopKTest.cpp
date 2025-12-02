@@ -22,6 +22,13 @@ namespace tk = tensorrt_llm::kernels;
 using namespace tensorrt_llm::runtime;
 using namespace tensorrt_llm::tests::kernels::sampling;
 
+namespace {
+    int32_t getEnvInt(const char* name, int32_t defaultValue) {
+        const char* val = std::getenv(name);
+        return val ? std::atoi(val) : defaultValue;
+    }
+}
+
 namespace
 {
 
@@ -85,6 +92,22 @@ protected:
 };
 
 TYPED_TEST_SUITE(TopKSamplingKernelTest, FloatAndHalfTypes);
+
+//  added
+TYPED_TEST(TopKSamplingKernelTest, parameterizedTopK)
+{
+    auto batchSize = getEnvInt("TEST_BATCH_SIZE", 16);
+    auto vocabSize = getEnvInt("TEST_VOCAB_SIZE", 51200);
+    auto topK = getEnvInt("TEST_TOP_K", 1);
+    auto topP = getEnvInt("TEST_TOP_P", 1.0f);
+
+    this->runTest(SamplingKernelTestParam()
+        .setBatchSize(batchSize)
+        .setVocabSize(vocabSize)
+        .setTopK(topK)
+        .setTopP(topP));
+};
+
 
 TYPED_TEST(TopKSamplingKernelTest, CorrectnessGreedy)
 {
