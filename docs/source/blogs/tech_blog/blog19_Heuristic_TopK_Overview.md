@@ -45,12 +45,16 @@ Instead of exhaustively scanning all data 3–4 times (like the existing radix-s
 
 Each phase in one sentence:
 
+<div align="center">
+
 | Phase | What it does | Why it's fast |
-|:-----:|-------------|---------------|
+|:-----:|:-------------|:--------------|
 | **Guess** | Compute a score threshold from last step's top-2048 | Reads only 2048 scattered values, not all N |
 | **Search** | Secant interpolation to adjust threshold until 2048–6144 candidates | Good initial guess → only 1–2 full scans needed |
 | **Collect** | Gather all above-threshold candidates into on-chip SRAM | No ballot sync, no atomic contention, full memory pipeline |
 | **Refine** | 2048-bin histogram to select exactly 2048 | Pure on-chip work, converges in 1–3 iterations |
+
+</div>
 
 **The core advantage**: the existing radix-select method scans the entire score array 3–4 times regardless of the data. We exploit the "cheat sheet" for an accurate initial guess — **fewer memory passes = less time reading data = faster**.
 
@@ -67,15 +71,21 @@ On actual decode-stage data from SWE-Bench-64K evaluation (9 layers × 17 sample
 </div>
 <p align="center"><sub><em>Per-layer kernel latency at N=70,690 on B200. The heuristic kernel achieves 1.32×–2.11× speedup across all 9 layers.</em></sub></p>
 
+<div align="center">
+
 | Metric | Value |
 |:------:|:-----:|
 | **Overall average speedup** | **1.81×** |
 | **Best layer per-step** | up to **2.36×** |
 | **Layers beating baseline** | **9 / 9** (all layers win) |
 
+</div>
+
 ### It Works Across Data Distributions
 
 This is a **data-aware** algorithm — it works best when the "cheat sheet" is accurate. We analyzed the score distributions across layers and found stable speedups across all distribution types:
+
+<div align="center">
 
 | Distribution Type | Examples | Speedup Range |
 |:-----------------:|:--------:|:-------------:|
@@ -84,6 +94,8 @@ This is a **data-aware** algorithm — it works best when the "cheat sheet" is a
 | Logistic/t (heavy-tailed) | L1 | **1.74×** |
 | Lognormal (heterogeneous) | L0 | **1.32×** |
 | Synthetic random (N≥16K) | — | **1.01–1.75×** |
+
+</div>
 
 Even the trickiest layer (L0, lognormal) still consistently beats the baseline — the algorithm is **robust**.
 
