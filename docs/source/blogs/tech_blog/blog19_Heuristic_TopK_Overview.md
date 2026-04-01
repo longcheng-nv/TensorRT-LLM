@@ -1,4 +1,4 @@
-# Making LLMs Think Faster: A Smarter Top-K for Sparse Attention
+# Making LLMs Think Faster: A Heuristic GVR Top-K for Sparse Attention
 
 By NVIDIA TensorRT LLM team
 
@@ -6,7 +6,7 @@ By NVIDIA TensorRT LLM team
 
 Modern AI agents — systems that browse the web, write code, and call tools autonomously — need to process *long* conversations, sometimes 64K–128K tokens or more. To avoid the quadratic cost of full attention, a growing family of **sparse attention** methods — including DeepSeek [DSA](https://api-docs.deepseek.com/news/news251201) and [NSA](https://arxiv.org/abs/2502.11089), Moonshot's [MoBA](https://arxiv.org/abs/2502.13189), NVIDIA's [RocketKV](https://arxiv.org/abs/2502.15579), MIT's [Quest](https://proceedings.mlr.press/v235/tang24l.html), and [SAGE-KV](https://arxiv.org/abs/2503.08879) — all rely on a common primitive: **Top-K selection** to pick the most important key-value entries at token, page, or block granularity.
 
-The catch? **Picking the top entries from tens or hundreds of thousands of candidates** becomes a real bottleneck as sequences grow. In DeepSeek-V3.2's Sparse Attention (DSA), the Top-K step selects 2048 tokens from up to 128K+ indexer scores each decode step — consuming a substantial fraction of the sparse attention module's latency at long sequences.
+Efficient GPU Top-K has been extensively studied (e.g., [RadiK](https://dl.acm.org/doi/10.1145/3650200.3656601) (ICS 2024), [Zhang et al.](https://doi.org/10.1145/3581784.3607062) (SC 2023)), but these methods are *distribution-agnostic* general-purpose primitives. As sequences grow, **picking the top entries from tens or hundreds of thousands of candidates** becomes a real bottleneck. In DeepSeek-V3.2's Sparse Attention (DSA), the Top-K step selects 2048 tokens from up to 128K+ indexer scores each decode step — consuming a substantial fraction of the sparse attention module's latency at long sequences.
 
 <div align="center">
 <figure>
@@ -30,18 +30,18 @@ The following chart shows our measurements on real DeepSeek-V3.2 workloads (SWE-
 
 This isn't a coincidence — it's a direct consequence of how positional encoding (RoPE/YaRN) works. The attention scores depend on *relative distance* between tokens, and advancing by one position only shifts each distance by one — a tiny perturbation in a smooth function.
 
-**This means we can use the previous step's Top-K result as a "cheat sheet" to speed up the current step.**
+**This means we can use the previous step's Top-K result as a "cheat sheet" to heuristically speed up the current step.**
 
-## The Algorithm: Guess, Verify, Refine
+## The Algorithm: Guess-Verify-Refine (GVR)
 
-Instead of exhaustively scanning all data 3–4 times (like the existing radix-select method), our heuristic approach exploits the "cheat sheet" to find the answer in just 1–2 scans:
+Instead of exhaustively scanning all data 3–4 times (like existing distribution-agnostic radix-select), our heuristic GVR approach exploits the "cheat sheet" to find the answer in just 1–2 scans:
 
 <div align="center">
 <figure>
-  <img src="../media/tech_blog19_algorithm_flow.png" alt="Four-Phase Algorithm Flow" width="800" height="auto">
+  <img src="../media/tech_blog19_algorithm_flow.png" alt="GVR Four-Phase Algorithm Flow" width="800" height="auto">
 </figure>
 </div>
-<p align="center"><sub><em>Heuristic-guided Top-K: four phases execute sequentially within a single CTA (thread block). Per-phase complexity is annotated below each phase.</em></sub></p>
+<p align="center"><sub><em>GVR (heuristic-guided) Top-K: four phases execute sequentially within a single CTA (thread block). Per-phase complexity is annotated below each phase.</em></sub></p>
 
 Each phase in one sentence:
 
@@ -49,27 +49,26 @@ Each phase in one sentence:
 
 | Phase | What it does | Why it's fast |
 |:-----:|:-------------|:--------------|
-| **Guess** | Compute a score threshold from last step's top-2048 | Reads only 2048 scattered values, not all N |
-| **Search** | Secant interpolation to adjust threshold until 2048–6144 candidates | Good initial guess → only 1–2 full scans needed |
-| **Collect** | Gather all above-threshold candidates into on-chip SRAM | No ballot sync, no atomic contention, full memory pipeline |
-| **Refine** | 2048-bin histogram to select exactly 2048 | Pure on-chip work, converges in 1–3 iterations |
+| **Guess** | Heuristically compute a score threshold from last step's top-2048 | Reads only 2048 scattered values, not all N |
+| **Verify** | Secant interpolation to adjust threshold until 2048–6144 candidates | Good heuristic initial guess → only 1–2 full scans needed |
+| **Refine** | Collect candidates into on-chip SRAM; histogram to select exactly 2048 | No ballot sync, pure on-chip work, converges in 1–3 iterations |
 
 </div>
 
-**The core advantage**: the existing radix-select method scans the entire score array 3–4 times regardless of the data. We exploit the "cheat sheet" for an accurate initial guess — **fewer memory passes = less time reading data = faster**.
+**The core advantage**: the existing radix-select method ([Zhang et al., SC23](https://doi.org/10.1145/3581784.3607062) evolved for Blackwell, already 7.4× over `torch.topk`) scans the entire score array 3–4 times regardless of the data. Our heuristic approach exploits the "cheat sheet" for an accurate initial guess — **fewer memory passes = less time reading data = faster** — while guaranteeing **exact** correctness (results identical to `torch.topk`).
 
 ## The Results
 
 ### Real DeepSeek-V3.2 Decoding on NVIDIA B200
 
-On actual decode-stage data from SWE-Bench-64K evaluation (9 layers × 17 sampled decode steps), the heuristic kernel **outperforms the baseline on every single layer**:
+On actual decode-stage data from SWE-Bench-64K evaluation (9 layers × 17 sampled decode steps), the GVR heuristic kernel **outperforms the baseline on every single layer**:
 
 <div align="center">
 <figure>
   <img src="../media/tech_blog19_real_data_bars.png" alt="Per-Layer Latency and Speedup" width="800" height="auto">
 </figure>
 </div>
-<p align="center"><sub><em>Per-layer kernel latency at N=70,690 on B200. The heuristic kernel achieves 1.32×–2.11× speedup across all 9 layers.</em></sub></p>
+<p align="center"><sub><em>Per-layer kernel latency at N=70,690 on B200. The GVR heuristic kernel achieves 1.32×–2.11× speedup across all 9 layers.</em></sub></p>
 
 <div align="center">
 
@@ -83,7 +82,7 @@ On actual decode-stage data from SWE-Bench-64K evaluation (9 layers × 17 sample
 
 ### It Works Across Data Distributions
 
-This is a **data-aware** algorithm — it works best when the "cheat sheet" is accurate. We analyzed the score distributions across layers and found stable speedups across all distribution types:
+This is a **data-aware** heuristic algorithm — it works best when the "cheat sheet" is accurate. We analyzed the score distributions across layers and found stable speedups across all distribution types:
 
 <div align="center">
 
@@ -101,11 +100,11 @@ Even the trickiest layer (L0, lognormal) still consistently beats the baseline �
 
 ### No Accuracy Loss
 
-The heuristic Top-K produces the exact same set of top-2048 indices as `torch.topk` — verified across sequence lengths from 8K to 131K. End-to-end model accuracy is unchanged across five benchmarks (MMLU, GSM8K, GPQA, LongBench V1/V2), with all deltas within run-to-run variance.
+The GVR heuristic Top-K produces the exact same set of top-2048 indices as `torch.topk` — verified across sequence lengths from 8K to 131K. End-to-end model accuracy is unchanged across five benchmarks (MMLU, GSM8K, GPQA, LongBench V1/V2), with all deltas within run-to-run variance.
 
 ## How It Fits In
 
-The heuristic kernel is integrated into TensorRT-LLM as a **configurable fast path**. Enable it via YAML:
+The heuristic GVR kernel is integrated into TensorRT-LLM as a **configurable fast path**. Enable it via YAML:
 
 ```yaml
 sparse_attention_config:
@@ -117,7 +116,7 @@ When enabled, the system automatically uses the heuristic kernel when previous-s
 
 ## The Bigger Picture
 
-This work illustrates an important principle: **data-aware GPU kernel design**. Instead of building algorithms that treat all inputs identically, we exploit the statistical structure of specific workloads — in this case, the temporal correlation inherent in autoregressive LLM decoding.
+This work illustrates an important principle: **data-aware GPU kernel design**. Instead of building distribution-agnostic algorithms that treat all inputs identically, we heuristically exploit the statistical structure of specific workloads — in this case, the temporal correlation inherent in autoregressive LLM decoding.
 
 While demonstrated on DeepSeek DSA, the approach generalizes to **any sparse attention method whose decode-phase Top-K exhibits temporal correlation** — including NSA, MoBA, RocketKV, and others. As context lengths continue to grow in the era of agentic AI, such workload-specific optimizations will be essential for keeping inference fast and affordable.
 
