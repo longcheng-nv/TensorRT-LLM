@@ -38,7 +38,8 @@ namespace torch_ext
 
 void indexer_topk_decode(th::Tensor const& logits, th::Tensor const& seq_lens, th::Tensor const& indices,
     int64_t next_n, int64_t index_topk, std::optional<th::Tensor> const& pre_idx,
-    std::optional<th::Tensor> const& heuristic_scratch)
+    std::optional<th::Tensor> const& heuristic_scratch, std::optional<th::Tensor> const& threshold_pred = std::nullopt,
+    std::optional<th::Tensor> const& threshold_out = std::nullopt)
 {
 
     TORCH_CHECK(logits.is_cuda() && seq_lens.is_cuda() && indices.is_cuda(),
@@ -101,6 +102,30 @@ void indexer_topk_decode(th::Tensor const& logits, th::Tensor const& seq_lens, t
         heuristicScratchPtr = scratchTensor.data_ptr<float>();
     }
 
+    // Opt-M: optional per-row temporal threshold hint and output buffer
+    float const* thresholdPredPtr = nullptr;
+    if (threshold_pred.has_value())
+    {
+        auto const& t = threshold_pred.value();
+        TORCH_CHECK(t.is_cuda(), "threshold_pred must be a CUDA tensor");
+        TORCH_CHECK(t.device() == logits.device(), "threshold_pred must be on the same device as logits");
+        TORCH_CHECK(t.is_contiguous(), "threshold_pred must be contiguous");
+        TORCH_CHECK(t.scalar_type() == th::kFloat32, "threshold_pred must be float32");
+        TORCH_CHECK(t.numel() >= num_rows, "threshold_pred must have at least numRows elements");
+        thresholdPredPtr = t.data_ptr<float>();
+    }
+    float* thresholdOutPtr = nullptr;
+    if (threshold_out.has_value())
+    {
+        auto const& t = threshold_out.value();
+        TORCH_CHECK(t.is_cuda(), "threshold_out must be a CUDA tensor");
+        TORCH_CHECK(t.device() == logits.device(), "threshold_out must be on the same device as logits");
+        TORCH_CHECK(t.is_contiguous(), "threshold_out must be contiguous");
+        TORCH_CHECK(t.scalar_type() == th::kFloat32, "threshold_out must be float32");
+        TORCH_CHECK(t.numel() >= num_rows, "threshold_out must have at least numRows elements");
+        thresholdOutPtr = t.data_ptr<float>();
+    }
+
     int32_t splitWorkThreshold = 200 * 1000;
     th::Tensor aux_indices = th::empty({0}, th::TensorOptions().dtype(th::kInt32).device(logits.device()));
     th::Tensor aux_logits = th::empty({0}, th::TensorOptions().dtype(th::kFloat32).device(logits.device()));
@@ -116,7 +141,7 @@ void indexer_topk_decode(th::Tensor const& logits, th::Tensor const& seq_lens, t
     tk::invokeIndexerTopKDecode(logits.data_ptr<float>(), seq_lens.data_ptr<int32_t>(), indices.data_ptr<int32_t>(),
         aux_logits.data_ptr<float>(), aux_indices.data_ptr<int32_t>(), splitWorkThreshold, num_rows, num_columns,
         logits_stride_0, logits_stride_1, static_cast<int32_t>(next_n), static_cast<int32_t>(index_topk), preIdxPtr,
-        preIdxStride, preIdxCount, heuristicScratchPtr, stream);
+        preIdxStride, preIdxCount, heuristicScratchPtr, stream, thresholdPredPtr, thresholdOutPtr);
 }
 
 void indexer_topk_prefill(th::Tensor const& logits, th::Tensor const& row_starts, th::Tensor const& row_ends,
@@ -163,7 +188,8 @@ TORCH_LIBRARY_FRAGMENT(trtllm, m)
 {
     m.def(
         "indexer_topk_decode(Tensor logits, Tensor seq_lens, Tensor indices, int next_n, int index_topk=2048, "
-        "Tensor? pre_idx=None, Tensor? heuristic_scratch=None) -> ()");
+        "Tensor? pre_idx=None, Tensor? heuristic_scratch=None, Tensor? threshold_pred=None, "
+        "Tensor? threshold_out=None) -> ()");
 }
 
 TORCH_LIBRARY_IMPL(trtllm, CUDA, m)

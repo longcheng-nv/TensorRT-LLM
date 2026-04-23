@@ -40,9 +40,11 @@ using heuristic_topk::TOP_K;
 
 // Multi-row kernel: thin wrapper that computes per-row parameters,
 // then calls heuristicTopKJob (independently optimized device function).
+// Opt-M: optional thresholdPred (per-row hint) and thresholdOut (per-row K-th export).
 __global__ void __launch_bounds__(BLOCK_SIZE) heuristicTopKMultiRowKernel(float const* __restrict__ logits,
     int const* __restrict__ seqLens, int const* __restrict__ preIdx, float* __restrict__ scratchValues,
-    int* __restrict__ outIndices, int stride0, int next_n, int topK, int preIdxStride, int preIdxCount)
+    int* __restrict__ outIndices, int stride0, int next_n, int topK, int preIdxStride, int preIdxCount,
+    float const* __restrict__ thresholdPred, float* __restrict__ thresholdOut)
 {
     int const rowIdx = blockIdx.x;
     int const seq_len = seqLens[rowIdx / next_n];
@@ -52,6 +54,15 @@ __global__ void __launch_bounds__(BLOCK_SIZE) heuristicTopKMultiRowKernel(float 
     int const* __restrict__ rowPreIdx = preIdx + static_cast<int64_t>(rowIdx / next_n) * preIdxStride;
     float* __restrict__ outputValues = scratchValues + static_cast<int64_t>(rowIdx) * topK;
     int* __restrict__ outputIndices = outIndices + static_cast<int64_t>(rowIdx) * topK;
+
+    // Opt-M: pull the per-row hint if available; otherwise -FLT_MAX disables fast path
+    float thr_pred_val = -FLT_MAX;
+    if (thresholdPred != nullptr)
+    {
+        thr_pred_val = thresholdPred[rowIdx];
+    }
+    // Per-row output pointer for exact K-th export (if buffer provided)
+    float* __restrict__ thresholdOutRow = (thresholdOut != nullptr) ? (thresholdOut + rowIdx) : nullptr;
 
     extern __shared__ unsigned char smem_raw[];
     auto* smem = reinterpret_cast<KernelSmem*>(smem_raw);
@@ -69,20 +80,24 @@ __global__ void __launch_bounds__(BLOCK_SIZE) heuristicTopKMultiRowKernel(float 
             outputValues[i] = -FLT_MAX;
             outputIndices[i] = -1;
         }
+        // No valid K-th exported on this path; leave thresholdOut unchanged or write -FLT_MAX
+        if (threadIdx.x == 0 && thresholdOutRow != nullptr)
+            thresholdOutRow[0] = -FLT_MAX;
         return;
     }
 
     // +1 accounts for the temporal shift: prev_topk indices were computed at
     // seq_len-1, but the current step has one additional KV token appended.
     int const preIdxOffset = (rowIdx % next_n) + 1;
-    heuristicTopKJob(input, N, rowPreIdx, preIdxCount, topK, outputValues, outputIndices, smem, preIdxOffset);
+    heuristicTopKJob(input, N, rowPreIdx, preIdxCount, topK, outputValues, outputIndices, smem, preIdxOffset,
+        thr_pred_val, thresholdOutRow);
 }
 
 } // anonymous namespace
 
 void launchHeuristicTopKDecode(float const* logits, int const* seqLens, int const* preIdx, int* outIndices,
     float* scratchValues, int stride0, int next_n, int topK, int preIdxStride, int preIdxCount, int numRows,
-    cudaStream_t stream)
+    cudaStream_t stream, float const* thresholdPred, float* thresholdOut)
 {
     TLLM_CHECK_WITH_INFO(topK == TOP_K, "heuristicTopKDecode requires topK == 2048 (compile-time constant)");
 
@@ -102,8 +117,8 @@ void launchHeuristicTopKDecode(float const* logits, int const* seqLens, int cons
     TLLM_CHECK_WITH_INFO(stride0 % 4 == 0 || numRows <= 1,
         "heuristicTopKDecode requires logits stride0 divisible by 4 for multi-row launch");
 
-    heuristicTopKMultiRowKernel<<<numRows, BLOCK_SIZE, smemSize, stream>>>(
-        logits, seqLens, preIdx, scratchValues, outIndices, stride0, next_n, topK, preIdxStride, preIdxCount);
+    heuristicTopKMultiRowKernel<<<numRows, BLOCK_SIZE, smemSize, stream>>>(logits, seqLens, preIdx, scratchValues,
+        outIndices, stride0, next_n, topK, preIdxStride, preIdxCount, thresholdPred, thresholdOut);
 }
 
 } // namespace kernels

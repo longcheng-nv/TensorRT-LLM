@@ -81,7 +81,7 @@ from tensorrt_llm.llmapi import DeepSeekSparseAttentionConfig
 
 # Example: DSA configuration (exact values depend on model + use case)
 sparse_attention_config = DeepSeekSparseAttentionConfig(
-    index_topk=64,
+    index_topk=2048,
 )
 
 llm = LLM(
@@ -89,6 +89,28 @@ llm = LLM(
     sparse_attention_config=sparse_attention_config,
 )
 ```
+
+**Heuristic TopK (Blackwell only):** On Blackwell (SM100+) GPUs, you can enable heuristic-guided TopK to accelerate the decode indexer by exploiting temporal correlation between consecutive decode steps. This reuses previous step's TopK indices as hints, reducing threshold search iterations and achieving up to ~1.8x speedup on the decode indexer kernel for long-sequence workloads.
+
+```python
+# DSA with heuristic TopK enabled (requires Blackwell SM100+ GPU)
+sparse_attention_config = DeepSeekSparseAttentionConfig(
+    index_topk=2048,
+    enable_heuristic_topk=True,
+)
+
+llm = LLM(
+    model="<path_or_hf_id>",
+    sparse_attention_config=sparse_attention_config,
+)
+```
+
+When `enable_heuristic_topk` is enabled, the decode indexer uses a 3-way dispatch priority:
+1. **Heuristic kernel** — uses previous step's indices as hints (fastest, Blackwell only)
+2. **CuTE DSL kernel** — falls back when no hint is available (e.g., first decode step)
+3. **Radix sort** — final fallback for correctness
+
+The heuristic path is CUDA Graph compatible and supports multi-token prediction (`next_n > 1`). On pre-Blackwell GPUs, the flag is silently ignored and the standard dispatch path is used.
 
 #### Skip Softmax Attention
 
@@ -128,7 +150,15 @@ enable_chunked_prefill: false
 ```yaml
 sparse_attention_config:
   algorithm: dsa
-  index_topk: 64
+  index_topk: 2048
+```
+
+**DSA with heuristic TopK (Blackwell only)**
+```yaml
+sparse_attention_config:
+  algorithm: dsa
+  index_topk: 2048
+  enable_heuristic_topk: true
 ```
 
 **Skip Softmax Attention**
@@ -342,3 +372,4 @@ The following table compares the three sparse attention algorithms available in 
 | KV Cache Reduction | Yes | No | No |
 | Framework-Level Support Required | Yes | Yes | No |
 | Model Native | No | Yes | No |
+| Heuristic TopK (Blackwell) | No | Yes (`enable_heuristic_topk`) | No |
