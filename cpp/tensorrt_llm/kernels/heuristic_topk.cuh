@@ -823,6 +823,9 @@ __global__ void __launch_bounds__(BLOCK_SIZE, 1)
 
     heuristicTopKJob(input, N, preIdx, M, topK, outputValues, outputIndices, smem, /*preIdxOffset=*/0, threshold_pred,
         threshold_out);
+#if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 900))
+    cudaTriggerProgrammaticLaunchCompletion();
+#endif
 }
 
 // ============================================================================

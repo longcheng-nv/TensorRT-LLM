@@ -18,6 +18,7 @@
 
 #include "tensorrt_llm/common/assert.h"
 #include "tensorrt_llm/common/config.h"
+#include "tensorrt_llm/common/envUtils.h"
 
 // Import heuristicTopKJob (__device__ __noinline__) and all helpers.
 // heuristicTopKJob is independently optimized by ptxas, matching standalone
@@ -83,6 +84,9 @@ __global__ void __launch_bounds__(BLOCK_SIZE) heuristicTopKMultiRowKernel(float 
         // No valid K-th exported on this path; leave thresholdOut unchanged or write -FLT_MAX
         if (threadIdx.x == 0 && thresholdOutRow != nullptr)
             thresholdOutRow[0] = -FLT_MAX;
+#if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 900))
+        cudaTriggerProgrammaticLaunchCompletion();
+#endif
         return;
     }
 
@@ -91,6 +95,9 @@ __global__ void __launch_bounds__(BLOCK_SIZE) heuristicTopKMultiRowKernel(float 
     int const preIdxOffset = (rowIdx % next_n) + 1;
     heuristicTopKJob(input, N, rowPreIdx, preIdxCount, topK, outputValues, outputIndices, smem, preIdxOffset,
         thr_pred_val, thresholdOutRow);
+#if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 900))
+    cudaTriggerProgrammaticLaunchCompletion();
+#endif
 }
 
 } // anonymous namespace
@@ -117,8 +124,19 @@ void launchHeuristicTopKDecode(float const* logits, int const* seqLens, int cons
     TLLM_CHECK_WITH_INFO(stride0 % 4 == 0 || numRows <= 1,
         "heuristicTopKDecode requires logits stride0 divisible by 4 for multi-row launch");
 
-    heuristicTopKMultiRowKernel<<<numRows, BLOCK_SIZE, smemSize, stream>>>(logits, seqLens, preIdx, scratchValues,
-        outIndices, stride0, next_n, topK, preIdxStride, preIdxCount, thresholdPred, thresholdOut);
+    cudaLaunchConfig_t config;
+    config.gridDim = numRows;
+    config.blockDim = BLOCK_SIZE;
+    config.dynamicSmemBytes = smemSize;
+    config.stream = stream;
+    cudaLaunchAttribute attrs[1];
+    attrs[0].id = cudaLaunchAttributeProgrammaticStreamSerialization;
+    attrs[0].val.programmaticStreamSerializationAllowed = tensorrt_llm::common::getEnvEnablePDL();
+    config.numAttrs = 1;
+    config.attrs = attrs;
+
+    cudaLaunchKernelEx(&config, heuristicTopKMultiRowKernel, logits, seqLens, preIdx, scratchValues, outIndices,
+        stride0, next_n, topK, preIdxStride, preIdxCount, thresholdPred, thresholdOut);
 }
 
 } // namespace kernels
