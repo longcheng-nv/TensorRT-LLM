@@ -15,12 +15,28 @@
  */
 
 // ============================================================================
-// heuristic_topk.cuh — V2e: Heuristic-Guided TopK
-// Sort-Free, Histogram-Based Selection
-// Optimised for NVIDIA B200 (Blackwell, sm_100), single thread-block kernel
+// heuristic_topk.cuh — Heuristic-Guided Top-K (Sort-Free, Histogram-Based)
 //
-// Pipeline: P1 (preIdx stats) -> P2 (secant search) -> P3 (collect) ->
-//           P4 (histogram snap + partition output).
+// Outer name: "heuristic" (algorithm family + public dispatcher / launchers).
+// Inner name: "gvr" (Guess-Verify-Refine) — the single-CTA single-row
+//             micro-kernel implementing the algorithm of:
+//   "Guess-Verify-Refine: Data-Aware Top-K for Sparse-Attention Decoding
+//    on Blackwell via Temporal Correlation"
+//
+// Optimised for NVIDIA B200 (Blackwell, sm_100), single thread-block kernel.
+//
+// GVR phase mapping:
+//   P1 (preIdx stats)               ┐  Guess: estimate the K-th-value
+//   P2 (secant threshold search)    ┘  threshold from previous-step top-K
+//                                      indices, then refine the guess via
+//                                      count-only secant iterations.
+//   P3 (collect)                    — Verify: scatter the elements that
+//                                      pass the guessed threshold into
+//                                      shared memory and confirm the
+//                                      candidate count is in the safe band.
+//   P4 (histogram snap + partition) — Refine: 2048-bin histogram snap to
+//                                      the exact K-th value, then partition
+//                                      the candidates into the output set.
 // ============================================================================
 
 #pragma once
@@ -245,9 +261,9 @@ __device__ __forceinline__ void blockFusedSnapIter(KernelSmem* smem, int count, 
 // for this function independently from the caller, matching standalone SASS.
 // ============================================================================
 
-__device__ __noinline__ void heuristicTopKJob(float const* __restrict__ input, int const N,
-    int const* __restrict__ preIdx, int const M, int const topK, float* __restrict__ outputValues,
-    int* __restrict__ outputIndices, KernelSmem* smem, int const preIdxOffset = 0)
+__device__ __noinline__ void gvrTopKJob(float const* __restrict__ input, int const N, int const* __restrict__ preIdx,
+    int const M, int const topK, float* __restrict__ outputValues, int* __restrict__ outputIndices, KernelSmem* smem,
+    int const preIdxOffset = 0)
 {
     int const tid = threadIdx.x;
     int const warp_id = tid / WARP_SIZE;
@@ -256,7 +272,7 @@ __device__ __noinline__ void heuristicTopKJob(float const* __restrict__ input, i
 
     {
         // ================================================================
-        // Phase 1 — Min/Max/Mean of pre-indexed values
+        // Phase 1 (GVR Guess, part 1) — Min/Max/Mean of pre-indexed values
         // ================================================================
 
         float local_min = FLT_MAX;
@@ -328,7 +344,7 @@ __device__ __noinline__ void heuristicTopKJob(float const* __restrict__ input, i
         }
 
         // ================================================================
-        // Phase 2 — Interpolation threshold search
+        // Phase 2 (GVR Guess, part 2) — Secant-interpolation threshold search
         // ================================================================
 
         blockCountGE(input, N, smem->threshold, smem, tid, warp_id, lane);
@@ -425,12 +441,12 @@ __device__ __noinline__ void heuristicTopKJob(float const* __restrict__ input, i
     } // end of P1+P2 scope
 
     // ================================================================
-    // Phase 3 — Ballot-free collect
+    // Phase 3 (GVR Verify) — Ballot-free candidate collect
     // ================================================================
 
-    // OPT5: when done==1, Phase 2 (or Opt-M fast-path) already verified
-    //        count in [TOP_K, MAX_CANDIDATES]; skip the redundant
-    //        full-N blockCountGE re-check entirely.
+    // OPT5: when done==1, Phase 2 already verified count in
+    //        [TOP_K, MAX_CANDIDATES]; skip the redundant full-N
+    //        blockCountGE re-check entirely.
     if (smem->done != 1)
     {
         blockCountGE(input, N, smem->threshold, smem, tid, warp_id, lane);
@@ -527,7 +543,7 @@ __device__ __noinline__ void heuristicTopKJob(float const* __restrict__ input, i
     __syncthreads();
 
     // ================================================================
-    // Phase 4 — Histogram-based selection + partition
+    // Phase 4 (GVR Refine) — Histogram-based selection + partition
     // ================================================================
 
     int const cand_count = min(smem->cand_count, MAX_CANDIDATES);
@@ -739,17 +755,20 @@ __device__ __noinline__ void heuristicTopKJob(float const* __restrict__ input, i
 }
 
 // ============================================================================
-// Main Kernel (calls heuristicTopKJob as an independently-optimized device fn)
+// gvrTopKKernel — single-row global wrapper (1 CTA, 1 row).
+// Calls gvrTopKJob (independently-optimized device function).
+// For multi-row decode launches, see heuristicTopKMultiRowKernel in
+// heuristicTopKDecode.cu — both share the same micro-kernel job.
 // ============================================================================
 
 __global__ void __launch_bounds__(BLOCK_SIZE, 1)
-    heuristicTopKKernel(float const* __restrict__ input, int const N, int const* __restrict__ preIdx, int const M,
+    gvrTopKKernel(float const* __restrict__ input, int const N, int const* __restrict__ preIdx, int const M,
         int const topK, float* __restrict__ outputValues, int* __restrict__ outputIndices, int const thresholdPos)
 {
     extern __shared__ unsigned char smem_raw[];
     auto* smem = reinterpret_cast<KernelSmem*>(smem_raw);
 
-    heuristicTopKJob(input, N, preIdx, M, topK, outputValues, outputIndices, smem, /*preIdxOffset=*/0);
+    gvrTopKJob(input, N, preIdx, M, topK, outputValues, outputIndices, smem, /*preIdxOffset=*/0);
 #if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 900))
     cudaTriggerProgrammaticLaunchCompletion();
 #endif
@@ -780,11 +799,10 @@ cudaError_t launchHeuristicTopK(T const* input, int N, IdxT const* preIdx, int M
         cudaDeviceGetAttribute(&maxSmem, cudaDevAttrMaxSharedMemoryPerBlockOptin, device);
         if (smemSize > static_cast<size_t>(maxSmem))
             return cudaErrorInvalidConfiguration;
-        cudaFuncSetAttribute(
-            heuristicTopKKernel, cudaFuncAttributeMaxDynamicSharedMemorySize, static_cast<int>(smemSize));
+        cudaFuncSetAttribute(gvrTopKKernel, cudaFuncAttributeMaxDynamicSharedMemorySize, static_cast<int>(smemSize));
     }
 
-    heuristicTopKKernel<<<1, BLOCK_SIZE, smemSize, stream>>>(
+    gvrTopKKernel<<<1, BLOCK_SIZE, smemSize, stream>>>(
         input, N, preIdx, M, topK, outputValues, outputIndices, thresholdPos);
 
     return cudaGetLastError();
