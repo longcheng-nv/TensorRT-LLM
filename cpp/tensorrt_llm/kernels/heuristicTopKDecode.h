@@ -28,18 +28,12 @@ namespace kernels
 inline constexpr int kHeuristicTopK = 2048;
 inline constexpr int kHeuristicSize = 2048;
 
-/// Launch heuristic TopK decode kernel with optional temporal threshold hint (Opt-M).
+/// Launch heuristic TopK decode kernel.
 /// @param scratchValues Caller-owned buffer of size [numRows * topK] floats.
 ///        Required for CUDA Graph compatibility — must have a stable device address.
-/// @param thresholdPred Optional [numRows] float buffer holding the previous step's
-///        snapped K-th threshold (Opt-M). Pass nullptr or set per-row to -FLT_MAX
-///        to force cold-start for that row.
-/// @param thresholdOut Optional [numRows] float buffer receiving the current step's
-///        snapped K-th threshold, for use as the next step's thresholdPred. May be
-///        nullptr if the caller does not need the output.
 void launchHeuristicTopKDecode(float const* logits, int const* seqLens, int const* preIdx, int* outIndices,
     float* scratchValues, int stride0, int next_n, int topK, int preIdxStride, int preIdxCount, int numRows,
-    cudaStream_t stream, float const* thresholdPred = nullptr, float* thresholdOut = nullptr);
+    cudaStream_t stream);
 
 } // namespace kernels
 

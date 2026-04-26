@@ -15,21 +15,12 @@
  */
 
 // ============================================================================
-// heuristic_topk.cuh — V2e + Opt-M v1: temporal threshold hint fast path
-// Heuristic-Guided TopK — Sort-Free, Histogram-Based Selection
+// heuristic_topk.cuh — V2e: Heuristic-Guided TopK
+// Sort-Free, Histogram-Based Selection
 // Optimised for NVIDIA B200 (Blackwell, sm_100), single thread-block kernel
 //
-// Opt-M v1 (this file): adds threshold_pred (float scalar, -INF=disabled) and
-//   threshold_out (float*, nullable) to heuristicTopKJob.
-//   Fast path: if threshold_pred > -INF, run blockCountGE with that threshold
-//   as the initial probe. If count in [TOP_K, MAX_CANDIDATES] -> HAPPY, skip
-//   P1 and P2 entirely, go directly to P3 collect. Else fall back to v0 full
-//   flow (P1 -> P2 -> P3 -> P4); the wasted blockCountGE is acceptable in v1.
-//   Always export the P4 snapped K-th threshold to threshold_out[0] when
-//   the pointer is non-null, for use as the next-step hint.
-//
-// Back-compat: default threshold_pred = -INFINITY and threshold_out = nullptr
-//   reduces to exact v0 behavior.
+// Pipeline: P1 (preIdx stats) -> P2 (secant search) -> P3 (collect) ->
+//           P4 (histogram snap + partition output).
 // ============================================================================
 
 #pragma once
@@ -256,62 +247,13 @@ __device__ __forceinline__ void blockFusedSnapIter(KernelSmem* smem, int count, 
 
 __device__ __noinline__ void heuristicTopKJob(float const* __restrict__ input, int const N,
     int const* __restrict__ preIdx, int const M, int const topK, float* __restrict__ outputValues,
-    int* __restrict__ outputIndices, KernelSmem* smem, int const preIdxOffset = 0,
-    float const threshold_pred = -FLT_MAX, float* __restrict__ threshold_out = nullptr)
+    int* __restrict__ outputIndices, KernelSmem* smem, int const preIdxOffset = 0)
 {
     int const tid = threadIdx.x;
     int const warp_id = tid / WARP_SIZE;
     int const lane = tid & (WARP_SIZE - 1);
     unsigned const full_mask = 0xffffffffu;
 
-    // ================================================================
-    // Opt-M Phase 0 — Fast-path probe using temporal hint
-    //
-    // If threshold_pred > -FLT_MAX (caller supplied a valid hint from the
-    // previous decode step), try the hint as the initial threshold.
-    // blockCountGE populates per_thread_counts[] (OPT7 cache); if the count
-    // lands in [TOP_K, MAX_CANDIDATES] we can skip P1 + P2 entirely and flow
-    // straight to P3 collect (setting smem->done = 1 triggers OPT5 skip).
-    // ================================================================
-    bool happy_hint = false;
-    bool const use_hint = (threshold_pred > -FLT_MAX);
-    if (use_hint)
-    {
-        if (tid == 0)
-        {
-            smem->threshold = threshold_pred;
-            smem->done = 0;
-        }
-        __syncthreads();
-
-        blockCountGE(input, N, threshold_pred, smem, tid, warp_id, lane);
-        __syncthreads(); // ensure smem->cand_count visible across block
-
-        int const c_hint = smem->cand_count;
-        // Tight happy band: [TOP_K, TOP_K + SAFETY_MARGIN] = [2048, 4096].
-        // v0's secant targets TOP_K + SAFETY_MARGIN/2 = 3072; staying within
-        // +/-1024 of that avoids Phase 4 snap-loop pathology when cand_count
-        // is close to MAX_CANDIDATES (= 6144) where blockFusedSnapIter can
-        // iterate many times before converging.
-        int constexpr kHintHappyHi = TOP_K + SAFETY_MARGIN; // 4096
-        if (c_hint >= TOP_K && c_hint <= kHintHappyHi)
-        {
-            // HAPPY: skip P1 + P2, OPT7 cache already valid for P3 prefix-sum
-            happy_hint = true;
-            if (tid == 0)
-            {
-                smem->done = 1; // tells P3 to skip the re-blockCountGE (OPT5)
-                // val_lo / val_hi / pmax_saved remain uninitialized on this
-                // path — P3/P4 do not depend on them when done==1.
-            }
-            __syncthreads();
-        }
-        // Miss: fall through to the standard v0 flow (P1 -> P2 -> P3 -> P4).
-        // The blockCountGE above is wasted in this case; v2 will reuse it
-        // via an asymmetric fallback bracket setup.
-    }
-
-    if (!happy_hint)
     {
         // ================================================================
         // Phase 1 — Min/Max/Mean of pre-indexed values
@@ -382,9 +324,6 @@ __device__ __noinline__ void heuristicTopKJob(float const* __restrict__ input, i
                     outputIndices[i] = i;
                     outputValues[i] = input[i];
                 }
-            // Opt-M: force next step to cold-start (no valid K-th computed)
-            if (tid == 0 && threshold_out != nullptr)
-                threshold_out[0] = -FLT_MAX;
             return;
         }
 
@@ -483,7 +422,7 @@ __device__ __noinline__ void heuristicTopKJob(float const* __restrict__ input, i
             smem->done = 2;
         }
         __syncthreads();
-    } // end of if (!happy_hint) — Phase 1 + early-exit + Phase 2 skipped on HAPPY fast path
+    } // end of P1+P2 scope
 
     // ================================================================
     // Phase 3 — Ballot-free collect
@@ -600,9 +539,6 @@ __device__ __noinline__ void heuristicTopKJob(float const* __restrict__ input, i
             outputValues[i] = smem->keys[i];
             outputIndices[i] = smem->vals[i];
         }
-        // Opt-M: export exact K-th threshold for next-step hint
-        if (tid == 0 && threshold_out != nullptr)
-            threshold_out[0] = smem->threshold;
         return;
     }
 
@@ -787,9 +723,6 @@ __device__ __noinline__ void heuristicTopKJob(float const* __restrict__ input, i
             outputValues[i] = -FLT_MAX;
             outputIndices[i] = -1;
         }
-        // Opt-M: export exact K-th threshold (snapped) for next-step hint
-        if (tid == 0 && threshold_out != nullptr)
-            threshold_out[0] = sel_thr;
         return;
     }
 
@@ -803,10 +736,6 @@ __device__ __noinline__ void heuristicTopKJob(float const* __restrict__ input, i
         outputValues[i] = -FLT_MAX;
         outputIndices[i] = -1;
     }
-    // Opt-M: export threshold (degenerate cand_count < TOP_K path — not a valid
-    // happy K-th, but write something consistent so caller sees a value)
-    if (tid == 0 && threshold_out != nullptr)
-        threshold_out[0] = smem->threshold;
 }
 
 // ============================================================================
@@ -815,14 +744,12 @@ __device__ __noinline__ void heuristicTopKJob(float const* __restrict__ input, i
 
 __global__ void __launch_bounds__(BLOCK_SIZE, 1)
     heuristicTopKKernel(float const* __restrict__ input, int const N, int const* __restrict__ preIdx, int const M,
-        int const topK, float* __restrict__ outputValues, int* __restrict__ outputIndices, int const thresholdPos,
-        float const threshold_pred, float* __restrict__ threshold_out)
+        int const topK, float* __restrict__ outputValues, int* __restrict__ outputIndices, int const thresholdPos)
 {
     extern __shared__ unsigned char smem_raw[];
     auto* smem = reinterpret_cast<KernelSmem*>(smem_raw);
 
-    heuristicTopKJob(input, N, preIdx, M, topK, outputValues, outputIndices, smem, /*preIdxOffset=*/0, threshold_pred,
-        threshold_out);
+    heuristicTopKJob(input, N, preIdx, M, topK, outputValues, outputIndices, smem, /*preIdxOffset=*/0);
 #if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 900))
     cudaTriggerProgrammaticLaunchCompletion();
 #endif
@@ -834,8 +761,7 @@ __global__ void __launch_bounds__(BLOCK_SIZE, 1)
 
 template <typename T, typename IdxT = int>
 cudaError_t launchHeuristicTopK(T const* input, int N, IdxT const* preIdx, int M, int topK, T* outputValues,
-    IdxT* outputIndices, cudaStream_t stream = 0, int thresholdPos = -1, float threshold_pred = -FLT_MAX,
-    float* threshold_out = nullptr)
+    IdxT* outputIndices, cudaStream_t stream = 0, int thresholdPos = -1)
 {
     static_assert(sizeof(IdxT) == sizeof(int), "launchHeuristicTopK only supports 32-bit indices");
 
@@ -859,21 +785,12 @@ cudaError_t launchHeuristicTopK(T const* input, int N, IdxT const* preIdx, int M
     }
 
     heuristicTopKKernel<<<1, BLOCK_SIZE, smemSize, stream>>>(
-        input, N, preIdx, M, topK, outputValues, outputIndices, thresholdPos, threshold_pred, threshold_out);
+        input, N, preIdx, M, topK, outputValues, outputIndices, thresholdPos);
 
     return cudaGetLastError();
 }
 
 template cudaError_t launchHeuristicTopK<float, int>(
-    float const*, int, int const*, int, int, float*, int*, cudaStream_t, int, float, float*);
-
-// Keep a back-compat overload (no new params) for callers that want default behavior.
-template <typename T, typename IdxT = int>
-inline cudaError_t launchHeuristicTopK_legacy(T const* input, int N, IdxT const* preIdx, int M, int topK,
-    T* outputValues, IdxT* outputIndices, cudaStream_t stream = 0, int thresholdPos = -1)
-{
-    return launchHeuristicTopK<T, IdxT>(input, N, preIdx, M, topK, outputValues, outputIndices, stream, thresholdPos,
-        /*threshold_pred=*/-FLT_MAX, /*threshold_out=*/nullptr);
-}
+    float const*, int, int const*, int, int, float*, int*, cudaStream_t, int);
 
 } // namespace heuristic_topk

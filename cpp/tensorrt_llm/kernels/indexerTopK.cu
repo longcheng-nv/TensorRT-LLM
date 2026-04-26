@@ -672,8 +672,7 @@ static __global__ __launch_bounds__(kNumThreadsPerBlock) void topKPerRowDecode(f
 void invokeIndexerTopKDecode(float const* logits, int const* seqLens, int* indices, float* outLogitsAux,
     int* outIndicesAux, int const splitWorkThreshold, int const numRows, int const numColumns, int const stride0,
     int const stride1, int const next_n, int const topK, int const* preIdx, int const preIdxStride,
-    int const preIdxCount, float* heuristicScratch, cudaStream_t const stream, float const* thresholdPred,
-    float* thresholdOut)
+    int const preIdxCount, float* heuristicScratch, cudaStream_t const stream)
 {
 
     // INVARIANT: kSortingAlgorithmThreshold is the ORIGINAL TRT-LLM Radix-path
@@ -805,7 +804,7 @@ void invokeIndexerTopKDecode(float const* logits, int const* seqLens, int* indic
     if (canUseHeuristic)
     {
         launchHeuristicTopKDecode(logits, seqLens, preIdx, indices, heuristicScratch, stride0, next_n, topK,
-            preIdxStride, preIdxCount, numRows, stream, thresholdPred, thresholdOut);
+            preIdxStride, preIdxCount, numRows, stream);
     }
     else if (numColumns < kSortingAlgorithmThreshold)
     {

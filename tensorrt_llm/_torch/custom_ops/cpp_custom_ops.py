@@ -199,9 +199,7 @@ def _register_fake():
           next_n,
           index_topk,
           pre_idx=None,
-          heuristic_scratch=None,
-          threshold_pred=None,
-          threshold_out=None):
+          heuristic_scratch=None):
         # In-place operation, no return value (void function)
         pass
 
