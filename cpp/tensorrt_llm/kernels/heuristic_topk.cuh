@@ -47,6 +47,11 @@
 #include <cstdlib> // for std::getenv (PDL launcher env-gate)
 #include <cuda_runtime.h>
 
+// V4 K=M=512 ablation config is centralized in heuristicTopKDecode.h so both
+// indexerTopK.cu (which includes heuristicTopKDecode.h only) and this header see
+// consistent macros. Edit the block in heuristicTopKDecode.h to sweep (f, C).
+#include "tensorrt_llm/kernels/heuristicTopKDecode.h"
+
 namespace heuristic_topk
 {
 
@@ -58,16 +63,41 @@ constexpr int BLOCK_SIZE = 512;
 constexpr int WARP_SIZE = 32;
 constexpr int NUM_WARPS = BLOCK_SIZE / WARP_SIZE;
 
-constexpr int TOP_K = 2048;
-constexpr int HEURISTIC_SIZE = 2048;
-constexpr int SAFETY_MARGIN = 2048;
-constexpr int MAX_CANDIDATES = TOP_K + SAFETY_MARGIN * 2; // 6144
+// V4 K=M=512 ablation parameters (see 06_preidx_deep_dive/08_v4_K512_realbench/).
+// Defaults reproduce V3.2 production (K=M=2048, f=3072, C=6144). Override via
+//   -DHEURISTIC_TOP_K=<n> -DHEURISTIC_SIZE_M=<n>
+//   -DHEURISTIC_F_TARGET=<n> -DHEURISTIC_MAX_CANDIDATES=<n>
+// Constraints: F_TARGET >= TOP_K; MAX_CANDIDATES >= F_TARGET; MAX_CANDIDATES % BLOCK_SIZE == 0.
+#ifndef HEURISTIC_TOP_K
+#define HEURISTIC_TOP_K 2048
+#endif
+#ifndef HEURISTIC_SIZE_M
+#define HEURISTIC_SIZE_M HEURISTIC_TOP_K
+#endif
+#ifndef HEURISTIC_F_TARGET
+// Backward compat: TOP_K + SAFETY_MARGIN/2 with SAFETY_MARGIN=TOP_K (default = 1.5 * K)
+#define HEURISTIC_F_TARGET ((HEURISTIC_TOP_K) + (HEURISTIC_TOP_K) / 2)
+#endif
+#ifndef HEURISTIC_MAX_CANDIDATES
+// Backward compat: TOP_K + SAFETY_MARGIN*2 with SAFETY_MARGIN=TOP_K (default = 3 * K)
+#define HEURISTIC_MAX_CANDIDATES ((HEURISTIC_TOP_K) *3)
+#endif
+
+constexpr int TOP_K = HEURISTIC_TOP_K;
+constexpr int HEURISTIC_SIZE = HEURISTIC_SIZE_M;
+constexpr int F_TARGET = HEURISTIC_F_TARGET;
+constexpr int MAX_CANDIDATES = HEURISTIC_MAX_CANDIDATES;
+// SAFETY_MARGIN preserved as derived constant for any external reader
+// (no longer the source-of-truth — F_TARGET and MAX_CANDIDATES are independent).
+constexpr int SAFETY_MARGIN = (MAX_CANDIDATES - TOP_K) / 2;
 
 constexpr int MAX_REFINE_ITERS = 15;
 constexpr int NUM_BINS = 2048;
 
-static_assert(TOP_K % BLOCK_SIZE == 0);
-static_assert(MAX_CANDIDATES % BLOCK_SIZE == 0);
+static_assert(TOP_K % BLOCK_SIZE == 0, "TOP_K must be divisible by BLOCK_SIZE");
+static_assert(MAX_CANDIDATES % BLOCK_SIZE == 0, "MAX_CANDIDATES must be divisible by BLOCK_SIZE");
+static_assert(F_TARGET >= TOP_K, "F_TARGET must be >= TOP_K");
+static_assert(MAX_CANDIDATES >= F_TARGET, "MAX_CANDIDATES must be >= F_TARGET");
 
 // ============================================================================
 // Shared Memory Layout (~59 KB)
@@ -376,7 +406,7 @@ __device__ __noinline__ void gvrTopKJob(float const* __restrict__ input, int con
             {
                 float vlo = smem->val_lo, vhi = smem->val_hi;
                 int clo = smem->cnt_lo, chi = smem->cnt_hi;
-                int target = TOP_K + SAFETY_MARGIN / 2;
+                int target = F_TARGET;
                 float range = vhi - vlo;
                 float nv;
                 if (clo > chi && range > 1e-10f)

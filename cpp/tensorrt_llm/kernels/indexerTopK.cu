@@ -804,10 +804,12 @@ void invokeIndexerTopKDecode(float const* logits, int const* seqLens, int* indic
         {
             fprintf(stderr,
                 "[Scheme X v1.2] numRows=%d numColumns=%d kBsWave=%d kBsL2=%d kBsLarge=%d kSeqSmall=%d smCount=%d "
-                "L2=%dMB -> %s path%s\n",
+                "L2=%dMB topK=%d kHeurTopK=%d preIdxCount=%d kHeurSize=%d preIdxStride=%d preIdx=%s scratch=%s "
+                "stride1=%d -> %s path%s\n",
                 numRows, numColumns, kBsWave, kBsL2, kBsLarge, kSeqSmall, sCachedSmCount,
-                sCachedL2Bytes / (1024 * 1024), canUseHeuristic ? "Heuristic" : "Radix",
-                (numColumns < kSeqSmall) ? " (small-N route)" : "");
+                sCachedL2Bytes / (1024 * 1024), topK, kHeuristicTopK, preIdxCount, kHeuristicSize, preIdxStride,
+                (preIdx != nullptr ? "yes" : "NULL"), (heuristicScratch != nullptr ? "yes" : "NULL"), stride1,
+                canUseHeuristic ? "Heuristic" : "Radix", (numColumns < kSeqSmall) ? " (small-N route)" : "");
         }
     }
 

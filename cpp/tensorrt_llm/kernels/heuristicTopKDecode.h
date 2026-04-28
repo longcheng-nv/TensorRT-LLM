@@ -25,8 +25,27 @@ TRTLLM_NAMESPACE_BEGIN
 namespace kernels
 {
 
-inline constexpr int kHeuristicTopK = 2048;
-inline constexpr int kHeuristicSize = 2048;
+// ============================================================================
+// V4 K=M=512 ABLATION CONFIG BLOCK (branch feat/gvr-v4-K512-ablation)
+// ----------------------------------------------------------------------------
+// This block is the SINGLE SOURCE OF TRUTH for all 4 GVR-pipeline macros.
+// Both indexerTopK.cu (uses kHeuristicTopK / kHeuristicSize constants) and
+// heuristic_topk.cuh (uses TOP_K, F_TARGET, MAX_CANDIDATES constexpr derived
+// from these macros) include this header — the include sequencing of macro
+// processing in CUDA TUs forced this consolidation.
+// Edit MAX_CANDIDATES per build to sweep (f, C). Comment the whole block to
+// restore V3.2 production defaults (K=M=2048, f=3072, C=6144).
+// Experiment dir: ablation_study/gvr_phase_timing/06_preidx_deep_dive/
+//                 08_v4_K512_realbench/
+// ============================================================================
+#define HEURISTIC_TOP_K 512
+#define HEURISTIC_SIZE_M 512
+#define HEURISTIC_F_TARGET 2560
+#define HEURISTIC_MAX_CANDIDATES 4096 // sweep: {6144, 5120, 4096}
+// ============================================================================
+
+inline constexpr int kHeuristicTopK = HEURISTIC_TOP_K;
+inline constexpr int kHeuristicSize = HEURISTIC_SIZE_M;
 
 /// Launch heuristic TopK decode kernel.
 /// @param scratchValues Caller-owned buffer of size [numRows * topK] floats.

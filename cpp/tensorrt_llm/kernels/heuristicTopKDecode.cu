@@ -92,7 +92,10 @@ void launchHeuristicTopKDecode(float const* logits, int const* seqLens, int cons
     float* scratchValues, int stride0, int next_n, int topK, int preIdxStride, int preIdxCount, int numRows,
     cudaStream_t stream)
 {
-    TLLM_CHECK_WITH_INFO(topK == TOP_K, "heuristicTopKDecode requires topK == 2048 (compile-time constant)");
+    TLLM_CHECK_WITH_INFO(topK == TOP_K,
+        "heuristicTopKDecode runtime topK must equal compile-time TOP_K (currently %d). "
+        "Rebuild kernels with -DHEURISTIC_TOP_K=<n> to change.",
+        TOP_K);
 
     size_t const smemSize = sizeof(KernelSmem);
 
