@@ -750,10 +750,18 @@ int computeIndexerTopKDecodeBlocksPerRow(int numRows, int numColumns, int splitW
     {
         return kMaxBlocksPerRowDecode;
     }
-    // Pick the smallest split that still saturates SMs and keeps each sub-block
-    // large enough for the radix passes to be efficient. For tiny rows the
-    // maxByCols guard collapses to 1 (single block, insertion-sort variant).
+    // Q14 v1.1 fix: gate MC to BS where Stage A actually has idle SMs to recruit.
+    // Empirically (Q14 v1 BS-scan, real V4 N=70K SWE-Bench data, 9 layers x 1827
+    // rows): MC wins +5..9% at BS=1-8, ties at BS=16, slightly regresses at BS=32
+    // (-1.3%), and regresses 11.7% at BS=64. The break-even is at smTarget=4
+    // (numRows ≈ 37), so we conservatively require smTarget >= 4 (numRows <= 37)
+    // before enabling the multi-block split. This guarantees no regression at any
+    // BS while keeping the BS=1-8 wins.
     int const smTarget = (kDecodeTargetTotalBlocks + numRows - 1) / numRows;
+    if (smTarget < 4)
+    {
+        return 1;
+    }
     int const maxByCols = std::max(1, numColumns / kDecodeMinColsPerSubBlock);
     int blocksPerRow = std::min({smTarget, maxByCols, kMaxBlocksPerRowDecode});
     return std::max(1, blocksPerRow);
