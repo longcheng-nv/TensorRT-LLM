@@ -27,12 +27,23 @@ TRTLLM_NAMESPACE_BEGIN
 
 namespace kernels
 {
+/// Q14 v1: heuristic that returns the number of CTAs/row for the multi-block
+/// split path. Returns 1 when single-block is preferred. Mirrors PR #13811's
+/// helper but with B200-tuned constants (Q14 v1 bumped kMax 10→16, target 132→148,
+/// minCols 2048→1024). Callers that allocate aux buffers must use this same
+/// helper to size them, and must pass the same splitWorkThreshold they will
+/// pass to invokeIndexerTopKDecode (a value <= 0 selects the internal default).
+/// Set TRTLLM_FORCE_SC_RADIX=1 in the env to force single-block at runtime
+/// regardless of the heuristic (used for A/B perf comparison against the
+/// pre-Q14 single-CTA radix baseline within the same .so build).
+int computeIndexerTopKDecodeBlocksPerRow(int numRows, int numColumns, int splitWorkThreshold = 0);
+
 /// fp32 indexer TopK decode — L2-aware BS-threshold dispatcher with four
 /// fallback tiers:
 ///   - GVR Heuristic    (preIdx provided, kSeqSmall ≤ N < splitWork, BS < kBsLarge, K ∈ {512,1024,2048})
 ///   - Insertion sort   (N < kSortingAlgorithmThreshold)
-///   - Radix sort       (kSortingAlgorithmThreshold ≤ N < splitWork)
-///   - Radix split-work (N ≥ splitWork — uses outLogitsAux / outIndicesAux)
+///   - Radix sort       (kSortingAlgorithmThreshold ≤ N < splitWork, blocksPerRow == 1)
+///   - Radix split-work (kSortingAlgorithmThreshold ≤ N, blocksPerRow > 1 — uses outLogitsAux / outIndicesAux)
 void invokeIndexerTopKDecode(float const* logits, int const* seqLens, int* indices, float* outLogitsAux,
     int* outIndicesAux, int const splitWorkThreshold, int const numRows, int const numColumns, int const stride0,
     int const stride1, int const next_n, int const topK = 2048, int const* preIdx = nullptr, int const preIdxStride = 0,

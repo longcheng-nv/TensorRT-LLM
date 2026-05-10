@@ -115,15 +115,17 @@ void indexer_topk_decode(th::Tensor const& logits, th::Tensor const& seq_lens, t
     if (logits_dtype == at::ScalarType::Float)
     {
         // fp32 path — full Scheme X v1.2 dispatcher (GVR / Insertion / Radix /
-        // Radix-split-work). aux_logits/aux_indices needed only by split-work.
+        // Radix-split-work). aux_logits/aux_indices needed when blocksPerRow > 1.
+        // Q14 v1: aux size now driven by computeIndexerTopKDecodeBlocksPerRow so
+        // small/medium-N batches that pick a multi-block path also get aux.
         th::Tensor aux_indices = th::empty({0}, th::TensorOptions().dtype(th::kInt32).device(logits.device()));
         th::Tensor aux_logits = th::empty({0}, th::TensorOptions().dtype(th::kFloat32).device(logits.device()));
-        constexpr auto multipleBlocksPerRowConfig = 10;
-        if (num_columns >= splitWorkThreshold)
+        int const blocks_per_row = tk::computeIndexerTopKDecodeBlocksPerRow(num_rows, num_columns, splitWorkThreshold);
+        if (blocks_per_row > 1)
         {
-            aux_indices = th::empty({num_rows, multipleBlocksPerRowConfig, index_topk},
-                th::TensorOptions().dtype(th::kInt32).device(logits.device()));
-            aux_logits = th::empty({num_rows, multipleBlocksPerRowConfig, index_topk},
+            aux_indices = th::empty(
+                {num_rows, blocks_per_row, index_topk}, th::TensorOptions().dtype(th::kInt32).device(logits.device()));
+            aux_logits = th::empty({num_rows, blocks_per_row, index_topk},
                 th::TensorOptions().dtype(th::kFloat32).device(logits.device()));
         }
         tk::invokeIndexerTopKDecode(logits.data_ptr<float>(), seq_lens.data_ptr<int32_t>(), indices.data_ptr<int32_t>(),

@@ -729,7 +729,35 @@ inline SchemeXBounds getSchemeXBounds(int numColumns, int bytesPerElem)
     return b;
 }
 
+// Q14 v1: tunables for the radix multi-CTA split-and-merge path. These extend
+// PR #13811's helper to the GVR fork (B200-tuned numbers).
+constexpr int kMaxBlocksPerRowDecode = 16;      // PR #13811 was 10; Q14 bumps to 16.
+constexpr int kDecodeTargetTotalBlocks = 148;   // B200 SM count (PR was 132 = H100).
+constexpr int kDecodeMinColsPerSubBlock = 1024; // PR was 2048; Q14 lowers to 1024.
+
 } // anonymous namespace
+
+int computeIndexerTopKDecodeBlocksPerRow(int numRows, int numColumns, int splitWorkThreshold)
+{
+    if (numRows <= 0)
+    {
+        return 1;
+    }
+    constexpr int kDefaultSplitWorkThreshold = 200 * 1000;
+    int const forceSplitThreshold = splitWorkThreshold > 0 ? splitWorkThreshold : kDefaultSplitWorkThreshold;
+    // Preserve original behavior for very long sequences.
+    if (numColumns >= forceSplitThreshold)
+    {
+        return kMaxBlocksPerRowDecode;
+    }
+    // Pick the smallest split that still saturates SMs and keeps each sub-block
+    // large enough for the radix passes to be efficient. For tiny rows the
+    // maxByCols guard collapses to 1 (single block, insertion-sort variant).
+    int const smTarget = (kDecodeTargetTotalBlocks + numRows - 1) / numRows;
+    int const maxByCols = std::max(1, numColumns / kDecodeMinColsPerSubBlock);
+    int blocksPerRow = std::min({smTarget, maxByCols, kMaxBlocksPerRowDecode});
+    return std::max(1, blocksPerRow);
+}
 
 void invokeIndexerTopKDecode(float const* logits, int const* seqLens, int* indices, float* outLogitsAux,
     int* outIndicesAux, int const splitWorkThreshold, int const numRows, int const numColumns, int const stride0,
@@ -856,57 +884,65 @@ void invokeIndexerTopKDecode(float const* logits, int const* seqLens, int* indic
         cudaLaunchKernelEx(
             &config, kernel_instance, logits, seqLens, indices, stride0, stride1, topK, next_n, nullptr, 0, nullptr);
     }
-    else if (numColumns < effectiveSplitWorkThreshold)
-    {
-        // From this threshold, use radix sort instead
-        auto* kernel_instance = &topKPerRowDecode<kNumThreadsPerBlock, true>;
-
-        cudaLaunchConfig_t config;
-        config.gridDim = numRows;
-        config.blockDim = kNumThreadsPerBlock;
-        config.dynamicSmemBytes = topK * sizeof(int32_t);
-        config.stream = stream;
-        cudaLaunchAttribute attrs[1];
-        attrs[0].id = cudaLaunchAttributeProgrammaticStreamSerialization;
-        attrs[0].val.programmaticStreamSerializationAllowed = tensorrt_llm::common::getEnvEnablePDL();
-        config.numAttrs = 1;
-        config.attrs = attrs;
-
-        cudaLaunchKernelEx(
-            &config, kernel_instance, logits, seqLens, indices, stride0, stride1, topK, next_n, nullptr, 0, nullptr);
-    }
     else
     {
-        // Long sequences are run in two steps
-        constexpr auto multipleBlocksPerRowConfig = 10;
-        auto* kernel_instance_part1 = &topKPerRowDecode<kNumThreadsPerBlock, true, true>;
-        cudaLaunchConfig_t config_part1;
-        config_part1.gridDim = dim3(numRows, multipleBlocksPerRowConfig);
-        config_part1.blockDim = kNumThreadsPerBlock;
-        config_part1.dynamicSmemBytes = 2 * topK * sizeof(int32_t);
-        config_part1.stream = stream;
+        // Q14 v1: unified radix dispatcher (subsumes the previous
+        // "single-block radix at N<200K" and "multi-block-10 at N>=200K" cases).
+        // Decides blocksPerRow per (numRows, numColumns); env override
+        // TRTLLM_FORCE_SC_RADIX=1 forces blocksPerRow=1 for A/B perf comparison
+        // against the pre-Q14 single-CTA baseline.
+        static bool const forceSCRadix = []()
+        {
+            char const* env = std::getenv("TRTLLM_FORCE_SC_RADIX");
+            return env != nullptr && std::atoi(env) != 0;
+        }();
+        int blocksPerRow
+            = forceSCRadix ? 1 : computeIndexerTopKDecodeBlocksPerRow(numRows, numColumns, splitWorkThreshold);
+
         cudaLaunchAttribute attrs[1];
         attrs[0].id = cudaLaunchAttributeProgrammaticStreamSerialization;
         attrs[0].val.programmaticStreamSerializationAllowed = tensorrt_llm::common::getEnvEnablePDL();
-        config_part1.numAttrs = 1;
-        config_part1.attrs = attrs;
 
-        cudaLaunchKernelEx(&config_part1, kernel_instance_part1, logits, seqLens, outIndicesAux, stride0, stride1, topK,
-            next_n, outLogitsAux, 0, nullptr);
+        if (blocksPerRow == 1)
+        {
+            // Single-block radix (matches pre-Q14 path for N >= kSortingAlgorithmThreshold).
+            auto* kernel_instance = &topKPerRowDecode<kNumThreadsPerBlock, true>;
+            cudaLaunchConfig_t config;
+            config.gridDim = numRows;
+            config.blockDim = kNumThreadsPerBlock;
+            config.dynamicSmemBytes = topK * sizeof(int32_t);
+            config.stream = stream;
+            config.numAttrs = 1;
+            config.attrs = attrs;
+            cudaLaunchKernelEx(&config, kernel_instance, logits, seqLens, indices, stride0, stride1, topK, next_n,
+                nullptr, 0, nullptr);
+        }
+        else
+        {
+            // Multi-block split (Stage A) + merge (Stage B).
+            auto* kernel_instance_part1 = &topKPerRowDecode<kNumThreadsPerBlock, true, true>;
+            cudaLaunchConfig_t config_part1;
+            config_part1.gridDim = dim3(numRows, blocksPerRow);
+            config_part1.blockDim = kNumThreadsPerBlock;
+            config_part1.dynamicSmemBytes = 2 * topK * sizeof(int32_t);
+            config_part1.stream = stream;
+            config_part1.numAttrs = 1;
+            config_part1.attrs = attrs;
+            cudaLaunchKernelEx(&config_part1, kernel_instance_part1, logits, seqLens, outIndicesAux, stride0, stride1,
+                topK, next_n, outLogitsAux, 0, nullptr);
 
-        constexpr int kNumThreadsPerBlockMerge = 1024;
-        auto* kernel_instance_part2 = &topKPerRowDecode<kNumThreadsPerBlockMerge, true, false, true>;
-        cudaLaunchConfig_t config_part2;
-        config_part2.gridDim = numRows;
-        config_part2.blockDim = kNumThreadsPerBlockMerge;
-        config_part2.dynamicSmemBytes = topK * sizeof(int32_t);
-        config_part2.stream = stream;
-        // Reuse attrs array since part1 kernel has already been launched
-        config_part2.numAttrs = 1;
-        config_part2.attrs = attrs;
-
-        cudaLaunchKernelEx(&config_part2, kernel_instance_part2, outLogitsAux, seqLens, indices,
-            multipleBlocksPerRowConfig * topK, 1, topK, next_n, nullptr, multipleBlocksPerRowConfig, outIndicesAux);
+            constexpr int kNumThreadsPerBlockMerge = 1024;
+            auto* kernel_instance_part2 = &topKPerRowDecode<kNumThreadsPerBlockMerge, true, false, true>;
+            cudaLaunchConfig_t config_part2;
+            config_part2.gridDim = numRows;
+            config_part2.blockDim = kNumThreadsPerBlockMerge;
+            config_part2.dynamicSmemBytes = topK * sizeof(int32_t);
+            config_part2.stream = stream;
+            config_part2.numAttrs = 1;
+            config_part2.attrs = attrs;
+            cudaLaunchKernelEx(&config_part2, kernel_instance_part2, outLogitsAux, seqLens, indices,
+                blocksPerRow * topK, 1, topK, next_n, nullptr, blocksPerRow, outIndicesAux);
+        }
     }
     sync_check_cuda_error(stream);
 }
