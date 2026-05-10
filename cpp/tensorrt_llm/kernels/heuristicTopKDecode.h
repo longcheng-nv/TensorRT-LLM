@@ -33,21 +33,24 @@ inline constexpr int kHeuristicSize = 2048;
 /// Launch heuristic TopK decode kernel — fp32 input.
 /// @param scratchValues Caller-owned buffer of size [numRows * topK] floats.
 ///        Required for CUDA Graph compatibility — must have a stable device address.
+/// @param numColumns Optional row-length hint used by the multi-CTA dispatcher
+///        to compute cluster_size (chunk_min = 8 * topK; cluster_cap from chunk
+///        and smem). Pass 0 to force single-CTA path (default).
 void launchHeuristicTopKDecode(float const* logits, int const* seqLens, int const* preIdx, int* outIndices,
     float* scratchValues, int stride0, int next_n, int topK, int preIdxStride, int preIdxCount, int numRows,
-    cudaStream_t stream);
+    cudaStream_t stream, int numColumns = 0);
 
 /// Launch heuristic TopK decode kernel — bf16 input.
 /// scratchValues is [numRows * topK] of bf16 (matches input dtype).
 void launchHeuristicTopKDecode(__nv_bfloat16 const* logits, int const* seqLens, int const* preIdx, int* outIndices,
     __nv_bfloat16* scratchValues, int stride0, int next_n, int topK, int preIdxStride, int preIdxCount, int numRows,
-    cudaStream_t stream);
+    cudaStream_t stream, int numColumns = 0);
 
 /// Launch heuristic TopK decode kernel — fp16 input.
 /// scratchValues is [numRows * topK] of fp16 (matches input dtype).
 void launchHeuristicTopKDecode(__half const* logits, int const* seqLens, int const* preIdx, int* outIndices,
     __half* scratchValues, int stride0, int next_n, int topK, int preIdxStride, int preIdxCount, int numRows,
-    cudaStream_t stream);
+    cudaStream_t stream, int numColumns = 0);
 
 } // namespace kernels
 

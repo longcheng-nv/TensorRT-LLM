@@ -835,7 +835,7 @@ void invokeIndexerTopKDecode(float const* logits, int const* seqLens, int* indic
     if (canUseHeuristic)
     {
         launchHeuristicTopKDecode(logits, seqLens, preIdx, indices, heuristicScratch, stride0, next_n, topK,
-            preIdxStride, preIdxCount, numRows, stream);
+            preIdxStride, preIdxCount, numRows, stream, numColumns);
     }
     else if (numColumns < kSortingAlgorithmThreshold)
     {
@@ -964,7 +964,7 @@ void invokeIndexerTopKDecodeDtype(InputT const* logits, int const* seqLens, int*
     if (canUseHeuristic)
     {
         launchHeuristicTopKDecode(logits, seqLens, preIdx, indices, heuristicScratch, stride0, next_n, topK,
-            preIdxStride, preIdxCount, numRows, stream);
+            preIdxStride, preIdxCount, numRows, stream, numColumns);
     }
     else if (numColumns < kSortingAlgorithmThreshold)
     {
