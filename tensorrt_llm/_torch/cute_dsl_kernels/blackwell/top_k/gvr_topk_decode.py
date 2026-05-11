@@ -39,6 +39,30 @@ def float_as_uint32(float_val):
     return llvm.bitcast(cutlass.Uint32.mlir_type, float_val.ir_value())
 
 
+def _fmin_f32_inline(a, b):
+    """Emit single PTX `min.f32` -> single SASS FMNMX instruction.
+
+    cuTe DSL has cute.arch.fmax but NOT cute.arch.fmin; the canonical
+    workaround `-fmax(-a, -b)` lowers to a 3-instruction sequence
+    (FADD R, RZ, -a; FADD R, RZ, -b; FMNMX R, ...; FADD R, RZ, -R).
+    Per phase-resolved hotspot analysis 2026-05-11
+    (.perfbot/learnings/20260511T150703-agent.yaml F004), this pattern
+    is concentrated in block_fused_snap_iter's inner loop and accounts
+    for ~8-10 us of the cuTe vs prod GVR gap at fp32 K=2048 BS=1.
+    """
+    return cutlass.Float32(
+        llvm.inline_asm(
+            cutlass.Float32.mlir_type,
+            [a.ir_value(), b.ir_value()],
+            "min.f32 $0, $1, $2;",
+            "=f,f,f",
+            has_side_effects=False,
+            is_align_stack=False,
+            asm_dialect=llvm.AsmDialect.AD_ATT,
+        )
+    )
+
+
 # =============================================================================
 # Constants (mirror heuristic_topk.cuh:157-167)
 # =============================================================================
@@ -226,10 +250,7 @@ class GvrTopKKernel:
                 v = self._load_fp32(input_row, idx)
                 # cute.arch.fmax / negate-trick keep result as cutlass.Float32.
                 local_max = cute.arch.fmax(local_max, v)
-                local_min = cutlass.Float32(0.0) - cute.arch.fmax(
-                    cutlass.Float32(0.0) - local_min,
-                    cutlass.Float32(0.0) - v,
-                )
+                local_min = _fmin_f32_inline(local_min, v)
                 local_sum = local_sum + v
                 local_cnt = local_cnt + 1
             i = i + self.num_threads
@@ -271,9 +292,7 @@ class GvrTopKKernel:
                 v_sum = smem_wsum_f32[w]
                 v_cnt = smem_wcnt_i32[w]
                 pmax = cute.arch.fmax(pmax, v_max)
-                pmin = cutlass.Float32(0.0) - cute.arch.fmax(
-                    cutlass.Float32(0.0) - pmin, cutlass.Float32(0.0) - v_min
-                )
+                pmin = _fmin_f32_inline(pmin, v_min)
                 psum = psum + v_sum
                 pcnt = pcnt + v_cnt
 
@@ -464,16 +483,10 @@ class GvrTopKKernel:
                         )
                         # clamp f to [0.05, 0.95]
                         f = cute.arch.fmax(cutlass.Float32(0.05), f)
-                        # min via negate-trick
-                        f = cutlass.Float32(0.0) - cute.arch.fmax(
-                            cutlass.Float32(0.0) - f, cutlass.Float32(0.0) - cutlass.Float32(0.95)
-                        )
+                        f = _fmin_f32_inline(f, cutlass.Float32(0.95))
                         if it == 0:
                             # iter 0: f = min(f, 0.5)
-                            f = cutlass.Float32(0.0) - cute.arch.fmax(
-                                cutlass.Float32(0.0) - f,
-                                cutlass.Float32(0.0) - cutlass.Float32(0.5),
-                            )
+                            f = _fmin_f32_inline(f, cutlass.Float32(0.5))
                         nv = vlo + rng * f
                     else:
                         nv = (vlo + vhi) * cutlass.Float32(0.5)
@@ -744,10 +757,8 @@ class GvrTopKKernel:
                 lge = lge + cutlass.Int32(1)
             if v > thr:
                 lgt = lgt + cutlass.Int32(1)
-                # s_up = min(s_up, v) via negation trick
-                s_up = cutlass.Float32(0.0) - cute.arch.fmax(
-                    cutlass.Float32(0.0) - s_up, cutlass.Float32(0.0) - v
-                )
+                # s_up = min(s_up, v) — hot path in block_fused_snap_iter (~10us)
+                s_up = _fmin_f32_inline(s_up, v)
             if v < thr:
                 s_down = cute.arch.fmax(s_down, v)
             isi = isi + cutlass.Int32(num_threads)
@@ -777,9 +788,7 @@ class GvrTopKKernel:
                 )
                 vu_w = cutlass.Float32(vu)
                 vd_w = cutlass.Float32(vd)
-                total_up = cutlass.Float32(0.0) - cute.arch.fmax(
-                    cutlass.Float32(0.0) - total_up, cutlass.Float32(0.0) - vu_w
-                )
+                total_up = _fmin_f32_inline(total_up, vu_w)
                 total_down = cute.arch.fmax(total_down, vd_w)
 
             cge = tp >> cutlass.Int32(16)
@@ -842,9 +851,7 @@ class GvrTopKKernel:
             i5 = tidx
             while i5 < cand_count:
                 v = smem_keys[i5]
-                local_cmin = cutlass.Float32(0.0) - cute.arch.fmax(
-                    cutlass.Float32(0.0) - local_cmin, cutlass.Float32(0.0) - v
-                )
+                local_cmin = _fmin_f32_inline(local_cmin, v)
                 local_cmax = cute.arch.fmax(local_cmax, v)
                 i5 = i5 + cutlass.Int32(num_threads)
             cmin = self.warp_reduce_min_f32(local_cmin)
@@ -871,9 +878,7 @@ class GvrTopKKernel:
                     vmax = cutlass.Float32(
                         llvm.bitcast(cutlass.Float32.mlir_type, vmax_bits.ir_value())
                     )
-                    bmin = cutlass.Float32(0.0) - cute.arch.fmax(
-                        cutlass.Float32(0.0) - bmin, cutlass.Float32(0.0) - vmin
-                    )
+                    bmin = _fmin_f32_inline(bmin, vmin)
                     bmax = cute.arch.fmax(bmax, vmax)
                 if bmax <= bmin:
                     bmax = bmin + cutlass.Float32(1e-6)
