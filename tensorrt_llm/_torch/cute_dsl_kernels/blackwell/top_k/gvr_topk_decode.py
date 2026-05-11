@@ -153,27 +153,35 @@ class GvrTopKKernel:
     # ------------------------------------------------------------------
     # Warp-level reductions (mirror heuristic_topk.cuh:336-398)
     #
-    # Delegate to cute.arch.warp_reduction_{max,sum} (built-in; lowers to
-    # redux.sync on sm_80+ and shfl_xor tree elsewhere). cuTe DSL lacks
-    # `fmin` and `warp_reduction_min`, so f32 min uses the negation trick:
-    # min(x) = -max(-x).
+    # Use cute.arch.warp_redux_sync — direct map to PTX redux.sync (sm_80+
+    # for int32, sm_100 hardware for fp32). NCU on 2026-05-11 showed the
+    # generic cute.arch.warp_reduction_{sum,max} lower to SHFL.BFLY 5-step
+    # tree, not REDUX — accounting for ~29% (~7.7 us) of the cuTe vs CUDA
+    # gap at K=2048 fp32 BS=1. warp_redux_sync emits redux.sync directly
+    # (see cutlass/cute/arch/nvvm_wrappers.py:1611).
     # ------------------------------------------------------------------
     @cute.jit
     def warp_reduce_sum_i32(self, val):
-        return cute.arch.warp_reduction_sum(val)
+        # REDUX.SYNC.ADD.S32 (sm_80+)
+        return cute.arch.warp_redux_sync(val, "add")
 
     @cute.jit
     def warp_reduce_sum_f32(self, val):
+        # PTX redux.sync has no fadd — keep shfl-tree fallback.
         return cute.arch.warp_reduction_sum(val)
 
     @cute.jit
     def warp_reduce_min_f32(self, val):
-        neg = cutlass.Float32(0.0) - val
-        return cutlass.Float32(0.0) - cute.arch.warp_reduction_max(neg)
+        # PTX redux.sync.fmin.f32 (sm_100). Single instruction; supersedes
+        # the prior negation trick (-warp_reduction_max(-val)) which lowered
+        # to 5x SHFL.BFLY + 2x FNEG.
+        return cute.arch.warp_redux_sync(val, "fmin")
 
     @cute.jit
     def warp_reduce_max_f32(self, val):
-        return cute.arch.warp_reduction_max(val)
+        # PTX redux.sync.fmax.f32 (sm_100). Supersedes warp_reduction_max
+        # (shfl tree) lowering.
+        return cute.arch.warp_redux_sync(val, "fmax")
 
     # ------------------------------------------------------------------
     # Phase 1: preIdx Min/Max/Mean → initial threshold
