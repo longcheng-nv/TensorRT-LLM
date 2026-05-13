@@ -88,7 +88,7 @@ Do **not** invoke for:
 | `--K` | `2048` | Top-K. Fixed in production but exposed for ablation. |
 | `--max_c` | `5.0` | Upper bound for noise coefficient binary search. Larger N may converge below 1.0; small N (where K/N is close to 0.5) may saturate. |
 | `--outdir` | `./synth_out/` | Output directory. Created if missing. |
-| `--bench` | (false) | If set, also run a quick GVR vs Radix speedup measurement on the generated data and emit `speedup.txt`. Requires `$TRTLLM_REPO/cpp/build/tensorrt_llm/thop/libth_common.so`. |
+| `--bench` | (false) | If set, also run a quick **in-process** GVR vs Radix speedup measurement (cuda.Event timing, 128 MiB L2-flush before every rep) and emit `speedup.txt`. Requires `$TRTLLM_REPO/cpp/build/tensorrt_llm/thop/libth_common.so`. Note: `cuda.Event` walls include kernel-launch latency tail (~5–10 µs) and underestimate the GVR-vs-Radix speedup by 0.06×–0.29× vs nsys. For production-quoted numbers use the nsys workflow below. |
 
 ## How to run
 
@@ -114,6 +114,60 @@ All-cfg sweep example (3 beta cfgs × 6 N from Q19-tempC):
 bash ${SKILL_DIR}/src/run_all_n.sh /tmp/swebench_synth_full_sweep
 ```
 
+### Production-grade walls (nsys + NVTX + L2-flush)
+
+The default `--bench` mode uses in-process `cuda.Event` timing, which
+includes kernel-launch latency tail (~5–10 µs per call) and underestimates
+the GVR-vs-Radix speedup by 0.06×–0.29× vs nsys "Projected Duration"
+(GPU-only). For production-quoted numbers — e.g. comparing against
+Q9d-04b real-data 1.94× or the F006 production-path bracket — run the
+synth without `--bench`, then re-time under nsys via `bench_nsys.py`:
+
+```bash
+# 1. Synthesize bundles (no --bench)
+python3 ${SKILL_DIR}/src/synth_temporal_data.py \
+    --N 65536 --cfg all --bs 1 --outdir /tmp/synth_out
+
+# 2. NVTX-tagged + L2-flushed nsys capture (uses pre-saved bundles in --indir)
+cd /tmp/synth_out && nsys profile \
+    --trace=cuda,nvtx \
+    --capture-range=cudaProfilerApi --capture-range-end=stop \
+    --force-overwrite=true -o nsys_sweep \
+    python3 ${SKILL_DIR}/src/bench_nsys.py \
+    --indir . --warmup 3 --reps 10
+
+# 3. Export NVTX→GPU projection CSV
+nsys stats -r nvtx_gpu_proj_trace nsys_sweep.nsys-rep \
+    --format csv -o nsys_sweep
+
+# 4. Parse: median µs per (cfg, N, variant) + speedup
+python3 ${SKILL_DIR}/src/parse_nsys.py \
+    nsys_sweep_nvtx_gpu_proj_trace.csv
+```
+
+`bench_nsys.py` loops over every `{cfg}_N{N}_bs{BS}/` subdir under
+`--indir`, wraps each `op(...)` call in an `nvtx.annotate(tag)` range
+with `tag = "GVR|{cfg_N_bs}|rep{r}"` or `"RADIX|{cfg_N_bs}|rep{r}"`,
+and flushes 128 MiB to L2 before every launch. `cudaProfilerStart/Stop`
+brackets the timed loop so warmup is excluded.
+
+`parse_nsys.py` reads "Projected Duration (ns)" from `nvtx_gpu_proj_trace`
+and emits both stdout and `nsys_speedup_summary.json`:
+
+```
+cfg            N    GVR µs   Radix µs   Speedup
+beta_shallow  8192    8.77       8.96    1.022x
+beta_moderate 8192    9.54       9.66    1.013x
+…
+beta_moderate 65536  25.25      48.70    1.929x  ⭐ (≈ Q9d-04b 1.94×)
+```
+
+At N=64K beta_moderate the nsys speedup lands inside the Q9d-04b
+production reference; the same cell under `--bench` cuda.Event reports
+~1.64× (17 % underestimate). Both modes use the same 128 MiB L2-flush
+idiom (B200 L2 = 126.5 MiB) — walls are L2-cold in both; only the
+timing instrumentation differs.
+
 ## What this skill outputs
 
 For each invocation, the output directory contains:
@@ -125,7 +179,13 @@ synth_out/
     preIdx.pt          # int32 [BS, K=2048] (kernel reads logits[preIdx[i]+1])
     seq_lens.pt        # int32 [BS] = N (valid range)
     meta.json          # noise_c, realised_hit_rate, row stats, kernel-side hit_rate
-    [speedup.txt]      # if --bench: GVR/Radix wall in µs + speedup ratio
+    [speedup.txt]      # if --bench: cuda.Event GVR/Radix wall in µs + speedup ratio
+
+  # nsys workflow adds (at --outdir root):
+  nsys_sweep.nsys-rep                          # raw nsys capture
+  nsys_sweep.sqlite                            # nsys SQLite
+  nsys_sweep_nvtx_gpu_proj_trace.csv           # 1 row per (cfg, N, variant, rep)
+  nsys_speedup_summary.json                    # median µs + speedup per cell
 ```
 
 Loading from PyTorch:
