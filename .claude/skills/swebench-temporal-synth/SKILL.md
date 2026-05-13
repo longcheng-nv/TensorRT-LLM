@@ -11,11 +11,12 @@ description: >
   Optional follow-up: run GVR vs Radix nsys speedup measurement on the
   generated data (validated upper bound on production: 2.08-2.25× at
   N=128K; closest synthetic match to Q9d-04b real-data 1.94×). Trigger
-  keywords: "生成SWE-bench随机合成时间相关数据", "synthesize temporal
-  coherent SWE-bench logits", "temporal preIdx benchmark data",
-  "GVR boundary-band miss synth", "decode 时间相干 合成 logits",
-  "generate prev-step coherent preIdx", "boundary-miss preIdx synth",
-  "SWE-bench-aligned beta logits with temporal preIdx".
+  keywords: "generate SWE-bench random synthetic temporal-correlated data",
+  "synthesize temporal coherent SWE-bench logits", "temporal preIdx
+  benchmark data", "GVR boundary-band miss synth", "decode temporal-coherent
+  synthetic logits", "generate prev-step coherent preIdx",
+  "boundary-miss preIdx synth", "SWE-bench-aligned beta logits with
+  temporal preIdx".
 license: LicenseRef-NvidiaProprietary
 metadata:
   author: loncheng@nvidia.com
@@ -60,7 +61,7 @@ speedup.
 Triggered when the user asks for SWE-Bench-aligned synthetic data with
 temporal correlation between consecutive decode steps. Sample phrasings:
 
-- "生成 SWE-bench 随机合成时间相关数据，长度为 64K"
+- "generate SWE-bench random synthetic temporal-correlated data, length 64K"
 - "synthesize temporal-coherent SWE-bench-style decode logits"
 - "generate prev-step coherent preIdx with 50 % hit rate"
 - "boundary-band miss synth at N=128K"
