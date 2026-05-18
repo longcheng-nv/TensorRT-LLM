@@ -80,17 +80,65 @@ ISL_FILTER=131072  MTP_FILTER=3  MODE_FILTER=TEP  GVR_FILTER=1  \
   bash $SKILL_DIR/scripts/02_master.sh
 ```
 
+### Dataset is identical across every BS cell
+
+Both modes (synthetic, real) generate ONE dataset of size `DATASET_NUM_PROMPTS` and reuse it across all BS cells; smaller-BS cells consume a strict prefix. This is mandatory for paired BS scaling — without it, BS=1 and BS=32 would see different prompts and the BS effect would be confounded with prompt-content noise.
+
+| Quantity | Set by | Default |
+|---|---|---|
+| `DATASET_NUM_PROMPTS` | `00_generate_plan.py` → `$PERFDIR/bench.env` (sourced by `02_master.sh`) | `max(BSS) * MULTI_ROUND` |
+| `MULTI_ROUND` | env at plan-gen time | `2` |
+
+Override `DATASET_NUM_PROMPTS` when re-using a pre-generated dataset of a different size (e.g. real-prompt JSONL has 256 rows total).
+
+### Real-prompt mode (long-sequence SWE-bench)
+
+To benchmark against real prompts instead of synthetic random tokens, pre-generate a trtllm-bench-compatible JSONL once with `scripts/prepare_real_prompts.py`, then point `DATASET_FILE` at it. The sweep skips synthetic generation entirely:
+
+```bash
+# 1. Pick the ISL bucket matching your sweep (16k / 32k / 64k / 100k)
+curl -sL -O https://raw.githubusercontent.com/longcheng-nv/GVR_TopK_supplementaty_materials/main/longseqtasks/swe_bench_64k.jsonl
+
+# 2. Convert: source JSONL is {system, user}; output is {task_id, prompt, output_tokens}.
+#    If --model-path is given AND it contains encoding/encoding_dsv4.py, the
+#    DSv4 chat template is applied (preserves thinking_mode/reasoning_effort).
+#    Otherwise plain "system\n\nuser" concat is used.
+python3 $SKILL_DIR/scripts/prepare_real_prompts.py \
+    --input swe_bench_64k.jsonl \
+    --output $PERFDIR/datasets/swe_bench_64k.jsonl \
+    --num-prompts 256 \
+    --output-tokens 4096 \
+    --model-path $MODEL_PATH \
+    --thinking-mode thinking
+
+# 3. Wire the sweep to use this file (all BS cells share it)
+export DATASET_FILE=$PERFDIR/datasets/swe_bench_64k.jsonl
+bash $SKILL_DIR/scripts/02_master.sh
+```
+
+Source files (4 ISL buckets at `longcheng-nv/GVR_TopK_supplementaty_materials/longseqtasks/`):
+
+| File | Rough ISL after templating | Source rows |
+|---|---|---|
+| `swe_bench_16k.jsonl`  | ~16 384 | small (cycled if `--num-prompts` larger) |
+| `swe_bench_32k.jsonl`  | ~32 768 | — |
+| `swe_bench_64k.jsonl`  | ~65 536 | — |
+| `swe_bench_100k.jsonl` | ~102 400 | — |
+
+`prepare_real_prompts.py` cycles input rows modulo their length if `--num-prompts` exceeds the source row count — guaranteeing identical per-row content across all BS cells in the sweep (BS=1 sees row 0; BS=4 sees rows 0..7; BS=32 sees rows 0..63; etc.).
+
 ### Skill files
 
 ```
 .claude/skills/dsv4-pareto-bench/
 ├── SKILL.md
 ├── scripts/
-│   ├── 00_generate_plan.py    # axis cross-product → plan.csv
-│   ├── 01_run_one_cell.sh     # render YAML, run trtllm-bench, parse log
-│   ├── 02_master.sh           # resumable driver, idempotent on restart
-│   ├── 03_summarize.py        # paired ON/OFF deltas + heatmaps
-│   └── _parse_one_cell.py     # PERFORMANCE OVERVIEW + [Scheme X] dispatch parser
+│   ├── 00_generate_plan.py       # axis cross-product → plan.csv + bench.env
+│   ├── 01_run_one_cell.sh        # render YAML, run trtllm-bench, parse log
+│   ├── 02_master.sh              # resumable driver, idempotent on restart
+│   ├── 03_summarize.py           # paired ON/OFF deltas + heatmaps
+│   ├── _parse_one_cell.py        # PERFORMANCE OVERVIEW + [Scheme X] dispatch parser
+│   └── prepare_real_prompts.py   # real-prompt JSONL converter (SWE-bench long-seq)
 └── templates/
     ├── extra-llm-api-config.yml.tpl   # envsubst template, all knobs as ${VAR}
     └── sampler-options.yml.tpl

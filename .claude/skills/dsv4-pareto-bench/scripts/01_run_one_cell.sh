@@ -20,6 +20,14 @@
 #   KV_CACHE_DTYPE      fp8
 #   MOE_BACKEND         TRTLLM    (Pro variant: DEEPGEMM)
 #   MULTI_ROUND         2         (NUM_PROMPTS = BS * MULTI_ROUND)
+#   DATASET_NUM_PROMPTS sweep-wide dataset size (default: NUM_PROMPTS).
+#                       Normally set in PERFDIR/bench.env by 00_generate_plan.py
+#                       to max(BSS) * MULTI_ROUND so every BS cell consumes the
+#                       SAME prompts (smaller BS = strict prefix of larger BS).
+#   DATASET_FILE        absolute path to a pre-made trtllm-bench JSONL.
+#                       When set, synthetic generation is skipped entirely —
+#                       used for real prompts produced by prepare_real_prompts.py
+#                       or any external dataset (e.g., Xianjie's random-v2).
 #   TOKEN_BUDGET_MARGIN 512
 #   CUDA_GRAPH_BS_LIST  "[1, 2, 3, 4, 5, 6, 7, 8]"
 #   SAMPLER_TOP_K       1
@@ -91,6 +99,10 @@ if grep -qP "^${CELL_ID}\b" "${PERFDIR}/failed.txt" 2>/dev/null \
 fi
 
 NUM_PROMPTS=$(( BS * MULTI_ROUND ))
+# Default to per-cell NUM_PROMPTS for backwards compat; 02_master.sh sources
+# bench.env which sets this to max(BSS) * MULTI_ROUND so all BS cells share
+# the same dataset (smaller BS consumes a strict prefix).
+DATASET_NUM_PROMPTS="${DATASET_NUM_PROMPTS:-${NUM_PROMPTS}}"
 MAX_INPUT_LEN=$(( ISL + TOKEN_BUDGET_MARGIN ))
 MAX_SEQ_LEN=$(( ISL + OSL + TOKEN_BUDGET_MARGIN ))
 
@@ -144,28 +156,40 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
     exit 0
 fi
 
-# Dataset cached per (ISL, OSL, num_prompts). Generated lazily so DRY_RUN can
-# render YAML without triggering the slow tokenisation step.
-DATASET="${PERFDIR}/datasets/synth_isl${ISL}_osl${OSL}_n${NUM_PROMPTS}.jsonl"
-if [[ ! -s "${DATASET}" ]]; then
-    echo "[dataset] generating ${DATASET}"
-    PREPARE="${TRTLLM_REPO}/benchmarks/cpp/prepare_dataset.py"
-    [[ -f "${PREPARE}" ]] || { echo "TRTLLM_REPO/${PREPARE} missing; set TRTLLM_REPO env" >&2; exit 5; }
-    # Generate to a temp file first so a failing prepare_dataset.py doesn't
-    # leave a 0-byte cache that future runs would consider "present".
-    tmp_dataset="${DATASET}.partial"
-    if ! ( cd "${TRTLLM_REPO}" && python3 "${PREPARE}" \
-            --tokenizer "${MODEL_PATH}" --stdout \
-            token-norm-dist \
-                --num-requests "${NUM_PROMPTS}" \
-                --input-mean "${ISL}" --input-stdev 0 \
-                --output-mean "${OSL}" --output-stdev 0 \
-            > "${tmp_dataset}" ); then
-        rm -f "${tmp_dataset}"
-        echo "[fail] dataset generation failed" >&2
-        exit 3
+# Dataset selection:
+#   - If DATASET_FILE env is set, use it directly (real prompts produced by
+#     prepare_real_prompts.py, or any pre-made trtllm-bench JSONL). Bench
+#     consumes the first NUM_PROMPTS rows of this file.
+#   - Otherwise, lazily generate a synthetic token-norm-dist dataset sized to
+#     DATASET_NUM_PROMPTS (= max(BSS) * MULTI_ROUND when sourced from
+#     bench.env). Smaller-BS cells consume a strict prefix of the same file,
+#     so per-prompt content is identical across every BS cell in the sweep.
+if [[ -n "${DATASET_FILE:-}" ]]; then
+    DATASET="${DATASET_FILE}"
+    [[ -s "${DATASET}" ]] || { echo "DATASET_FILE=${DATASET} does not exist or is empty" >&2; exit 5; }
+    echo "[dataset] using pre-made ${DATASET}"
+else
+    DATASET="${PERFDIR}/datasets/synth_isl${ISL}_osl${OSL}_n${DATASET_NUM_PROMPTS}.jsonl"
+    if [[ ! -s "${DATASET}" ]]; then
+        echo "[dataset] generating ${DATASET} (n=${DATASET_NUM_PROMPTS}; same file across all BS cells)"
+        PREPARE="${TRTLLM_REPO}/benchmarks/cpp/prepare_dataset.py"
+        [[ -f "${PREPARE}" ]] || { echo "TRTLLM_REPO/${PREPARE} missing; set TRTLLM_REPO env" >&2; exit 5; }
+        # Generate to a temp file first so a failing prepare_dataset.py doesn't
+        # leave a 0-byte cache that future runs would consider "present".
+        tmp_dataset="${DATASET}.partial"
+        if ! ( cd "${TRTLLM_REPO}" && python3 "${PREPARE}" \
+                --tokenizer "${MODEL_PATH}" --stdout \
+                token-norm-dist \
+                    --num-requests "${DATASET_NUM_PROMPTS}" \
+                    --input-mean "${ISL}" --input-stdev 0 \
+                    --output-mean "${OSL}" --output-stdev 0 \
+                > "${tmp_dataset}" ); then
+            rm -f "${tmp_dataset}"
+            echo "[fail] dataset generation failed" >&2
+            exit 3
+        fi
+        mv "${tmp_dataset}" "${DATASET}"
     fi
-    mv "${tmp_dataset}" "${DATASET}"
 fi
 
 set +e

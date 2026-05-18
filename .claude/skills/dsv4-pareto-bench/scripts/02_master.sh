@@ -49,6 +49,13 @@ touch "${COMPLETED}" "${FAILED}"
 [[ -f "${PLAN}" ]] || { echo "missing ${PLAN}; run 00_generate_plan.py first" >&2; exit 1; }
 mkdir -p "${PERFDIR}/results"
 
+# Pull sweep-wide DATASET_NUM_PROMPTS / MULTI_ROUND from bench.env so all
+# BS cells consume identical prompts (smaller-BS cells use a strict prefix).
+if [[ -f "${PERFDIR}/bench.env" ]]; then
+    # shellcheck disable=SC1091
+    source "${PERFDIR}/bench.env"
+fi
+
 echo "================================================================"
 echo "DSv4 paired-feature master driver"
 echo "PERFDIR : ${PERFDIR}"
