@@ -9,8 +9,8 @@ Unified playbook combining Xianjie Qiao's cluster-native sweep methodology (`ben
 
 ## When to invoke
 
-Triggers (Chinese or English):
-- "run Flash/Pro throughput sweep" / "测试 V4 性能"
+Triggers:
+- "run Flash/Pro throughput sweep" / "test V4 performance"
 - "generate Pareto curve" / "build frontier report" / "publish Flash bench numbers"
 - "MTP-scan" / "BS-scan" / "concurrency ramp"
 - "compare GVR/feature-X ON vs OFF" — for kernel-feature A/B work (PR §6 style)
@@ -664,7 +664,7 @@ Each example shows the full chain: **user prompt → 3-axis dispatch → concret
 
 ### Example 1 — Production Pareto on B300 Flash with real dataset
 
-**User**: "在 lyris1 上跑 Flash 的全 Pareto 曲线，对比 NVFP4 vs 现有 baseline"
+**User**: "On lyris1, run the full Flash Pareto curve, comparing NVFP4 vs the current baseline"
 
 Dispatch:
 
@@ -672,7 +672,7 @@ Dispatch:
 |---|---|---|
 | HW | B300 | "lyris1" → GB300 |
 | Model | Flash | explicit |
-| Dataset | real | "生产 Pareto" → random-v2 ratio=0.8 |
+| Dataset | real | "production Pareto" → random-v2 ratio=0.8 |
 | Recipe | F1 | (B300, Flash, real) lookup |
 | Driver | Workflow A (sbatch) | recipe F1 default |
 
@@ -697,9 +697,9 @@ Combo failure modes: BS=512+1024 DEP4 conc OOM (G7) → set kv=0.8 for the bad c
 
 ### Example 2 — Kernel A/B on B300 Flash with synthetic dataset (the GVR pattern)
 
-**User**: "测一下我的新 Heuristic Top-K 在 V4 上是不是 win，跨 BS/MTP 全比较一遍"
+**User**: "Check whether my new Heuristic Top-K is a win on V4, comparing across BS/MTP"
 
-Dispatch: (B300, Flash, synthetic, B-flash-B300, Workflow B). HW + Model defaulted because user didn't specify; dataset inferred from "比较 ON/OFF" needing low noise floor.
+Dispatch: (B300, Flash, synthetic, B-flash-B300, Workflow B). HW + Model defaulted because user didn't specify; dataset inferred from "compare ON/OFF" needing low noise floor.
 
 ```bash
 hostname  # confirm umb-b300-dp-*; if not, ssh there
@@ -724,7 +724,7 @@ Combo failure modes (will hit, plan for them):
 
 ### Example 3 — Pro full sweep on B200 with real dataset
 
-**User**: "在 dfw 上测 Pro 模型的全 sweep，对比 MTP=0/1/2/3"
+**User**: "On dfw, run the full sweep on the Pro model, comparing MTP=0/1/2/3"
 
 Dispatch: (B200, Pro, real, P1+B200deltas, Workflow A).
 
@@ -744,7 +744,7 @@ Combo failure modes: G3 (Pro DEP4 MTP>0 hang — submit script MUST enforce MTP=
 
 ### Example 4 — Cross-cluster overlay (B200 + B300 Pro real)
 
-**User**: "我想看 Pro 在 B300 vs B200 上的 Pareto frontier 对比图，跨集群 overlay"
+**User**: "I want a Pareto frontier comparison plot for Pro on B300 vs B200, cross-cluster overlay"
 
 Dispatch: two sweeps + R1 overlay.
 
@@ -766,7 +766,7 @@ Combo failure modes: not strict apples-to-apples (B200 caps max_num_tokens lower
 
 ### Example 5 — Dispatcher asks when user under-specifies
 
-**User**: "测一下 Flash 的性能"
+**User**: "benchmark Flash performance"
 
 SKILL response per dispatch protocol:
 
@@ -780,7 +780,7 @@ If user replies "B300 + GVR comparison" → auto-completes to **(B300, Flash, sy
 ### Cheat sheet
 
 ```
-User句式                                      → (HW, Model, Dataset, Recipe, Workflow, Host)
+User phrasing                                 → (HW, Model, Dataset, Recipe, Workflow, Host)
 ─────────────────────────────────────────────────────────────────────────────────────────────
 "reproduce Xianjie's Flash frontier"          → (B300, Flash, real, F1,           A, lyris1)
 "reproduce Xianjie's Pro frontier"            → (B300, Pro,   real, P1,           A, lyris1)
