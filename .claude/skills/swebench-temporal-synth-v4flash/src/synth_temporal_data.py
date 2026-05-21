@@ -54,15 +54,18 @@ RADIX_AUX_BLOCKS_MAX = 32  # safe upper bound on blocksPerRow for ISL ≤ 100K
 
 # Fitted from real V4 Flash swe-bench captures, 21 layers (even 2..42),
 # three-bucketed by mean across (32K, 64K, 100K) ISL captures.
-# See /tmp/dsv4/v4_dist_flash_K512.json for full per-layer fits.
+# clip_low / clip_high are the actual observed (min, max) bounds (NOT a
+# symmetric envelope around mean) — V4 logits have asymmetric tails with
+# stronger positive outliers. See /tmp/dsv4/v4_dist_flash_K512_v2.json.
 BETA_CFGS = {
-    "beta_shallow": dict(mean=-1.315, std=0.605, full_range=7.31, target_hr=0.36),
-    "beta_moderate": dict(mean=-2.088, std=0.728, full_range=9.95, target_hr=0.46),
-    "beta_deep": dict(mean=-2.595, std=0.785, full_range=11.46, target_hr=0.44),
+    "beta_shallow": dict(mean=-1.315, std=0.605, clip_low=-4.36, clip_high=7.83, target_hr=0.36),
+    "beta_moderate": dict(mean=-2.088, std=0.728, clip_low=-5.08, clip_high=7.17, target_hr=0.46),
+    "beta_deep": dict(mean=-2.595, std=0.785, clip_low=-6.28, clip_high=7.55, target_hr=0.44),
 }
 
 
 def _fit_beta_params(mean: float, std: float, low: float, high: float):
+    """Solve Beta(α, β) on [low, high] matching target (mean, std)."""
     r = high - low
     mu = (mean - low) / r
     var = min((std / r) ** 2, mu * (1 - mu) * 0.99)
@@ -71,9 +74,13 @@ def _fit_beta_params(mean: float, std: float, low: float, high: float):
 
 
 def sample_beta_row(N: int, cfg_name: str, seed: int) -> torch.Tensor:
+    """Sample N values from a Beta on [clip_low, clip_high] matching cfg's
+    (mean, std). Bounds reflect real V4 logit envelope — asymmetric, with
+    positive-tail extending further than negative.
+    """
     cfg = BETA_CFGS[cfg_name]
-    mean, std, fr = cfg["mean"], cfg["std"], cfg["full_range"]
-    low, high = mean - fr / 2, mean + fr / 2
+    mean, std = cfg["mean"], cfg["std"]
+    low, high = cfg["clip_low"], cfg["clip_high"]
     alpha, beta_p = _fit_beta_params(mean, std, low, high)
     rng = np.random.default_rng(seed)
     samples = (rng.beta(alpha, beta_p, size=N) * (high - low) + low).astype(np.float32)

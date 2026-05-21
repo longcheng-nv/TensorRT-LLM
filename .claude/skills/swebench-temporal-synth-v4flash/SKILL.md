@@ -80,13 +80,17 @@ Do **not** invoke for:
 
 ## Per-cfg beta parameters (fitted from real captures)
 
-| cfg | mean | std | full_range | target_hr | Source layers |
-|---|---:|---:|---:|---:|---|
-| `beta_shallow` | −1.315 | 0.605 | 7.31 | 0.36 | L2, L4, L10, L14, L16, L18, L22 (across 32K/64K/100K captures) |
-| `beta_moderate` | −2.088 | 0.728 | 9.95 | 0.46 | L6, L8, L12, L30, L34, L40, L42 |
-| `beta_deep` | −2.595 | 0.785 | 11.46 | 0.44 | L20, L24, L26, L28, L32, L36, L38 |
+Distribution clip is taken from the actual observed (min, max) per-cfg —
+**NOT** a symmetric envelope around mean. V4 Flash logits have
+asymmetric tails (positive outliers extend further than negative).
 
-Source: `/tmp/dsv4/v4_dist_flash_K512.json` (run-2026-05-21T07:12Z analyzer).
+| cfg | mean | std | `[clip_low, clip_high]` | target_hr | Source layers |
+|---|---:|---:|---|---:|---|
+| `beta_shallow` | −1.315 | 0.605 | `[−4.36, +7.83]` | 0.36 | L2, L4, L10, L14, L16, L18, L22 (across 32K/64K/100K captures) |
+| `beta_moderate` | −2.088 | 0.728 | `[−5.08, +7.17]` | 0.46 | L6, L8, L12, L30, L34, L40, L42 |
+| `beta_deep` | −2.595 | 0.785 | `[−6.28, +7.55]` | 0.44 | L20, L24, L26, L28, L32, L36, L38 |
+
+Source: `/tmp/dsv4/v4_dist_flash_K512_v2.json` (asymmetric-fit analyzer).
 
 ## How to run
 
@@ -98,23 +102,39 @@ python3 ${SKILL_DIR}/src/synth_temporal_data.py \
     --outdir /tmp/v4flash_synth_64k
 ```
 
-### Synth + in-process GVR/Radix wall (cuda.Event)
+### One-shot bench via `run_all_n.sh BENCH=1` (nsys-based, recommended)
 
 ```bash
-TRTLLM_HEURISTIC_NMIN=4096 TRTLLM_HEURISTIC_BSMAX=2048 \
-  python3 ${SKILL_DIR}/src/synth_temporal_data.py \
-    --N 14474 --cfg all --bs 1 --dtype bf16 --bench \
-    --outdir /tmp/v4flash_synth_64k_bench
+TRTLLM_HEURISTIC_NMIN=4096 TRTLLM_HEURISTIC_BSMAX=2048 BENCH=1 \
+  bash ${SKILL_DIR}/src/run_all_n.sh /tmp/v4flash_synth
 ```
 
-### Production-grade nsys + L2-flush + multi-dtype sweep
+This synthesises all 3 beta cfgs × 4 N values, then runs **one** nsys
+session over the whole output dir (via `bench_nsys.py`), exports the
+NVTX→GPU projection CSV, and parses to a per-(cfg, N, BS, dtype) R/H
+summary table (`summary_table.txt` + `nsys_speedup_summary.json` at the
+output dir root). All timing is GPU-kernel-only — no cuda.Event
+launch-tail bias.
+
+Knobs (env):
+- `BS` (default 1), `SEED` (default 42)
+- `DTYPES` (default `fp32,bf16,fp16`) — heuristic-path dtypes; radix is
+  always fp32
+- `WARMUP` (default 3), `REPS` (default 10)
+- `LIBTH_COMMON` (default = built `cpp/build/.../libth_common.so`)
+
+### Manual nsys workflow (one-cell or custom bundle layout)
 
 ```bash
-# 1. Synthesize bundles (multi-N, multi-cfg)
-bash ${SKILL_DIR}/src/run_all_n.sh /tmp/v4flash_synth
+# 1. Synthesise (no --bench inside synth_temporal_data.py — the in-process
+#    cuda.Event path is deprecated; use the run_all_n.sh BENCH=1 path or
+#    the manual nsys invocation below for production-grade numbers).
+python3 ${SKILL_DIR}/src/synth_temporal_data.py \
+    --N 14474 --cfg all --bs 1 --dtype bf16 \
+    --outdir /tmp/v4flash_synth_64k
 
 # 2. nsys capture with NVTX-bracketed GVR_<dtype> + RADIX_fp32 per cell
-cd /tmp/v4flash_synth && nsys profile \
+cd /tmp/v4flash_synth_64k && nsys profile \
     --trace=cuda,nvtx \
     --capture-range=cudaProfilerApi --capture-range-end=stop \
     --force-overwrite=true -o nsys_sweep \

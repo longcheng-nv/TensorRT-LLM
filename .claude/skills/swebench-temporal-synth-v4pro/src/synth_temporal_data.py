@@ -42,15 +42,18 @@ RADIX_AUX_BLOCKS_MAX = 32
 
 # Fitted from real V4 Pro swe-bench captures, 30 layers (even 2..60),
 # three-bucketed by mean across (32K, 64K) ISL captures.
-# See /tmp/dsv4/v4_dist_pro_K1024.json for full per-layer fits.
+# clip_low / clip_high are the actual observed (min, max) bounds — V4 Pro
+# logits show asymmetric tails (positive outliers larger than negative).
+# See /tmp/dsv4/v4_dist_pro_K1024_v2.json for full per-layer fits.
 BETA_CFGS = {
-    "beta_shallow": dict(mean=-1.184, std=0.864, full_range=8.76, target_hr=0.69),
-    "beta_moderate": dict(mean=-1.885, std=1.025, full_range=10.04, target_hr=0.75),
-    "beta_deep": dict(mean=-2.590, std=0.870, full_range=9.74, target_hr=0.77),
+    "beta_shallow": dict(mean=-1.184, std=0.864, clip_low=-4.54, clip_high=7.33, target_hr=0.69),
+    "beta_moderate": dict(mean=-1.885, std=1.025, clip_low=-6.15, clip_high=8.45, target_hr=0.75),
+    "beta_deep": dict(mean=-2.590, std=0.870, clip_low=-5.42, clip_high=6.47, target_hr=0.77),
 }
 
 
 def _fit_beta_params(mean: float, std: float, low: float, high: float):
+    """Solve Beta(α, β) on [low, high] matching target (mean, std)."""
     r = high - low
     mu = (mean - low) / r
     var = min((std / r) ** 2, mu * (1 - mu) * 0.99)
@@ -59,9 +62,12 @@ def _fit_beta_params(mean: float, std: float, low: float, high: float):
 
 
 def sample_beta_row(N: int, cfg_name: str, seed: int) -> torch.Tensor:
+    """Sample N values from a Beta on [clip_low, clip_high] matching cfg's
+    (mean, std). Bounds reflect real V4 Pro logit envelope (asymmetric).
+    """
     cfg = BETA_CFGS[cfg_name]
-    mean, std, fr = cfg["mean"], cfg["std"], cfg["full_range"]
-    low, high = mean - fr / 2, mean + fr / 2
+    mean, std = cfg["mean"], cfg["std"]
+    low, high = cfg["clip_low"], cfg["clip_high"]
     alpha, beta_p = _fit_beta_params(mean, std, low, high)
     rng = np.random.default_rng(seed)
     samples = (rng.beta(alpha, beta_p, size=N) * (high - low) + low).astype(np.float32)

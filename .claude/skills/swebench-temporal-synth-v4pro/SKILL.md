@@ -75,13 +75,17 @@ Do **not** invoke for:
 
 ## Per-cfg beta parameters (fitted from real captures)
 
-| cfg | mean | std | full_range | target_hr | Source layers |
-|---|---:|---:|---:|---:|---|
-| `beta_shallow` | −1.184 | 0.864 | 8.76 | **0.69** | L2, L6, L12, L14, L16, L18, L24, L30, L32, L60 |
-| `beta_moderate` | −1.885 | 1.025 | 10.04 | **0.75** | L8, L10, L20, L22, L34, L36, L42, L44, L48, L58 |
-| `beta_deep` | −2.590 | 0.870 | 9.74 | **0.77** | L4, L26, L28, L38, L40, L46, L50, L52, L54, L56 |
+Distribution clip is taken from the actual observed (min, max) per-cfg —
+**NOT** a symmetric envelope around mean. V4 Pro logits have asymmetric
+tails (positive outliers extend further than negative).
 
-Source: `/tmp/dsv4/v4_dist_pro_K1024.json`.
+| cfg | mean | std | `[clip_low, clip_high]` | target_hr | Source layers |
+|---|---:|---:|---|---:|---|
+| `beta_shallow` | −1.184 | 0.864 | `[−4.54, +7.33]` | **0.69** | L2, L6, L12, L14, L16, L18, L24, L30, L32, L60 |
+| `beta_moderate` | −1.885 | 1.025 | `[−6.15, +8.45]` | **0.75** | L8, L10, L20, L22, L34, L36, L42, L44, L48, L58 |
+| `beta_deep` | −2.590 | 0.870 | `[−5.42, +6.47]` | **0.77** | L4, L26, L28, L38, L40, L46, L50, L52, L54, L56 |
+
+Source: `/tmp/dsv4/v4_dist_pro_K1024_v2.json`.
 
 > **Note on the high hit_rate**: V4 Pro decode steps show much stronger
 > prev-step / current-step preIdx overlap (~75 %) than V4 Flash (~40 %).
@@ -100,16 +104,28 @@ python3 ${SKILL_DIR}/src/synth_temporal_data.py \
     --outdir /tmp/v4pro_synth_64k
 ```
 
-### Multi-cfg sweep + bench
+### One-shot bench via `run_all_n.sh BENCH=1` (nsys-based, recommended)
 
 ```bash
-bash ${SKILL_DIR}/src/run_all_n.sh /tmp/v4pro_synth
+TRTLLM_HEURISTIC_NMIN=4096 TRTLLM_HEURISTIC_BSMAX=2048 BENCH=1 \
+  bash ${SKILL_DIR}/src/run_all_n.sh /tmp/v4pro_synth
 ```
 
-### Production-grade nsys multi-dtype sweep
+Synthesises all 3 cfgs × 4 N, then runs one nsys session over the
+output dir, exports CSV, and parses to per-(cfg, N, BS, dtype) R/H.
+GPU-kernel-only timing — no cuda.Event launch-tail bias.
+
+Knobs (env): `BS`, `SEED`, `DTYPES` (default `fp32,bf16,fp16`),
+`WARMUP`, `REPS`, `LIBTH_COMMON`.
+
+### Manual nsys workflow
 
 ```bash
-cd /tmp/v4pro_synth && nsys profile \
+python3 ${SKILL_DIR}/src/synth_temporal_data.py \
+    --N 14460 --cfg all --bs 1 --dtype bf16 \
+    --outdir /tmp/v4pro_synth_64k
+
+cd /tmp/v4pro_synth_64k && nsys profile \
     --trace=cuda,nvtx \
     --capture-range=cudaProfilerApi --capture-range-end=stop \
     --force-overwrite=true -o nsys_sweep \
