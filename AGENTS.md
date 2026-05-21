@@ -102,6 +102,7 @@ HuggingFace Model → LLM API → Executor (PyTorch/AutoDeploy/TensorRT)
 - **Avoid broad exception handling** — catch specific exceptions, not bare `except:` (see `CODING_GUIDELINES.md`).
 - **One concern per PR** — avoid scope creep. If a PR touches unrelated areas, split it.
 - **User-facing configuration classes** - when editing or defining any user-facing configuration classes (particularly `LlmArgs` or any class used in its fields), you **MUST** follow the Pydantic guidelines in `CODING_GUIDELINES.md`.
+- **Don't load two same-named Python files via `sys.path` + `import`** — Python caches by top-level module name in `sys.modules`, so the second `import` returns the first module regardless of `sys.path` order. To load two sibling-skill `synth_temporal_data.py` (or any same-named) files as distinct modules, use `importlib.util.spec_from_file_location(name, path)` with a UNIQUE `name` per file (e.g. `"synth_flash"`, `"synth_pro"`). Add asserts on a distinguishing constant (e.g. `K_DEFAULT`) right after load to catch regressions.
 
 ## Development Workflow
 

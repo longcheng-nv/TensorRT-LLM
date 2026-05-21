@@ -138,6 +138,21 @@ nsys stats -r nvtx_gpu_proj_trace nsys_sweep.nsys-rep \
 python3 ${SKILL_DIR}/src/parse_nsys.py nsys_sweep_nvtx_gpu_proj_trace.csv
 ```
 
+### Cross-family sweep (Flash + Pro together)
+
+Use the canonical harness `sweep_AB_bench.py` shipped under the v4flash
+sibling at
+`.claude/skills/swebench-temporal-synth-v4flash/src/sweep_AB_bench.py`.
+It loads BOTH skill `synth_temporal_data.py` modules via
+`importlib.util` under distinct names — critical to avoid `sys.modules`
+aliasing the Pro module onto Flash's `K=512` / `BETA_CFGS` (see
+Anti-Patterns in `AGENTS.md`).
+
+See the v4flash sibling's SKILL.md "Cross-family sweep" section for the
+full nsys + SQLite pipeline. Reference Flash + Pro R/H tables and PNG
+plots are under
+`auto_optimization_v1/ablation_study/gvr_phase_timing/13_v4_synth_sweep_AB/REPORT.md`.
+
 ## Loading from PyTorch
 
 ```python

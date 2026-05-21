@@ -149,6 +149,48 @@ nsys stats -r nvtx_gpu_proj_trace nsys_sweep.nsys-rep \
 python3 ${SKILL_DIR}/src/parse_nsys.py nsys_sweep_nvtx_gpu_proj_trace.csv
 ```
 
+### Cross-family sweep — V4 Flash + V4 Pro together (`sweep_AB_bench.py`)
+
+The canonical harness for **paired Flash + Pro** sweeps (Sweep A:
+seq-len scan at BS=1, N ∈ {2K..256K}; Sweep B: BS scan at N=64K, BS ∈
+{1..1024}) lives here at `${SKILL_DIR}/src/sweep_AB_bench.py`. It loads
+this skill's `synth_temporal_data.py` AND the sibling
+`swebench-temporal-synth-v4pro` skill's module via `importlib.util`
+under **distinct module names** — critical because Python's
+`sys.modules` cache would otherwise alias the second
+`import synth_temporal_data` to the first, silently running Pro cells
+with Flash's `K_DEFAULT=512` / `BETA_CFGS`. The script auto-detects the
+sibling skill (env > sibling-layout > `.claude/skills/` upward search >
+`$TRTLLM_REPO`; see the script docstring).
+
+```bash
+mkdir -p data
+for sw in A B; do
+  nsys profile -t cuda,nvtx \
+    --capture-range=cudaProfilerApi --capture-range-end=stop \
+    --force-overwrite=true \
+    --sample=none --cpuctxsw=none --backtrace=none \
+    -o data/sweep_$sw \
+    python3 ${SKILL_DIR}/src/sweep_AB_bench.py --sweep $sw --out-dir data
+done
+
+for sw in A B; do
+  nsys export --type=sqlite --force-overwrite=true \
+    -o data/sweep_$sw.sqlite data/sweep_$sw.nsys-rep
+done
+
+python3 ${SKILL_DIR}/src/sweep_AB_parse_sqlite.py \
+    data/sweep_A.sqlite data/sweep_B.sqlite data
+```
+
+Total wall-time ~3 min on B200. Off-tree reproductions (when this script
+is copied outside `.claude/skills/`) need `SKILL_FLASH` / `SKILL_PRO`
+env vars pointing at each skill's root or `src/`, or `TRTLLM_REPO=<repo>`.
+
+**Reference numbers** (B200, May-2026): Flash + Pro R/H tables and PNG
+plots live under
+`auto_optimization_v1/ablation_study/gvr_phase_timing/13_v4_synth_sweep_AB/REPORT.md`.
+
 ## Loading from PyTorch
 
 ```python
