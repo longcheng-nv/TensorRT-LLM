@@ -945,7 +945,11 @@ def test_cute_dsl_topk_decode_single_pass_multi_cta_cluster(
 @pytest.mark.parametrize("batch_size", [1, 64, 128])
 @pytest.mark.parametrize("next_n", [1, 2, 3])
 @pytest.mark.parametrize("index_topk", [2048])
-@pytest.mark.parametrize("num_tokens", [8192, 16384])
+# num_tokens=4096 added to cover the new uniform kSeqSmall=4096 boundary
+# (indexerTopK.cu kSeqSmallDefaultForK). num_tokens=4096 sits right at the
+# GVR routing threshold so the assertion validates the just-inside-GVR
+# path correctness.
+@pytest.mark.parametrize("num_tokens", [4096, 8192, 16384])
 def test_indexer_topk_decode_dist(
     dist_cfg, batch_size, next_n, index_topk, num_tokens, success_ratio
 ):
