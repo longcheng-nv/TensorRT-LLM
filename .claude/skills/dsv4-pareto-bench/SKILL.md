@@ -30,7 +30,11 @@ The skill ships a portable driver in `scripts/` and YAML templates in `templates
 ```bash
 SKILL_DIR=.claude/skills/dsv4-pareto-bench          # path inside this repo
 export PERFDIR=$PWD/dsv4_bench                       # sweep workdir (plan.csv, logs/, results/)
-export MODEL_PATH=/path/to/DeepSeek-V4-Flash         # absolute; MoE backend auto-detected from config.json:expert_dtype
+# MODEL_PATH — explicit absolute path, OR omit and set MODEL_VARIANT to let the
+# driver auto-detect by cluster (SC computelab → /home/scratch.trt_llm_data_ci/llm-models/,
+# lyris1 → /lustre/...). MoE backend auto-detected from config.json:expert_dtype.
+export MODEL_VARIANT=Flash                           # Flash (default) | Pro
+# export MODEL_PATH=/path/to/DeepSeek-V4-Flash       # uncomment to override auto-detect
 export TRTLLM_REPO=$PWD                              # must contain benchmarks/cpp/prepare_dataset.py
 
 # Paired-feature parity: share autotune cache across cells so GVR ON/OFF (or
@@ -80,6 +84,8 @@ python3 $SKILL_DIR/scripts/03_summarize.py
 
 | Env var | Default | When to change |
 |---|---|---|
+| `MODEL_PATH` | auto-detected from `MODEL_VARIANT` + hostname (see "Model-path auto-detection" below) | set explicitly to override or when running on an unrecognized cluster |
+| `MODEL_VARIANT` | `Flash` | `Pro` to pick DSv4 Pro weights at the auto-detected location |
 | `MOE_BACKEND` | auto from `config.json:expert_dtype` (`fp4 → TRTLLM`, else `DEEPGEMM`) | rarely overridden; set explicitly to bypass auto-detect |
 | `TLLM_AUTOTUNER_CACHE_PATH` | unset (autotune in-memory only) | `${PERFDIR}/autotuner_cache.json` (FILE path, NOT a directory — `open(file_path, 'r')` is called directly; parent dir is auto-created on first save) to share kernel-selection across cells; required when comparing paired GVR ON/OFF (or any feature A/B) so both branches run on the same autotuned kernels |
 | `MAX_NUM_TOKENS` | `8192` | `16384` on B300 / Flash |
@@ -90,6 +96,30 @@ python3 $SKILL_DIR/scripts/03_summarize.py
 | `CELL_TIMEOUT` | `7200` | per-cell hard timeout (s) |
 | `CUDA_GRAPH_BS_LIST` | `[1,2,3,4,5,6,7,8]` | extend if running BS>8 cells |
 | `EXTRA_YAML_TEMPLATE` | `templates/extra-llm-api-config.yml.tpl` | override for custom YAML shape |
+
+### Model-path auto-detection — cluster → weights map
+
+`01_run_one_cell.sh` and `02_master.sh` auto-resolve `MODEL_PATH` when unset, using `MODEL_VARIANT` (`Flash` default; set `Pro` for DSv4 Pro) and probing the cluster's canonical weights location. First-hit wins; explicit `MODEL_PATH` always overrides.
+
+| Cluster | Hostname pattern (`hostname -f`) | Weights root | Flash path | Pro path |
+|---|---|---|---|---|
+| **SC computelab** | `umb-b*`, `*.colossus.nvidia.com` (e.g. `umb-b300-026.ipp2a1.colossus.nvidia.com`) | `/home/scratch.trt_llm_data_ci/llm-models/` | `/home/scratch.trt_llm_data_ci/llm-models/DeepSeek-V4-Flash` | `/home/scratch.trt_llm_data_ci/llm-models/DeepSeek-V4-Pro` |
+| **lyris1** | `lyris*` | `/lustre/fsw/portfolios/coreai/projects/coreai_comparch_trtllm/common/` (+ `coreai_comparch_inferencex/...` fallback) | `…/common/DeepSeek-V4-Flash` | `…/common/DeepSeek-V4-Pro` |
+| dfw / OCI / unknown | other | (relies on `MODEL_PATH` env var) | set `MODEL_PATH` explicitly | set `MODEL_PATH` explicitly |
+
+Detection log line emitted by `01_run_one_cell.sh` on success:
+
+```
+[model-auto] cluster=SC-computelab variant=Flash → MODEL_PATH=/home/scratch.trt_llm_data_ci/llm-models/DeepSeek-V4-Flash
+```
+
+If auto-detect fails (no probed path exists) the script aborts with:
+
+```
+MODEL_PATH unset and auto-detect failed — set MODEL_PATH explicitly or MODEL_VARIANT=Flash|Pro
+```
+
+When **the user says "run on computelab" / "on SC" / mentions a `umb-b*` host**, the dispatcher should leave `MODEL_PATH` unset and only set `MODEL_VARIANT=Flash|Pro` — the SC-computelab path is the first probe so it'll always be picked there.
 
 ### Per-axis filter (master driver) — slice the matrix without regenerating plan.csv
 

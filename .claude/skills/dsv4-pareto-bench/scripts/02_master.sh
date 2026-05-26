@@ -4,7 +4,10 @@
 # (unless listed in force_retry.txt).
 #
 # Required env (inherited by 01_run_one_cell.sh):
-#   MODEL_PATH
+#   MODEL_PATH         absolute path to DSv4 Flash / Pro weights;
+#                      OR omit and set MODEL_VARIANT=Flash|Pro to let
+#                      01_run_one_cell.sh auto-detect by cluster
+#                      (SC computelab → /home/scratch.trt_llm_data_ci/llm-models/)
 #
 # Optional env:
 #   PERFDIR            sweep working dir (default: parent of this script's dir)
@@ -24,7 +27,19 @@ PLAN="${PERFDIR}/plan.csv"
 COMPLETED="${PERFDIR}/completed.txt"
 FAILED="${PERFDIR}/failed.txt"
 
-: "${MODEL_PATH:?MODEL_PATH env var required}"
+# MODEL_PATH may be auto-detected by 01_run_one_cell.sh via MODEL_VARIANT.
+# Pre-check upfront so we don't enumerate the plan and then fail every cell.
+if [[ -z "${MODEL_PATH:-}" ]]; then
+    _variant="${MODEL_VARIANT:-Flash}"
+    for _cand in \
+        "/home/scratch.trt_llm_data_ci/llm-models/DeepSeek-V4-${_variant}" \
+        "/lustre/fsw/portfolios/coreai/projects/coreai_comparch_trtllm/common/DeepSeek-V4-${_variant}" \
+        ; do
+        if [[ -d "${_cand}" ]]; then MODEL_PATH="${_cand}"; break; fi
+    done
+    unset _cand _variant
+fi
+: "${MODEL_PATH:?MODEL_PATH unset and auto-detect failed — set MODEL_PATH explicitly or MODEL_VARIANT=Flash|Pro}"
 
 MAX_WALL_SECONDS="${MAX_WALL_SECONDS:-14000}"
 START_EPOCH=$(date +%s)

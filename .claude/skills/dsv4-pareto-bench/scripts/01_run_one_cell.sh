@@ -56,8 +56,39 @@ fi
 
 CELL_ID="$1"; ISL="$2"; OSL="$3"; BS="$4"; MTP="$5"; MODE="$6"; GVR="$7"
 
-# Required env
-: "${MODEL_PATH:?MODEL_PATH env var required}"
+# MODEL_PATH — explicit env var wins; otherwise auto-detect by cluster + MODEL_VARIANT.
+# MODEL_VARIANT defaults to Flash; set "Pro" to pick DSv4 Pro weights.
+# Detected clusters:
+#   SC computelab (umb-b*, *.colossus.nvidia.com) → /home/scratch.trt_llm_data_ci/llm-models/
+#   lyris1                                        → /lustre/fsw/...
+if [[ -z "${MODEL_PATH:-}" ]]; then
+    _variant="${MODEL_VARIANT:-Flash}"
+    case "${_variant}" in
+        Flash|Pro) ;;
+        *) echo "MODEL_VARIANT must be Flash or Pro, got '${_variant}'" >&2; exit 5 ;;
+    esac
+    case "$(hostname -f 2>/dev/null || hostname)" in
+        *.colossus.nvidia.com|umb-b*) _cluster="SC-computelab" ;;
+        lyris*)                       _cluster="lyris1" ;;
+        *)                            _cluster="unknown" ;;
+    esac
+    # First-hit wins. SC computelab path comes first because it's the
+    # local-disk fast path on internal /home/scratch.* mounts.
+    for _cand in \
+        "/home/scratch.trt_llm_data_ci/llm-models/DeepSeek-V4-${_variant}" \
+        "/lustre/fsw/portfolios/coreai/projects/coreai_comparch_trtllm/common/DeepSeek-V4-${_variant}" \
+        "/lustre/fsw/portfolios/coreai/projects/coreai_comparch_inferencex/users/ashanbhag/DeepSeek-V4-${_variant}" \
+        "/lustre/fsw/coreai_comparch_inferencex/models/dsv4-$(echo ${_variant} | tr A-Z a-z)" \
+    ; do
+        if [[ -d "${_cand}" ]]; then
+            MODEL_PATH="${_cand}"
+            echo "[model-auto] cluster=${_cluster} variant=${_variant} → MODEL_PATH=${MODEL_PATH}"
+            break
+        fi
+    done
+    unset _cand _variant _cluster
+fi
+: "${MODEL_PATH:?MODEL_PATH unset and auto-detect failed — set MODEL_PATH explicitly or MODEL_VARIANT=Flash|Pro}"
 [[ -d "${MODEL_PATH}" ]] || { echo "MODEL_PATH ${MODEL_PATH} does not exist" >&2; exit 5; }
 
 # Defaults
