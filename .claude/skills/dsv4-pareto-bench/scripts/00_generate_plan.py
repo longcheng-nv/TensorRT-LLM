@@ -7,7 +7,7 @@ recipe used in perf_logs/pareto_v4_flash_gvr):
   ISLS     "<isl>:<osl>[,<isl>:<osl>...]"  default "131072:4096,262144:4096,524288:4096"
   BSS      space- or comma-separated ints  default "1 2 4 8 16 32 64 128"
   MTPS     space- or comma-separated ints  default "0 1 2 3"     (0 disables MTP block)
-  MODES    space- or comma-separated      default "TEP DEP"     (TEP=attn-DP on, DEP=attn-DP off)
+  MODES    space- or comma-separated      default "TEP DEP"     (TEP=attn-DP off, DEP=attn-DP on; Xianjie bench-dsv4 convention)
   FEATURES space- or comma-separated 0/1  default "1 0"          (GVR enable_heuristic_topk)
 
 Ordering: (ISL asc, BS asc, MTP asc, Mode {first listed}, Feature {first listed}).

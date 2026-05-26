@@ -5,7 +5,13 @@ description: Comprehensive playbook for benchmarking DeepSeek-V4 Flash and Pro o
 
 # DeepSeek-V4 Pareto throughput benchmarking — Flash & Pro
 
-Unified playbook combining Xianjie Qiao's cluster-native sweep methodology (`bench-dsv4`) with the single-node paired-feature sweep methodology proven on `perf_logs/pareto_v4_flash_gvr`. Both target **DeepSeek-V4 Flash** (MXFP4 routed experts) and **DeepSeek-V4 Pro** (FP8 block-scale routed experts) on Blackwell GPUs (sm_100 / sm_103).
+> ⚠️ **Naming convention fix 2026-05-26**: TEP/DEP→`enable_attention_dp` mapping in this skill was previously **inverted** vs Xianjie's `bench-dsv4` submit scripts. As of this date both doc and driver scripts use the canonical convention:
+>   - **TEP** = Tensor + Expert Parallel = `enable_attention_dp: false`  (matches `submit_pro_full_lyris1.sh` adp=0)
+>   - **DEP** = Data  + Expert Parallel = `enable_attention_dp: true`   (matches `submit_pro_full_lyris1.sh` adp=1)
+>
+> **Reading historical results**: runs landed in `perf_logs/pareto_v4_flash_gvr/`, `dsv4_pareto_*`, or any node directory referenced in `~/.claude/.../memory/project_dsv4_pro_b300_gvr_pareto*.md` **before 2026-05-26** have inverted labels in REPORT.md and figure filenames (`dtpot_isl_bs_TEP_*.png` is actually DEP and vice versa). Swap TEP↔DEP when reading those, or re-run with `scripts/02_master.sh` to relabel.
+
+Unified playbook combining Xianjie Qiao's cluster-native sweep methodology (`bench-dsv4`) with the single-node paired-feature sweep methodology proven on `perf_logs/pareto_v4_flash_gvr`. Both target **DeepSeek-V4 Flash** (MXFP4 routed experts) and **DeepSeek-V4 Pro** (MXFP4 routed experts as of 2026-05; earlier Pro releases used FP8 block-scale routed) on Blackwell GPUs (sm_100 / sm_103). MoE backend is auto-derived per checkpoint from `config.json:expert_dtype` — `fp4 → TRTLLM`, otherwise `DEEPGEMM`. See [`scripts/01_run_one_cell.sh`](scripts/01_run_one_cell.sh) `[moe-auto]` block.
 
 ## When to invoke
 
@@ -24,13 +30,24 @@ The skill ships a portable driver in `scripts/` and YAML templates in `templates
 ```bash
 SKILL_DIR=.claude/skills/dsv4-pareto-bench          # path inside this repo
 export PERFDIR=$PWD/dsv4_bench                       # sweep workdir (plan.csv, logs/, results/)
-export MODEL_PATH=/path/to/DeepSeek-V4-Flash         # absolute; Pro: also set MOE_BACKEND=DEEPGEMM
+export MODEL_PATH=/path/to/DeepSeek-V4-Flash         # absolute; MoE backend auto-detected from config.json:expert_dtype
 export TRTLLM_REPO=$PWD                              # must contain benchmarks/cpp/prepare_dataset.py
+
+# Paired-feature parity: share autotune cache across cells so GVR ON/OFF (or
+# any feature A/B) run on the SAME kernel selection. Without this, the first
+# GVR-ON cell picks one kernel and the first GVR-OFF cell picks another, and
+# the ON-vs-OFF delta conflates "feature effect" with "kernel choice noise".
+#
+# TLLM_AUTOTUNER_CACHE_PATH must be a FILE path (NOT a directory).
+# autotuner.py:576 calls open(file_path, 'r') directly on this value, so a
+# directory triggers IsADirectoryError. The parent dir is auto-created on
+# first save (autotuner.py:514). Do NOT `mkdir -p` the cache path itself.
+export TLLM_AUTOTUNER_CACHE_PATH=$PERFDIR/autotuner_cache.json
 
 # Axes (any subset of these env vars; defaults reproduce B-flash-B300 384 cells)
 export BSS="1 2 4 8 16 32"                           # batch sizes
 export MTPS="0 3"                                    # MTP draft layers (0 = MTP off)
-export MODES="TEP DEP"                               # TEP = attn-DP on, DEP = attn-DP off
+export MODES="TEP DEP"                               # TEP = attn-DP off, DEP = attn-DP on (Xianjie's bench-dsv4 convention)
 export FEATURES="1 0"                                # GVR enable_heuristic_topk: 1=ON first, 0=OFF
 export ISLS="131072:4096 262144:4096"                # "ISL:OSL[ ISL:OSL]" pairs
 
@@ -56,19 +73,20 @@ python3 $SKILL_DIR/scripts/03_summarize.py
 | **BS** | `BSS` | `--max_batch_size` + `--concurrency`; `cuda_graph_config.batch_sizes` should include it | DEP+Radix+BS≥8 ISL≥128K crashes (G4); BS≥16 DEP+GVR saturates (G5) |
 | **MTP** | `MTPS` | `speculative_config.num_nextn_predict_layers` (block dropped when MTP=0) | Pro DEP4 hangs for MTP∈{1,2,3} — set `MTPS="0"` (G3) |
 | **GVR Top-K** | `FEATURES` | `sparse_attention_config.enable_heuristic_topk: true/false` | Requires SM≥100; `compress_ratio=4` indexerTopK path |
-| **TEP/DEP** | `MODES` | `enable_attention_dp: true(=TEP) / false(=DEP)`; same `--tp ${TP} --ep ${EP}` for both | TP/EP themselves fixed via `TP` `EP` env vars (default 8/8) |
+| **TEP/DEP** | `MODES` | `enable_attention_dp: false(=TEP) / true(=DEP)`; same `--tp ${TP} --ep ${EP}` for both | TP/EP themselves fixed via `TP` `EP` env vars (default 8/8). Matches Xianjie's `submit_pro_full_lyris1.sh` (adp=0→TEP, adp=1→DEP). |
 | **ISL/OSL** | `ISLS="ISL:OSL,..."` | `max_input_len`, `max_seq_len` | OSL drives wall-clock; ISL drives indexer cost |
 
 ### Other tunables for `01_run_one_cell.sh` (all env vars, see header)
 
 | Env var | Default | When to change |
 |---|---|---|
-| `MOE_BACKEND` | `TRTLLM` | `DEEPGEMM` for Pro |
+| `MOE_BACKEND` | auto from `config.json:expert_dtype` (`fp4 → TRTLLM`, else `DEEPGEMM`) | rarely overridden; set explicitly to bypass auto-detect |
+| `TLLM_AUTOTUNER_CACHE_PATH` | unset (autotune in-memory only) | `${PERFDIR}/autotuner_cache.json` (FILE path, NOT a directory — `open(file_path, 'r')` is called directly; parent dir is auto-created on first save) to share kernel-selection across cells; required when comparing paired GVR ON/OFF (or any feature A/B) so both branches run on the same autotuned kernels |
 | `MAX_NUM_TOKENS` | `8192` | `16384` on B300 / Flash |
 | `KV_FRACTION` | `0.8` | `0.9` for TEP-only sweeps with plenty of VRAM |
 | `MOE_MAX_NUM_TOKENS` | `131072` | rarely changed |
 | `TP`, `EP` | `8`, `8` | TP4 / TP2 sweeps |
-| `MULTI_ROUND` | `2` | bigger = lower variance, longer wall-clock |
+| `MULTI_ROUND` | `4` | # waves of steady-state. See "Sizing `num_requests`" below — `2` (the old default) under-samples on long-ISL workloads; bump to `8` for ISL ≥ 64K. |
 | `CELL_TIMEOUT` | `7200` | per-cell hard timeout (s) |
 | `CUDA_GRAPH_BS_LIST` | `[1,2,3,4,5,6,7,8]` | extend if running BS>8 cells |
 | `EXTRA_YAML_TEMPLATE` | `templates/extra-llm-api-config.yml.tpl` | override for custom YAML shape |
@@ -87,9 +105,151 @@ Both modes (synthetic, real) generate ONE dataset of size `DATASET_NUM_PROMPTS` 
 | Quantity | Set by | Default |
 |---|---|---|
 | `DATASET_NUM_PROMPTS` | `00_generate_plan.py` → `$PERFDIR/bench.env` (sourced by `02_master.sh`) | `max(BSS) * MULTI_ROUND` |
-| `MULTI_ROUND` | env at plan-gen time | `2` |
+| `MULTI_ROUND` | env at plan-gen time | `4` (was `2`; see "Sizing `num_requests`") |
 
 Override `DATASET_NUM_PROMPTS` when re-using a pre-generated dataset of a different size (e.g. real-prompt JSONL has 256 rows total).
+
+### Sizing `num_requests` — steady-state vs tail-drain (read before any long-ISL sweep)
+
+trtllm-bench has **three orthogonal knobs** that look similar but mean different things; conflating them was the cause of the 2-wave bias that biased the B200 SWE-bench-100K Flash Pareto numbers downward at high CONC (see `perf_logs/pareto_b200_swebench100k_v1_2waves/ARCHIVE.md`).
+
+#### Definitions (from `tensorrt_llm/bench/benchmark/throughput.py` + `utils/asynchronous.py`)
+
+| Flag | Role | Where consumed | Default |
+|---|---|---|---|
+| `--max_batch_size` (BS) | **Engine-side cap**: scheduler's per-forward batch width. Written into `exec_settings["settings_config"]["max_batch_size"]`; combined with `dynamic_max_batch_size=True`. | `throughput.py:420-435` | engine builtin |
+| `--num_requests` | **Dataset window**: how many prompts to take from the dataset and submit. Determines total work and measurement-window length. | `create_dataset_from_stream(num_requests=…)` @ `throughput.py:362` | `0` = use full dataset |
+| `--concurrency` | **Client-side throttle**: `asyncio.Semaphore(concurrency)` wrapping `llm.generate_async()` — limits requests *in flight* at any instant. `≤0` = unlimited. | `asynchronous.py:46-47` | `-1` (unlimited) |
+
+#### Interaction invariants
+
+```
+in_flight   = min(concurrency, max_batch_size)        if concurrency > 0
+            = max_batch_size                          if concurrency <= 0
+num_waves   = num_requests / in_flight                (≈ measurement waves through pipeline)
+```
+
+- `concurrency < max_batch_size` → **concurrency is binding**; engine never reaches BS ceiling.
+- `concurrency > max_batch_size` → **BS is binding**; surplus requests queue inside the executor.
+- `num_requests` does NOT affect in-flight width — only the total elapsed bench time.
+
+#### Steady-state vs tail-drain
+
+For each cell, the run decomposes as `fill (1 wave) → body (N−2 waves) → drain (1 wave)`. Body throughput is the per-GPU number you want; fill + drain bias the average downward because in-flight count is below the steady-state target during those phases.
+
+For `num_waves = num_requests / in_flight`:
+
+| Waves | Body fraction | Bias direction |
+|---:|---:|:---|
+| 2 | ~0 % (fill = body = drain) | **strong downward bias on throughput** |
+| 4 | ~50 % | acceptable for ISL ≤ 16K, marginal for ISL ≥ 64K |
+| 8 | ~75 % | recommended for ISL ≥ 64K and high-CONC cells |
+| 16+ | ~88 % | needed only for noise-floor work (paired ON/OFF on small effects) |
+
+**Concrete evidence** (B200 Flash MXFP4, ISL=100200 OSL=4096, archived as v1):
+
+| CONC | `num_req = 2×CONC` | avg_req_latency_ms | total_run_ms | tail ratio |
+|---:|---:|---:|---:|---:|
+| 1   | 4  | 40 767 | 163 070 | ~25% |
+| 4   | 8  | 43 561 | 87 131  | **~50%** |
+| 16  | 32 | 58 642 | 117 398 | **~50%** |
+| 32  | 64 | 77 051 | 154 373 | **~50%** |
+
+At MULTI_ROUND=2 the high-CONC frontier under-reports per-GPU TPS by an estimated 30-60%.
+
+#### Default policy (encoded in `01_run_one_cell.sh`)
+
+```bash
+MULTI_ROUND=4                          # canonical default (≥ 3-wave body)
+# Override per (HW × ISL) regime:
+#   ISL ≤ 16K  → 4 (default OK)
+#   ISL  ~64K  → 6
+#   ISL ≥ 100K → 8                     # high-CONC cells get a clean steady-state window
+NUM_PROMPTS=$(( BS * MULTI_ROUND ))    # baseline
+[[ $NUM_PROMPTS -lt 8 ]] && NUM_PROMPTS=8
+```
+
+For **A/B paired-feature work** (e.g., GVR ON vs OFF), use `MULTI_ROUND ≥ 6` even at moderate ISL: paired ΔTPOT signal can be < 5%, which is inside the 2-wave noise envelope.
+
+For **resumable workdirs that previously used MULTI_ROUND=2**, re-run high-CONC cells (CONC ≥ 8 or so) before trusting their per-GPU TPS numbers. Low-CONC cells (CONC ≤ 4) are usually fine because per-request latency dominates regardless of wave count.
+
+### Pareto sweep methodology — fix `max_batch_size`, sweep only `--concurrency` (incl. GVR ON vs OFF comparison)
+
+The canonical way to produce a Pareto curve in this skill — and in Xianjie's `bench-dsv4/agg_bench/submit_pro_full_lyris1.sh` — is to **hold the engine-side `max_batch_size` at the upper bound of the sweep across every cell, and vary only `--concurrency`** (the client-side `asyncio.Semaphore` throttle, see Axis table above). This keeps each Pareto point a pure function of `in_flight = min(C, max_bs) = C`, so the curve isolates the concurrency effect from any engine-capacity change.
+
+| Anti-pattern | Why it fails |
+|---|---|
+| Setting `max_batch_size = concurrency` per cell (matched) | The KV cache pre-allocates against `max_bs`, so each cell is a different engine. Cells stop being directly comparable; cuda-graph capture has to repeat per cell instead of amortizing across the sweep. |
+| Setting `max_batch_size = num_gpus × concurrency` for DEP under the assumption that `max_bs` is per-rank | `max_batch_size` is **system-level**, not per-rank. The scheduler uses `scheduler_capacity = max_batch_size × mapping.pp_size` (`tensorrt_llm/_torch/pyexecutor/_util.py:1600`) — there is **no `tp_size` or `dp_size` multiplier**. For DEP8 on 8×B300, `--max_batch_size 1024` already gives a system-level cap of 1024; do **not** divide by 8. |
+
+#### Recommended per-(HW, Mode) `max_batch_size` values (DSv4 Pro, 8×B300, PP=1)
+
+These mirror Recipe A's cells table below (kept in sync with Xianjie's `submit_pro_full_lyris1.sh` adp arg):
+
+| Mode | `enable_attention_dp` | `max_batch_size` (fixed across sweep) | `--concurrency` sweep points | Why this cap |
+|---|:---:|---:|---|---|
+| **TEP8** | `false` | **512** | `1, 2, 4, 8, 16, 32, 64, 128, 256, 512` | Attention TP-sharded — all ranks share one KV slot per request → aggregate KV caps at ~512 with `kv_frac=0.9` |
+| **DEP8** | `true`  | **1024** | `1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024` | Attention DP'd — each rank holds its own KV slice → aggregate KV reaches 1024 with `kv_frac=0.8` |
+
+For each Pareto point: `--num_requests = max(8, concurrency × MULTI_ROUND)` per the "Sizing `num_requests`" section above.
+
+#### GVR Top-K ON vs OFF — paired Pareto-curve comparison
+
+The driver already supports this directly via the `FEATURES` axis. Setting `FEATURES="1 0"` makes `00_generate_plan.py` enumerate every `(BS, MTP, Mode)` cell twice — once with `enable_heuristic_topk: true` (GVR ON, cell suffix `_GVRT`), once with `false` (GVR OFF, `_GVRF`) — in immediate back-to-back order so thermal/cache state matches. `03_summarize.py` then pairs them and emits paired ΔTPS / ΔTPOT% heatmaps per Mode/MTP grid.
+
+To produce **directly comparable GVR ON vs OFF Pareto curves** for concurrency 1→1024 on 8×B300 Pro:
+
+```bash
+export PERFDIR=$PWD/dsv4_pareto_gvr_$(date -u +%Y%m%dT%H%M%SZ)
+export MODEL_PATH=/home/scratch.trt_llm_data_ci/llm-models/DeepSeek-V4-Pro
+
+# Concurrency = BS axis here (one cell per (BS, GVR) pair; max_bs fixed inside 01_run_one_cell.sh).
+export BSS="1 2 4 8 16 32 64 128 256 512 1024"     # DEP cells use full list; TEP cells auto-capped at 512
+export MTPS="0"                                     # G3: keep MTP=0 to avoid DEP-MTP>0 cells
+export MODES="TEP DEP"                              # both modes; will land in *_TEP_GVR{T,F} and *_DEP_GVR{T,F}
+export FEATURES="1 0"                               # GVR ON first, OFF second — paired blocks
+export ISLS="65536:8192"                            # ISL=64K OSL=8K → MULTI_ROUND=6
+export MULTI_ROUND=6
+
+# Share autotune cache across all cells so GVR ON's first cell and OFF's first cell
+# both run on the *same* autotuned kernels (otherwise paired delta = autotune noise).
+export TLLM_AUTOTUNER_CACHE_PATH="${PERFDIR}/autotuner_cache.json"
+
+python3 .claude/skills/dsv4-pareto-bench/scripts/00_generate_plan.py
+setsid nohup bash .claude/skills/dsv4-pareto-bench/scripts/02_master.sh \
+  > "${PERFDIR}/driver_$(date -u +%Y%m%dT%H%M%SZ).log" 2>&1 < /dev/null &
+disown
+
+# After the run completes (or partially completes — both summarize the cells in plan.csv that finished):
+python3 .claude/skills/dsv4-pareto-bench/scripts/03_summarize.py
+# → PERFDIR/REPORT.md (paired ΔTPS / ΔTPOT tables)
+# → PERFDIR/results/figures/dtpot_isl_bs_TEP_M0.png  (ΔTPOT% heatmap, TEP MTP=0)
+# → PERFDIR/results/figures/dtpot_isl_bs_DEP_M0.png  (ΔTPOT% heatmap, DEP MTP=0)
+```
+
+Plotting the Pareto curves directly:
+
+```python
+import pandas as pd, matplotlib.pyplot as plt
+df = pd.read_csv(f"{PERFDIR}/results/cells.csv")
+fig, ax = plt.subplots(1, 2, figsize=(12, 5))
+for j, mode in enumerate(("TEP", "DEP")):
+    for gvr_val, label in [(True, "GVR ON"), (False, "GVR OFF")]:
+        sub = df[(df.Mode == mode) & (df.GVR == gvr_val)].sort_values("BS")
+        ax[j].plot(sub.avg_req_latency_ms, sub.tps_per_gpu, "o-", label=label)
+    ax[j].set(title=f"{mode}8 Pareto (ISL=64K OSL=8K MTP=0)",
+              xlabel="avg_req_latency_ms (lower = better)",
+              ylabel="tps_per_gpu (higher = better)")
+    ax[j].legend(); ax[j].grid(True, alpha=0.3)
+plt.tight_layout(); plt.savefig(f"{PERFDIR}/results/figures/pareto_gvr_on_off.png", dpi=120)
+```
+
+Each Pareto point is then *strictly paired* across GVR ON/OFF (same BS, same Mode, same MTP, same ISL/OSL, same dataset rows, same autotuner cache) — ΔTPS and ΔTPOT% reflect only the GVR Top-K kernel difference.
+
+**Known GVR-specific gotchas to honour while sweeping** (full detail in the Gotchas section below):
+
+- **G4** — `DEP + Radix (GVR OFF) + BS ≥ 8 + ISL ≥ 128K` → DeepGEMM `smxx_layout.hpp:97` `CUDA_ERROR_ILLEGAL_ADDRESS` or cuBLAS failure. Drop those cells from the sweep at ISL ≥ 128K, or stay at ISL ≤ 100K for GVR-OFF DEP comparisons.
+- **G5** — `DEP + Heuristic (GVR ON) + BS ≥ 16` → numRows saturates, 5-10× slower than TEP same point. The curve is still measurable; just don't be surprised by the inflection.
 
 ### Real-prompt mode (long-sequence SWE-bench)
 
@@ -151,7 +311,7 @@ The rest of this document covers cluster sbatch workflow (A), known DSv4 gotchas
 The skill must be parameterized by 3 orthogonal user-supplied inputs. Ask if any is unspecified:
 
 1. **Hardware**: `B200` (sm_100, GB200, ~80 GB VRAM/GPU) | `B300` (sm_103, GB300, ~141 GB VRAM/GPU)
-2. **Model variant**: `Flash` (Instruct, MXFP4 routed experts, MoE backend = TRTLLM) | `Pro` (Instruct, FP8 block-scale routed experts, MoE backend = DEEPGEMM)
+2. **Model variant**: `Flash` (Instruct, MXFP4 routed experts, MoE backend = TRTLLM) | `Pro` (Instruct; **current Pro checkpoint is MXFP4 routed → TRTLLM**; older FP8-block-scale Pro releases use DEEPGEMM). 01_run_one_cell.sh auto-detects via `config.json:expert_dtype` — verify with `jq -r .expert_dtype $MODEL_PATH/config.json`.
 3. **Dataset mode**:
    - `synthetic` — `prepare_dataset.py token-norm-dist`, fixed length (stdev=0), no prefix sharing. Best for **paired feature A/B** comparison (variance floor ≈ ±2 %).
    - `real` — `random-v2 ratio=0.8` (80 % prefix-shared chat-like prompts) from Xianjie's `aa_synthetic_generation`. Best for **production-representative Pareto frontier**.
@@ -163,9 +323,9 @@ All 8 combinations (HW × Model × Dataset) are valid — but defaults change pe
 | HW | Model | max_num_tokens | kv_frac | MoE backend | TP×EP combos | DEP4 MTP allowed | Notes |
 |---|---|---|---|---|---|---|---|
 | **B200** | Flash | 16384 | 0.9 | TRTLLM | TP1/2/4, TEP/DEP up to TP4 | 0,1,2,3 | Recipe F1; cluster=OCI/dfw |
-| **B200** | Pro   | 8192 (TP4) / 16384 (TP8) | 0.8 | DEEPGEMM | TP4/8, TEP/DEP | **0 only on DEP4** (G3) | Recipe P1; check Pro path on B200 cluster |
+| **B200** | Pro   | 8192 (TP4) / 16384 (TP8) | 0.8 | auto (TRTLLM for current MXFP4 Pro; DEEPGEMM for older FP8 Pro) | TP4/8, TEP/DEP | **0 only on DEP4** (G3) | Recipe P1; check Pro path on B200 cluster |
 | **B300** | Flash | 16384 | 0.9 | TRTLLM | TP8 EP8 (single 8-GPU node) or multi-node TP4 on lyris1 | 0,1,2,3 | Recipe F1 (params unchanged from B200 — B300 has MORE VRAM); also workflow B if doing paired A/B |
-| **B300** | Pro   | 16384 | 0.8 | DEEPGEMM | TP4/8, TEP/DEP | **0 only on DEP4** (G3 verified on lyris1 2026-04) | Recipe P1; lyris1 is the canonical B300 Pro cluster |
+| **B300** | Pro   | 16384 | 0.8 | auto (TRTLLM for current MXFP4 Pro; DEEPGEMM for older FP8 Pro) | TP4/8, TEP/DEP | **0 only on DEP4** (G3 verified on lyris1 2026-04) | Recipe P1; lyris1 is the canonical B300 Pro cluster |
 
 For ALL (HW, Model) combos: KV reuse OFF (G1), `fast_hadamard_transform` installed (G2), `enable_padding=true`, `kv_cache_config.dtype=fp8`, `tokens_per_block=128`.
 
@@ -281,34 +441,41 @@ kv_cache_config:
     tokens_per_block:     128         # Xianjie default; works on both variants
     dtype:                fp8         # 2× KV capacity vs bf16
 
-# MoE backend
+# MoE backend — 01_run_one_cell.sh auto-derives from config.json:expert_dtype
+# (current Flash + current Pro are both MXFP4 → TRTLLM; older FP8-block-scale Pro → DEEPGEMM).
+# Workflow A's bench-dsv4 wrapper picks the same way (run.sh:78-82).
 moe_config:
-    # Flash (MXFP4 routed experts):
-    backend: TRTLLM
-    # Pro (FP8 block-scale routed experts):
-    # backend: DEEPGEMM   # workflow A default
-    # backend: WIDEEP     # alternate for Pro-Base completion model
+    backend: TRTLLM                   # auto-detected; override via MOE_BACKEND env if needed
+    # backend: DEEPGEMM               # legacy FP8 block-scale Pro
+    # backend: WIDEEP                 # alternate for Pro-Base completion model
     max_num_tokens: 131072            # workflow B's larger value;
                                       # workflow A uses 16384 (Flash GB200) / 8192-16384 (Pro)
 
 # Logging + stream throttling
 print_iter_log: true
-stream_interval: 100                  # workflow A only (reduces tqdm churn)
+stream_interval: 100                  # both workflows — keeps log volume sane on long-OSL cells
 
-# Attention parallelism — controls TEP vs DEP
-enable_attention_dp: true             # TEP (Tensor + AttnDP + Expert parallel)
-# enable_attention_dp: false          # DEP (Tensor + Expert parallel, no AttnDP)
+# Attention parallelism — controls TEP vs DEP (Xianjie's bench-dsv4 convention)
+# TEP = Tensor + Expert Parallel       (attention TP-sharded; lower aggregate KV → max_bs caps ~512 on 8×B300)
+# DEP = Data + Expert Parallel         (attention DP'd per rank; per-rank KV slice → max_bs reaches ~1024 on 8×B300)
+enable_attention_dp: false            # TEP
+# enable_attention_dp: true           # DEP
 
-# Autotuner — disable for reproducible numbers
-enable_autotuner: false               # workflow B default; workflow A leaves on
+# Autotuner — enabled on both workflows. For paired feature comparison (workflow B),
+# set TLLM_AUTOTUNER_CACHE_PATH=${PERFDIR}/autotuner_cache.json (FILE path, NOT a
+# directory — opened directly with open(file_path, 'r')) so all cells share the
+# same kernel selection (otherwise GVR ON's first cell picks one kernel and GVR
+# OFF's first cell picks another — apples-vs-oranges).
+enable_autotuner: true
 
 # Speculative decoding (MTP layers, V4 native)
 speculative_config:
     decoding_type: MTP
     num_nextn_predict_layers: <MTP>   # 0 → drop the whole block; 1-3 typical
 
-# AllReduce path — only for tp=8 ep=8 + DEP (attn_dp=false)
-# allreduce_strategy: MNNVL          # Xianjie sets this conditionally
+# AllReduce path — both workflows emit conditionally for tp=8 ep=8 TEP (attn_dp=false).
+# Workflow B: 01_run_one_cell.sh sets ALLREDUCE_BLOCK based on (TP, EP, ATTN_DP).
+# allreduce_strategy: MNNVL
 
 # Feature toggles (workflow B's added knobs)
 sparse_attention_config:
@@ -335,15 +502,16 @@ trtllm-bench \
   --kv_cache_free_gpu_mem_fraction ${KV_FRAC} \   # 0.8 default; 0.9 if not OOMing
   --concurrency ${BS}               \   # workflow A: linear sweep value (1..max_bs)
                                        # workflow B: = max_batch_size (= BS)
-  --num_requests ${BS * MULTI_ROUND} \  # workflow A multi_round=5; workflow B=2
+  --num_requests ${BS * MULTI_ROUND} \  # MULTI_ROUND ≥ 4 (default) — see "Sizing num_requests"
   --extra_llm_api_options ${YAML}   \
   --sampler_options ${SAMPLER}      \   # workflow B only — top_k=1 seed=0 for greedy
   --disable_chunked_context         \   # workflow A only — important for steady-state metric
   --streaming                       \
-  --report_json ${PREFIX}_report.json   # workflow A — structured metrics dump
+  --report_json ${PREFIX}_report.json   # both workflows — structured metrics dump
+                                       # workflow B writes to ${PERFDIR}/results/${CELL_ID}_report.json
 ```
 
-`trtllm-llmapi-launch` is the MPI-rank-aware launcher (rank 0 = driver, rank N = MGMN worker). Required for multi-node TP via `--mpi=pmix` in SLURM. `numactl -m 0,1` binds memory to NUMA nodes 0 + 1 — essential for large-BS perf on dual-socket GB200/GB300 hosts.
+`trtllm-llmapi-launch` is the MPI-rank-aware launcher (rank 0 = driver, rank N = MGMN worker). Required for multi-node TP via `--mpi=pmix` in SLURM (workflow A only — workflow B is single-node and invokes `trtllm-bench` directly). `numactl -m 0,1` binds memory to NUMA nodes 0 + 1 — essential for large-BS perf on dual-socket GB200/GB300 hosts. Workflow B's `01_run_one_cell.sh` auto-prefixes `numactl -m 0,1` when `numactl --hardware` reports ≥ 2 NUMA nodes (skipped on single-socket hosts).
 
 ## Sweep recipes — what "best" Pareto coverage means
 
@@ -403,8 +571,8 @@ Edit `00_generate_plan.py` axis arrays and the YAML template in `01_run_one_cell
 |---|---|---|---|---|---|---|---|
 | **B-flash-B300** (baseline) | `[1,2,4,8,16,32,64,128]` | `[128K, 256K, 512K]` | `[0,1,2,3]` | `[TEP, DEP]` | (none — uses baseline YAML) | 384 | Proven on `umb-b300-dp-184`; BS=64/128 OOM expected, BS≥8 DEP+Radix crash expected (G4) |
 | **B-flash-B200** | `[1,2,4,8,16,32]` (drop 64+; B200 80GB VRAM cap) | `[64K, 128K, 256K]` (drop 512K) | `[0,1,2,3]` | `[TEP, DEP]` | `max_num_tokens: 16384`; model_path → B200 cluster (OCI/dfw) | 192 | Verify TP8 EP8 single-node B200 host exists; else split across multi-node TP4 + sbatch wrap |
-| **B-pro-B300** | `[1,2,4,8,16,32,64,128]` | `[128K, 256K, 512K]` | TEP: `[0,1,2,3]`, DEP4: `[0]` only (G3) | `[TEP, DEP]` | `moe_config.backend: DEEPGEMM`; `kv_cache_free_gpu_mem_fraction: 0.8`; model_path → Pro B300 (`lyris1` or interactive) | ≤192 | Skip BS≥16 DEP MTP>0 cells (G3 hang); BS=64/128 likely OOM even on 141GB |
-| **B-pro-B200** | `[1,2,4,8,16,32]` (drop 64+) | `[64K, 128K]` (drop 256K/512K; Pro KV is heavier) | TEP: `[0,1,2,3]`, DEP4: `[0]` only | `[TEP, DEP]` | `max_num_tokens: 8192` (TP4) / `16384` (TP8); `kv_frac: 0.8`; `moe_config.backend: DEEPGEMM` | ≤96 | Aggressive prune — Pro on B200 hits OOM at concurrency≥1024 with kv=0.9; stick to TP≤4 |
+| **B-pro-B300** | `[1,2,4,8,16,32,64,128]` | `[128K, 256K, 512K]` | TEP: `[0,1,2,3]`, DEP4: `[0]` only (G3) | `[TEP, DEP]` | `moe_config.backend: auto from expert_dtype` (current Pro=MXFP4 → TRTLLM); `kv_cache_free_gpu_mem_fraction: 0.8`; model_path → Pro B300 (`lyris1` or interactive) | ≤192 | Skip BS≥16 DEP MTP>0 cells (G3 hang); BS=64/128 likely OOM even on 141GB |
+| **B-pro-B200** | `[1,2,4,8,16,32]` (drop 64+) | `[64K, 128K]` (drop 256K/512K; Pro KV is heavier) | TEP: `[0,1,2,3]`, DEP4: `[0]` only | `[TEP, DEP]` | `max_num_tokens: 8192` (TP4) / `16384` (TP8); `kv_frac: 0.8`; `moe_config.backend: auto from expert_dtype` | ≤96 | Aggressive prune — Pro on B200 hits OOM at concurrency≥1024 with kv=0.9; stick to TP≤4 |
 
 After picking a variant, regenerate plan + restart driver:
 ```bash

@@ -19,7 +19,11 @@
 #   KV_FRACTION         0.8       (--kv_cache_free_gpu_mem_fraction)
 #   KV_CACHE_DTYPE      fp8
 #   MOE_BACKEND         TRTLLM    (Pro variant: DEEPGEMM)
-#   MULTI_ROUND         2         (NUM_PROMPTS = BS * MULTI_ROUND)
+#   MULTI_ROUND         4         (NUM_PROMPTS = BS * MULTI_ROUND; was 2 before
+#                                  2026-05-19 when steady-state analysis showed
+#                                  2 waves = ~50% tail-drain on ISL≥64K. Bump
+#                                  to 8 for ISL≥100K + high CONC. See SKILL.md
+#                                  "Sizing num_requests".)
 #   DATASET_NUM_PROMPTS sweep-wide dataset size (default: NUM_PROMPTS).
 #                       Normally set in PERFDIR/bench.env by 00_generate_plan.py
 #                       to max(BSS) * MULTI_ROUND so every BS cell consumes the
@@ -68,8 +72,28 @@ MAX_NUM_TOKENS="${MAX_NUM_TOKENS:-8192}"
 MOE_MAX_NUM_TOKENS="${MOE_MAX_NUM_TOKENS:-131072}"
 KV_FRACTION="${KV_FRACTION:-0.8}"
 KV_CACHE_DTYPE="${KV_CACHE_DTYPE:-fp8}"
+# Auto-derive MoE backend from quantization unless user overrides.
+# expert_dtype=fp4 → MXFP4 routed experts → TRTLLM (W4A8_MXFP4_MXFP8 kernel)
+# expert_dtype absent/other → FP8 block-scale routed → DEEPGEMM
+if [[ -z "${MOE_BACKEND:-}" ]] && [[ -f "${MODEL_PATH}/config.json" ]]; then
+    _expert_dtype=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('expert_dtype',''))" "${MODEL_PATH}/config.json" 2>/dev/null || echo "")
+    if [[ "${_expert_dtype}" == "fp4" ]]; then
+        MOE_BACKEND="TRTLLM"
+        echo "[moe-auto] expert_dtype=fp4 → MOE_BACKEND=TRTLLM"
+    elif [[ -n "${_expert_dtype}" ]]; then
+        MOE_BACKEND="DEEPGEMM"
+        echo "[moe-auto] expert_dtype=${_expert_dtype} → MOE_BACKEND=DEEPGEMM"
+    fi
+fi
 MOE_BACKEND="${MOE_BACKEND:-TRTLLM}"
-MULTI_ROUND="${MULTI_ROUND:-2}"
+MULTI_ROUND="${MULTI_ROUND:-4}"
+# Decouple --max_batch_size (engine-side cap) from BS (which doubles as
+# --concurrency). Set MAX_BS_OVERRIDE to fix the engine-side max batch
+# (e.g., MAX_BS_OVERRIDE=128 for a concurrency sweep at fixed BS=128).
+MAX_BS_OVERRIDE="${MAX_BS_OVERRIDE:-}"
+# Likewise, decouple --num_requests from BS * MULTI_ROUND when you need a
+# fixed dataset window across all cells (e.g., NUM_PROMPTS_OVERRIDE=256).
+NUM_PROMPTS_OVERRIDE="${NUM_PROMPTS_OVERRIDE:-}"
 TOKEN_BUDGET_MARGIN="${TOKEN_BUDGET_MARGIN:-512}"
 CUDA_GRAPH_BS_LIST="${CUDA_GRAPH_BS_LIST:-[1, 2, 3, 4, 5, 6, 7, 8]}"
 SAMPLER_TOP_K="${SAMPLER_TOP_K:-1}"
@@ -98,7 +122,17 @@ if grep -qP "^${CELL_ID}\b" "${PERFDIR}/failed.txt" 2>/dev/null \
     exit 1
 fi
 
-NUM_PROMPTS=$(( BS * MULTI_ROUND ))
+if [[ -n "${NUM_PROMPTS_OVERRIDE}" ]]; then
+    NUM_PROMPTS="${NUM_PROMPTS_OVERRIDE}"
+else
+    NUM_PROMPTS=$(( BS * MULTI_ROUND ))
+    # Floor at 8 prompts so very-low-BS cells still get a meaningful steady-state
+    # window (BS=1 × MULTI_ROUND=4 = 4 is too short on long-ISL workloads).
+    (( NUM_PROMPTS < 8 )) && NUM_PROMPTS=8
+fi
+# MAX_BS = max_batch_size sent to --max_batch_size. Defaults to BS but can be
+# pinned via MAX_BS_OVERRIDE (e.g., concurrency-sweep style at fixed engine BS).
+MAX_BS="${MAX_BS_OVERRIDE:-${BS}}"
 # Default to per-cell NUM_PROMPTS for backwards compat; 02_master.sh sources
 # bench.env which sets this to max(BSS) * MULTI_ROUND so all BS cells share
 # the same dataset (smaller BS consumes a strict prefix).
@@ -108,10 +142,13 @@ MAX_SEQ_LEN=$(( ISL + OSL + TOKEN_BUDGET_MARGIN ))
 
 case "${MODE}" in
     # Both modes use `--tp ${TP} --ep ${EP}`; difference is enable_attention_dp.
-    # TEP = attention DP on (V4 production default at TP8 EP8)
-    # DEP = attention DP off (full TP on attention)
-    TEP) ATTN_DP=true  ;;
-    DEP) ATTN_DP=false ;;
+    # Convention matches Xianjie's bench-dsv4/agg_bench/submit_pro_full_lyris1.sh:
+    #   adp=0 → TEP (Tensor + Expert Parallel; attention TP-sharded)
+    #   adp=1 → DEP (Data  + Expert Parallel; attention DP'd per rank)
+    # Pre-2026-05-26 versions of this script had this mapping INVERTED — see
+    # SKILL.md "Naming convention fix 2026-05-26" banner.
+    TEP) ATTN_DP=false ;;
+    DEP) ATTN_DP=true  ;;
     *) echo "Mode must be TEP or DEP, got ${MODE}" >&2; exit 5 ;;
 esac
 
@@ -131,16 +168,32 @@ EOF
 )
 fi
 
+# MNNVL allreduce: enable on Blackwell only for TP=8 EP=8 non-attention-DP cases
+# (bench-dsv4 pattern; NVLink ring becomes worth it at TP8 EP8).
+if [[ "${TP}" == "8" ]] && [[ "${EP}" == "8" ]] && [[ "${ATTN_DP}" == "false" ]]; then
+    ALLREDUCE_BLOCK=$'allreduce_strategy: MNNVL\n'
+else
+    ALLREDUCE_BLOCK=""
+fi
+
 # Render YAML via envsubst.
 export MAX_INPUT_LEN MAX_SEQ_LEN CUDA_GRAPH_BATCH_SIZES="${CUDA_GRAPH_BS_LIST}"
 export KV_CACHE_DTYPE MOE_MAX_NUM_TOKENS MOE_BACKEND ATTN_DP
-export SPECULATIVE_CONFIG_BLOCK ENABLE_HEURISTIC_TOPK
-envsubst < "${EXTRA_YAML_TEMPLATE}" > "${YAML_FILE}"
+export SPECULATIVE_CONFIG_BLOCK ENABLE_HEURISTIC_TOPK ALLREDUCE_BLOCK
+# Prefer the system envsubst (gettext-base) when available; fall back to
+# the pure-Python equivalent in the skill scripts dir. Some hosts (internal
+# VMs without gettext) need the Python path.
+if command -v envsubst >/dev/null 2>&1; then
+    ENVSUBST_CMD=(envsubst)
+else
+    ENVSUBST_CMD=(python3 "${SCRIPT_DIR}/_envsubst.py")
+fi
+"${ENVSUBST_CMD[@]}" < "${EXTRA_YAML_TEMPLATE}" > "${YAML_FILE}"
 export SAMPLER_TOP_K SAMPLER_SEED
-envsubst < "${SAMPLER_TEMPLATE}" > "${SAMPLER_FILE}"
+"${ENVSUBST_CMD[@]}" < "${SAMPLER_TEMPLATE}" > "${SAMPLER_FILE}"
 
 echo "==================== ${CELL_ID} ===================="
-echo "ISL/OSL=${ISL}/${OSL} BS=${BS} MTP=${MTP} Mode=${MODE} GVR=${GVR_BOOL} TP=${TP} EP=${EP}"
+echo "ISL/OSL=${ISL}/${OSL} BS(conc)=${BS} max_bs=${MAX_BS} num_prompts=${NUM_PROMPTS} MTP=${MTP} Mode=${MODE} GVR=${GVR_BOOL} TP=${TP} EP=${EP}"
 echo "MODEL_PATH=${MODEL_PATH}  MOE_BACKEND=${MOE_BACKEND}  KV_FRACTION=${KV_FRACTION}"
 echo "YAML: ${YAML_FILE}"
 echo "log:  ${LOG_FILE}"
@@ -192,14 +245,26 @@ else
     fi
 fi
 
+REPORT_JSON="${PERFDIR}/results/${CELL_ID}_report.json"
+
+# NUMA pin to nodes 0,1 (bench-dsv4 pattern) when the host has ≥2 NUMA nodes.
+NUMA_PREFIX=()
+if command -v numactl >/dev/null 2>&1; then
+    _numa_nodes=$(numactl --hardware 2>/dev/null | awk '/available:/{print $2}')
+    if [[ -n "${_numa_nodes}" ]] && (( _numa_nodes >= 2 )); then
+        NUMA_PREFIX=(numactl -m 0,1)
+    fi
+fi
+
 set +e
 timeout --kill-after=30s "${CELL_TIMEOUT}" \
+    "${NUMA_PREFIX[@]}" \
     trtllm-bench -m "${MODEL_CARD}" --model_path "${MODEL_PATH}" throughput \
         --tp "${TP}" --ep "${EP}" \
         --warmup 1 \
         --dataset "${DATASET}" \
         --backend pytorch \
-        --max_batch_size "${BS}" \
+        --max_batch_size "${MAX_BS}" \
         --max_num_tokens "${MAX_NUM_TOKENS}" \
         --kv_cache_free_gpu_mem_fraction "${KV_FRACTION}" \
         --concurrency "${BS}" \
@@ -207,6 +272,7 @@ timeout --kill-after=30s "${CELL_TIMEOUT}" \
         --sampler_options "${SAMPLER_FILE}" \
         --num_requests "${NUM_PROMPTS}" \
         --streaming \
+        --report_json "${REPORT_JSON}" \
         > "${LOG_FILE}" 2>&1
 BENCH_EXIT=$?
 set -e
