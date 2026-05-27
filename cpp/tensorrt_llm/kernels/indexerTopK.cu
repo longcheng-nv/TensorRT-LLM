@@ -1178,11 +1178,84 @@ void invokeIndexerTopKDecode(__half const* logits, int const* seqLens, int* indi
 }
 
 void invokeIndexerTopKPrefill(float const* logits, int const* rowStarts, int const* rowEnds, int* indices,
-    int const numRows, int const numColumns, int const stride0, int const stride1, int const topK,
-    cudaStream_t const stream)
+    float* heuristicScratch, int const numRows, int const numColumns, int const stride0, int const stride1,
+    int const topK, int const compressRatio, cudaStream_t const stream)
 {
     constexpr int kNumThreadsPerBlock = 512;
 
+    // ========================================================================
+    // GVR Heuristic prefill dispatch — mirrors the decode dispatch envelope:
+    //   * K ∈ {512, 1024, 2048}
+    //   * compressRatio ∈ {1, 4} (V3.2 / V4 Flash & Pro)
+    //   * stride1 == 1 (contiguous columns required by Phase-3 vector load)
+    //   * kSeqSmall ≤ numColumns < splitWorkThreshold
+    //   * numRows < kBsLarge (L2 + occupancy bound)
+    //   * caller provided a stable-address heuristicScratch buffer
+    //
+    // The talos-observed top-K diagonal pattern (cr=1: most-recent-K /
+    // cr=4: constant identity) is consumed as a *Phase-1 preIdx seed*, NOT a
+    // verified answer — Phase 2-4 still verify and correct on every row, so a
+    // workload that violates the pattern gets a (possibly slower) but always
+    // correct result.
+    //
+    // Env-gated kill switches for the prefill GVR path (correctness-safe,
+    // affects perf only — falls back to existing Radix path):
+    //   TRTLLM_PREFILL_GVR_DISABLE=1     → disable prefill GVR entirely.
+    //   TRTLLM_PREFILL_GVR_V4_DISABLE=1  → disable only for cr=4 (V4 Flash
+    //     and Pro). Use when the V4 ConstIdentity seed `[0..K-1]` may not
+    //     match the actual top-K (swe-bench captures show V4 Flash hit rate
+    //     ~36-46% and V4 Pro 69-77% — workloads with lower hit rate let
+    //     Phase 2 secant exhaust MAX_REFINE_ITERS=15 and the row stragglers
+    //     drag the batch). V3.2 (cr=1) BaseShift seed is unaffected.
+    // ========================================================================
+    static std::once_flag sPrefillGvrEnvOnce;
+    static bool sPrefillGvrDisabled = false;
+    static bool sPrefillGvrV4Disabled = false;
+    std::call_once(sPrefillGvrEnvOnce,
+        []()
+        {
+            char const* env = std::getenv("TRTLLM_PREFILL_GVR_DISABLE");
+            sPrefillGvrDisabled = (env != nullptr && env[0] == '1');
+            char const* env_v4 = std::getenv("TRTLLM_PREFILL_GVR_V4_DISABLE");
+            sPrefillGvrV4Disabled = (env_v4 != nullptr && env_v4[0] == '1');
+        });
+
+    auto const bounds = getSchemeXBounds(numColumns, /*bytesPerElem=*/4, topK);
+    bool const isSupportedTopK = (topK == 512 || topK == 1024 || topK == 2048);
+    bool const compressRatioOk = (compressRatio == 1 || compressRatio == 4);
+    bool const envAllowsGvr = !sPrefillGvrDisabled && !(sPrefillGvrV4Disabled && compressRatio == 4);
+    bool const canUseHeuristic = envAllowsGvr && isSupportedTopK && compressRatioOk && stride1 == 1
+        && heuristicScratch != nullptr && numColumns < kDefaultSplitWorkThreshold
+        && numColumns >= bounds.kSeqSmall && numRows > 0 && numRows < bounds.kBsLarge;
+
+    // Optional env-gated dispatch trace (set TRTLLM_SCHEMEX_DEBUG=1 to enable)
+    {
+        static std::once_flag sDebugOnceFlag;
+        static bool sDebug = false;
+        std::call_once(sDebugOnceFlag,
+            []()
+            {
+                char const* env = std::getenv("TRTLLM_SCHEMEX_DEBUG");
+                sDebug = (env != nullptr && env[0] == '1');
+            });
+        if (sDebug)
+        {
+            fprintf(stderr,
+                "[Scheme X Prefill] numRows=%d numColumns=%d topK=%d cr=%d kBsLarge=%d kSeqSmall=%d -> %s path\n",
+                numRows, numColumns, topK, compressRatio, bounds.kBsLarge, bounds.kSeqSmall,
+                canUseHeuristic ? "Heuristic" : "Radix");
+        }
+    }
+
+    if (canUseHeuristic)
+    {
+        launchHeuristicTopKPrefill(
+            logits, rowStarts, rowEnds, indices, heuristicScratch, stride0, topK, numRows, compressRatio, stream);
+        sync_check_cuda_error(stream);
+        return;
+    }
+
+    // Fallback: existing Radix / Insertion split (byte-identical to prior).
     int numInsertionBlocks = std::min(numRows, kSortingAlgorithmThreshold);
     topKPerRowPrefill<kNumThreadsPerBlock, false>
         <<<numInsertionBlocks, kNumThreadsPerBlock, topK * sizeof(int32_t), stream>>>(
@@ -1208,6 +1281,113 @@ bool canIndexerTopKDecodeUseGvr(int numRows, int numColumns, int topK, int bytes
     }
     auto const bounds = getSchemeXBounds(numColumns, bytesPerElem, topK);
     return numColumns >= bounds.kSeqSmall && numColumns < kDefaultSplitWorkThreshold && numRows < bounds.kBsLarge;
+}
+
+// ============================================================================
+// bf16 / fp16 indexer TopK prefill — GVR-Heuristic only (no Radix fallback).
+// ============================================================================
+// The existing `topKPerRowPrefill` (Radix/Insertion) is fp32-only, so bf16/
+// fp16 callers must satisfy the GVR envelope (or use the fp32 entry to get
+// the Radix fallback). Aborts with TLLM_CHECK on envelope violation rather
+// than silently producing wrong results.
+namespace
+{
+template <typename InputT>
+void invokeIndexerTopKPrefillDtype(InputT const* logits, int const* rowStarts, int const* rowEnds, int* indices,
+    InputT* heuristicScratch, int const numRows, int const numColumns, int const stride0, int const stride1,
+    int const topK, int const compressRatio, cudaStream_t const stream)
+{
+    static_assert(std::is_same_v<InputT, __nv_bfloat16> || std::is_same_v<InputT, __half>,
+        "invokeIndexerTopKPrefillDtype is for bf16/fp16 only");
+
+    auto const bounds = getSchemeXBounds(numColumns, /*bytesPerElem=*/static_cast<int>(sizeof(InputT)), topK);
+    bool const isSupportedTopK = (topK == 512 || topK == 1024 || topK == 2048);
+    bool const compressRatioOk = (compressRatio == 1 || compressRatio == 4);
+
+    // Same env-gated kill switches as the fp32 dispatcher (process-wide
+    // static once-flag is shared across all dispatcher entries — see
+    // canIndexerTopKPrefillUseGvr).
+    static std::once_flag sOnce;
+    static bool sPrefillGvrDisabled = false;
+    static bool sPrefillGvrV4Disabled = false;
+    std::call_once(sOnce,
+        []()
+        {
+            char const* env = std::getenv("TRTLLM_PREFILL_GVR_DISABLE");
+            sPrefillGvrDisabled = (env != nullptr && env[0] == '1');
+            char const* env_v4 = std::getenv("TRTLLM_PREFILL_GVR_V4_DISABLE");
+            sPrefillGvrV4Disabled = (env_v4 != nullptr && env_v4[0] == '1');
+        });
+    bool const envAllowsGvr = !sPrefillGvrDisabled && !(sPrefillGvrV4Disabled && compressRatio == 4);
+
+    TLLM_CHECK_WITH_INFO(envAllowsGvr,
+        "indexer_topk_prefill bf16/fp16 entry requires GVR enabled (env knob disabled it). Use the fp32 entry "
+        "for callers that need a Radix fallback.");
+    TLLM_CHECK_WITH_INFO(isSupportedTopK, "indexer_topk_prefill bf16/fp16 requires topK ∈ {512, 1024, 2048}, got %d",
+        topK);
+    TLLM_CHECK_WITH_INFO(compressRatioOk, "indexer_topk_prefill bf16/fp16 requires compressRatio ∈ {1, 4}, got %d",
+        compressRatio);
+    TLLM_CHECK_WITH_INFO(stride1 == 1, "indexer_topk_prefill bf16/fp16 requires stride1 == 1 (contiguous columns)");
+    TLLM_CHECK_WITH_INFO(heuristicScratch != nullptr,
+        "indexer_topk_prefill bf16/fp16 requires a caller-owned heuristicScratch ([topK] elements); "
+        "no Radix fallback exists for non-fp32 prefill.");
+    TLLM_CHECK_WITH_INFO(numColumns < kDefaultSplitWorkThreshold && numColumns >= bounds.kSeqSmall,
+        "indexer_topk_prefill bf16/fp16 requires numColumns in [%d, %d); got %d", bounds.kSeqSmall,
+        kDefaultSplitWorkThreshold, numColumns);
+    TLLM_CHECK_WITH_INFO(numRows > 0 && numRows < bounds.kBsLarge,
+        "indexer_topk_prefill bf16/fp16 requires 0 < numRows < %d; got %d", bounds.kBsLarge, numRows);
+
+    launchHeuristicTopKPrefill(
+        logits, rowStarts, rowEnds, indices, heuristicScratch, stride0, topK, numRows, compressRatio, stream);
+    sync_check_cuda_error(stream);
+}
+} // anonymous namespace
+
+void invokeIndexerTopKPrefill(__nv_bfloat16 const* logits, int const* rowStarts, int const* rowEnds, int* indices,
+    __nv_bfloat16* heuristicScratch, int const numRows, int const numColumns, int const stride0, int const stride1,
+    int const topK, int const compressRatio, cudaStream_t const stream)
+{
+    invokeIndexerTopKPrefillDtype<__nv_bfloat16>(logits, rowStarts, rowEnds, indices, heuristicScratch, numRows,
+        numColumns, stride0, stride1, topK, compressRatio, stream);
+}
+
+void invokeIndexerTopKPrefill(__half const* logits, int const* rowStarts, int const* rowEnds, int* indices,
+    __half* heuristicScratch, int const numRows, int const numColumns, int const stride0, int const stride1,
+    int const topK, int const compressRatio, cudaStream_t const stream)
+{
+    invokeIndexerTopKPrefillDtype<__half>(logits, rowStarts, rowEnds, indices, heuristicScratch, numRows, numColumns,
+        stride0, stride1, topK, compressRatio, stream);
+}
+
+bool canIndexerTopKPrefillUseGvr(int numRows, int numColumns, int topK, int compressRatio)
+{
+    bool const isSupportedTopK = (topK == 512 || topK == 1024 || topK == 2048);
+    bool const compressRatioOk = (compressRatio == 1 || compressRatio == 4);
+    if (!isSupportedTopK || !compressRatioOk)
+    {
+        return false;
+    }
+    // Honor the same env-gated kill switches as the dispatcher so callers
+    // sizing pre-allocated buffers (e.g., DSAtrtllmAttentionMetadata) skip
+    // the allocation when the env says GVR will never fire.
+    static std::once_flag sOnce;
+    static bool sPrefillGvrDisabled = false;
+    static bool sPrefillGvrV4Disabled = false;
+    std::call_once(sOnce,
+        []()
+        {
+            char const* env = std::getenv("TRTLLM_PREFILL_GVR_DISABLE");
+            sPrefillGvrDisabled = (env != nullptr && env[0] == '1');
+            char const* env_v4 = std::getenv("TRTLLM_PREFILL_GVR_V4_DISABLE");
+            sPrefillGvrV4Disabled = (env_v4 != nullptr && env_v4[0] == '1');
+        });
+    if (sPrefillGvrDisabled || (sPrefillGvrV4Disabled && compressRatio == 4))
+    {
+        return false;
+    }
+    auto const bounds = getSchemeXBounds(numColumns, /*bytesPerElem=*/4, topK);
+    return numColumns >= bounds.kSeqSmall && numColumns < kDefaultSplitWorkThreshold && numRows > 0
+        && numRows < bounds.kBsLarge;
 }
 
 } // namespace kernels

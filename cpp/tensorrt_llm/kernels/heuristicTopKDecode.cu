@@ -39,6 +39,7 @@ namespace
 using heuristic_topk::BLOCK_SIZE;
 using heuristic_topk::GvrDtypeTraits;
 using heuristic_topk::GvrParams;
+using heuristic_topk::GvrPreIdxMode;
 using heuristic_topk::gvrTopKJob;
 using heuristic_topk::gvrTopKJobDtype;
 using heuristic_topk::KernelSmemTplK;
@@ -254,6 +255,233 @@ void launchHeuristicTopKDecodeImpl(InputT const* logits, int const* seqLens, int
     }
 }
 
+// ============================================================================
+// Prefill assembly kernel (mirror of decode, micro-kernel shared)
+// ============================================================================
+// Derives `N_r = rowEnds[r] - rowStarts[r]` per row (chunked-prefill row
+// geometry — supports nonzero `rowStart` for `cu_seqlen_ks > 0`) and
+// dispatches the same `gvrTopKJob<TopK, PreIdxMode>` micro-kernel as decode.
+// preIdx is synthesized in Phase 1 via `PreIdxMode`, not read from a tensor:
+//   ConstIdentity (V4 cr=4) : idx = i               → [0..K-1]
+//   BaseShift     (V3.2 cr=1): idx = (N_r-K) + i     → [N_r-K..N_r-1]
+// Region-A (`N_r <= topK`) short-circuits to identity output before calling
+// the micro-kernel, matching the decode assembly's early-exit and the radix-
+// based prefill behavior for short rows.
+//
+// dtype-templated. The fp32 specialization preserves the original fp32-only
+// production path (radix-based prefill is also fp32 because DeepGEMM's
+// `fp8_mqa_logits` returns fp32). bf16/fp16 specializations are added for
+// API symmetry with the decode op (which accepts fp32/bf16/fp16) and for
+// callers that pass non-fp32 logits directly (e.g., manual experiments,
+// future MQA logits variants).
+template <typename InputT, int TopK, GvrPreIdxMode PreIdxMode>
+__global__ void __launch_bounds__(BLOCK_SIZE)
+    heuristicTopKMultiRowKernelPrefillDtype(InputT const* __restrict__ logits, int const* __restrict__ rowStarts,
+        int const* __restrict__ rowEnds, InputT* __restrict__ scratchValues, int* __restrict__ outIndices, int stride0,
+        int topK)
+{
+    // dtype path uses fp32 keys[] in smem (down-conversion deferred to writeback)
+    using SmemT = KernelSmemTplK<float, GvrParams<InputT, TopK>::kC, GvrParams<InputT, TopK>::kNumBins>;
+
+    int const rowIdx = blockIdx.x;
+    int const rowStart = rowStarts[rowIdx];
+    int const rowEnd = rowEnds[rowIdx];
+    int const N = rowEnd - rowStart;
+
+    // rowStart is folded into the input pointer; the micro-kernel uses local
+    // [0, N) indexing and emits row-local output indices, identical to the
+    // existing radix-based prefill behavior (no Python-side `-= cu_seqlen_ks`
+    // is required by callers).
+    InputT const* __restrict__ input = logits + static_cast<int64_t>(rowIdx) * stride0 + rowStart;
+    // outputValues is a kernel-internal write-only output store: the
+    // micro-kernel's Phase 4 final writeback and Region-A early-exit write
+    // top-K logit values here, but NO code path inside the kernel reads them
+    // back, and Python downstream (`heuristic_prefill_scratch_values`) is
+    // only allocated as a caller-owned scratch — never read after the op
+    // returns. So all CTAs in the prefill launch share the same [topK] slot.
+    // The cross-CTA write race is benign (last-write-wins, no reader). See
+    // the corresponding comment in the fp32 path for the full rationale.
+    InputT* __restrict__ outputValues = scratchValues;
+    int* __restrict__ outputIndices = outIndices + static_cast<int64_t>(rowIdx) * topK;
+
+    extern __shared__ unsigned char smem_raw[];
+    auto* smem = reinterpret_cast<SmemT*>(smem_raw);
+
+    if (N <= topK)
+    {
+        // Region-A: dense degeneracy. Causal-mask ensures all `N` valid
+        // positions are retained; rest is -FLT_MAX / -1 padded.
+        int const tid = threadIdx.x;
+        if constexpr (std::is_same_v<InputT, float>)
+        {
+            for (int i = tid; i < N; i += BLOCK_SIZE)
+            {
+                outputValues[i] = input[i];
+                outputIndices[i] = i;
+            }
+            for (int i = N + tid; i < topK; i += BLOCK_SIZE)
+            {
+                outputValues[i] = -FLT_MAX;
+                outputIndices[i] = -1;
+            }
+        }
+        else
+        {
+            InputT const neg_max = GvrDtypeTraits<InputT>::from_fp32(-FLT_MAX);
+            for (int i = tid; i < N; i += BLOCK_SIZE)
+            {
+                outputValues[i] = input[i];
+                outputIndices[i] = i;
+            }
+            for (int i = N + tid; i < topK; i += BLOCK_SIZE)
+            {
+                outputValues[i] = neg_max;
+                outputIndices[i] = -1;
+            }
+        }
+#if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 900))
+        cudaTriggerProgrammaticLaunchCompletion();
+#endif
+        return;
+    }
+
+    // Region-B: N > topK. Synthesize preIdx via PreIdxMode + preIdxOffset.
+    //   ConstIdentity (V4 cr=4)  → preIdxOffset unused; idx = i  ∈ [0, K)
+    //   BaseShift     (V3.2 cr=1) → preIdxOffset = base = N - K; idx = base + i
+    int const preIdxOffsetForMode = (PreIdxMode == GvrPreIdxMode::BaseShift) ? (N - topK) : 0;
+
+    // Pass nullptr for preIdx — the micro-kernel does not dereference it in
+    // ConstIdentity / BaseShift modes (Phase 1 takes the synthesized branch).
+    //
+    // Aligned=false: the per-row input pointer `logits + r*stride0 + rowStart`
+    // may be misaligned for fp32 when `rowStart % 4 != 0` and for bf16/fp16
+    // when `rowStart % 8 != 0` (multi-request packed chunks and batch_size > 1
+    // single-pass prefill produce arbitrary cumulative rowStart values).
+    // The misalignment-safe path in gvrTopKJob{,Dtype} adds a scalar prologue
+    // to blockCountGE and Phase-3 collect, keeping vals indices in the
+    // original [0, N) frame.
+    if constexpr (std::is_same_v<InputT, float>)
+    {
+        gvrTopKJob<TopK, PreIdxMode, /*Aligned=*/false>(
+            input, N, /*preIdx=*/nullptr, /*M=*/topK, topK, outputValues, outputIndices, smem, preIdxOffsetForMode);
+    }
+    else
+    {
+        gvrTopKJobDtype<InputT, TopK, PreIdxMode, /*Aligned=*/false>(
+            input, N, /*preIdx=*/nullptr, /*M=*/topK, topK, outputValues, outputIndices, smem, preIdxOffsetForMode);
+    }
+#if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 900))
+    cudaTriggerProgrammaticLaunchCompletion();
+#endif
+}
+
+// Explicit instantiations — {fp32, bf16, fp16} × {K=512, 1024, 2048} ×
+// {ConstIdentity, BaseShift} = 18 combos. Launcher dispatches on (dtype,
+// compressRatio, topK) at runtime via switch, so all 18 must be available
+// at link time.
+//
+// fp32 path serves the production radix-replacement (DeepGEMM
+// `fp8_mqa_logits` returns fp32). bf16/fp16 specializations exist for API
+// symmetry with the decode op and for callers that pass non-fp32 logits
+// (manual experiments, future MQA logits variants).
+template __global__ void heuristicTopKMultiRowKernelPrefillDtype<float, 512, GvrPreIdxMode::ConstIdentity>(
+    float const*, int const*, int const*, float*, int*, int, int); // V4 Flash fp32
+template __global__ void heuristicTopKMultiRowKernelPrefillDtype<float, 1024, GvrPreIdxMode::ConstIdentity>(
+    float const*, int const*, int const*, float*, int*, int, int); // V4 Pro fp32
+template __global__ void heuristicTopKMultiRowKernelPrefillDtype<float, 2048, GvrPreIdxMode::ConstIdentity>(
+    float const*, int const*, int const*, float*, int*, int, int); // future V4 K=2048 fp32
+template __global__ void heuristicTopKMultiRowKernelPrefillDtype<float, 512, GvrPreIdxMode::BaseShift>(
+    float const*, int const*, int const*, float*, int*, int, int); // V3.2 small K fp32
+template __global__ void heuristicTopKMultiRowKernelPrefillDtype<float, 1024, GvrPreIdxMode::BaseShift>(
+    float const*, int const*, int const*, float*, int*, int, int); // V3.2 mid K fp32
+template __global__ void heuristicTopKMultiRowKernelPrefillDtype<float, 2048, GvrPreIdxMode::BaseShift>(
+    float const*, int const*, int const*, float*, int*, int, int); // V3.2 production K fp32
+template __global__ void heuristicTopKMultiRowKernelPrefillDtype<__nv_bfloat16, 512, GvrPreIdxMode::ConstIdentity>(
+    __nv_bfloat16 const*, int const*, int const*, __nv_bfloat16*, int*, int, int); // V4 Flash bf16
+template __global__ void heuristicTopKMultiRowKernelPrefillDtype<__nv_bfloat16, 1024, GvrPreIdxMode::ConstIdentity>(
+    __nv_bfloat16 const*, int const*, int const*, __nv_bfloat16*, int*, int, int); // V4 Pro bf16
+template __global__ void heuristicTopKMultiRowKernelPrefillDtype<__nv_bfloat16, 2048, GvrPreIdxMode::ConstIdentity>(
+    __nv_bfloat16 const*, int const*, int const*, __nv_bfloat16*, int*, int, int);
+template __global__ void heuristicTopKMultiRowKernelPrefillDtype<__nv_bfloat16, 512, GvrPreIdxMode::BaseShift>(
+    __nv_bfloat16 const*, int const*, int const*, __nv_bfloat16*, int*, int, int);
+template __global__ void heuristicTopKMultiRowKernelPrefillDtype<__nv_bfloat16, 1024, GvrPreIdxMode::BaseShift>(
+    __nv_bfloat16 const*, int const*, int const*, __nv_bfloat16*, int*, int, int);
+template __global__ void heuristicTopKMultiRowKernelPrefillDtype<__nv_bfloat16, 2048, GvrPreIdxMode::BaseShift>(
+    __nv_bfloat16 const*, int const*, int const*, __nv_bfloat16*, int*, int, int);
+template __global__ void heuristicTopKMultiRowKernelPrefillDtype<__half, 512, GvrPreIdxMode::ConstIdentity>(
+    __half const*, int const*, int const*, __half*, int*, int, int); // V4 Flash fp16
+template __global__ void heuristicTopKMultiRowKernelPrefillDtype<__half, 1024, GvrPreIdxMode::ConstIdentity>(
+    __half const*, int const*, int const*, __half*, int*, int, int); // V4 Pro fp16
+template __global__ void heuristicTopKMultiRowKernelPrefillDtype<__half, 2048, GvrPreIdxMode::ConstIdentity>(
+    __half const*, int const*, int const*, __half*, int*, int, int);
+template __global__ void heuristicTopKMultiRowKernelPrefillDtype<__half, 512, GvrPreIdxMode::BaseShift>(
+    __half const*, int const*, int const*, __half*, int*, int, int);
+template __global__ void heuristicTopKMultiRowKernelPrefillDtype<__half, 1024, GvrPreIdxMode::BaseShift>(
+    __half const*, int const*, int const*, __half*, int*, int, int);
+template __global__ void heuristicTopKMultiRowKernelPrefillDtype<__half, 2048, GvrPreIdxMode::BaseShift>(
+    __half const*, int const*, int const*, __half*, int*, int, int);
+
+template <typename InputT>
+void launchHeuristicTopKPrefillImpl(InputT const* logits, int const* rowStarts, int const* rowEnds, int* outIndices,
+    InputT* scratchValues, int stride0, int topK, int numRows, int compressRatio, cudaStream_t stream)
+{
+    TLLM_CHECK_WITH_INFO(
+        topK == 512 || topK == 1024 || topK == 2048, "heuristicTopKPrefill requires topK ∈ {512, 1024, 2048}");
+    TLLM_CHECK_WITH_INFO(compressRatio == 1 || compressRatio == 4,
+        "heuristicTopKPrefill requires compressRatio ∈ {1, 4}; got %d", compressRatio);
+    // fp32: float4 vector load needs 4-element alignment.
+    // bf16/fp16: int4 vector load needs 8-element alignment.
+    constexpr int kAlign = std::is_same_v<InputT, float> ? 4 : 8;
+    TLLM_CHECK_WITH_INFO(stride0 % kAlign == 0 || numRows <= 1,
+        "heuristicTopKPrefill requires logits stride0 divisible by %d (vector-load alignment)", kAlign);
+
+    auto launchOne = [&]<int TopK, GvrPreIdxMode PreIdxMode>()
+    {
+        using SmemT = KernelSmemTplK<float, GvrParams<InputT, TopK>::kC, GvrParams<InputT, TopK>::kNumBins>;
+        size_t const smemSize = sizeof(SmemT);
+
+        auto* kfn = heuristicTopKMultiRowKernelPrefillDtype<InputT, TopK, PreIdxMode>;
+        if (smemSize > 48u * 1024u)
+        {
+            cudaFuncSetAttribute(kfn, cudaFuncAttributeMaxDynamicSharedMemorySize, static_cast<int>(smemSize));
+        }
+
+        cudaLaunchConfig_t config;
+        config.gridDim = numRows;
+        config.blockDim = BLOCK_SIZE;
+        config.dynamicSmemBytes = smemSize;
+        config.stream = stream;
+        cudaLaunchAttribute attrs[1];
+        attrs[0].id = cudaLaunchAttributeProgrammaticStreamSerialization;
+        attrs[0].val.programmaticStreamSerializationAllowed = tensorrt_llm::common::getEnvEnablePDL();
+        config.numAttrs = 1;
+        config.attrs = attrs;
+
+        cudaLaunchKernelEx(&config, kfn, logits, rowStarts, rowEnds, scratchValues, outIndices, stride0, topK);
+    };
+
+    if (compressRatio == 4)
+    {
+        switch (topK)
+        {
+        case 512: launchOne.template operator()<512, GvrPreIdxMode::ConstIdentity>(); break;
+        case 1024: launchOne.template operator()<1024, GvrPreIdxMode::ConstIdentity>(); break;
+        case 2048: launchOne.template operator()<2048, GvrPreIdxMode::ConstIdentity>(); break;
+        default: TLLM_THROW("heuristicTopKPrefill: topK validated above; unreachable");
+        }
+    }
+    else // compressRatio == 1
+    {
+        switch (topK)
+        {
+        case 512: launchOne.template operator()<512, GvrPreIdxMode::BaseShift>(); break;
+        case 1024: launchOne.template operator()<1024, GvrPreIdxMode::BaseShift>(); break;
+        case 2048: launchOne.template operator()<2048, GvrPreIdxMode::BaseShift>(); break;
+        default: TLLM_THROW("heuristicTopKPrefill: topK validated above; unreachable");
+        }
+    }
+}
+
 } // anonymous namespace
 
 void launchHeuristicTopKDecode(float const* logits, int const* seqLens, int const* preIdx, int* outIndices,
@@ -278,6 +506,27 @@ void launchHeuristicTopKDecode(__half const* logits, int const* seqLens, int con
 {
     launchHeuristicTopKDecodeImpl<__half>(logits, seqLens, preIdx, outIndices, scratchValues, stride0, next_n, topK,
         preIdxStride, preIdxCount, numRows, compressRatio, stream);
+}
+
+void launchHeuristicTopKPrefill(float const* logits, int const* rowStarts, int const* rowEnds, int* outIndices,
+    float* scratchValues, int stride0, int topK, int numRows, int compressRatio, cudaStream_t stream)
+{
+    launchHeuristicTopKPrefillImpl<float>(
+        logits, rowStarts, rowEnds, outIndices, scratchValues, stride0, topK, numRows, compressRatio, stream);
+}
+
+void launchHeuristicTopKPrefill(__nv_bfloat16 const* logits, int const* rowStarts, int const* rowEnds, int* outIndices,
+    __nv_bfloat16* scratchValues, int stride0, int topK, int numRows, int compressRatio, cudaStream_t stream)
+{
+    launchHeuristicTopKPrefillImpl<__nv_bfloat16>(
+        logits, rowStarts, rowEnds, outIndices, scratchValues, stride0, topK, numRows, compressRatio, stream);
+}
+
+void launchHeuristicTopKPrefill(__half const* logits, int const* rowStarts, int const* rowEnds, int* outIndices,
+    __half* scratchValues, int stride0, int topK, int numRows, int compressRatio, cudaStream_t stream)
+{
+    launchHeuristicTopKPrefillImpl<__half>(
+        logits, rowStarts, rowEnds, outIndices, scratchValues, stride0, topK, numRows, compressRatio, stream);
 }
 
 } // namespace kernels

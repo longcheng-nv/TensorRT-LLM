@@ -897,6 +897,47 @@ class DSAtrtllmAttentionMetadata(TrtllmAttentionMetadata):
                 dtype=torch.float32,
                 capture_graph=capture_graph,
             )
+            # Scratch buffer for heuristic TopK prefill kernel output values.
+            # The kernel writes top-K logit values to this buffer in Phase 4
+            # final writeback and Region-A early-exit, but NO code path
+            # (inside the kernel, inside the launcher, or in Python
+            # downstream) ever reads them back. So the prefill assembly
+            # passes the SAME `scratchValues` pointer to every CTA in the
+            # launch (cross-CTA writes race on the [topK] slot, last-write-
+            # wins, no reader → race is benign). Buffer therefore only needs
+            # `[topK]` floats (~8 KB at K=2048) regardless of how many rows
+            # the launch processes. This is the prefill counterpart of the
+            # decode path's [max_gen_tokens × topK] scratch — but decode
+            # keeps per-row sizing because its multi-block split-merge path
+            # actually reads scratchValues during the merge step.
+            #
+            # Persistent caller-owned allocation mirrors the radix_aux
+            # buffers' rationale: per-call th::empty inside the C++ op
+            # perturbs the caching allocator and can produce stale pointers
+            # in the subsequent CUDA-graphed decode replay at high CONC.
+            #
+            # Conditional allocation (mirror of `canIndexerTopKPrefillUseGvr`
+            # in indexerTopK.cu): the dispatcher only routes to the GVR
+            # Heuristic path when (a) num_sparse_topk ∈ {512, 1024, 2048}
+            # (the only K values with GvrParams specializations) and (b)
+            # max_num_tokens ≥ kSeqSmall (4096; below this every per-row
+            # numColumns falls back to the Radix/Insertion path inside the
+            # dispatcher). When GVR can never fire, leave the buffer None;
+            # the call sites in `sparse_attn_indexer` treat None as "fall
+            # back to Radix" (compatible with the op's heuristic_scratch=
+            # None default).
+            _gvr_prefill_can_fire = (self.num_sparse_topk in (512, 1024, 2048)
+                                     and self.max_num_tokens >= 4096)
+            if _gvr_prefill_can_fire:
+                self.heuristic_prefill_scratch_values = self.get_empty(
+                    self.cuda_graph_buffers,
+                    (self.num_sparse_topk, ),
+                    cache_name="heuristic_prefill_scratch_values",
+                    dtype=torch.float32,
+                    capture_graph=capture_graph,
+                )
+            else:
+                self.heuristic_prefill_scratch_values = None
 
         # Persistent scratch for Radix-split-work indexer path (blocks_per_row > 1).
         # Mirrors the fix the Heuristic path applied above: per-call th::empty
@@ -1553,6 +1594,15 @@ class Indexer(nn.Module):
             # Populate static caches (sm_count, L2 cache size) inside the C++
             # Scheme X dispatcher before any CUDA Graph capture so the host
             # attribute queries do not end up frozen into a captured graph.
+            #
+            # Note: this single decode warmup also primes the *prefill* GVR
+            # dispatcher's caches — `getSchemeXBounds` (sm_count, L2) and the
+            # env-flag reads (TRTLLM_PREFILL_GVR{,_V4}_DISABLE) are all guarded
+            # by process-wide `std::call_once` blocks in indexerTopK.cu, so
+            # the first `invokeIndexerTopKDecode` call populates them once
+            # for both paths. No separate prefill warmup is required (prefill
+            # is also not CUDA-graphed, so there is no capture-vs-eager
+            # ordering hazard to defend against on the prefill side).
             warmup_heuristic_topk_decode(top_k=self.index_topk)
 
         # Fused wk + weights_proj weight for single FP32 cuBLAS GEMM
@@ -2201,12 +2251,27 @@ class Indexer(nn.Module):
                         chunk_q_scale,
                     )
                     if use_custom_topk:
+                        # GVR prefill scratch: caller-owned [topK] buffer
+                        # shared across all CTAs in the launch (kernel writes
+                        # are race-but-no-reader). When
+                        # metadata.heuristic_prefill_scratch_values is None
+                        # (K not in {512,1024,2048} or max_num_tokens < 4096
+                        # → GVR can never fire), pass None and the op falls
+                        # back to Radix.
+                        prefill_heuristic_scratch = None
+                        if (self._enable_heuristic_topk and
+                                metadata.heuristic_prefill_scratch_values
+                                is not None):
+                            prefill_heuristic_scratch = \
+                                metadata.heuristic_prefill_scratch_values
                         torch.ops.trtllm.indexer_topk_prefill(
                             logits,
                             chunk.cu_seqlen_ks[chunk_q_start:chunk_q_end],
                             chunk.cu_seqlen_ke[chunk_q_start:chunk_q_end],
                             topk_indices_buffer[global_q_start:global_q_end, :],
-                            self.index_topk)
+                            self.index_topk,
+                            heuristic_scratch=prefill_heuristic_scratch,
+                            compress_ratio=self.compress_ratio)
                     else:
                         topk_indices = logits.topk(min(self.index_topk,
                                                        logits.shape[-1]),
@@ -2260,10 +2325,20 @@ class Indexer(nn.Module):
                     ctx_q_scale,
                 )
                 if use_custom_topk:
+                    # GVR prefill scratch: [topK] shared across all CTAs
+                    # (write-only, no reader). None when GVR can never fire.
+                    prefill_heuristic_scratch = None
+                    if (self._enable_heuristic_topk and
+                            metadata.heuristic_prefill_scratch_values
+                            is not None):
+                        prefill_heuristic_scratch = \
+                            metadata.heuristic_prefill_scratch_values
                     torch.ops.trtllm.indexer_topk_prefill(
                         logits, cu_seqlen_ks, cu_seqlen_ke,
                         topk_indices_buffer[:num_ctx_tokens, :],
-                        self.index_topk)
+                        self.index_topk,
+                        heuristic_scratch=prefill_heuristic_scratch,
+                        compress_ratio=self.compress_ratio)
                 else:
                     topk_indices = logits.topk(min(self.index_topk,
                                                    logits.shape[-1]),

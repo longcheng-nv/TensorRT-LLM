@@ -183,7 +183,8 @@ void indexer_topk_decode(th::Tensor const& logits, th::Tensor const& seq_lens, t
 }
 
 void indexer_topk_prefill(th::Tensor const& logits, th::Tensor const& row_starts, th::Tensor const& row_ends,
-    th::Tensor const& indices, int64_t index_topk)
+    th::Tensor const& indices, int64_t index_topk, std::optional<th::Tensor> const& heuristic_scratch,
+    int64_t compress_ratio)
 {
     TORCH_CHECK(logits.is_cuda() && row_starts.is_cuda() && row_ends.is_cuda() && indices.is_cuda(),
         "logits, row_starts, row_ends, and indices must be CUDA tensors");
@@ -195,6 +196,15 @@ void indexer_topk_prefill(th::Tensor const& logits, th::Tensor const& row_starts
     TORCH_CHECK(logits.dim() == 2, "logits must be a 2D Tensor");
     TORCH_CHECK(indices.size(1) >= index_topk, "indices.size(1) must be >= index_topk, got ", indices.size(1), " < ",
         index_topk);
+    TORCH_CHECK(compress_ratio > 0, "compress_ratio must be greater than 0");
+
+    // Same dtype envelope as indexer_topk_decode for API symmetry. Production
+    // path is fp32 (DeepGEMM's `fp8_mqa_logits` returns fp32); bf16/fp16
+    // entries are GVR-only (no Radix fallback for non-fp32 prefill).
+    auto const logits_dtype = logits.scalar_type();
+    TORCH_CHECK(logits_dtype == at::ScalarType::Float || logits_dtype == at::ScalarType::BFloat16
+            || logits_dtype == at::ScalarType::Half,
+        "indexer_topk_prefill: logits dtype must be float32, bfloat16, or float16; got ", logits_dtype);
 
     auto const inputSize = logits.sizes();
     auto const numRows64 = inputSize[0];
@@ -214,10 +224,55 @@ void indexer_topk_prefill(th::Tensor const& logits, th::Tensor const& row_starts
     TORCH_CHECK(logits_stride_0 >= 0, "logits_stride_0 must be greater than or equal to 0");
     TORCH_CHECK(logits_stride_1 >= 0, "logits_stride_1 must be greater than or equal to 0");
 
+    // Caller-owned heuristic scratch (CUDA-Graph safe, stable address). The
+    // prefill kernel uses scratchValues as a write-only output store shared
+    // across all CTAs in the launch (no per-row offset; race-but-no-reader),
+    // so the buffer only needs `topK` elements regardless of numRows. Decode
+    // requires [numRows × topK] because its multi-block split-merge path
+    // reads scratchValues during the merge step, but no such path exists for
+    // prefill. When nullptr (allowed only for fp32 since bf16/fp16 have no
+    // Radix fallback), the fp32 dispatcher falls back to Radix.
+    void* heuristic_scratch_ptr = nullptr;
+    if (heuristic_scratch.has_value())
+    {
+        auto const& scratchTensor = heuristic_scratch.value();
+        TORCH_CHECK(scratchTensor.is_cuda(), "heuristic_scratch must be a CUDA tensor");
+        TORCH_CHECK(
+            scratchTensor.device() == logits.device(), "heuristic_scratch must be on the same device as logits");
+        TORCH_CHECK(scratchTensor.is_contiguous(), "heuristic_scratch must be contiguous");
+        TORCH_CHECK(scratchTensor.scalar_type() == logits_dtype,
+            "heuristic_scratch dtype must match logits dtype (got scratch=", scratchTensor.scalar_type(),
+            ", logits=", logits_dtype, ")");
+        TORCH_CHECK(scratchTensor.numel() >= index_topk,
+            "heuristic_scratch must have at least index_topk elements (shared across CTAs, write-only)");
+        heuristic_scratch_ptr = scratchTensor.data_ptr();
+    }
+
     auto stream = at::cuda::getCurrentCUDAStream(logits.get_device());
-    tk::invokeIndexerTopKPrefill(logits.data_ptr<float>(), row_starts.data_ptr<int32_t>(), row_ends.data_ptr<int32_t>(),
-        indices.data_ptr<int32_t>(), num_rows, num_columns, static_cast<int32_t>(logits_stride_0),
-        static_cast<int32_t>(logits_stride_1), static_cast<int32_t>(index_topk), stream);
+
+    if (logits_dtype == at::ScalarType::Float)
+    {
+        tk::invokeIndexerTopKPrefill(logits.data_ptr<float>(), row_starts.data_ptr<int32_t>(),
+            row_ends.data_ptr<int32_t>(), indices.data_ptr<int32_t>(), static_cast<float*>(heuristic_scratch_ptr),
+            num_rows, num_columns, static_cast<int32_t>(logits_stride_0), static_cast<int32_t>(logits_stride_1),
+            static_cast<int32_t>(index_topk), static_cast<int32_t>(compress_ratio), stream);
+    }
+    else if (logits_dtype == at::ScalarType::BFloat16)
+    {
+        tk::invokeIndexerTopKPrefill(reinterpret_cast<__nv_bfloat16 const*>(logits.data_ptr()),
+            row_starts.data_ptr<int32_t>(), row_ends.data_ptr<int32_t>(), indices.data_ptr<int32_t>(),
+            static_cast<__nv_bfloat16*>(heuristic_scratch_ptr), num_rows, num_columns,
+            static_cast<int32_t>(logits_stride_0), static_cast<int32_t>(logits_stride_1),
+            static_cast<int32_t>(index_topk), static_cast<int32_t>(compress_ratio), stream);
+    }
+    else // Half
+    {
+        tk::invokeIndexerTopKPrefill(reinterpret_cast<__half const*>(logits.data_ptr()),
+            row_starts.data_ptr<int32_t>(), row_ends.data_ptr<int32_t>(), indices.data_ptr<int32_t>(),
+            static_cast<__half*>(heuristic_scratch_ptr), num_rows, num_columns,
+            static_cast<int32_t>(logits_stride_0), static_cast<int32_t>(logits_stride_1),
+            static_cast<int32_t>(index_topk), static_cast<int32_t>(compress_ratio), stream);
+    }
 }
 
 } // end namespace torch_ext
@@ -241,7 +296,7 @@ TORCH_LIBRARY_FRAGMENT(trtllm, m)
 {
     m.def(
         "indexer_topk_prefill(Tensor logits, Tensor row_starts, Tensor row_ends, Tensor indices, int "
-        "index_topk=2048) -> ()");
+        "index_topk=2048, Tensor? heuristic_scratch=None, int compress_ratio=1) -> ()");
 }
 
 TORCH_LIBRARY_IMPL(trtllm, CUDA, m)

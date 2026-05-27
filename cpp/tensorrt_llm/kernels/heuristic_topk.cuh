@@ -170,6 +170,36 @@ static_assert(TOP_K % BLOCK_SIZE == 0);
 static_assert(MAX_CANDIDATES % BLOCK_SIZE == 0);
 
 // ============================================================================
+// GVR preIdx source mode (Phase-1 only divergence point)
+// ============================================================================
+// Selects how `gvrTopKJob` / `gvrTopKJobDtype`'s Phase-1 loop computes the
+// preIdx-pointed sample index for each thread step. P2-P4 are independent of
+// the preIdx source and run identically across all modes — preIdx only seeds
+// the Phase-1 (min/max/mean) statistics that the secant search uses as an
+// initial bracket. Wrong preIdx → wider initial bracket and more secant iters,
+// but the final top-K is still correct because P3 (Verify) does a full N scan
+// and P4 (Refine) snaps to the exact K-th value via a 2048-bin histogram.
+//
+//   Tensor        — Read `preIdx[i]` from a caller-provided HBM tensor and add
+//                   `preIdxOffset`. Used by the decode assembly to consume the
+//                   previous step's top-K (cr=1 also applies the +next_n MTP
+//                   shift via preIdxOffset). Default mode preserves byte-
+//                   identical SASS for the existing decode kernels.
+//   ConstIdentity — Synthesize `idx = i` in [0, M). Used by V4 (cr=4) prefill
+//                   where the empirically-observed top-K is the constant
+//                   identity vector `[0..K-1]` in compressed-token space.
+//   BaseShift     — Synthesize `idx = preIdxOffset + i` in [base, base+M).
+//                   Used by V3.2 (cr=1) prefill where the empirically-observed
+//                   top-K is the "most recent K positions" diagonal pattern.
+//                   The caller stores `base = max(0, N-K)` in `preIdxOffset`.
+enum class GvrPreIdxMode : int
+{
+    Tensor = 0,
+    ConstIdentity = 1,
+    BaseShift = 2,
+};
+
+// ============================================================================
 // Multi-K Trait Layer
 // ============================================================================
 // Per-(InputT, TopK) compile-time trait encoding the secant-search target
@@ -425,18 +455,49 @@ __device__ __forceinline__ float warpReduceMax(float val)
 
 // Templated on SmemT so K=512/1024 paths can pass a kC=5120 layout.
 // Default (KernelSmem) targets the K=2048 kC=6144 layout.
-template <typename SmemT = KernelSmem>
+//
+// `Aligned` selects between the original aligned-only loop (default; preserves
+// decode-path SASS byte-identity, since decode passes `rowStart=0` so `input`
+// is always 16-byte aligned given `stride0 % 4 == 0`) and a misalignment-safe
+// loop with a scalar prologue. The new prefill assembly passes Aligned=false
+// because `input = logits + r*stride0 + rowStart` is misaligned whenever
+// `rowStart % 4 != 0` (which happens for batch_size > 1 single-pass prefill
+// and multi-request packed chunks where per-token `cu_seqlen_ks` are
+// cumulative compressed sequence lengths, e.g., V4 cr=4 with seq_lens=[100,…]
+// produces row 100's `rowStart = 25 = 0b11001`, not a multiple of 4).
+template <bool Aligned = true, typename SmemT = KernelSmem>
 __device__ __forceinline__ void blockCountGE(
     float const* __restrict__ input, int N, float threshold, SmemT* smem, int tid, int warp_id, int lane)
 {
     int c = 0;
-    for (int i = tid * 4; i + 3 < N; i += BLOCK_SIZE * 4)
+    if constexpr (Aligned)
     {
-        float4 v4 = __ldg(reinterpret_cast<float4 const*>(input + i));
-        c += (v4.x >= threshold) + (v4.y >= threshold) + (v4.z >= threshold) + (v4.w >= threshold);
+        for (int i = tid * 4; i + 3 < N; i += BLOCK_SIZE * 4)
+        {
+            float4 v4 = __ldg(reinterpret_cast<float4 const*>(input + i));
+            c += (v4.x >= threshold) + (v4.y >= threshold) + (v4.z >= threshold) + (v4.w >= threshold);
+        }
+        for (int i = (N & ~3) + tid; i < N; i += BLOCK_SIZE)
+            c += (__ldg(&input[i]) >= threshold);
     }
-    for (int i = (N & ~3) + tid; i < N; i += BLOCK_SIZE)
-        c += (__ldg(&input[i]) >= threshold);
+    else
+    {
+        // Scalar prologue covers the unaligned [0, prologueN) prefix; aligned
+        // float4 body then runs on input + prologueN which is guaranteed 16B.
+        int const skipCnt = ((16 - (static_cast<int>(reinterpret_cast<uintptr_t>(input) & 15))) & 15) / 4;
+        int const prologueN = (skipCnt < N) ? skipCnt : N;
+        for (int i = tid; i < prologueN; i += BLOCK_SIZE)
+            c += (__ldg(&input[i]) >= threshold);
+        int const alignedN = N - prologueN;
+        float const* __restrict__ aligned = input + prologueN;
+        for (int i = tid * 4; i + 3 < alignedN; i += BLOCK_SIZE * 4)
+        {
+            float4 v4 = __ldg(reinterpret_cast<float4 const*>(aligned + i));
+            c += (v4.x >= threshold) + (v4.y >= threshold) + (v4.z >= threshold) + (v4.w >= threshold);
+        }
+        for (int i = (alignedN & ~3) + tid; i < alignedN; i += BLOCK_SIZE)
+            c += (__ldg(&aligned[i]) >= threshold);
+    }
 
     // cache per-thread count for Phase 3 sub-pass 1 reuse
     smem->per_thread_counts[tid] = c;
@@ -535,7 +596,15 @@ __device__ __forceinline__ void blockFusedSnapIter(SmemT* smem, int count, int t
 
 // Templated on SmemT so K=512/1024 dtype paths can pass a kC=5120 layout.
 // Default targets the K=2048 kC=6144 layout.
-template <typename InputT, typename SmemT = KernelSmemTpl<typename GvrDtypeTraits<InputT>::SmemKey>>
+//
+// `Aligned` matches the fp32 helper's contract: default true preserves the
+// existing decode SASS (rowStart=0 → input always 16B aligned); Aligned=false
+// activates a scalar prologue for the unaligned prefix, allowing prefill
+// callers to pass `input = logits + r*stride0 + rowStart` with arbitrary
+// rowStart. bf16/fp16 needs 16B alignment for the int4 vector load (8 ×
+// 2-byte elements per load), so the prologue advances to a multiple of 8.
+template <bool Aligned = true, typename InputT,
+    typename SmemT = KernelSmemTpl<typename GvrDtypeTraits<InputT>::SmemKey>>
 __device__ __forceinline__ void blockCountGEDtype(
     InputT const* __restrict__ input, int N, float threshold, SmemT* smem, int tid, int warp_id, int lane)
 {
@@ -543,17 +612,40 @@ __device__ __forceinline__ void blockCountGEDtype(
     static_assert(Trait::VEC_W == 8, "blockCountGEDtype is for bf16/fp16 (8-wide vector); use blockCountGE for fp32");
 
     int c = 0;
-    for (int i = tid * 8; i + 7 < N; i += BLOCK_SIZE * 8)
+    if constexpr (Aligned)
     {
-        int4 raw = __ldg(reinterpret_cast<int4 const*>(input + i));
-        float v[8];
-        Trait::unpack8(raw, v);
+        for (int i = tid * 8; i + 7 < N; i += BLOCK_SIZE * 8)
+        {
+            int4 raw = __ldg(reinterpret_cast<int4 const*>(input + i));
+            float v[8];
+            Trait::unpack8(raw, v);
 #pragma unroll
-        for (int j = 0; j < 8; j++)
-            c += (v[j] >= threshold);
+            for (int j = 0; j < 8; j++)
+                c += (v[j] >= threshold);
+        }
+        for (int i = (N & ~7) + tid; i < N; i += BLOCK_SIZE)
+            c += (Trait::to_fp32(__ldg(&input[i])) >= threshold);
     }
-    for (int i = (N & ~7) + tid; i < N; i += BLOCK_SIZE)
-        c += (Trait::to_fp32(__ldg(&input[i])) >= threshold);
+    else
+    {
+        int const skipCnt = ((16 - (static_cast<int>(reinterpret_cast<uintptr_t>(input) & 15))) & 15) / 2;
+        int const prologueN = (skipCnt < N) ? skipCnt : N;
+        for (int i = tid; i < prologueN; i += BLOCK_SIZE)
+            c += (Trait::to_fp32(__ldg(&input[i])) >= threshold);
+        int const alignedN = N - prologueN;
+        InputT const* __restrict__ aligned = input + prologueN;
+        for (int i = tid * 8; i + 7 < alignedN; i += BLOCK_SIZE * 8)
+        {
+            int4 raw = __ldg(reinterpret_cast<int4 const*>(aligned + i));
+            float v[8];
+            Trait::unpack8(raw, v);
+#pragma unroll
+            for (int j = 0; j < 8; j++)
+                c += (v[j] >= threshold);
+        }
+        for (int i = (alignedN & ~7) + tid; i < alignedN; i += BLOCK_SIZE)
+            c += (Trait::to_fp32(__ldg(&aligned[i])) >= threshold);
+    }
 
     smem->per_thread_counts[tid] = c;
 
@@ -582,7 +674,18 @@ __device__ __forceinline__ void blockCountGEDtype(
 // runtime `topK` parameter is kept for header-API compatibility with
 // callers that pass it; the kernel asserts at entry that it matches
 // the template instantiation.
-template <int TopK = TOP_K>
+//
+// PreIdxMode (default Tensor) selects the Phase-1 preIdx source (see
+// GvrPreIdxMode comment). Default value preserves byte-identical SASS for
+// existing decode callers; new prefill assembly passes ConstIdentity (V4
+// cr=4) or BaseShift (V3.2 cr=1).
+//
+// `Aligned` (default true) preserves the decode hot-path SASS by selecting
+// the original 16B-aligned vector loads in blockCountGE and Phase-3 collect.
+// Prefill assembly passes Aligned=false because the `input = logits +
+// r*stride0 + rowStart` pointer can be misaligned for any `rowStart % 4 != 0`
+// (multi-request packed chunks / batch_size > 1 single-pass prefill).
+template <int TopK = TOP_K, GvrPreIdxMode PreIdxMode = GvrPreIdxMode::Tensor, bool Aligned = true>
 __device__ __noinline__ void gvrTopKJob(float const* __restrict__ input, int const N, int const* __restrict__ preIdx,
     int const M, int const topK, float* __restrict__ outputValues, int* __restrict__ outputIndices,
     KernelSmemTplK<float, GvrParams<float, TopK>::kC, GvrParams<float, TopK>::kNumBins>* smem,
@@ -610,7 +713,19 @@ __device__ __noinline__ void gvrTopKJob(float const* __restrict__ input, int con
         int local_cnt = 0;
         for (int i = tid; i < M; i += BLOCK_SIZE)
         {
-            int idx = __ldg(&preIdx[i]) + preIdxOffset;
+            int idx;
+            if constexpr (PreIdxMode == GvrPreIdxMode::Tensor)
+            {
+                idx = __ldg(&preIdx[i]) + preIdxOffset;
+            }
+            else if constexpr (PreIdxMode == GvrPreIdxMode::ConstIdentity)
+            {
+                idx = i;
+            }
+            else // BaseShift
+            {
+                idx = preIdxOffset + i;
+            }
             if (idx >= 0 && idx < N)
             {
                 float v = __ldg(&input[idx]);
@@ -676,7 +791,7 @@ __device__ __noinline__ void gvrTopKJob(float const* __restrict__ input, int con
         // Phase 2 (GVR Guess, part 2) — Secant-interpolation threshold search
         // ================================================================
 
-        blockCountGE(input, N, smem->threshold, smem, tid, warp_id, lane);
+        blockCountGE<Aligned>(input, N, smem->threshold, smem, tid, warp_id, lane);
 
         if (tid == 0)
         {
@@ -738,7 +853,7 @@ __device__ __noinline__ void gvrTopKJob(float const* __restrict__ input, int con
             __syncthreads();
             if (smem->done)
                 break;
-            blockCountGE(input, N, smem->threshold, smem, tid, warp_id, lane);
+            blockCountGE<Aligned>(input, N, smem->threshold, smem, tid, warp_id, lane);
             if (tid == 0)
             {
                 int c = smem->cand_count;
@@ -777,7 +892,7 @@ __device__ __noinline__ void gvrTopKJob(float const* __restrict__ input, int con
     // [kK, kCC]; skip the redundant full-N blockCountGE re-check.
     if (smem->done != 1)
     {
-        blockCountGE(input, N, smem->threshold, smem, tid, warp_id, lane);
+        blockCountGE<Aligned>(input, N, smem->threshold, smem, tid, warp_id, lane);
         if (tid == 0 && smem->cand_count > kCC)
             smem->val_lo = smem->threshold;
         __syncthreads();
@@ -793,7 +908,7 @@ __device__ __noinline__ void gvrTopKJob(float const* __restrict__ input, int con
                 smem->threshold = mid;
             }
             __syncthreads();
-            blockCountGE(input, N, smem->threshold, smem, tid, warp_id, lane);
+            blockCountGE<Aligned>(input, N, smem->threshold, smem, tid, warp_id, lane);
             if (tid == 0)
             {
                 int c = smem->cand_count;
@@ -842,29 +957,76 @@ __device__ __noinline__ void gvrTopKJob(float const* __restrict__ input, int con
 
     {
         float const thr = smem->threshold;
-        for (int i = tid * 4; i + 3 < N; i += BLOCK_SIZE * 4)
+        if constexpr (Aligned)
         {
-            float4 v4 = __ldg(reinterpret_cast<float4 const*>(input + i));
-#pragma unroll
-            for (int j = 0; j < 4; j++)
+            for (int i = tid * 4; i + 3 < N; i += BLOCK_SIZE * 4)
             {
-                float val = (&v4.x)[j];
+                float4 v4 = __ldg(reinterpret_cast<float4 const*>(input + i));
+#pragma unroll
+                for (int j = 0; j < 4; j++)
+                {
+                    float val = (&v4.x)[j];
+                    if (val >= thr && my_write_pos < kCC)
+                    {
+                        smem->keys[my_write_pos] = val;
+                        smem->vals[my_write_pos] = i + j;
+                        my_write_pos++;
+                    }
+                }
+            }
+            for (int i = (N & ~3) + tid; i < N; i += BLOCK_SIZE)
+            {
+                float val = __ldg(&input[i]);
                 if (val >= thr && my_write_pos < kCC)
                 {
                     smem->keys[my_write_pos] = val;
-                    smem->vals[my_write_pos] = i + j;
+                    smem->vals[my_write_pos] = i;
                     my_write_pos++;
                 }
             }
         }
-        for (int i = (N & ~3) + tid; i < N; i += BLOCK_SIZE)
+        else
         {
-            float val = __ldg(&input[i]);
-            if (val >= thr && my_write_pos < kCC)
+            // vals indices are in the original [0, N) frame: prologue uses
+            // i directly, aligned body adds prologueN to map back.
+            int const skipCnt = ((16 - (static_cast<int>(reinterpret_cast<uintptr_t>(input) & 15))) & 15) / 4;
+            int const prologueN = (skipCnt < N) ? skipCnt : N;
+            for (int i = tid; i < prologueN; i += BLOCK_SIZE)
             {
-                smem->keys[my_write_pos] = val;
-                smem->vals[my_write_pos] = i;
-                my_write_pos++;
+                float val = __ldg(&input[i]);
+                if (val >= thr && my_write_pos < kCC)
+                {
+                    smem->keys[my_write_pos] = val;
+                    smem->vals[my_write_pos] = i;
+                    my_write_pos++;
+                }
+            }
+            int const alignedN = N - prologueN;
+            float const* __restrict__ aligned = input + prologueN;
+            for (int i = tid * 4; i + 3 < alignedN; i += BLOCK_SIZE * 4)
+            {
+                float4 v4 = __ldg(reinterpret_cast<float4 const*>(aligned + i));
+#pragma unroll
+                for (int j = 0; j < 4; j++)
+                {
+                    float val = (&v4.x)[j];
+                    if (val >= thr && my_write_pos < kCC)
+                    {
+                        smem->keys[my_write_pos] = val;
+                        smem->vals[my_write_pos] = prologueN + i + j;
+                        my_write_pos++;
+                    }
+                }
+            }
+            for (int i = (alignedN & ~3) + tid; i < alignedN; i += BLOCK_SIZE)
+            {
+                float val = __ldg(&aligned[i]);
+                if (val >= thr && my_write_pos < kCC)
+                {
+                    smem->keys[my_write_pos] = val;
+                    smem->vals[my_write_pos] = prologueN + i;
+                    my_write_pos++;
+                }
             }
         }
     }
@@ -1144,7 +1306,18 @@ __global__ void __launch_bounds__(BLOCK_SIZE)
 // the down-conversion out of the Phase-3 collect loop saves more than the
 // extra ~10 KB of smem costs. The fp32 keys move conversion to the output
 // writeback (one cvt per surviving candidate) instead of every smem store.
-template <typename InputT, int TopK = TOP_K>
+// `Aligned` matches the fp32 path's contract (default true preserves decode
+// SASS). The bf16/fp16 prefill assembly (`heuristicTopKMultiRowKernelPrefill
+// Dtype<bf16|fp16, TopK, PreIdxMode>`) instantiates this template with
+// Aligned=false because the per-row input pointer
+// `logits + r*stride0 + rowStart` is misaligned whenever rowStart's byte
+// offset is not a multiple of 16 (i.e., rowStart % 8 != 0 for bf16/fp16
+// since each element is 2 bytes). The Aligned=false branch runs a scalar
+// prologue (up to 7 elements) to advance to the next 16B boundary before
+// the aligned 8-wide int4 vector body.
+// Decode (multi-row bf16/fp16) keeps Aligned=true since seqLens-derived row
+// geometry always passes rowStart=0.
+template <typename InputT, int TopK = TOP_K, GvrPreIdxMode PreIdxMode = GvrPreIdxMode::Tensor, bool Aligned = true>
 __device__ __noinline__ void gvrTopKJobDtype(InputT const* __restrict__ input, int const N,
     int const* __restrict__ preIdx, int const M, int const topK, InputT* __restrict__ outputValues,
     int* __restrict__ outputIndices,
@@ -1176,7 +1349,19 @@ __device__ __noinline__ void gvrTopKJobDtype(InputT const* __restrict__ input, i
         int local_cnt = 0;
         for (int i = tid; i < M; i += BLOCK_SIZE)
         {
-            int idx = __ldg(&preIdx[i]) + preIdxOffset;
+            int idx;
+            if constexpr (PreIdxMode == GvrPreIdxMode::Tensor)
+            {
+                idx = __ldg(&preIdx[i]) + preIdxOffset;
+            }
+            else if constexpr (PreIdxMode == GvrPreIdxMode::ConstIdentity)
+            {
+                idx = i;
+            }
+            else // BaseShift
+            {
+                idx = preIdxOffset + i;
+            }
             if (idx >= 0 && idx < N)
             {
                 float v = Trait::to_fp32(__ldg(&input[idx]));
@@ -1242,7 +1427,7 @@ __device__ __noinline__ void gvrTopKJobDtype(InputT const* __restrict__ input, i
         // Phase 2 — Secant-interpolation threshold search
         // ================================================================
 
-        blockCountGEDtype<InputT>(input, N, smem->threshold, smem, tid, warp_id, lane);
+        blockCountGEDtype<Aligned, InputT>(input, N, smem->threshold, smem, tid, warp_id, lane);
 
         if (tid == 0)
         {
@@ -1304,7 +1489,7 @@ __device__ __noinline__ void gvrTopKJobDtype(InputT const* __restrict__ input, i
             __syncthreads();
             if (smem->done)
                 break;
-            blockCountGEDtype<InputT>(input, N, smem->threshold, smem, tid, warp_id, lane);
+            blockCountGEDtype<Aligned, InputT>(input, N, smem->threshold, smem, tid, warp_id, lane);
             if (tid == 0)
             {
                 int c = smem->cand_count;
@@ -1341,7 +1526,7 @@ __device__ __noinline__ void gvrTopKJobDtype(InputT const* __restrict__ input, i
 
     if (smem->done != 1)
     {
-        blockCountGEDtype<InputT>(input, N, smem->threshold, smem, tid, warp_id, lane);
+        blockCountGEDtype<Aligned, InputT>(input, N, smem->threshold, smem, tid, warp_id, lane);
         if (tid == 0 && smem->cand_count > kCC)
             smem->val_lo = smem->threshold;
         __syncthreads();
@@ -1357,7 +1542,7 @@ __device__ __noinline__ void gvrTopKJobDtype(InputT const* __restrict__ input, i
                 smem->threshold = mid;
             }
             __syncthreads();
-            blockCountGEDtype<InputT>(input, N, smem->threshold, smem, tid, warp_id, lane);
+            blockCountGEDtype<Aligned, InputT>(input, N, smem->threshold, smem, tid, warp_id, lane);
             if (tid == 0)
             {
                 int c = smem->cand_count;
@@ -1404,33 +1589,83 @@ __device__ __noinline__ void gvrTopKJobDtype(InputT const* __restrict__ input, i
 
     {
         float const thr = smem->threshold;
-        // 8-wide vector load (int4 = 8 × bf16/fp16)
-        for (int i = tid * 8; i + 7 < N; i += BLOCK_SIZE * 8)
+        if constexpr (Aligned)
         {
-            int4 raw = __ldg(reinterpret_cast<int4 const*>(input + i));
-            float v[8];
-            Trait::unpack8(raw, v);
-#pragma unroll
-            for (int j = 0; j < 8; j++)
+            // 8-wide vector load (int4 = 8 × bf16/fp16)
+            for (int i = tid * 8; i + 7 < N; i += BLOCK_SIZE * 8)
             {
-                float val = v[j];
+                int4 raw = __ldg(reinterpret_cast<int4 const*>(input + i));
+                float v[8];
+                Trait::unpack8(raw, v);
+#pragma unroll
+                for (int j = 0; j < 8; j++)
+                {
+                    float val = v[j];
+                    if (val >= thr && my_write_pos < kCC)
+                    {
+                        smem->keys[my_write_pos] = val; // P0: defer convert to output
+                        smem->vals[my_write_pos] = i + j;
+                        my_write_pos++;
+                    }
+                }
+            }
+            // Tail loop (N % 8)
+            for (int i = (N & ~7) + tid; i < N; i += BLOCK_SIZE)
+            {
+                float val = Trait::to_fp32(__ldg(&input[i]));
                 if (val >= thr && my_write_pos < kCC)
                 {
                     smem->keys[my_write_pos] = val; // P0: defer convert to output
-                    smem->vals[my_write_pos] = i + j;
+                    smem->vals[my_write_pos] = i;
                     my_write_pos++;
                 }
             }
         }
-        // Tail loop (N % 8)
-        for (int i = (N & ~7) + tid; i < N; i += BLOCK_SIZE)
+        else
         {
-            float val = Trait::to_fp32(__ldg(&input[i]));
-            if (val >= thr && my_write_pos < kCC)
+            // int4 load requires 16B alignment; scalar prologue covers up to 7
+            // unaligned bf16/fp16 elements until input + prologueN reaches a
+            // 16B boundary. vals indices stay in the original [0, N) frame.
+            int const skipCnt = ((16 - (static_cast<int>(reinterpret_cast<uintptr_t>(input) & 15))) & 15) / 2;
+            int const prologueN = (skipCnt < N) ? skipCnt : N;
+            for (int i = tid; i < prologueN; i += BLOCK_SIZE)
             {
-                smem->keys[my_write_pos] = val; // P0: defer convert to output
-                smem->vals[my_write_pos] = i;
-                my_write_pos++;
+                float val = Trait::to_fp32(__ldg(&input[i]));
+                if (val >= thr && my_write_pos < kCC)
+                {
+                    smem->keys[my_write_pos] = val;
+                    smem->vals[my_write_pos] = i;
+                    my_write_pos++;
+                }
+            }
+            int const alignedN = N - prologueN;
+            InputT const* __restrict__ aligned = input + prologueN;
+            for (int i = tid * 8; i + 7 < alignedN; i += BLOCK_SIZE * 8)
+            {
+                int4 raw = __ldg(reinterpret_cast<int4 const*>(aligned + i));
+                float v[8];
+                Trait::unpack8(raw, v);
+#pragma unroll
+                for (int j = 0; j < 8; j++)
+                {
+                    float val = v[j];
+                    if (val >= thr && my_write_pos < kCC)
+                    {
+                        smem->keys[my_write_pos] = val;
+                        smem->vals[my_write_pos] = prologueN + i + j;
+                        my_write_pos++;
+                    }
+                }
+            }
+            for (int i = (alignedN & ~7) + tid; i < alignedN; i += BLOCK_SIZE)
+            {
+                float val = Trait::to_fp32(__ldg(&aligned[i]));
+                if (val >= thr && my_write_pos < kCC)
+                {
+                    smem->keys[my_write_pos] = val;
+                    smem->vals[my_write_pos] = prologueN + i;
+                    my_write_pos++;
+                }
             }
         }
     }

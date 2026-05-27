@@ -67,9 +67,42 @@ void invokeIndexerTopKDecode(__half const* logits, int const* seqLens, int* indi
     int const topK = 2048, int const* preIdx = nullptr, int const preIdxStride = 0, int const preIdxCount = 0,
     __half* heuristicScratch = nullptr, int const compressRatio = 1, cudaStream_t const stream = 0);
 
+/// Indexer TopK prefill — fp32 dispatcher. Dispatches to GVR Heuristic when
+/// a caller-owned heuristicScratch is provided and `(topK, compressRatio,
+/// stride1, numColumns, numRows)` satisfy the same dispatch envelope as
+/// decode; otherwise falls back to the existing Radix / Insertion path
+/// (Radix is fp32-only).
+///
+/// GVR prefill synthesizes preIdx inside the kernel from `(N_r, K, compressRatio)`:
+///   compressRatio == 1 (V3.2)         → BaseShift mode, idx = (N_r - K) + i
+///   compressRatio == 4 (V4 Flash/Pro) → ConstIdentity mode, idx = i
+/// No external preIdx tensor is required from the caller (in contrast to
+/// decode where preIdx is the previous step's top-K output).
+///
+/// @param heuristicScratch  Caller-owned [topK] fp32 buffer shared across
+///                          all CTAs (kernel-internal write-only, no reader).
+///                          Mandatory for GVR path, CUDA-Graph-safe stable
+///                          address. Pass nullptr to force the Radix
+///                          fallback regardless of other gating.
+/// @param compressRatio     KV compression ratio: 1 = V3.2 (raw KV space),
+///                          4 = V4 Flash / Pro (compressed token-index space).
 void invokeIndexerTopKPrefill(float const* logits, int const* rowStarts, int const* rowEnds, int* indices,
-    int const numRows, int const numColumns, int const stride0, int const stride1, int const topK = 2048,
-    cudaStream_t const stream = 0);
+    float* heuristicScratch, int const numRows, int const numColumns, int const stride0, int const stride1,
+    int const topK = 2048, int const compressRatio = 1, cudaStream_t const stream = 0);
+
+/// bf16 indexer TopK prefill — GVR-Heuristic only (no Radix fallback; the
+/// existing `topKPerRowPrefill` path is fp32-only). API symmetry with the
+/// decode dispatcher (which also has bf16/fp16 entries). Aborts with
+/// TLLM_CHECK if `heuristicScratch == nullptr` or the GVR envelope is not
+/// satisfied. Use the fp32 overload for callers that want a Radix fallback.
+void invokeIndexerTopKPrefill(__nv_bfloat16 const* logits, int const* rowStarts, int const* rowEnds, int* indices,
+    __nv_bfloat16* heuristicScratch, int const numRows, int const numColumns, int const stride0, int const stride1,
+    int const topK = 2048, int const compressRatio = 1, cudaStream_t const stream = 0);
+
+/// fp16 indexer TopK prefill — see bf16 overload for dispatcher contract.
+void invokeIndexerTopKPrefill(__half const* logits, int const* rowStarts, int const* rowEnds, int* indices,
+    __half* heuristicScratch, int const numRows, int const numColumns, int const stride0, int const stride1,
+    int const topK = 2048, int const compressRatio = 1, cudaStream_t const stream = 0);
 
 /// Returns true iff invokeIndexerTopKDecode would route to the GVR Heuristic
 /// kernel for this (numRows, numColumns, topK) triple, assuming valid preIdx
@@ -85,6 +118,13 @@ void invokeIndexerTopKPrefill(float const* logits, int const* rowStarts, int con
 /// @param topK            requested output size
 /// @param bytesPerElem    element size of logits (4 for fp32, 2 for bf16/fp16)
 bool canIndexerTopKDecodeUseGvr(int numRows, int numColumns, int topK, int bytesPerElem = 4);
+
+/// Returns true iff invokeIndexerTopKPrefill would route to the GVR Heuristic
+/// kernel for this (numRows, numColumns, topK, compressRatio) tuple, assuming
+/// a valid heuristicScratch is provided and stride1 == 1. Mirrors the gating
+/// logic of the prefill dispatcher: K ∈ {512, 1024, 2048}, compressRatio ∈
+/// {1, 4}, numColumns ∈ [kSeqSmall, splitWorkThreshold), numRows < kBsLarge.
+bool canIndexerTopKPrefillUseGvr(int numRows, int numColumns, int topK, int compressRatio);
 
 } // namespace kernels
 

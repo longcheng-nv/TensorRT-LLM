@@ -663,6 +663,197 @@ def test_indexer_topk_prefill(batch_size, index_topk, num_tokens):
 
 
 # ============================================================================
+# GVR Prefill Tests (heuristic_scratch + compress_ratio)
+# ============================================================================
+# Verify that the new GVR prefill path (heuristic_scratch provided) produces
+# top-K results that match torch.topk for both V3.2 (cr=1, BaseShift mode)
+# and V4 Flash / Pro (cr=4, ConstIdentity mode). Set-equality check matches
+# the existing prefill test convention via `compare_top_k_results`.
+
+
+def _run_indexer_topk_prefill_gvr_check(
+    batch_size: int,
+    index_topk: int,
+    num_tokens: int,
+    compress_ratio: int,
+    dtype: torch.dtype = torch.float32,
+):
+    """GVR prefill equivalence check — provides heuristic_scratch + compress_ratio."""
+    torch.manual_seed(31)
+    torch.cuda.manual_seed(31)
+
+    seq_lens = generate_seq_lens(batch_size, index_topk, num_tokens)
+    num_gen_tokens = seq_lens.sum()
+
+    row_starts = torch.zeros(num_gen_tokens, dtype=torch.int32, device="cuda")
+    row_indices = torch.arange(1, seq_lens.max() + 1, dtype=torch.int32, device="cuda")
+    row_ends = row_indices.expand(seq_lens.size(0), -1)[
+        row_indices.expand(seq_lens.size(0), -1) <= seq_lens.unsqueeze(1)
+    ].contiguous()
+
+    logits = create_random_logits(row_starts, row_ends, dtype, 73)
+
+    indices = torch.empty((num_gen_tokens, index_topk), dtype=torch.int32, device="cuda")
+    # Prefill scratch is shared across all CTAs (write-only, no reader), so
+    # only `index_topk` elements are needed regardless of num_gen_tokens.
+    # Scratch dtype must match logits dtype (op TORCH_CHECK).
+    heuristic_scratch = torch.empty((index_topk, ), dtype=dtype, device="cuda")
+
+    torch.ops.trtllm.indexer_topk_prefill(
+        logits,
+        row_starts,
+        row_ends,
+        indices,
+        index_topk,
+        heuristic_scratch=heuristic_scratch,
+        compress_ratio=compress_ratio,
+    )
+    torch.cuda.synchronize()
+
+    max_row_len = row_ends.max().item()
+    torch_indices = logits.topk(min(index_topk, max_row_len), dim=-1)[1]
+    mask_lo = torch_indices >= 0
+    mask_hi = (torch_indices - (row_ends - row_starts)[:, None]) < 0
+    mask = mask_lo & mask_hi
+    torch_indices = torch_indices.masked_fill(~mask, -1)
+
+    assert compare_top_k_results(
+        logits, indices, torch_indices, row_starts, row_ends, index_topk
+    ), (
+        f"GVR prefill (dtype={dtype}, cr={compress_ratio}, K={index_topk}, "
+        f"BS={batch_size}, N={num_tokens}) disagrees with torch.topk"
+    )
+
+
+@skip_pre_blackwell
+@pytest.mark.parametrize("batch_size", _PREFILL_BATCH_SIZES)
+@pytest.mark.parametrize("index_topk", [512, 1024, 2048])
+@pytest.mark.parametrize("num_tokens", _PREFILL_NUM_TOKENS)
+@pytest.mark.parametrize("compress_ratio", [1, 4], ids=["v3p2", "v4"])
+def test_indexer_topk_prefill_gvr(batch_size, index_topk, num_tokens, compress_ratio):
+    """GVR prefill set-equality vs torch.topk on random fp32 logits (production path).
+
+    Covers both V3.2 (cr=1 → BaseShift preIdx mode) and V4 Flash/Pro
+    (cr=4 → ConstIdentity preIdx mode). The micro-kernel still runs full
+    P2 (secant), P3 (Verify), and P4 (Refine) phases — so the output must
+    exactly match radix-based prefill in set semantics regardless of
+    whether the talos-observed diagonal pattern holds on the random
+    inputs (which it generally won't).
+    """
+    _run_indexer_topk_prefill_gvr_check(batch_size, index_topk, num_tokens, compress_ratio,
+                                        dtype=torch.float32)
+
+
+@skip_pre_blackwell
+@pytest.mark.parametrize("batch_size", _PREFILL_BATCH_SIZES)
+@pytest.mark.parametrize("index_topk", [512, 1024, 2048])
+@pytest.mark.parametrize("num_tokens", _PREFILL_NUM_TOKENS)
+@pytest.mark.parametrize("compress_ratio", [1, 4], ids=["v3p2", "v4"])
+@pytest.mark.parametrize(
+    "dtype",
+    [torch.bfloat16, torch.float16],
+    ids=["bf16", "fp16"],
+)
+def test_indexer_topk_prefill_gvr_dtype(batch_size, index_topk, num_tokens, compress_ratio, dtype):
+    """GVR prefill bf16/fp16 paths.
+
+    DeepGEMM's `fp8_mqa_logits` returns fp32 in production, so the bf16/fp16
+    prefill paths are not on the production hot path today. They exist for
+    API symmetry with the decode op (which accepts all three dtypes) and
+    for callers that pass non-fp32 logits directly. The bf16/fp16
+    dispatcher is GVR-only (no Radix fallback, since `topKPerRowPrefill`
+    is fp32-only) — TORCH_CHECK fires if the GVR envelope isn't met.
+    """
+    _run_indexer_topk_prefill_gvr_check(batch_size, index_topk, num_tokens, compress_ratio,
+                                        dtype=dtype)
+
+
+def _run_indexer_topk_prefill_gvr_misaligned_check(
+    index_topk: int,
+    num_tokens: int,
+    compress_ratio: int,
+    dtype: torch.dtype = torch.float32,
+):
+    """GVR prefill with deliberately misaligned rowStart (batch_size>1 / multi-request packed chunk).
+
+    Constructs `row_starts` with values that are NOT multiples of the
+    dtype's vector-load alignment (fp32: not multiple of 4; bf16/fp16: not
+    multiple of 8). The kernel's vector loads (float4 / int4 in
+    blockCountGE and Phase-3 collect) require 16-byte alignment of
+    `input = logits + r*stride0 + rowStart`, so the prefill assembly
+    dispatches gvrTopKJob{,Dtype} with Aligned=false to activate the
+    scalar-prologue path for these rows.
+    """
+    torch.manual_seed(57)
+    torch.cuda.manual_seed(57)
+
+    # Construct rows with explicit non-aligned starts. row_ends ensures each
+    # row's N = end - start exceeds index_topk so Region-B (the path that
+    # exercises blockCountGE + Phase-3 collect) runs, not Region-A short-circuit.
+    # The 12 chosen values include misalignments under both the fp32 (% 4)
+    # and bf16/fp16 (% 8) byte-alignment constraints.
+    misaligned_starts = [0, 1, 2, 3, 5, 7, 9, 13, 17, 25, 33, 41]
+    n_rows = len(misaligned_starts)
+    target_row_len = max(num_tokens, index_topk * 4)  # ensure N > K
+    row_starts = torch.tensor(misaligned_starts, dtype=torch.int32, device="cuda")
+    row_ends = row_starts + target_row_len
+    # Pad logits column width to cover the largest row_end + alignment slack.
+    max_end = int(row_ends.max().item())
+    padded_cols = (max_end + 15) & ~15  # multiple of 16 elements for tensor alignment
+    logits = torch.rand(n_rows, padded_cols, dtype=dtype, device="cuda")
+    # Mask out columns outside each row's [start, end) range.
+    col_idx = torch.arange(padded_cols, device="cuda").unsqueeze(0)
+    mask = (col_idx < row_starts.unsqueeze(1)) | (col_idx >= row_ends.unsqueeze(1))
+    logits[mask] = float("-inf")
+
+    indices = torch.empty((n_rows, index_topk), dtype=torch.int32, device="cuda")
+    # Prefill scratch is [topK] regardless of n_rows; dtype must match logits.
+    heuristic_scratch = torch.empty((index_topk, ), dtype=dtype, device="cuda")
+
+    torch.ops.trtllm.indexer_topk_prefill(
+        logits,
+        row_starts,
+        row_ends,
+        indices,
+        index_topk,
+        heuristic_scratch=heuristic_scratch,
+        compress_ratio=compress_ratio,
+    )
+    torch.cuda.synchronize()
+
+    # Reference: torch.topk per row in the valid window.
+    torch_indices = logits.topk(min(index_topk, padded_cols), dim=-1)[1]
+    mask_lo = torch_indices >= 0
+    mask_hi = (torch_indices - (row_ends - row_starts)[:, None]) < 0
+    torch_indices = torch_indices.masked_fill(~(mask_lo & mask_hi), -1)
+
+    assert compare_top_k_results(
+        logits, indices, torch_indices, row_starts, row_ends, index_topk
+    ), (
+        f"GVR prefill with misaligned row_starts {misaligned_starts} "
+        f"(dtype={dtype}, cr={compress_ratio}, K={index_topk}) disagrees with torch.topk "
+        f"— check Aligned=false path in gvrTopKJob{{,Dtype}}"
+    )
+
+
+@skip_pre_blackwell
+@pytest.mark.parametrize("index_topk", [512, 1024, 2048])
+@pytest.mark.parametrize("num_tokens", [8192, 32768])
+@pytest.mark.parametrize("compress_ratio", [1, 4], ids=["v3p2", "v4"])
+@pytest.mark.parametrize(
+    "dtype",
+    [torch.float32, torch.bfloat16, torch.float16],
+    ids=["fp32", "bf16", "fp16"],
+)
+def test_indexer_topk_prefill_gvr_misaligned_rowstart(index_topk, num_tokens, compress_ratio, dtype):
+    """GVR prefill correctness under rowStart byte-misalignment (production
+    scenario: batch_size > 1 packed chunks). Regression guard for the
+    misalignment-safe blockCountGE / Phase-3 collect paths in gvrTopKJob
+    (fp32, Aligned=false) and gvrTopKJobDtype (bf16/fp16, Aligned=false)."""
+    _run_indexer_topk_prefill_gvr_misaligned_check(index_topk, num_tokens, compress_ratio, dtype)
+
+
+# ============================================================================
 # CuTE DSL Top-K Tests
 # ============================================================================
 
