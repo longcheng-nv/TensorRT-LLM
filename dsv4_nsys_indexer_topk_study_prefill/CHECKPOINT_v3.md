@@ -1,5 +1,46 @@
 # Session Checkpoint v3 — 2026-06-01T09:48Z (umb-b300-023, Claude session restarting)
 
+---
+
+## ⚠️ LIVE STATUS UPDATE @ 2026-06-01T09:56Z (T+17min into Run #1 v2)
+
+**Run #1 v2 is past weight load but **silent for >16 min** after that.** Triage facts:
+
+- `nvidia-smi`: GPUs 0-3 carrying 42-45 GB each (model loaded, TP=4 ranks 0-3 ✓)
+- `trtllm-bench` PID 6044: State=S, wchan=`do_poll.constprop.0` (waiting)
+- orted child PID 6426: State=S, wchan=`ep_pol` (OpenMPI singleton, healthy)
+- `run.log` ends at `Loading weights: 100% 1884/1884` — no autotuner / cuda-graph / bench messages
+- No `[Autotuner]`, no `Running benchmark`, no iter lines
+
+**Hypothesis** (in order of likelihood):
+1. CUDA graph capture per-config stuck (cuda_graph_config has batch_sizes=[1..8] → 8 captures)
+2. Autotuner tactic search cold cache (first-time on this host)
+3. NCCL init / collective handshake stuck
+4. Pathological scheduler behavior with 80-req dataset (BS=1, chunked-prefill)
+
+**Action for the next session if the situation hasn't changed by your arrival:**
+
+```bash
+# 1. Check if it's STILL silent:
+tail -3 /home/scratch.loncheng_gpu/workspace/perf/workloads/DSV4/TensorRT-LLM/dsv4_nsys_indexer_topk_study_prefill/ds4_Flash_ISL68656_OSL2048_BS1_MTP0_TEP_GVRfalse_20260601T093908Z/run.log
+
+# 2. If still no iter lines after T+25min from 09:39Z (i.e. > 10:04Z), KILL and bisect:
+kill -9 5906 5912 6017 6044 6426 2>/dev/null
+sleep 3
+pkill -9 -f trtllm-bench
+
+# 3. Re-launch with smaller NUM_PROMPTS to isolate:
+#    - If NUM_PROMPTS=20 works → 80 was pathological; back off
+#    - If NUM_PROMPTS=20 also hangs → not request count; investigate cuda_graph
+sed -i 's/PROMPTS_REPLICATE=80/PROMPTS_REPLICATE=20/; s/NUM_PROMPTS=80/NUM_PROMPTS=20/' \
+    /home/scratch.loncheng_gpu/workspace/perf/workloads/DSV4/TensorRT-LLM/dsv4_nsys_indexer_topk_study_prefill/launch_gvr0_multireq.sh
+# Re-run as before with launch_gvr0_multireq.sh
+```
+
+**Don't kill before T+25min from 09:39Z** — autotuner / cuda graph capture CAN legitimately take 15+ min on cold cache, esp. with 8 batch-size variants × 4 ranks. If you see `[Autotuner] Autotuning process starts` even at T+22min, let it run.
+
+---
+
 > **新会话开局先 cat 这个文件 + CHECKPOINT.md。** v3 是当前(09:48Z)状态;CHECKPOINT.md
 > 是上一会话(08:22Z umb-b300-022 切机前)的状态。RESUME_PROMPT.md 是更早的恢复指南,**部分已过时**(详见 §6)。
 
