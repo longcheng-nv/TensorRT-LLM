@@ -1,4 +1,5 @@
 import asyncio
+import os
 import threading
 from contextlib import contextmanager
 from typing import Callable, Optional
@@ -11,7 +12,11 @@ class HangDetector:
     def __init__(
         self, timeout: Optional[int] = None, on_detected: Optional[Callable[[], None]] = None
     ):
-        self.timeout = timeout if timeout is not None else 300
+        env_timeout = os.environ.get("TLLM_HANG_DETECT_TIMEOUT")
+        if env_timeout is not None:
+            self.timeout = int(env_timeout)
+        else:
+            self.timeout = timeout if timeout is not None else 300
         assert self.timeout > 0, "timeout must be greater than 0"
         self.on_detected = on_detected or (lambda: None)
         self.task = None
