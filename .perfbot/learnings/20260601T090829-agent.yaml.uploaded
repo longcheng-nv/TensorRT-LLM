@@ -1,0 +1,115 @@
+findings:
+  - id: F001
+    perfbot_related: true
+    category: skill_gap
+    severity: medium
+    summary: "G8 NFS-stale-handle hang on `pip install -e` CAN still occur in Phase 5 cross-machine reuse on a fresh-NFS-client machine — skill currently claims it does not"
+
+    problem: |
+      Running Phase 5 (Scenario B) recovery recipe verbatim on umb-b300-023
+      (fresh machine, never previously imported wt_gvr_prefill), the
+      `pip install -e $WT --no-deps --no-build-isolation
+      --config-settings editable_mode=compat` step stalled for 5+ min.
+      Subprocess `prepare_metadata_for_build_editable` (PID 3529) sat in
+      State=D with WCHAN=`rpc_wait_bit_killable` — the exact G8 signature.
+
+      SKILL.md Phase 5 Caveat 3 currently asserts: "G8 (NFS handle hang)
+      does NOT apply in scenarios B/C." That guidance is too strong: the
+      build that produced wt_gvr_prefill's .so files was hours old, yet
+      the hang still triggered on this host's first walk of those files.
+
+    root_cause: |
+      G8 lists "NFS client handle cache stale within minutes of build_wheel.py
+      exit" as the cause, but the underlying mechanism — pip's PEP 660
+      `build_editable` doing `os.walk + stat` on every file in the editable
+      target, which on NFSv3 issues a LOOKUP RPC per file — has a SECOND
+      trigger: a *cold* NFS client cache on a machine that has never
+      previously walked that directory tree. The wt_gvr_prefill/
+      tensorrt_llm/ subtree has thousands of files (.py, .pyi, .so);
+      cold-walk under NFSv3 with timeo=600 can stall arbitrarily long
+      when individual LOOKUPs miss the client cache.
+
+      The Phase 5 Caveat 3 reasoning ("handles long-since stable hours/days
+      after build") only addresses the stale-handle variant. Cold-cache
+      walk-time on a fresh machine is a separate, equally-G8-shaped hang.
+
+    solution: |
+      Manual two-line `.pth` injection bypasses pip entirely and is
+      functionally equivalent for the import-resolution objective:
+
+      ```bash
+      SP=$VENV_DIR/lib/python3.12/site-packages
+      cat > $SP/zz_wt_<branch>.pth <<PTH
+      import sys; sys.path.insert(2, '<WT path>')
+      PTH
+      ```
+
+      Why `zz_` prefix + `sys.path.insert(2, ...)`: .pth files are
+      processed alphabetically; `zz_` runs LAST; `insert(2, ...)` puts
+      the wt path right after `sys.path[0]=''` and the venv site-packages,
+      so it overrides NFS userbase (via G10 .pth) for `tensorrt_llm`
+      while leaving baseline deps reachable. Verified via
+      `importlib.util.find_spec('tensorrt_llm')` → wt path, other deps
+      → NFS userbase.
+
+      Total time: ~5s vs. ~5-10 min for pip install -e (which may or
+      may not eventually complete).
+
+    failed_approaches:
+      - "Wait out the G8 hang trusting SKILL.md's 'does not apply in B/C' assertion → 5 min elapsed with no progress; killed at 5 min mark"
+      - "Re-run pip install -e with --config-settings editable_mode=compat → already had that flag; not the trigger"
+
+    target_file: ".claude/skills/trtllm-machine-local-install/SKILL.md"
+    update_type: troubleshooting
+    update_section: "Phase 5 — Cross-machine reuse on the same NFS → Caveats"
+    suggested_update: |
+      Revise Caveat 3 to acknowledge the cold-cache variant of G8 and
+      point to the manual .pth workaround:
+
+      3. **G8 hang has a cold-cache variant in Phase 5**. The "stale
+         handle within minutes of build_wheel.py exit" form does NOT
+         apply in B/C. However, on a machine that has never previously
+         walked `<wt>/tensorrt_llm/`, pip's PEP 660 `prepare_metadata_for_build_editable`
+         can stall in D-state (`WCHAN=rpc_wait_bit_killable`) on cold NFS
+         LOOKUP RPCs for the thousands of `.py` / `.pyi` / `.so` files
+         under that subtree. Symptom is identical to G8.
+
+         **Detect**: `ps --ppid $PIP_PID -o pid,etime,state,wchan,cmd`
+         shows a `prepare_metadata_for_build_editable` child in `State=D`
+         with `WCHAN=rpc_wait_bit_killable`.
+
+         **Workaround (≤10s, functionally equivalent for the import-resolution
+         objective)**: skip `pip install -e` and write a manual `.pth`:
+
+         ```bash
+         SP=$VENV_DIR/lib/python3.12/site-packages
+         cat > $SP/zz_wt_<branch>.pth <<PTH
+         import sys; sys.path.insert(2, '<WT path>')
+         PTH
+         ```
+
+         Naming + `insert(2, ...)` is intentional: `zz_` runs alphabetically
+         after `_nfs_user_site_readonly.pth`, and `sys.path.insert(2, ...)`
+         places the wt path right after `sys.path[0]=''` and the venv
+         site-packages, so it overrides any NFS-baseline `tensorrt_llm`.
+
+         **Trade-off**: skipping pip means no `.egg-info`/`.dist-info`
+         metadata in the venv. Tools that introspect via `importlib.metadata`
+         (e.g. `pkg_resources.get_distribution('tensorrt_llm').version`)
+         will fall through to whatever METADATA the WT's NFS-resident
+         `tensorrt_llm/METADATA` provides — same as the editable install
+         would have surfaced. No runtime impact for `import tensorrt_llm`,
+         `trtllm-bench`, or `trtllm-serve`.
+
+         **Pre-warm alternative** (defensive, before pip): walk the WT
+         once with `find $WT/tensorrt_llm -type f \( -name '*.so' -o
+         -name '*.py' -o -name '*.pyi' \) > /dev/null` to populate NFS
+         client cache. May reduce the cold-cache stall enough for pip
+         to complete, but no guarantee.
+
+    evidence:
+      turns_spent: 3
+      key_moments:
+        - "Turn 1: launched pip install -e following Phase 5 recipe verbatim; bg task `bq6wrrblw`"
+        - "Turn 2: observed bg still running after 5 min; probed `ps --ppid 3314` → child 3529 in D state, WCHAN=rpc_wait_bit_killable — exact G8 signature, despite Phase 5 Caveat 3"
+        - "Turn 3: killed 3314+3529, wrote manual .pth with sys.path.insert(2, ...) ordering, verified find_spec resolves correctly"

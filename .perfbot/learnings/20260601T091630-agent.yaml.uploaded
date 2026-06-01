@@ -1,0 +1,142 @@
+findings:
+  - id: F001
+    perfbot_related: true
+    category: skill_gap
+    severity: high
+    summary: "computelab-hf-stage skill lacks Phase 0 scan-before-stage step; agent re-downloaded V4 Flash to /raid for ~15 min while a complete 46/46-shard copy already sat in /dev/shm on the same host"
+
+    problem: |
+      On umb-b300-023 (fresh session), the agent followed the prior
+      session's RESUME_PROMPT §4.2 recipe and invoked computelab-hf-stage
+      to download deepseek-ai/DeepSeek-V4-Flash → /raid/data/$USER-stage/.
+      The recipe only checked `/raid/data/$USER-stage/DeepSeek-V4-Flash/`
+      (empty on this host) and proceeded directly to HF CDN download.
+      Stage ran for ~15 min (23/46 shards, 79 GB) before the user asked
+      "why didn't you check whether /raid already has Flash?"
+
+      A subsequent wide scan found `/dev/shm/DeepSeek-V4-Flash/` — fully
+      populated, 46/46 shards, 149 GB, all model weights + config +
+      tokenizer present (the 20 "missing" files per HF API were all
+      non-weight assets: PDF, README, encoding/* tools, test fixtures).
+      Switching MODEL_PATH=/dev/shm/DeepSeek-V4-Flash saved ~25 more
+      minutes of stage wall time. /dev/shm reads at RAM speed, strictly
+      faster than /raid NVMe.
+
+    root_cause: |
+      The skill jumps from "When to use" (line 20) directly to "Quick
+      recipe" (line 54) → "Path strategy" (line 94). The Path strategy
+      section discusses where to PUT the model after deciding to stage,
+      but does not include a pre-stage exhaustive scan of ALL tiers
+      named in the user's `[[dsv4-model-path-routing]]` memory:
+
+          /raid/data/${USER}-stage/<MODEL>/      ← skill only checks here
+          /raid/data/<other-user>-stage/<MODEL>/  ← may have been pre-staged
+          /raid/data/<model-name>/                ← legacy paths
+          /dev/shm/<MODEL>/                       ← previous session RAM stage
+          /dev/shm/hf-cache/...                   ← hf_transfer auto cache
+
+      The agent inherited the gap: checked the single canonical path,
+      saw it empty, started downloading. The memory `reference_dsv4_model_path_routing.md`
+      states the tier ordering ("/raid → /dev/shm → warm NFS → stage")
+      but provides no executable scan command; the skill never lifts
+      that into a Phase 0 step.
+
+    solution: |
+      Add a "Phase 0 — Scan local fast storage before staging" section
+      to computelab-hf-stage/SKILL.md, before "Quick recipe". The scan:
+
+      1. Enumerate every plausible host-local path for the model.
+      2. For each hit, verify with HfApi().repo_info(files_metadata=True)
+         that weight + tokenizer + config files match expected sizes.
+      3. Distinguish "complete enough for bench" (all *.safetensors +
+         config.json + tokenizer.* match expected size; non-weight
+         assets MAY be missing) from "incomplete" (any weight or
+         tokenizer file missing/wrong-size).
+      4. If complete, export MODEL_PATH=<found path> and SKIP staging.
+      5. Only if no tier yields a complete copy → proceed to "Quick recipe".
+
+    failed_approaches:
+      - "Trusted RESUME_PROMPT §4.2 recipe verbatim → recipe only checks `/raid/data/$USER-stage/<MODEL>/`, doesn't scan /dev/shm or other /raid paths"
+      - "Trusted memory `[[dsv4-model-path-routing]]` ordering implicitly → ordering is documented but not operationalized as an executable scan, agent silently truncated to first-tier-only check"
+
+    target_file: ".claude/skills/computelab-hf-stage/SKILL.md"
+    update_type: workflow
+    update_section: "(new) Phase 0 — Scan local fast storage before staging"
+    suggested_update: |
+      Insert immediately after "When to use" and before "Speed comparison":
+
+      ```markdown
+      ## Phase 0 — Scan local fast storage before staging
+
+      **Skip staging entirely if the model is already host-local.** A previous
+      session, a sibling user, or an unrelated experiment may have already
+      pulled the same model to `/dev/shm` (this session) or `/raid` (persisted
+      across reboots). Re-downloading wastes 5-60 min depending on size.
+
+      ```bash
+      # MODEL_REPO is the HF id, e.g. "deepseek-ai/DeepSeek-V4-Flash"
+      # MODEL_NAME is the basename, e.g. "DeepSeek-V4-Flash"
+      MODEL_REPO=deepseek-ai/DeepSeek-V4-Flash
+      MODEL_NAME=${MODEL_REPO##*/}
+
+      echo "=== Scan local fast storage for $MODEL_NAME ==="
+      # 1. All plausible /raid/*-stage paths (current user + siblings)
+      find /raid -maxdepth 6 -type d -name "$MODEL_NAME" 2>/dev/null
+      # 2. /dev/shm (RAM, wiped on reboot; check before assuming empty)
+      find /dev/shm -maxdepth 4 -type d -name "$MODEL_NAME" 2>/dev/null
+      # 3. Any other mounted local NVMe (cluster-specific, often /raid only)
+
+      # For each hit, verify completeness via HfApi:
+      for CANDIDATE in $(find /raid /dev/shm -maxdepth 6 -type d -name "$MODEL_NAME" 2>/dev/null); do
+          python3 - <<PY
+      from huggingface_hub import HfApi
+      import os, sys
+      info = HfApi().repo_info("$MODEL_REPO", files_metadata=True)
+      T = "$CANDIDATE"
+      ok = bad = missing = 0
+      bad_weights = 0
+      for f in info.siblings:
+          p = os.path.join(T, f.rfilename)
+          rfilename_lower = f.rfilename.lower()
+          is_weight = (
+              rfilename_lower.endswith(".safetensors") or
+              rfilename_lower.endswith(".bin") or
+              "tokenizer" in rfilename_lower or
+              rfilename_lower in ("config.json", "generation_config.json", "model.safetensors.index.json")
+          )
+          if not os.path.exists(p):
+              missing += 1
+              if is_weight: bad_weights += 1
+              continue
+          sz = os.path.getsize(p)
+          if sz != f.size:
+              bad += 1
+              if is_weight: bad_weights += 1
+          else:
+              ok += 1
+      print(f"$CANDIDATE: ok={ok}/{len(info.siblings)} bad_weights={bad_weights}")
+      print("  USABLE" if bad_weights == 0 else "  INCOMPLETE — need staging or repair")
+      PY
+      done
+      ```
+
+      **Decision rule**: if any candidate reports `bad_weights=0`,
+      `export MODEL_PATH=$CANDIDATE` and SKIP the rest of this skill.
+      Only if every candidate has `bad_weights > 0` (or no candidates),
+      proceed to "Quick recipe" below.
+
+      **Note on "missing" non-weight assets**: HF repos include PDF
+      papers, README, encoding tooling, test fixtures, .png images.
+      Those routinely show MISSING on `/dev/shm` and minimal-stage copies
+      and are NOT required for `trtllm-bench` / `trtllm-serve`. The
+      decision rule above correctly ignores them.
+      ```
+
+    evidence:
+      turns_spent: 4
+      key_moments:
+        - "Turn 1: checked /raid/data/$USER-stage/DeepSeek-V4-Flash/ → empty (0 shards), declared `need to stage`"
+        - "Turn 2-3: kicked off /raid HF stage; ran for ~15 min reaching 23/46 shards"
+        - "Turn 4: user asked 'why didn't you check /raid first?' → triggered exhaustive scan"
+        - "Turn 4: scan found /dev/shm/DeepSeek-V4-Flash/ already complete (46/46 shards, all weights+config+tokenizer present); killed in-flight /raid stage, switched MODEL_PATH"
+        - "Avoided ~25 more minutes of unnecessary download"

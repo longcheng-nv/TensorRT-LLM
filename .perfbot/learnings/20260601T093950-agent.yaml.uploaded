@@ -1,0 +1,137 @@
+findings:
+  - id: F001
+    perfbot_related: true
+    category: skill_gap
+    severity: high
+    summary: "Phase 5 G8-hang workaround (manual .pth from 20260601T090829-agent.yaml) is INCOMPLETE — also need a venv-local trtllm-bench wrapper, else NFS userbase's bench with `#!/usr/bin/python3` shebang silently bypasses the venv"
+
+    problem: |
+      After applying the manual `.pth` workaround for the Phase 5 G8 cold-cache
+      hang (see prior learning 20260601T090829-agent.yaml F001), launched
+      Run #1 GVR=0 multi-request. trtllm-bench exited within 7 seconds with:
+
+          File "/home/scratch.loncheng_gpu/python-userbase/bin/trtllm-bench", line 3, in <module>
+              from tensorrt_llm.commands.bench import main
+          ModuleNotFoundError: No module named 'tensorrt_llm'
+
+      Despite:
+      - venv activated → $PATH starts with `$VENV/bin/`
+      - venv site-packages had both .pth files (`_nfs_user_site_readonly.pth`
+        + `zz_wt_gvr_prefill_branch.pth`)
+      - `find_spec('tensorrt_llm')` from venv Python resolved to wt_gvr_prefill
+      - `shutil.which('trtllm-bench')` returned NFS userbase path
+        (because venv bin had no trtllm-bench)
+
+    root_cause: |
+      The NFS-resident `trtllm-bench` console script
+      (`/home/scratch.loncheng_gpu/python-userbase/bin/trtllm-bench`) has
+      shebang `#!/usr/bin/python3` — the system python, NOT a relative
+      `#!/usr/bin/env python3`. When invoked as a console command:
+
+      1. `$PATH` is venv-first, but venv bin has no `trtllm-bench` (we
+         skipped `pip install -e`), so the shell falls through to the
+         next $PATH entry that has it: NFS userbase bin.
+      2. The kernel honors the absolute shebang: `/usr/bin/python3 …
+         trtllm-bench`. This is the SYSTEM python, NOT the venv python.
+      3. The system python does NOT process venv's site-packages, so
+         the two `.pth` files (which redirect `tensorrt_llm`) are
+         never applied.
+      4. Normally `/usr/bin/python3` would fall back to PYTHONUSERBASE
+         (= NFS userbase) where `tensorrt_llm` editable is registered.
+         But the venv's activate script does `unset PYTHONUSERBASE`
+         (the Phase 3.2 isolation primitive that PHASE 5 inherited).
+      5. With `PYTHONUSERBASE` unset, the system python sees no NFS
+         userbase site-packages → ModuleNotFoundError.
+
+      The manual `.pth` workaround fixes module IMPORTS for the venv
+      python, but does nothing for console-script entry points, which
+      `pip install -e` would normally create as venv-local wrappers
+      with shebang `#!$VENV/bin/python3`.
+
+    solution: |
+      Augment the manual `.pth` workaround with a one-line wrapper
+      installed into the venv's bin/. The wrapper duplicates what
+      `pip install -e` would have generated:
+
+      ```bash
+      VENV=/workspace/trtllm-venv-<branch>
+      cat > $VENV/bin/trtllm-bench <<EOF
+      #!$VENV/bin/python3
+      import sys
+      from tensorrt_llm.commands.bench import main
+      if __name__ == '__main__':
+          sys.argv[0] = sys.argv[0].removesuffix('.exe')
+          sys.exit(main())
+      EOF
+      chmod +x $VENV/bin/trtllm-bench
+      ```
+
+      Repeat for every console script tensorrt_llm exposes that the
+      workload needs (`trtllm-serve`, `trtllm-eval`, `trtllm-build`,
+      `trtllm-llmapi-launch`, etc.). Inspect the NFS userbase set with
+      `ls /home/scratch.<user>/python-userbase/bin/trtllm-*` and
+      mirror each.
+
+      With the wrapper present, `which trtllm-bench` returns the
+      venv-local path; the venv python is used; the .pth files apply;
+      `import tensorrt_llm` resolves to the wt branch. Verified by
+      relaunching: no ModuleNotFoundError, bench started warmup.
+
+    failed_approaches:
+      - "Trusted manual .pth alone (from prior learning 20260601T090829-agent.yaml) → bench dies at 7s with ModuleNotFoundError; the .pth is invisible to /usr/bin/python3 + PYTHONUSERBASE-unset"
+      - "Considered restoring PYTHONUSERBASE in activate to fix the system-python fallback → would defeat the Phase 5 isolation guarantee; rejected"
+
+    target_file: ".claude/skills/trtllm-machine-local-install/SKILL.md"
+    update_type: troubleshooting
+    update_section: "Phase 5 — Cross-machine reuse on the same NFS → Caveats (the G8-cold-cache Caveat 3 added by prior learning 20260601T090829-agent.yaml)"
+    suggested_update: |
+      Extend the Caveat 3 workaround block in Phase 5 to include the
+      console-script wrapper step. Append after the existing manual
+      .pth bash snippet:
+
+      ```markdown
+      **The .pth fix alone is incomplete — also install venv-local
+      wrappers for every trtllm-* console script the workload uses.**
+      Otherwise `which trtllm-bench` falls through to the NFS userbase
+      wrapper, whose `#!/usr/bin/python3` shebang silently bypasses
+      the venv's .pth files. With `PYTHONUSERBASE` unset (the Phase 3.2
+      isolation primitive), the system python sees no `tensorrt_llm`
+      anywhere and the bench dies at <10s with `ModuleNotFoundError`.
+
+      Symptom: bench traceback starts with
+      `File "/home/scratch.<user>/python-userbase/bin/trtllm-bench"`
+      — note the NFS path, not the venv path. Quick check:
+      `which trtllm-bench` returning the NFS path = not yet wrapped.
+
+      Wrapper installation:
+
+      ```bash
+      # 1. List the console scripts the NFS userbase ships
+      ls /home/scratch.<user>/python-userbase/bin/trtllm-*
+
+      # 2. Mirror each into venv bin with venv-python shebang
+      for CMD in trtllm-bench trtllm-serve trtllm-eval trtllm-build \
+                 trtllm-llmapi-launch; do
+          SRC=/home/scratch.<user>/python-userbase/bin/$CMD
+          [ -f $SRC ] || continue
+          DST=$VENV_DIR/bin/$CMD
+          # Replace shebang's interpreter with venv python; rest of script unchanged
+          sed -e "1s|#!.*python.*|#!$VENV_DIR/bin/python3|" $SRC > $DST
+          chmod +x $DST
+      done
+
+      # 3. Verify (after `source $VENV_DIR/bin/activate`)
+      which trtllm-bench   # must return $VENV_DIR/bin/trtllm-bench
+      head -1 $(which trtllm-bench)   # must point at venv python
+      ```
+
+      The `sed` approach preserves the original entry-point logic
+      (`from tensorrt_llm.commands.<cmd> import main`); only the
+      interpreter is swapped to venv-local.
+      ```
+
+    evidence:
+      turns_spent: 2
+      key_moments:
+        - "Turn 1: launched Run #1 GVR=0 multi-request with manual-.pth venv; bench died at 7s with ModuleNotFoundError pointing at `/home/scratch.<user>/python-userbase/bin/trtllm-bench` (NFS path)"
+        - "Turn 2: diagnosed — NFS bench has `#!/usr/bin/python3` shebang; venv-activated $PATH falls through to NFS bin because venv had no trtllm-bench; system python + PYTHONUSERBASE-unset → no tensorrt_llm. Wrote venv-local wrapper with `#!$VENV/bin/python3` shebang; re-verified `which trtllm-bench` and find_spec; relaunched successfully"
