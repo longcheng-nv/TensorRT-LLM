@@ -1,0 +1,711 @@
+--- a/tensorrt_llm/_torch/attention_backend/sparse/dsa.py
++++ b/tensorrt_llm/_torch/attention_backend/sparse/dsa.py
+@@ -57,6 +57,222 @@
+     hadamard_transform = None
+     HAS_FAST_HADAMARD = False
+ 
++
++# === Q9j capture hook v2 (env-gated; default OFF) ============================
++# Captures real-loop DSV4 indexer streams. Backward compatible: with only
++# DSV4_INDEXER_CAPTURE_DIR set, behavior == hook v1 (decode-side
++# logits.in/preidx.in/topk.out + prefill topk_indices_buffer snapshot in
++# legacy single-file `q9j_*.pt` layout).
++#
++# Streams (per layer):
++#   - prefill.logits.in (fp32, [num_q, kv_len])  BEFORE prefill indexer
++#                                                 keyed by (layer, chunk_idx)
++#   - prefill.topk.out  (int32, [num_ctx, K])    AFTER prefill block (legacy)
++#                                                 keyed by layer
++#   - decode.logits.in  (fp32, [kv_len])         BEFORE indexer_topk_decode
++#                                                 keyed by (layer, step)
++#   - decode.preidx.in  (int32, [K])             BEFORE indexer_topk_decode
++#                                                 keyed by (layer, step)
++#   - decode.topk.out   (int32, [K])             AFTER  indexer_topk_decode
++#                                                 keyed by (layer, step)
++#
++# Env vars:
++#   DSV4_INDEXER_CAPTURE_DIR     = /path/to/out      (REQUIRED — gates hook)
++#   DSV4_INDEXER_CAPTURE_LAYERS  = "2,4,6,..."       (default Flash 2..42 even)
++#   DSV4_INDEXER_CAPTURE_PHASE   = prefill|decode|both   (default decode for
++#                                                         v1-compat; the new
++#                                                         driver sets `both`)
++#   DSV4_INDEXER_CAPTURE_LAYOUT  = single-file|per-layer (default single-file)
++#   DSV4_INDEXER_CAPTURE_FORMAT  = pt|npz                (default pt)
++import os as _q9j_os
++import atexit as _q9j_atexit
++
++_Q9J_CAPTURE_DIR = _q9j_os.environ.get("DSV4_INDEXER_CAPTURE_DIR")
++_Q9J_LAYERS_TO_LOG_DEFAULT = tuple(range(2, 43, 2))  # 21 Flash GVR-active layers
++_Q9J_LAYERS_TO_LOG_ENV = _q9j_os.environ.get("DSV4_INDEXER_CAPTURE_LAYERS")
++if _Q9J_LAYERS_TO_LOG_ENV:
++    _Q9J_LAYERS_TO_LOG = tuple(
++        int(x) for x in _Q9J_LAYERS_TO_LOG_ENV.split(",") if x.strip())
++else:
++    _Q9J_LAYERS_TO_LOG = _Q9J_LAYERS_TO_LOG_DEFAULT
++
++_Q9J_PHASE = (_q9j_os.environ.get("DSV4_INDEXER_CAPTURE_PHASE") or "both").lower()
++if _Q9J_PHASE not in ("prefill", "decode", "both"):
++    raise ValueError(f"DSV4_INDEXER_CAPTURE_PHASE must be prefill|decode|both, got {_Q9J_PHASE}")
++_Q9J_DO_DECODE = _Q9J_PHASE in ("decode", "both")
++_Q9J_DO_PREFILL = _Q9J_PHASE in ("prefill", "both")
++_Q9J_LAYOUT = (_q9j_os.environ.get("DSV4_INDEXER_CAPTURE_LAYOUT") or "single-file").lower()
++_Q9J_FORMAT = (_q9j_os.environ.get("DSV4_INDEXER_CAPTURE_FORMAT") or "pt").lower()
++if _Q9J_FORMAT not in ("pt", "npz"):
++    raise ValueError(f"DSV4_INDEXER_CAPTURE_FORMAT must be pt or npz, got {_Q9J_FORMAT}")
++if _Q9J_LAYOUT not in ("single-file", "per-layer"):
++    raise ValueError(f"DSV4_INDEXER_CAPTURE_LAYOUT must be single-file or per-layer, got {_Q9J_LAYOUT}")
++
++_q9j_buf = {  # {stream: {(layer_idx, step|chunk_idx): cpu_tensor}}
++    "logits.in":         {},  # decode (v1 name)
++    "preidx.in":         {},  # decode (v1 name)
++    "topk.out":          {},  # decode (v1 name)
++    "prefill.logits.in": {},  # new in v2
++}
++# Legacy prefill topk snapshot keyed by layer only.
++_q9j_prefill_buf = {}  # {layer_idx: cpu_tensor of shape (num_ctx_tokens, K)}
++_q9j_state = {
++    "step": -1,
++    "layers_seen": set(),
++    "flushed": False,
++}
++
++
++def _q9j_maybe_new_step(layer_idx: int) -> int:
++    """Advance decode-step counter on repeated layer (closed-loop detection)."""
++    s = _q9j_state
++    if layer_idx in s["layers_seen"] or len(s["layers_seen"]) == 0:
++        s["step"] += 1
++        s["layers_seen"] = {layer_idx}
++    else:
++        s["layers_seen"].add(layer_idx)
++    return s["step"]
++
++
++def _q9j_is_rank0(metadata) -> bool:
++    mapping = getattr(metadata, "mapping", None)
++    if mapping is None:
++        return True
++    return getattr(mapping, "tp_rank", 0) == 0
++
++
++def _q9j_log(stream: str, layer_idx: int, step: int, t) -> None:
++    if t is None or layer_idx not in _Q9J_LAYERS_TO_LOG:
++        return
++    if torch.cuda.is_current_stream_capturing():
++        return
++    _q9j_buf[stream][(layer_idx, step)] = t.detach().cpu().contiguous()
++
++
++def _q9j_log_prefill_logits(layer_idx: int, chunk_idx: int, t) -> None:
++    """Capture prefill `logits` tensor (output of MQA logits, input to
++    indexer_topk_prefill). Shape [num_q_in_chunk, kv_len_chunk] for chunked
++    prefill, or [num_ctx, num_ctx_kv] for single-pass fallback."""
++    if not _Q9J_DO_PREFILL:
++        return
++    if t is None or layer_idx not in _Q9J_LAYERS_TO_LOG:
++        return
++    if torch.cuda.is_current_stream_capturing():
++        return
++    _q9j_buf["prefill.logits.in"][(layer_idx, chunk_idx)] = (
++        t.detach().cpu().contiguous())
++
++
++def _q9j_log_prefill(layer_idx: int, t) -> None:
++    """Snapshot topk_indices_buffer[:num_ctx_tokens, :] after prefill (v1)."""
++    if t is None or layer_idx not in _Q9J_LAYERS_TO_LOG:
++        return
++    if torch.cuda.is_current_stream_capturing():
++        return
++    if not (t >= 0).any():
++        return  # all-sentinel warmup
++    _q9j_prefill_buf[layer_idx] = t.detach().cpu().contiguous()
++
++
++def _q9j_save_dict(dct, path_no_ext: str) -> str:
++    """Save a dict[key -> tensor] to .pt or .npz based on _Q9J_FORMAT.
++    Returns the full path written.
++    """
++    if _Q9J_FORMAT == "pt":
++        path = path_no_ext + ".pt"
++        torch.save(dct, path)
++    else:  # npz
++        import numpy as _np
++        path = path_no_ext + ".npz"
++        # Tuple keys -> "L<l>_S<s>" / scalar key -> "L<l>"
++        arr = {}
++        for k, v in dct.items():
++            if isinstance(k, tuple):
++                arr[f"L{k[0]}_S{k[1]}"] = v.numpy()
++            else:
++                arr[f"L{k}"] = v.numpy()
++        _np.savez(path, **arr)
++    return path
++
++
++def _q9j_flush() -> None:
++    if _q9j_state["flushed"] or not _Q9J_CAPTURE_DIR:
++        return
++    _q9j_os.makedirs(_Q9J_CAPTURE_DIR, exist_ok=True)
++
++    if _Q9J_LAYOUT == "single-file":
++        # v1-compat: one file per stream
++        STREAM_TO_FILE = {
++            "logits.in":         "q9j_logits.in",           # decode
++            "preidx.in":         "q9j_preidx.in",           # decode
++            "topk.out":          "q9j_topk.out",            # decode
++            "prefill.logits.in": "q9j_prefill.logits.in",   # new
++        }
++        for stream, dct in _q9j_buf.items():
++            if not dct:
++                continue
++            stem = _q9j_os.path.join(_Q9J_CAPTURE_DIR, STREAM_TO_FILE[stream])
++            p = _q9j_save_dict(dct, stem)
++            print(f"[Q9j] saved {stream}: {len(dct)} cells -> {p}")
++        if _q9j_prefill_buf:
++            stem = _q9j_os.path.join(_Q9J_CAPTURE_DIR, "q9j_prefill.topk.out")
++            p = _q9j_save_dict(_q9j_prefill_buf, stem)
++            print(f"[Q9j] saved prefill.topk.out: {len(_q9j_prefill_buf)} layers -> {p}")
++    else:
++        # per-layer: <dir>/layer_<L>/<stream>.<ext>
++        # Reverse-index: group every buf entry by layer.
++        STREAM_NAME = {
++            "logits.in":         "decode.logits.in",
++            "preidx.in":         "decode.preidx.in",
++            "topk.out":          "decode.topk.out",
++            "prefill.logits.in": "prefill.logits.in",
++        }
++        per_layer_streams = {}  # {layer: {stream_name: {step|chunk: tensor}}}
++        for stream, dct in _q9j_buf.items():
++            for (layer, sub), tensor in dct.items():
++                per_layer_streams.setdefault(layer, {}).setdefault(
++                    STREAM_NAME[stream], {})[sub] = tensor
++        # Legacy prefill topk: also into per-layer tree
++        for layer, tensor in _q9j_prefill_buf.items():
++            per_layer_streams.setdefault(layer, {})["prefill.topk.out"] = tensor
++        # Flush
++        total_files = 0
++        for layer in sorted(per_layer_streams):
++            ldir = _q9j_os.path.join(_Q9J_CAPTURE_DIR, f"layer_{layer:02d}")
++            _q9j_os.makedirs(ldir, exist_ok=True)
++            for stream_name, payload in per_layer_streams[layer].items():
++                stem = _q9j_os.path.join(ldir, stream_name)
++                if isinstance(payload, dict):
++                    p = _q9j_save_dict(payload, stem)
++                    n = len(payload)
++                else:
++                    # Scalar tensor (e.g. prefill.topk.out per layer)
++                    if _Q9J_FORMAT == "pt":
++                        p = stem + ".pt"
++                        torch.save(payload, p)
++                    else:
++                        import numpy as _np
++                        p = stem + ".npy"
++                        _np.save(p, payload.numpy())
++                    n = 1
++                print(f"[Q9j] L{layer:02d} {stream_name}: {n} -> {p}")
++                total_files += 1
++        print(f"[Q9j] per-layer flush done: {len(per_layer_streams)} layers, "
++              f"{total_files} files under {_Q9J_CAPTURE_DIR}")
++
++    _q9j_state["flushed"] = True
++
++
++if _Q9J_CAPTURE_DIR:
++    _q9j_atexit.register(_q9j_flush)
++    print(
++        f"[Q9j] capture ENABLED. dir={_Q9J_CAPTURE_DIR} "
++        f"layers={_Q9J_LAYERS_TO_LOG} phase={_Q9J_PHASE} "
++        f"layout={_Q9J_LAYOUT} format={_Q9J_FORMAT}",
++        flush=True,
++    )
++# === End Q9j capture hook v2 =================================================
++
+ # Idempotency guard for warmup_heuristic_topk_decode — keyed by
+ # (device_index, top_k, hint_size, num_cols). Prevents repeated allocations
+ # and synchronizations when multiple Indexer modules invoke the warmup with
+@@ -99,27 +315,13 @@
+     indices = torch.empty((1, top_k), dtype=torch.int32, device=device)
+     pre_idx = torch.zeros((1, hint_size), dtype=torch.int32, device=device)
+     scratch = torch.empty((top_k, ), dtype=torch.float32, device=device)
+-    # The default warmup geometry (num_cols=4096) falls below kSeqSmall=12288
+-    # and routes to the Radix path with blocks_per_row=2 (num_rows=1 sweeps
+-    # bp ∈ [2, maxByCols=2]). The cpp op rejects blocks_per_row > 1 without
+-    # caller-owned radix aux scratch, so supply worst-case (kMaxBlocksPerRowDecode=10)
+-    # buffers here. Cost is negligible (~80 KB) and the warmup is a one-shot.
+-    _radix_max_bp = 10
+-    radix_aux_indices = torch.empty((1, _radix_max_bp, top_k),
+-                                    dtype=torch.int32,
+-                                    device=device)
+-    radix_aux_logits = torch.empty((1, _radix_max_bp, top_k),
+-                                   dtype=torch.float32,
+-                                   device=device)
+     torch.ops.trtllm.indexer_topk_decode(logits,
+                                          seq_lens,
+                                          indices,
+                                          1,
+                                          top_k,
+                                          pre_idx=pre_idx,
+-                                         heuristic_scratch=scratch,
+-                                         radix_aux_indices=radix_aux_indices,
+-                                         radix_aux_logits=radix_aux_logits)
++                                         heuristic_scratch=scratch)
+     torch.cuda.synchronize()
+ 
+ 
+@@ -151,7 +353,7 @@
+     quant_block_size: int,
+     data_bytes_per_token: Optional[int] = None,
+ ) -> Tuple[torch.Tensor, torch.Tensor]:
+-    """Compute flat byte indices for FP8/FP4 data and scales from global token positions.
++    """Compute flat byte indices for indexer K data and scales from global token positions.
+ 
+     Shared by Indexer.prepare() (CPU) and on_update_kv_lens() (GPU) to avoid
+     duplicating the slot mapping arithmetic.
+@@ -160,14 +362,14 @@
+         global_positions: Per-token absolute position in the KV sequence.
+         block_offsets: [num_seqs, max_blocks_per_seq] block offset table.
+         req_indices: Per-token request index.
+-        head_dim: Indexer head dimension (logical element count).
++        head_dim: Indexer head dimension (used for the scale-size formula).
+         tokens_per_block: Tokens stored per cache block.
+         quant_block_size: Quantization block size.
+         data_bytes_per_token: Bytes of quantized data per token in the cache
+-            (default: head_dim, i.e. one byte per FP8 value). For MXFP4 this
+-            should be ``head_dim // 2`` since two E2M1 codes pack into one byte.
+-            The scale layout is identical at head_dim=128: 4 bytes per token
+-            (one float32 for FP8, four packed UE8M0 exponents for FP4).
++            pool. FP8 stores one byte per element (= head_dim). FP4 packs two
++            E2M1 codes per byte (= head_dim // 2). Defaults to ``head_dim``
++            when unset, preserving the FP8 layout for callers that haven't
++            threaded the FP4 dtype through.
+ 
+     Returns:
+         (fp8_indices, scale_indices): Flat byte offsets into the cache pool.
+@@ -615,11 +817,10 @@
+                 dtype=torch.int64) - seq_starts[req_indices]
+ 
+             global_positions = start_positions[req_indices] + token_offsets
+-            # Honor MXFP4 indexer K cache layout (½ byte per value vs FP8's
+-            # 1 byte) when the cache manager exposes a use_fp4 flag.
+             index_head_dim = self.kv_cache_manager.index_head_dim
+-            use_fp4 = getattr(self.kv_cache_manager, 'use_fp4', False)
+-            data_bytes_per_token = index_head_dim // 2 if use_fp4 else index_head_dim
++            data_bytes_per_token = (index_head_dim //
++                                    2 if self.kv_cache_manager.use_fp4 else
++                                    index_head_dim)
+             fp8_indices, scale_indices = _compute_slot_mappings(
+                 global_positions,
+                 self.indexer_k_cache_block_offsets,
+@@ -898,34 +1099,6 @@
+                 capture_graph=capture_graph,
+             )
+ 
+-        # Persistent scratch for Radix-split-work indexer path (blocks_per_row > 1).
+-        # Mirrors the fix the Heuristic path applied above: per-call th::empty
+-        # inside indexer_topk_decode produces stale pointers under CUDA Graph
+-        # replay when the caching allocator is perturbed by chunked prefill at
+-        # high CONC. Sized to the worst case kMaxBlocksPerRowDecode=10 from
+-        # cpp/tensorrt_llm/kernels/indexerTopK.cu. Allocated unconditionally:
+-        # even with enable_heuristic_topk=True, the dispatcher can fall back
+-        # to Radix when canUseHeuristic returns False (small numColumns, etc.).
+-        _radix_max_blocks_per_row = 10
+-        _radix_max_gen_tokens = self.max_num_sequences * (1 +
+-                                                          self.max_draft_tokens)
+-        self.radix_aux_indices = self.get_empty(
+-            self.cuda_graph_buffers,
+-            (_radix_max_gen_tokens, _radix_max_blocks_per_row,
+-             self.num_sparse_topk),
+-            cache_name="radix_aux_indices",
+-            dtype=torch.int32,
+-            capture_graph=capture_graph,
+-        )
+-        self.radix_aux_logits = self.get_empty(
+-            self.cuda_graph_buffers,
+-            (_radix_max_gen_tokens, _radix_max_blocks_per_row,
+-             self.num_sparse_topk),
+-            cache_name="radix_aux_logits",
+-            dtype=torch.float32,
+-            capture_graph=capture_graph,
+-        )
+-
+         # Create expanded buffers for MTP support
+         self.create_expanded_buffers(capture_graph=capture_graph)
+ 
+@@ -1020,32 +1193,6 @@
+                     dtype=torch.float32,
+                     capture_graph=capture_graph,
+                 )
+-            # Resize radix aux scratch for new max_draft_tokens. Allocated
+-            # unconditionally to mirror the __init__ path: even when
+-            # enable_heuristic_topk=True the dispatcher can still fall back to
+-            # the Radix path for small numColumns, so the buffers must follow
+-            # the new max_num_sequences*(1+max_draft_tokens) bound or the
+-            # kernel-side TORCH_CHECK in IndexerTopKOp.cpp (numel >=
+-            # num_rows*blocks_per_row*index_topk) will fire on the next step.
+-            _radix_max_blocks_per_row = 10
+-            _radix_max_gen_tokens = self.max_num_sequences * (
+-                1 + self.max_draft_tokens)
+-            self.radix_aux_indices = self.get_empty(
+-                self.cuda_graph_buffers,
+-                (_radix_max_gen_tokens, _radix_max_blocks_per_row,
+-                 self.num_sparse_topk),
+-                cache_name="radix_aux_indices",
+-                dtype=torch.int32,
+-                capture_graph=capture_graph,
+-            )
+-            self.radix_aux_logits = self.get_empty(
+-                self.cuda_graph_buffers,
+-                (_radix_max_gen_tokens, _radix_max_blocks_per_row,
+-                 self.num_sparse_topk),
+-                cache_name="radix_aux_logits",
+-                dtype=torch.float32,
+-                capture_graph=capture_graph,
+-            )
+ 
+     def _get_pool_block_indices(self) -> torch.Tensor:
+         """Extract memory pool block indices from host_kv_cache_block_offsets.
+@@ -1401,9 +1548,6 @@
+     request_ids: List[int]
+     num_past_tokens: List[int]
+     seq_lens: torch.Tensor
+-    # Bytes of quantized data per token in the indexer K cache; defaults to
+-    # head_dim (one FP8 byte per element). For MXFP4 use head_dim // 2.
+-    data_bytes_per_token: Optional[int] = None
+ 
+     def __post_init__(self):
+         # Pre-compute frequently used tensors once instead of on every property access
+@@ -1416,11 +1560,9 @@
+                                num_past_tokens_tensor) // compress_ratio
+         self._new_kv_tokens = self._all_kv_tokens - self._cached_kv_tokens
+         self._kv_lens = self._all_kv_tokens
+-        if self.data_bytes_per_token is None:
+-            self.data_bytes_per_token = self.head_dim
+         self._scale_size = self.head_dim // self.quant_block_size * 4
+-        self._block_stride = self.tokens_per_block * (
+-            self.data_bytes_per_token + self._scale_size)
++        self._block_stride = self.tokens_per_block * (self.head_dim +
++                                                      self._scale_size)
+ 
+     @property
+     def batch_size(self):
+@@ -1520,14 +1662,13 @@
+         self.softmax_scale = self.head_dim**-0.5
+         # TODO: make it configurable from hf config
+         self.scale_fmt = "ue8m0"
++        # indexer_k_dtype controls both Q and K precision. DeepGEMM's
++        # fp8_fp4_mqa_logits / fp8_fp4_paged_mqa_logits kernels only dispatch
++        # to FP4xFP4 or FP8xFP8 (no mixed-precision variant). The DeepGEMM
++        # kernel asserts SM100 + head_dim=128 at launch time under FP4.
++        self.use_fp4 = sparse_attention_config.indexer_k_dtype == "fp4"
+         self.aux_stream = aux_stream
+         self.ln_events = [torch.cuda.Event(), torch.cuda.Event()]
+-        # `indexer_k_dtype` is the single user-facing FP4 knob; the V4
+-        # config inherits this field from the DSA base config. DeepGEMM's
+-        # fp8_fp4_mqa_logits / fp8_fp4_paged_mqa_logits kernels only
+-        # dispatch to FP4xFP4 or FP8xFP8 (no mixed-precision variant) and
+-        # assert SM100 + head_dim=128 at launch time under FP4.
+-        self.use_fp4 = sparse_attention_config.indexer_k_dtype == "fp4"
+         self.use_cute_dsl_topk = (sparse_attention_config.use_cute_dsl_topk
+                                   and IS_CUTLASS_DSL_AVAILABLE)
+         self.use_cute_dsl_paged_mqa_logits = (
+@@ -1911,10 +2052,6 @@
+         num_past_tokens = metadata.kv_cache_params.num_cached_tokens_per_seq
+         compress_ratio = _effective_compress_ratio_divisor(
+             _select_indexer_compress_ratio(metadata.compress_ratios))
+-        # MXFP4 indexer K cache packs two E2M1 codes per byte so the data
+-        # footprint is half head_dim; FP8 keeps one byte per element.
+-        use_fp4 = getattr(kv_cache_manager, 'use_fp4', False)
+-        data_bytes_per_token = head_dim // 2 if use_fp4 else head_dim
+ 
+         indexer_params = IndexerParams(
+             num_contexts=num_contexts,
+@@ -1927,7 +2064,6 @@
+             request_ids=request_ids,
+             num_past_tokens=num_past_tokens,
+             seq_lens=seq_lens,
+-            data_bytes_per_token=data_bytes_per_token,
+         )
+         # Store compressed KV token count for context requests
+         metadata.num_ctx_kv_tokens = indexer_params.new_kv_tokens[:
+@@ -1983,14 +2119,57 @@
+         # The C++ op reinterprets k_fp8 (FP8) and k_scale (float32) as raw
+         # bytes internally and only reads the first num_tokens entries from
+         # the slot mapping buffers, avoiding Python-side view/slice overhead.
+-        if k_scale.element_size() == 1:
+-            # The op expects 4 byte elements.
+-            k_scale = k_scale.view(torch.int32)
+         torch.ops.trtllm.indexer_k_cache_scatter_op(k_fp8, k_scale, k_cache,
+                                                     metadata.slot_mapping_fp8,
+                                                     metadata.slot_mapping_scale,
+                                                     num_tokens)
+ 
++    def _call_mqa_logits(self, q_fp8: torch.Tensor, k_fp8: torch.Tensor,
++                         k_scale: torch.Tensor, weights: torch.Tensor,
++                         cu_seqlen_ks: torch.Tensor, cu_seqlen_ke: torch.Tensor,
++                         q_scale: Optional[torch.Tensor]) -> torch.Tensor:
++        """Dispatch to fp8_mqa_logits or fp8_fp4_mqa_logits based on use_fp4.
++
++        For FP4 the gather output is typed as FP8 for historical reasons;
++        reinterpret the bytes as the expected int8 / int32 layouts. DeepGEMM
++        asserts kv_sf is 1D in both modes, so flatten the scale here.
++        """
++        if self.use_fp4:
++            k_fp4_bytes = k_fp8.view(torch.int8)
++            k_scale_int32 = k_scale.view(torch.int32).reshape(-1)
++            # q_scale arrives here as (chunk_tokens, n_heads, 1) — fused_cat_fp4
++            # emits one int32 per (token, head) carrying four UE8M0 exponents,
++            # pre_indexer_proj reshapes back to (N, n_heads, 1), and
++            # sparse_attn_indexer chunk-slices on axis 0. The DeepGEMM FP4
++            # kernel asserts q_sf is 2D, so collapse the trailing unit axis.
++            q_scale_2d = q_scale.reshape(-1, self.n_heads)
++            return fp8_fp4_mqa_logits(
++                (q_fp8, q_scale_2d),
++                (k_fp4_bytes, k_scale_int32),
++                weights,
++                cu_seqlen_ks,
++                cu_seqlen_ke,
++            )
++        return fp8_mqa_logits(q_fp8, (k_fp8, k_scale.reshape(-1)), weights,
++                              cu_seqlen_ks, cu_seqlen_ke)
++
++    def _call_paged_mqa_logits(self, q_decode: torch.Tensor,
++                               k_cache: torch.Tensor,
++                               weights_decode: torch.Tensor,
++                               context_lens: torch.Tensor,
++                               block_table: torch.Tensor,
++                               scheduler_metadata_buffer: torch.Tensor,
++                               max_seq_len: int,
++                               q_scale: Optional[torch.Tensor]) -> torch.Tensor:
++        """Dispatch to fp8_paged_mqa_logits or fp8_fp4_paged_mqa_logits."""
++        if self.use_fp4:
++            return fp8_fp4_paged_mqa_logits(
++                (q_decode, q_scale), k_cache, weights_decode, context_lens,
++                block_table, scheduler_metadata_buffer, max_seq_len)
++        return fp8_paged_mqa_logits(q_decode, k_cache, weights_decode,
++                                    context_lens, block_table,
++                                    scheduler_metadata_buffer, max_seq_len)
++
+     def _gather_k_cache_for_chunk(
+         self,
+         metadata: DSAtrtllmAttentionMetadata,
+@@ -2057,50 +2236,6 @@
+ 
+         return k_fp8, k_scale
+ 
+-    def _call_mqa_logits(self, q_fp8: torch.Tensor, k_fp8: torch.Tensor,
+-                         k_scale: torch.Tensor, weights: torch.Tensor,
+-                         cu_seqlen_ks: torch.Tensor, cu_seqlen_ke: torch.Tensor,
+-                         q_scale: Optional[torch.Tensor]) -> torch.Tensor:
+-        """Dispatch fp8_mqa_logits vs fp8_fp4_mqa_logits based on use_fp4.
+-
+-        For FP4 the gather output keeps the legacy float8_e4m3fn dtype for
+-        API compatibility; reinterpret the bytes as the int8 / int32 layout
+-        the DeepGEMM kernel expects. The scale tensor is collapsed to 1D for
+-        the kv side and 2D for the q side per the kernel's asserts.
+-        """
+-        if self.use_fp4:
+-            k_fp4_bytes = k_fp8.view(torch.int8)
+-            k_scale_int32 = k_scale.view(torch.int32).reshape(-1)
+-            # q_scale arrives as (chunk_tokens, n_heads, 1); the FP4 kernel
+-            # asserts q_sf is 2D so collapse the trailing unit axis.
+-            q_scale_2d = q_scale.reshape(-1, self.n_heads)
+-            return fp8_fp4_mqa_logits(
+-                (q_fp8, q_scale_2d),
+-                (k_fp4_bytes, k_scale_int32),
+-                weights,
+-                cu_seqlen_ks,
+-                cu_seqlen_ke,
+-            )
+-        return fp8_mqa_logits(q_fp8, (k_fp8, k_scale.reshape(-1)), weights,
+-                              cu_seqlen_ks, cu_seqlen_ke)
+-
+-    def _call_paged_mqa_logits(self, q_decode: torch.Tensor,
+-                               k_cache: torch.Tensor,
+-                               weights_decode: torch.Tensor,
+-                               context_lens: torch.Tensor,
+-                               block_table: torch.Tensor,
+-                               scheduler_metadata_buffer: torch.Tensor,
+-                               max_seq_len: int,
+-                               q_scale: Optional[torch.Tensor]) -> torch.Tensor:
+-        """Dispatch fp8_paged_mqa_logits vs fp8_fp4_paged_mqa_logits."""
+-        if self.use_fp4:
+-            return fp8_fp4_paged_mqa_logits(
+-                (q_decode, q_scale), k_cache, weights_decode, context_lens,
+-                block_table, scheduler_metadata_buffer, max_seq_len)
+-        return fp8_paged_mqa_logits(q_decode, k_cache, weights_decode,
+-                                    context_lens, block_table,
+-                                    scheduler_metadata_buffer, max_seq_len)
+-
+     def sparse_attn_indexer(
+         self,
+         metadata: DSAtrtllmAttentionMetadata,
+@@ -2117,12 +2252,12 @@
+ 
+         q_scale is only consumed by the FP4 dispatch; FP8 path ignores it.
+         """
+-        # DSACacheManager / DeepseekV4CacheManager force quant_block_size to
+-        # 128 (FP8 path) or 32 (MXFP4 path); both round-trip to the same
+-        # 4-byte scale word per token at index_head_dim=128, so the slot
+-        # mapping arithmetic is unchanged in either mode.
++        # DSACacheManager hardcodes quant_block_size=128 (see its __init__);
++        # FP4 uses per-block-32 UE8M0 scales but packs four of them into one
++        # int32 so the cache-layout contribution is the same 4 bytes/token as
++        # FP8 per-block-128 at head_dim=128.
+         assert metadata.kv_cache_manager is None or \
+-            metadata.kv_cache_manager.quant_block_size in (32, 128), \
++            metadata.kv_cache_manager.quant_block_size == 128, \
+             f"Unexpected quant_block_size {metadata.kv_cache_manager.quant_block_size if metadata.kv_cache_manager else 'N/A'}"
+         # Update the indexer k cache before prefill chunks gather from it.
+         if update_k_cache:
+@@ -2158,13 +2293,9 @@
+ 
+                 k_cache_4d = metadata.kv_cache_manager.get_indexer_k_cache_buffers(
+                     self.layer_idx)
+-                # FP4 packs two codes per byte so the gathered row holds half
+-                # as many bytes as in the FP8 path. The scale (4 bytes) is the
+-                # same in both modes because FP4 packs four UE8M0 exponents
+-                # into one int32 to match FP8's float32 scale width.
+-                gather_head_dim = self.head_dim // 2 if self.use_fp4 else self.head_dim
+ 
+-                for chunk in metadata.indexer_prefill_chunks:
++                gather_head_dim = self.head_dim // 2 if self.use_fp4 else self.head_dim
++                for _q9j_chunk_idx, chunk in enumerate(metadata.indexer_prefill_chunks):
+                     # Skip chunks with no compressed KV tokens (e.g., warmup
+                     # sequences shorter than compress_ratio produce zero KV).
+                     if chunk.k_token_start >= chunk.k_token_end:
+@@ -2200,6 +2331,10 @@
+                         chunk.cu_seqlen_ke[chunk_q_start:chunk_q_end],
+                         chunk_q_scale,
+                     )
++                    # Q9j v2: capture prefill `logits` per chunk on rank 0
++                    if _Q9J_CAPTURE_DIR and _q9j_is_rank0(metadata):
++                        _q9j_log_prefill_logits(
++                            self.layer_idx, _q9j_chunk_idx, logits)
+                     if use_custom_topk:
+                         torch.ops.trtllm.indexer_topk_prefill(
+                             logits,
+@@ -2259,6 +2394,9 @@
+                     cu_seqlen_ke,
+                     ctx_q_scale,
+                 )
++                # Q9j v2: single-pass prefill fallback — capture as chunk_idx=0
++                if _Q9J_CAPTURE_DIR and _q9j_is_rank0(metadata):
++                    _q9j_log_prefill_logits(self.layer_idx, 0, logits)
+                 if use_custom_topk:
+                     torch.ops.trtllm.indexer_topk_prefill(
+                         logits, cu_seqlen_ks, cu_seqlen_ke,
+@@ -2284,30 +2422,14 @@
+             topk_indices_buffer[:num_ctx_tokens, :] = \
+                 metadata.topk_indices_buffer[:num_ctx_tokens, :]
+ 
+-        # Prefill→decode GVR handoff: seed each finishing-prefill sequence's
+-        # heuristic_prev_topk slot with its own last-context-token top-K, so
+-        # the FIRST decode step of that sequence gets a warm-started preIdx
+-        # (~60-75% set-overlap with the eventual decode top-K on this
+-        # workload) instead of the all-zero / all-(-1) cold start that the
+-        # default `heuristic_prev_topk.zero_()` initialization leaves behind.
+-        # Without this, GVR P2 secant on decode step 0 runs from a benign
+-        # but uninformative seed (kernel +1 offset on zeros → all indices
+-        # point at compressed-token position 1), wasting iterations.
+-        # Slot convention (mirrors the existing decode write-back at the
+-        # bottom of the decode block): new gens from finishing prefill
+-        # append after currently-active gens, i.e., slots
+-        # [num_generations : num_generations + num_contexts].
+-        if (self._enable_heuristic_topk and has_prefill
+-                and not metadata.skip_indexer_for_ctx_reqs):
+-            local_layer = metadata.kv_cache_manager.layer_offsets[
+-                self.layer_idx]
+-            ctx_seq_lens = metadata.seq_lens[:num_contexts]
+-            # Per-sequence last context-token offset (exclusive cumsum minus 1).
+-            last_ctx_idx = (torch.cumsum(ctx_seq_lens, dim=0) -
+-                            1).to(dtype=torch.long)
+-            metadata.heuristic_prev_topk[
+-                local_layer, num_generations:num_generations +
+-                num_contexts].copy_(topk_indices_buffer[last_ctx_idx, :])
++        # Q9j Plan B (2026-05-18): snapshot prefill top-K after the prefill
++        # block (any path) finishes, before decode runs. Bridges step -1 →
++        # step 0 in the GVR loop. v2: phase-gated.
++        if (_Q9J_CAPTURE_DIR and _Q9J_DO_PREFILL
++                and num_ctx_tokens > 0 and _q9j_is_rank0(metadata)):
++            _q9j_log_prefill(
++                self.layer_idx,
++                topk_indices_buffer[:num_ctx_tokens, :])
+ 
+         if has_decode and not metadata.skip_indexer_for_gen_reqs:
+             # Get decode lengths per request (from seq_lens) for validation
+@@ -2358,8 +2480,7 @@
+             weights_decode = weights[num_ctx_tokens:num_ctx_tokens +
+                                      num_gen_tokens, ...]
+ 
+-            # Get k cache and call fp8_paged_mqa_logits / fp8_fp4_paged_mqa_logits
+-            # with prepared decode metadata.
++            # Get k cache and call fp8_paged_mqa_logits with prepared decode metadata
+             # [num_blocks, tokens_per_block, 1, head_dim + scale_size]
+             k_cache = metadata.kv_cache_manager.get_indexer_k_cache_buffers(
+                 self.layer_idx)
+@@ -2416,6 +2537,20 @@
+                         metadata.heuristic_scratch_values[
+                             :num_gen_tokens]
+ 
++                # Q9j capture BEFORE indexer_topk_decode: pre_idx + logits_decode
++                # Gate on TP rank 0 to avoid race writes from multiple ranks
++                # (all ranks see identical post-reduction tensors at this point).
++                # v2: also gate on phase (decode|both).
++                _q9j_cur_step = -1
++                if _Q9J_CAPTURE_DIR and _Q9J_DO_DECODE and _q9j_is_rank0(metadata):
++                    _q9j_cur_step = _q9j_maybe_new_step(self.layer_idx)
++                    _q9j_log(
++                        "logits.in", self.layer_idx, _q9j_cur_step,
++                        logits_decode[num_ctx_tokens:num_ctx_tokens +
++                                      num_gen_tokens])
++                    _q9j_log("preidx.in", self.layer_idx, _q9j_cur_step,
++                             pre_idx)
++
+                 # CuTE DSL top-k allocates O(num_gen_tokens * kv_len) global
+                 # memory. Beyond 256 tokens the extra memory becomes significant,
+                 # so we cap it at 256 for now and fall back to the CUDA C++
+@@ -2439,9 +2574,16 @@
+                         self.index_topk,
+                         pre_idx=pre_idx,
+                         heuristic_scratch=heuristic_scratch,
+-                        compress_ratio=self.compress_ratio,
+-                        radix_aux_indices=metadata.radix_aux_indices,
+-                        radix_aux_logits=metadata.radix_aux_logits)
++                        compress_ratio=self.compress_ratio)
++
++                # Q9j capture AFTER indexer_topk_decode: topk_out
++                # Use _q9j_cur_step (-1 sentinel if rank!=0 or capture disabled,
++                # which _q9j_log treats as a no-op via layer filter).
++                if _Q9J_CAPTURE_DIR and _q9j_cur_step >= 0:
++                    _q9j_log(
++                        "topk.out", self.layer_idx, _q9j_cur_step,
++                        topk_indices_buffer[num_ctx_tokens:num_ctx_tokens +
++                                            num_gen_tokens, :])
+             else:
+                 # padded
+                 positions = torch.arange(
+@@ -2536,7 +2678,7 @@
+                torch.Tensor]:
+         """Pure token-wise projections (CUDA-graph-capturable).
+ 
+-        Runs cublas_mm, qk_projection_and_rope, FP8/FP4 quantize, and weight
++        Runs cublas_mm, qk_projection_and_rope, FP8 quantize, and weight
+         scaling.  Does NOT touch the k cache or any batch-specific metadata,
+         so this can safely run inside a captured CUDA graph partition.
+ 
+@@ -2580,14 +2722,7 @@
+             # internally, so weights carry only softmax_scale * n_heads^-0.5.
+             q_fp8 = q_fp8.view(-1, self.n_heads, self.head_dim // 2)
+             q_scale = q_scale.view(-1, self.n_heads, 1)
+-            # DeepGEMM's fp8_fp4_(paged_)mqa_logits asserts
+-            # `weights.scalar_type() == kFloat`. Unlike the FP8 branch (whose
+-            # `_weight_scale` multiplies by the fp32 `q_scale` tensor and so
+-            # implicitly upcasts), this branch's only multiplier is a Python
+-            # float — `bf16 * float` stays bf16 and trips the kernel assert.
+-            # Cast explicitly so this path doesn't silently rely on an
+-            # upstream `_to_float`.
+-            weights = weights.float() * self.weight_scale_factor
++            weights = weights * self.weight_scale_factor
+         else:
+             q_fp8 = q_fp8.view(-1, self.n_heads, self.head_dim)
+             q_scale = q_scale.view(-1, self.n_heads, 1)
