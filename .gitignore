@@ -1,0 +1,11 @@
+results/
+*.pyc
+__pycache__/
+*.log
+*.nsys-rep
+*.sqlite
+# Local JIT cpp_extension build cache
+gvr_perfsim_UT/gvr_kernel/_build/
+gvr_perfsim_UT/gvr_kernel/csrc/*.so
+build/
+*.egg-info/

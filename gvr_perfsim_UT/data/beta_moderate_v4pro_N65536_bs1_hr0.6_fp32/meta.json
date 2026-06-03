@@ -1,0 +1,36 @@
+{
+  "schema": "gvr_perfsim_UT v1",
+  "cfg_name": "beta_moderate_v4pro_typical",
+  "cfg_params": {
+    "mean": -1.885,
+    "std": 1.025,
+    "clip_low": -6.15,
+    "clip_high": 8.45
+  },
+  "N": 65536,
+  "Npad": 65536,
+  "BS": 1,
+  "K": 1024,
+  "compress_ratio": 4,
+  "next_n": 1,
+  "seq_lens_val": 262144,
+  "seed": 42,
+  "noise_seed": 1042,
+  "target_hr": 0.6,
+  "calibrated_noise_c": 0.546875,
+  "calibration_realised_hr": 0.595703125,
+  "kernel_side_hit_rate": 0.595703125,
+  "calibration_saturated": false,
+  "row_stats": {
+    "mean": -1.8884509801864624,
+    "std": 1.027101755142212,
+    "min": -5.015636920928955,
+    "max": 2.5618441104888916
+  },
+  "preidx_caller_offset": 0,
+  "preidx_construction": "V4 Pro temporal-coherence (caller offset=0; kernel uses preIdx[i] directly for cr=4)",
+  "logit_alignment": 8,
+  "radix_aux_blocks_max": 32,
+  "logits_dtype": "torch.float32",
+  "halfprec_method": "native fp32"
+}
