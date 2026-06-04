@@ -24,10 +24,12 @@ from tensorrt_llm.builder import LoraConfig
 from tensorrt_llm.commands.serve import get_llm_args, is_non_default_or_required
 from tensorrt_llm.llmapi import (BuildConfig, CapacitySchedulerPolicy,
                                  SchedulerConfig)
+# fmt: on
 # fmt: off
 from tensorrt_llm.llmapi.llm_args import (BaseLlmArgs, CacheTransceiverConfig,
                                           CalibConfig, ContextChunkingPolicy,
                                           CudaGraphConfig, DecodingBaseConfig,
+                                          DeepSeekSparseAttentionConfig,
                                           DynamicBatchConfig,
                                           Eagle3DecodingConfig,
                                           EagleDecodingConfig,
@@ -42,7 +44,6 @@ from tensorrt_llm.llmapi.llm_args import (BaseLlmArgs, CacheTransceiverConfig,
                                           TrtLlmArgs,
                                           UserProvidedDecodingConfig,
                                           update_llm_args_with_extra_dict)
-# fmt: on
 from tensorrt_llm.llmapi.llm_utils import apply_model_defaults_to_llm_args
 from tensorrt_llm.llmapi.utils import print_traceback_on_error
 from tensorrt_llm.models.modeling_utils import LayerQuantConfig, QuantConfig
@@ -1992,3 +1993,70 @@ class TestSkipSoftmaxAttentionConfig:
         assert cfg.target_sparsity is None
         assert cfg.threshold_scale_factor_prefill == pytest.approx(0.001)
         assert cfg.threshold_scale_factor_decode == pytest.approx(0.002)
+
+
+class TestDeepSeekHeuristicTopkValidator:
+    """Covers ``DeepSeekSparseAttentionConfig._warn_heuristic_topk_unsupported``.
+
+    The C++ ``indexer_topk_decode`` dispatcher only accelerates GVR (heuristic)
+    Top-K for ``index_topk in {512, 1024, 2048}`` and otherwise silently falls
+    back to the radix path. The validator warns (does not raise) so a
+    misconfigured GVR run is visible in the logs instead of looking active.
+    All construction here uses the *base* ``DeepSeekSparseAttentionConfig``
+    (``indexer_k_dtype`` defaults to ``fp8``) so the tests stay independent of
+    GPU SM version -- the V4 subclass would otherwise trip the fp4/SM>=100
+    validator on non-Blackwell CI runners.
+    """
+
+    @staticmethod
+    def _capture_warnings(monkeypatch):
+        warnings_seen: list[str] = []
+
+        def _capture(msg, *args, **kwargs):
+            warnings_seen.append(str(msg))
+
+        monkeypatch.setattr(llm_args_mod.logger, "warning", _capture)
+        return warnings_seen
+
+    def test_warns_on_unsupported_index_topk_with_heuristic(self, monkeypatch):
+        warnings_seen = self._capture_warnings(monkeypatch)
+
+        DeepSeekSparseAttentionConfig(index_topk=777,
+                                      enable_heuristic_topk=True)
+
+        assert any("index_topk=777" in m and "fall back to the radix" in m
+                   for m in warnings_seen), warnings_seen
+
+    @pytest.mark.parametrize("supported_topk", [512, 1024, 2048])
+    def test_no_warn_on_supported_index_topk(self, monkeypatch,
+                                             supported_topk):
+        warnings_seen = self._capture_warnings(monkeypatch)
+
+        DeepSeekSparseAttentionConfig(index_topk=supported_topk,
+                                      enable_heuristic_topk=True)
+
+        assert not any("GVR-supported set" in m for m in warnings_seen), \
+            warnings_seen
+
+    def test_no_warn_when_heuristic_disabled(self, monkeypatch):
+        # An unsupported index_topk is harmless when GVR is off: the production
+        # radix path is the intended path, so there is nothing to warn about.
+        warnings_seen = self._capture_warnings(monkeypatch)
+
+        DeepSeekSparseAttentionConfig(index_topk=777,
+                                      enable_heuristic_topk=False)
+
+        assert not any("GVR-supported set" in m for m in warnings_seen), \
+            warnings_seen
+
+    def test_no_warn_when_index_topk_none(self, monkeypatch):
+        # index_topk is frequently None at config-construction time (it is
+        # filled from the checkpoint later in ModelConfig.from_pretrained), so
+        # the validator must not warn on the not-yet-resolved None value.
+        warnings_seen = self._capture_warnings(monkeypatch)
+
+        cfg = DeepSeekSparseAttentionConfig(enable_heuristic_topk=True)
+
+        assert cfg.index_topk is None
+        assert not any("GVR-supported set" in m for m in warnings_seen), \
+            warnings_seen

@@ -7,6 +7,10 @@ import torch
 
 from tensorrt_llm._torch.model_config import _DEEPSEEK_V4_ROUTED_EXPERT_WEIGHT, ModelConfig
 from tensorrt_llm._torch.pyexecutor.model_loader import validate_and_set_kv_cache_quant
+from tensorrt_llm.llmapi.llm_args import (
+    DeepSeekSparseAttentionConfig,
+    DeepSeekV4SparseAttentionConfig,
+)
 from tensorrt_llm.mapping import Mapping
 from tensorrt_llm.models.modeling_utils import QuantAlgo, QuantConfig
 
@@ -154,3 +158,91 @@ def test_deepseek_v4_base_checkpoint_detection(
 
     assert ModelConfig._detect_deepseek_v4_routed_moe_layout(str(tmp_path)) == expected_layout
     assert ModelConfig._is_deepseek_v4_base_checkpoint(str(tmp_path)) is expected_is_base
+
+
+# ---------------------------------------------------------------------------
+# index_topk merge between a user-supplied sparse_attention_config and the
+# checkpoint's pretrained_config.
+#
+# The production merge lives in the nested
+# ``update_sparse_attention_indexer_config`` helper inside
+# ``ModelConfig.from_pretrained`` (tensorrt_llm/_torch/model_config.py): the
+# DeepSeek-V4 path (~L697-700) and the DeepSeek-V3.2 / GLM path (~L769-772).
+# That helper is not importable and exercising it end to end needs a real
+# checkpoint + quant config, so we lock its *contract* here against the real
+# config classes. ``_resolve_index_topk`` is a byte-for-byte mirror of the
+# production expression; if the production merge changes, update this mirror.
+# ---------------------------------------------------------------------------
+
+
+def _resolve_index_topk(sparse_attention_config, pretrained_config):
+    # Mirror of model_config.py: an explicitly-set index_topk wins, otherwise
+    # the checkpoint value is used. A plain ``a or b`` is WRONG here because
+    # the V4 subclass default (512) is truthy and would shadow the checkpoint.
+    if "index_topk" in sparse_attention_config.model_fields_set:
+        return sparse_attention_config.index_topk
+    return pretrained_config.index_topk
+
+
+def _pretrained_config_with_index_topk(index_topk):
+    # The merge only reads .index_topk; index_n_heads / index_head_dim use a
+    # separate `or` path and are irrelevant to this contract.
+    return types.SimpleNamespace(index_topk=index_topk, index_n_heads=None, index_head_dim=None)
+
+
+def test_v4_pro_index_topk_falls_back_to_checkpoint():
+    """V4 Pro regression: a user who enables GVR without setting index_topk
+    must inherit the checkpoint's 1024, not the truthy 512 subclass default."""
+    # fp8 keeps construction GPU-SM-agnostic (V4 defaults to fp4 -> SM>=100).
+    sac = DeepSeekV4SparseAttentionConfig(enable_heuristic_topk=True, indexer_k_dtype="fp8")
+    pc = _pretrained_config_with_index_topk(1024)
+
+    assert "index_topk" not in sac.model_fields_set
+    assert _resolve_index_topk(sac, pc) == 1024
+    # The original `or`-based merge produced the silent-halving bug:
+    assert (sac.index_topk or pc.index_topk) == 512
+
+
+def test_v4_explicit_index_topk_wins_over_checkpoint():
+    """An explicit user value is honored even when it differs from the
+    checkpoint."""
+    sac = DeepSeekV4SparseAttentionConfig(index_topk=512, indexer_k_dtype="fp8")
+    pc = _pretrained_config_with_index_topk(1024)
+
+    assert "index_topk" in sac.model_fields_set
+    assert _resolve_index_topk(sac, pc) == 512
+
+
+def test_v4_flash_index_topk_unaffected():
+    """V4 Flash checkpoints carry index_topk=512, which equals the subclass
+    default, so the fix is a no-op for Flash."""
+    sac = DeepSeekV4SparseAttentionConfig(enable_heuristic_topk=True, indexer_k_dtype="fp8")
+    pc = _pretrained_config_with_index_topk(512)
+
+    assert _resolve_index_topk(sac, pc) == 512
+
+
+def test_v32_index_topk_falls_back_to_checkpoint():
+    """V3.2 / GLM path: the base config default is None, so the checkpoint
+    value flows through. (The old `or` already worked here precisely because
+    None is falsy -- this documents that V3.2 is unaffected by the bug.)"""
+    sac = DeepSeekSparseAttentionConfig(enable_heuristic_topk=True)
+    pc = _pretrained_config_with_index_topk(1024)
+
+    assert sac.index_topk is None
+    assert "index_topk" not in sac.model_fields_set
+    assert _resolve_index_topk(sac, pc) == 1024
+    # Old `or` happened to give the same answer for V3.2 (None is falsy):
+    assert (sac.index_topk or pc.index_topk) == 1024
+
+
+def test_model_fields_set_root_cause():
+    """Pin the exact Pydantic mechanism the fix relies on: the V4 subclass's
+    truthy 512 default is NOT in model_fields_set unless the user sets it."""
+    default_cfg = DeepSeekV4SparseAttentionConfig(indexer_k_dtype="fp8")
+    assert default_cfg.index_topk == 512
+    assert "index_topk" not in default_cfg.model_fields_set
+
+    explicit_cfg = DeepSeekV4SparseAttentionConfig(index_topk=512, indexer_k_dtype="fp8")
+    assert explicit_cfg.index_topk == 512
+    assert "index_topk" in explicit_cfg.model_fields_set

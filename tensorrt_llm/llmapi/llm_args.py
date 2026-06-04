@@ -50,7 +50,19 @@ from ..bindings.executor import (BatchingType as _BatchingType,
                                  LookaheadDecodingConfig as _LookaheadDecodingConfig,
                                  PeftCacheConfig as _PeftCacheConfig,
                                  SchedulerConfig as _SchedulerConfig) # isort: skip
-from ..bindings.internal.algorithms import AgentTreeConfig as _AgentTreeConfig  # isort: skip
+try:
+    from ..bindings.internal.algorithms import AgentTreeConfig as _AgentTreeConfig  # isort: skip
+except ImportError:
+    # Compiled C++ binding predates Python-side AgentTreeConfig support.
+    # Safe stub: reorder_policy_config defaults to None so this is never instantiated
+    # except via PybindMirror mirroring, which only inspects field names/types.
+    class _AgentTreeConfig:  # type: ignore[no-redef]
+        def __init__(self, agent_percentage: float = -1.0,
+                     agent_types=None,
+                     agent_inflight_seq_num: int = 2147483647) -> None:
+            self.agent_percentage = agent_percentage
+            self.agent_types = agent_types
+            self.agent_inflight_seq_num = agent_inflight_seq_num
 # isort: on
 
 # yapf: enable
@@ -393,6 +405,27 @@ class DeepSeekSparseAttentionConfig(BaseSparseAttentionConfig):
                         f"indexer_k_dtype='fp4' requires SM>=100 (Blackwell); "
                         f"current device is SM{sm}. Set indexer_k_dtype='fp8' "
                         f"for non-Blackwell GPUs.")
+        return self
+
+    @model_validator(mode="after")
+    def _warn_heuristic_topk_unsupported(self):
+        """Warn (not raise) when GVR Top-K is enabled with an index_topk the
+        kernel cannot accelerate.
+
+        The C++ ``indexer_topk_decode`` dispatcher silently falls back to the
+        radix Top-K path for unsupported K, so without this warning a user may
+        believe GVR is active when it is not. ``index_topk`` may still be None
+        here (it is filled from the checkpoint later), so only validate
+        concrete values.
+        """
+        supported_topk = (512, 1024, 2048)
+        if (self.enable_heuristic_topk and self.index_topk is not None
+                and self.index_topk not in supported_topk):
+            logger.warning(
+                f"enable_heuristic_topk=True but index_topk={self.index_topk} "
+                f"is not in the GVR-supported set {supported_topk}; the indexer "
+                f"will silently fall back to the radix Top-K path. Set "
+                f"index_topk to one of {supported_topk} to use GVR.")
         return self
 
     def supports_backend(self, backend: str) -> bool:

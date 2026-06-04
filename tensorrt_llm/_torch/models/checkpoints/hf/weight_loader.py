@@ -85,7 +85,9 @@ class HfWeightLoader(BaseWeightLoader):
             num_layers = int(os.environ.get("TLLM_OVERRIDE_LAYER_NUM", "0"))
             enable_prefetch = (prefetch_size
                                < self._get_local_available_host_memory() * 0.9
-                               and num_layers == 0)
+                               and num_layers == 0
+                               and os.environ.get(
+                                   "TLLM_DISABLE_WEIGHT_PREFETCH", "0") != "1")
             if enable_prefetch:
                 logger.info(
                     f"Prefetching {prefetch_size / (1024**3):.2f}GB checkpoint files."
