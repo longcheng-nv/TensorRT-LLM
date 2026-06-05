@@ -6,10 +6,12 @@ the statistical distribution of real DSV4 Pro indexer inputs captured from
 SWE-bench 64K workloads (B300, 30 GVR layers, 377 decode steps, 2026-06-05),
 with controllable temporal hit-rate (GVR behavior).
 
-NOTE: Only DSV4 Pro is supported. Flash is NOT supported because Flash uses
-FP8 e4m3fn for K (not FP4) and its Q/K/weights distribution parameters have
-not been measured from real captures. Use dsv4-indexer-capture skill first
-to collect Flash data, then calibrate flash_params.json before enabling Flash.
+Both DSV4 Pro and Flash are supported with calibrated distribution parameters:
+  - Pro:   K=1024, 30 GVR layers (even 2..60), calibrated 2026-06-05 SWE-bench 64K B300
+  - Flash: K=512,  21 GVR layers (even 2..42), calibrated 2026-06-05 SWE-bench 64K B300 TP=EP=4
+
+Key finding: Flash K-cache uses the SAME FP4 e2m1 format as Pro ([n_blocks,32,1,68]),
+NOT FP8 as initially assumed. Both models use FP4 for indexer K on B300.
 
 Algorithm:
   1. Logits-First: sample per-step logits from the fitted per-layer distribution
@@ -21,7 +23,7 @@ Algorithm:
 
 Usage:
     python3 synth_indexer_inputs.py \\
-        --model   pro                       # required; only "pro" supported
+        --model   pro|flash                 # required
         --bs      1                         # batch size (default 1)
         --isl     65536                     # input sequence length (tokens)
         --osl     500                       # decode steps to synthesize
@@ -299,27 +301,24 @@ def synth_one_step(
 def resolve_params(model: str, custom_path: str = None) -> dict:
     """Load distribution parameters for the given model.
 
-    Only 'pro' is supported with built-in parameters. Flash parameters
-    have NOT been calibrated from real captures and are therefore excluded.
-    To use Flash, collect captures with dsv4-indexer-capture and provide
-    --params /path/to/calibrated_flash_params.json.
+    Built-in support: 'pro' (K=1024) and 'flash' (K=512).
+    Both calibrated from real SWE-bench 64K B300 captures (2026-06-05).
+    Pass an absolute path to --model or --params to use custom params.
     """
     if custom_path:
         with open(custom_path) as f:
             return json.load(f)
+    if os.path.isfile(model):
+        with open(model) as f:
+            return json.load(f)
     model_lower = model.lower()
-    if "flash" in model_lower:
-        raise ValueError(
-            "Flash model is NOT supported with built-in parameters.\n"
-            "Reason: Flash uses FP8 e4m3fn for K (not FP4), and Q/K/weights\n"
-            "distributions have not been measured from real captures.\n"
-            "Fix: run dsv4-indexer-capture on Flash, calibrate params, then\n"
-            "pass --params /path/to/calibrated_flash_params.json"
-        )
     skill_dir = Path(__file__).parent
-    default = skill_dir / "params" / "pro_params.json"
+    if "flash" in model_lower:
+        default = skill_dir / "params" / "flash_params.json"
+    else:
+        default = skill_dir / "params" / "pro_params.json"
     if not default.is_file():
-        raise FileNotFoundError(f"Built-in Pro params not found: {default}")
+        raise FileNotFoundError(f"Built-in params not found: {default}")
     with open(default) as f:
         return json.load(f)
 
@@ -346,9 +345,9 @@ def main() -> int:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--model",     required=True,
-                   help="pro  (only supported value with built-in params). "
-                        "Flash is NOT supported — K dtype/distribution not calibrated. "
-                        "Pass an absolute path to use custom params JSON.")
+                   help="pro (K=1024, 30 layers) | flash (K=512, 21 layers) | "
+                        "<abs-path-to-params.json>. Both calibrated from "
+                        "SWE-bench 64K B300 captures (2026-06-05).")
     p.add_argument("--bs",        type=int, default=1, help="batch size (default 1)")
     p.add_argument("--isl",       type=int, default=65536, help="input sequence length in tokens (default 65536)")
     p.add_argument("--osl",       type=int, default=500,   help="decode steps to synthesize (default 500)")

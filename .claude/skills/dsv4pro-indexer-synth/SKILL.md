@@ -1,15 +1,14 @@
 ---
 name: dsv4pro-indexer-synth
 description: >
-  Synthesize realistic DSV4 **Pro** indexer input tensors — Q (FP4),
-  K-cache (FP4), weights (fp32), logits (fp32), topK (int32), preIdx (int32) —
-  for any BS / ISL / OSL combination. Uses Logits-First + Rank-Transform +
-  Temporal-Bias algorithm calibrated from real SWE-bench 64K Pro captures (B300).
-  Output is ready-to-use input for indexer or fused indexer+topK kernel tests.
-  NOTE: Flash NOT supported — K dtype (FP8 vs FP4) and distribution params
-  uncalibrated; use dsv4-indexer-capture to collect Flash data first.
-  Trigger: "合成 DSV4 Pro indexer 测试数据", "synth Pro indexer inputs",
-  "generate DSV4 Pro random Q/K for kernel bench", "indexer unit test data Pro".
+  Synthesize realistic DSV4 Pro (K=1024) or Flash (K=512) indexer input tensors
+  — Q (FP4), K-cache (FP4), weights (fp32), logits (fp32), topK (int32),
+  preIdx (int32) — for any BS / ISL / OSL combination. Logits-First +
+  Rank-Transform + Temporal-Bias algorithm. Both models calibrated from real
+  SWE-bench 64K B300 captures (2026-06-05). Key finding: Flash K-cache uses
+  same FP4 e2m1 format as Pro (NOT FP8 as commonly assumed).
+  Trigger: "合成 DSV4 indexer 测试数据", "synth Pro/Flash indexer inputs",
+  "generate DSV4 random Q/K for kernel bench", "indexer unit test data".
 license: LicenseRef-NvidiaProprietary
 metadata:
   author: loncheng@nvidia.com
@@ -24,7 +23,7 @@ metadata:
 Generate statistically realistic `(Q_fp4, K_cache_fp4, weights, logits, topK, preIdx)` 
 tuples for DSV4 **Pro** indexer decode steps, given:
 
-- **Model**: `pro` (K=1024) — only Pro supported; Flash NOT calibrated
+- **Model**: `pro` (K=1024, 30 GVR layers) or `flash` (K=512, 21 GVR layers)
 - **BS**: batch size
 - **ISL**: input sequence length (determines KV cache size via compress_ratio=4)
 - **OSL**: number of decode steps to synthesize
@@ -202,10 +201,10 @@ KS test at N=14848 always rejects parametric distributions by construction
   never before. Rank-transform destroys positional structure.
 - **G2 — n_kv must be even**: FP4 packing requires even head_dim and even token count
   for block alignment. Use `((n_kv + 63) // 64) * 64`.
-- **G3 — Flash NOT supported**: Flash uses FP8 e4m3fn for K (not FP4) and has different
-  `tokens_per_block=128`. Flash Q/K/weights distributions are uncalibrated. Passing
-  `--model flash` raises a ValueError with remediation steps. Use `--params` with a
-  custom calibrated JSON once Flash captures are available.
+- **G3 — Flash K-cache is FP4 (NOT FP8)**: Despite Flash lacking `indexer_k_dtype` in
+  config.json, real captures on B300 show Flash K-cache is `[n_blocks,32,1,68]` FP4 e2m1
+  packed — identical format to Pro. The initial assumption of FP8 was wrong. Both models
+  use FP4 for indexer K. Flash hit-rate ≈ 0.61 (lower than Pro 0.69; use `--target-hr 0.61`).
 - **G4 — preIdx at step 0**: step 0 has no prev_topK → `preidx[0]` is zeros tensor.
   This is correct — real captures also show zeros for the first decode step.
 - **G5 — hit-rate saturation**: For target_hr > 0.95 at small n_kv, binary search
