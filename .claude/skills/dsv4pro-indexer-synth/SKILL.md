@@ -1,13 +1,15 @@
 ---
 name: dsv4pro-indexer-synth
 description: >
-  Synthesize realistic DSV4 Pro (or Flash) indexer input tensors — Q (FP4),
+  Synthesize realistic DSV4 **Pro** indexer input tensors — Q (FP4),
   K-cache (FP4), weights (fp32), logits (fp32), topK (int32), preIdx (int32) —
   for any BS / ISL / OSL combination. Uses Logits-First + Rank-Transform +
-  Temporal-Bias algorithm calibrated from real SWE-bench 64K captures.
+  Temporal-Bias algorithm calibrated from real SWE-bench 64K Pro captures (B300).
   Output is ready-to-use input for indexer or fused indexer+topK kernel tests.
-  Trigger: "合成 DSV4 indexer 测试数据", "synth Pro indexer inputs",
-  "generate DSV4 random Q/K for kernel bench", "indexer unit test data".
+  NOTE: Flash NOT supported — K dtype (FP8 vs FP4) and distribution params
+  uncalibrated; use dsv4-indexer-capture to collect Flash data first.
+  Trigger: "合成 DSV4 Pro indexer 测试数据", "synth Pro indexer inputs",
+  "generate DSV4 Pro random Q/K for kernel bench", "indexer unit test data Pro".
 license: LicenseRef-NvidiaProprietary
 metadata:
   author: loncheng@nvidia.com
@@ -20,9 +22,9 @@ metadata:
 ## What this skill does
 
 Generate statistically realistic `(Q_fp4, K_cache_fp4, weights, logits, topK, preIdx)` 
-tuples for DSV4 Pro/Flash indexer decode steps, given:
+tuples for DSV4 **Pro** indexer decode steps, given:
 
-- **Model**: `pro` (K=1024) or `flash` (K=512)
+- **Model**: `pro` (K=1024) — only Pro supported; Flash NOT calibrated
 - **BS**: batch size
 - **ISL**: input sequence length (determines KV cache size via compress_ratio=4)
 - **OSL**: number of decode steps to synthesize
@@ -75,7 +77,7 @@ Measured from SWE-bench 64K captures on B300, 30 GVR layers, 377 decode steps:
 
 ```bash
 python3 ${SKILL_DIR}/src/synth_indexer_inputs.py \
-    --model     pro|flash            # required
+    --model     pro                  # required; only "pro" supported
     --bs        1                    # batch size (default 1)
     --isl       65536                # input seq len in tokens (default 65536)
     --osl       500                  # decode steps (default 500)
@@ -105,13 +107,6 @@ python3 ${SKILL_DIR}/src/synth_indexer_inputs.py \
     --model pro --bs 1 --isl 65536 --osl 500 \
     --target-hr 0.69 --layers even \
     --out-dir /tmp/synth_pro_hr069
-```
-
-**Flash, no temporal correlation, custom ISL:**
-```bash
-python3 ${SKILL_DIR}/src/synth_indexer_inputs.py \
-    --model flash --bs 4 --isl 32768 --osl 200 \
-    --target-hr 0.0 --out-dir /tmp/synth_flash_bs4
 ```
 
 **Kernel testing only (no logits, faster):**
@@ -207,8 +202,10 @@ KS test at N=14848 always rejects parametric distributions by construction
   never before. Rank-transform destroys positional structure.
 - **G2 — n_kv must be even**: FP4 packing requires even head_dim and even token count
   for block alignment. Use `((n_kv + 63) // 64) * 64`.
-- **G3 — Flash K-cache dtype**: Flash may use FP8 (not FP4) for K. The built-in
-  `flash_params.json` uses FP8 for K; verify against target model config.
+- **G3 — Flash NOT supported**: Flash uses FP8 e4m3fn for K (not FP4) and has different
+  `tokens_per_block=128`. Flash Q/K/weights distributions are uncalibrated. Passing
+  `--model flash` raises a ValueError with remediation steps. Use `--params` with a
+  custom calibrated JSON once Flash captures are available.
 - **G4 — preIdx at step 0**: step 0 has no prev_topK → `preidx[0]` is zeros tensor.
   This is correct — real captures also show zeros for the first decode step.
 - **G5 — hit-rate saturation**: For target_hr > 0.95 at small n_kv, binary search

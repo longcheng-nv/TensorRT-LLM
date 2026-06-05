@@ -1,13 +1,19 @@
 """
-synth_indexer_inputs.py  —  DSV4 indexer input data synthesizer
+synth_indexer_inputs.py  —  DSV4 Pro indexer input data synthesizer
 
-Generates (Q, K_cache, weights, logits, topK, preIdx) tensors that match
-the statistical distribution of real DSV4 Pro/Flash indexer inputs captured
-from SWE-bench workloads, with controllable temporal hit-rate (GVR behavior).
+Generates (Q_fp4, K_cache_fp4, weights, logits, topK, preIdx) tensors that match
+the statistical distribution of real DSV4 Pro indexer inputs captured from
+SWE-bench 64K workloads (B300, 30 GVR layers, 377 decode steps, 2026-06-05),
+with controllable temporal hit-rate (GVR behavior).
+
+NOTE: Only DSV4 Pro is supported. Flash is NOT supported because Flash uses
+FP8 e4m3fn for K (not FP4) and its Q/K/weights distribution parameters have
+not been measured from real captures. Use dsv4-indexer-capture skill first
+to collect Flash data, then calibrate flash_params.json before enabling Flash.
 
 Algorithm:
   1. Logits-First: sample per-step logits from the fitted per-layer distribution
-     (Gumbel_r for shallow layers, Normal for deep layers).
+     (Gumbel_r for shallow layers L02-L10, Normal for deep layers L12-L60).
   2. Rank-Transform: map random Q/K inner-product onto logits target distribution.
   3. Temporal Bias: apply binary-searched coefficient c to prev_topK positions
      AFTER rank-transform to achieve the target GVR hit-rate exactly.
@@ -15,7 +21,7 @@ Algorithm:
 
 Usage:
     python3 synth_indexer_inputs.py \\
-        --model   pro|flash                 # required
+        --model   pro                       # required; only "pro" supported
         --bs      1                         # batch size (default 1)
         --isl     65536                     # input sequence length (tokens)
         --osl     500                       # decode steps to synthesize
@@ -291,15 +297,29 @@ def synth_one_step(
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def resolve_params(model: str, custom_path: str = None) -> dict:
-    """Load distribution parameters for the given model."""
+    """Load distribution parameters for the given model.
+
+    Only 'pro' is supported with built-in parameters. Flash parameters
+    have NOT been calibrated from real captures and are therefore excluded.
+    To use Flash, collect captures with dsv4-indexer-capture and provide
+    --params /path/to/calibrated_flash_params.json.
+    """
     if custom_path:
         with open(custom_path) as f:
             return json.load(f)
+    model_lower = model.lower()
+    if "flash" in model_lower:
+        raise ValueError(
+            "Flash model is NOT supported with built-in parameters.\n"
+            "Reason: Flash uses FP8 e4m3fn for K (not FP4), and Q/K/weights\n"
+            "distributions have not been measured from real captures.\n"
+            "Fix: run dsv4-indexer-capture on Flash, calibrate params, then\n"
+            "pass --params /path/to/calibrated_flash_params.json"
+        )
     skill_dir = Path(__file__).parent
-    name = "pro_params.json" if "pro" in model.lower() else "flash_params.json"
-    default = skill_dir / "params" / name
+    default = skill_dir / "params" / "pro_params.json"
     if not default.is_file():
-        raise FileNotFoundError(f"Built-in params not found: {default}")
+        raise FileNotFoundError(f"Built-in Pro params not found: {default}")
     with open(default) as f:
         return json.load(f)
 
@@ -325,7 +345,10 @@ def save_dict(dct: dict, path_no_ext: str, fmt: str) -> str:
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--model",     required=True, help="pro | flash | <path/to/custom_params.json>")
+    p.add_argument("--model",     required=True,
+                   help="pro  (only supported value with built-in params). "
+                        "Flash is NOT supported — K dtype/distribution not calibrated. "
+                        "Pass an absolute path to use custom params JSON.")
     p.add_argument("--bs",        type=int, default=1, help="batch size (default 1)")
     p.add_argument("--isl",       type=int, default=65536, help="input sequence length in tokens (default 65536)")
     p.add_argument("--osl",       type=int, default=500,   help="decode steps to synthesize (default 500)")
