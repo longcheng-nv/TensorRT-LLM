@@ -1,0 +1,70 @@
+{
+  "_comment": "DSV4 Flash indexer distribution parameters. Q/K measured from Flash B300 captures (2026-06-02, multi_turn_indexer_studies). Logits from Q9j study (swe_bench_32k). Pro parameters used as fallback for Q/K (very similar dtype/format).",
+  "model": "DSV4-Flash",
+  "K": 512,
+  "n_heads": 64,
+  "head_dim_fp4": 128,
+  "compress_ratio": 4,
+  "tokens_per_block": 128,
+  "fp4_lut": [0.0,0.5,1.0,1.5,2.0,3.0,4.0,6.0,-0.0,-0.5,-1.0,-1.5,-2.0,-3.0,-4.0,-6.0],
+  "fp4_clip": [-6.0, 6.0],
+
+  "q": {
+    "_comment": "Estimated from Pro captures; Flash uses same indexer head config. TODO: measure directly from Flash Q/K captures.",
+    "dtype": "fp4_e2m1_packed_int8",
+    "mu": 0.0,
+    "sigma": 1.93,
+    "clip_low": -6.0,
+    "clip_high": 6.0
+  },
+
+  "k": {
+    "_comment": "Estimated from Pro captures. Flash K-cache: [n_blocks,128,1,132] (128 bytes FP8 + 4 bytes scale). Note: Flash may use FP8 path, not FP4. TODO: verify.",
+    "dtype": "fp8_e4m3fn",
+    "mu": 0.0,
+    "sigma": 1.5,
+    "clip_low": -448.0,
+    "clip_high": 448.0,
+    "scale_bytes_per_token": 4,
+    "tokens_per_block": 128
+  },
+
+  "weights": {
+    "_comment": "Estimated; similar pattern to Pro with smaller scale.",
+    "dtype": "float32",
+    "mu": 0.018,
+    "sigma": 0.040,
+    "per_layer_mu":    null,
+    "per_layer_sigma": null
+  },
+
+  "logits": {
+    "_comment": "From Q9j study (swe_bench_32k, 21 GVR layers). Flash logits have weaker negative bias than Pro.",
+    "dtype": "float32",
+    "shallow_layers": [2,4,6,8,10,12,14,16],
+    "deep_layers":    [18,20,22,24,26,28,30,32,34,36,38,40,42],
+    "shallow": {
+      "dist": "gumbel_r",
+      "mu_mean":  -0.80,
+      "mu_std":    0.25,
+      "sig_mean":  0.55,
+      "sig_std":   0.06
+    },
+    "deep": {
+      "dist": "gumbel_r",
+      "mu_mean":  -1.10,
+      "mu_std":    0.35,
+      "sig_mean":  0.65,
+      "sig_std":   0.08
+    }
+  },
+
+  "temporal": {
+    "_comment": "Flash hit-rate measured from Q9j. Much lower than Pro.",
+    "default_target_hr": 0.40,
+    "measured_mean": 0.40,
+    "measured_per_layer": {}
+  },
+
+  "gvr_active_layers": [2,4,6,8,10,12,14,16,18,20,22,24,26,28,30,32,34,36,38,40,42]
+}

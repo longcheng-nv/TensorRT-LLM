@@ -1,0 +1,75 @@
+{
+  "_comment": "DSV4 Pro indexer distribution parameters. Measured from SWE-bench 64K captures on B300 (2026-06-05, 30 layers, 377 decode steps). See REPORT_INDEXER_SYNTH.md.",
+  "model": "DSV4-Pro",
+  "K": 1024,
+  "n_heads": 64,
+  "head_dim_fp4": 128,
+  "compress_ratio": 4,
+  "tokens_per_block": 32,
+  "fp4_lut": [0.0,0.5,1.0,1.5,2.0,3.0,4.0,6.0,-0.0,-0.5,-1.0,-1.5,-2.0,-3.0,-4.0,-6.0],
+  "fp4_clip": [-6.0, 6.0],
+
+  "q": {
+    "_comment": "FP4 e2m1 packed int8, shape [BS,1,64,64]. Near-zero mean, uniform across all 30 GVR layers.",
+    "dtype": "fp4_e2m1_packed_int8",
+    "mu": 0.0,
+    "sigma": 1.93,
+    "clip_low": -6.0,
+    "clip_high": 6.0
+  },
+
+  "k": {
+    "_comment": "FP4 e2m1 packed int8, paged layout [n_blocks,32,1,68] (64 bytes FP4 + 4 bytes scale). Extremely uniform across all 30 layers.",
+    "dtype": "fp4_e2m1_packed_int8",
+    "mu": 0.08,
+    "sigma": 2.32,
+    "clip_low": -6.0,
+    "clip_high": 6.0,
+    "scale_bytes_per_token": 4,
+    "tokens_per_block": 32
+  },
+
+  "weights": {
+    "_comment": "weights_proj output, fp32, shape [BS,64]. Small positive mean; per-layer sigma varies.",
+    "dtype": "float32",
+    "mu": 0.020,
+    "sigma": 0.048,
+    "per_layer_mu":    [0.0209,0.0138,0.0211,0.0158,0.0226,0.0210,0.0162,0.0242,0.0211,0.0169,0.0215,0.0260,0.0051,0.0128,0.0194,0.0238,0.0180,0.0217,0.0098,0.0183,0.0142,0.0076,0.0175,0.0261,0.0257,0.0190,0.0360,0.0220,0.0197,0.0134],
+    "per_layer_sigma": [0.0315,0.0443,0.0448,0.0283,0.0441,0.0460,0.0504,0.0437,0.0554,0.0511,0.0511,0.0425,0.0571,0.0464,0.0522,0.0492,0.0382,0.0694,0.0331,0.0390,0.0524,0.0251,0.0636,0.0523,0.0503,0.0480,0.0782,0.0550,0.0622,0.0474],
+    "_layer_order": "even layers 2,4,...,60 in index order 0..29"
+  },
+
+  "logits": {
+    "_comment": "MQA output = sum_h(w_h * Q_h@K.T)/sqrt(128), fp32, shape [BS,kv_len]. Negative mean from learned attention bias. Fit: Gumbel_r (shallow) or Normal (deep).",
+    "dtype": "float32",
+    "shallow_layers": [2,4,6,8,10],
+    "deep_layers":    [12,14,16,18,20,22,24,26,28,30,32,34,36,38,40,42,44,46,48,50,52,54,56,58,60],
+    "shallow": {
+      "dist": "gumbel_r",
+      "mu_mean":  -1.395,
+      "mu_std":    0.310,
+      "sig_mean":  0.590,
+      "sig_std":   0.075
+    },
+    "deep": {
+      "dist": "norm",
+      "mu_mean":  -1.090,
+      "mu_std":    0.560,
+      "sig_mean":  0.950,
+      "sig_std":   0.180
+    }
+  },
+
+  "temporal": {
+    "_comment": "GVR hit-rate: fraction of prev_topK re-selected in current topK. Binary-search coefficient c added to prev_topK positions post rank-transform.",
+    "default_target_hr": 0.69,
+    "measured_per_layer": {
+      "L02": 0.757, "L04": 0.822, "L06": 0.775,
+      "L08": 0.785, "L10": 0.732, "L12": 0.597,
+      "L14": 0.640, "L16": 0.550, "L18": 0.524
+    },
+    "measured_mean": 0.686
+  },
+
+  "gvr_active_layers": [2,4,6,8,10,12,14,16,18,20,22,24,26,28,30,32,34,36,38,40,42,44,46,48,50,52,54,56,58,60]
+}
