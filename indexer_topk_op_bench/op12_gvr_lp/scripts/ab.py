@@ -111,18 +111,22 @@ def main():
             k, n, bs = c.split(",")
             cells.append((int(k), int(n), int(bs)))
 
+    _DTMAP = {"fp32": torch.float32, "bf16": torch.bfloat16, "fp16": torch.float16}
     configs = []
     for c in args.configs.split(","):
         parts = c.split(":")
         mode, thr = parts[0], int(parts[1])
-        kca = int(parts[2]) if len(parts) > 2 else None
-        configs.append((mode, thr, kca))
+        kca = int(parts[2]) if len(parts) > 2 and parts[2] not in ("", "0") else None
+        dt = _DTMAP[parts[3]] if len(parts) > 3 else torch.float32
+        configs.append((mode, thr, kca, dt))
 
     cr_val = args.cr
     print(f"# cells={len(cells)} configs={configs} cr={cr_val}")
+    _DTNAME = {torch.float32: "fp32", torch.bfloat16: "bf16", torch.float16: "fp16"}
+
     def cfg_label(cfg):
-        mode, thr, kca = cfg
-        return f"{mode}/{thr}" + (f"/a{kca}" if kca else "")
+        mode, thr, kca, dt = cfg
+        return f"{mode}/{thr}/{_DTNAME[dt]}" + (f"/a{kca}" if kca else "")
 
     hdr = f"{'K':>5}{'N':>8}{'BS':>6} {'sglang':>8}"
     for cfg in configs:
@@ -149,20 +153,23 @@ def main():
             sg = float("nan")
         line = f"{K:>5}{N:>8}{BS:>6} {sg:>8.1f}"
         for cfg in configs:
-            mode, thr, kca = cfg
+            mode, thr, kca, dt = cfg
             try:
-                gvr_lp(logits, pre, seq_div, K, cr_val, out=out, num_threads=thr,
+                # gvr input in the config's dtype (bf16/fp16 = free upper bound of
+                # the fp16-scratch idea: half-width P1-P3, no pre-pass). sglang
+                # always consumes the fp32 logits above.
+                glog = logits if dt == torch.float32 else logits_row.to(dt).expand(BS, -1).contiguous()
+                gvr_lp(glog, pre, seq_div, K, cr_val, out=out, num_threads=thr,
                        p4_mode=mode, kc_accept=kca)
-                ok, d, nuniq = _exact(out, logits)
-                t = _time_cold(lambda: gvr_lp(logits, pre, seq_div, K, cr_val, out=out,
+                ok, d, nuniq = _exact(out, logits)  # exactness vs fp32 (bf16/fp16 expected to differ)
+                t = _time_cold(lambda: gvr_lp(glog, pre, seq_div, K, cr_val, out=out,
                                               num_threads=thr, p4_mode=mode, kc_accept=kca))
+                r = sg / t
+                ratios[cfg].append(r)  # always record timing (this run measures SPEED ceiling)
+                mark = "" if ok else "~"  # ~ = inexact vs fp32 (expected for bf16/fp16)
                 if not ok:
                     fails[cfg] += 1
-                    line += f" {('X%.1f' % t):>16}"
-                else:
-                    r = sg / t
-                    ratios[cfg].append(r)
-                    line += f" {('%.1f(%.2fx)' % (t, r)):>16}"
+                line += f" {('%s%.1f(%.2fx)' % (mark, t, r)):>16}"
             except Exception as e:
                 line += f" {('ERR'):>16}"
         print(line, flush=True)

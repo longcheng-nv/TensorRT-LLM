@@ -88,6 +88,38 @@ P4 barely changes (it is **barrier/latency-floor bound, not candidate-count boun
 while the extra secant/retry-shrink full-N passes make it *worse* at N≥16K. opt-2
 (candidate reduction) is rejected by data.
 
+## Iter 4 — opt-1 upper bound: half-width INPUT (free, no pre-pass) + P1-P3-only decomp
+Measures the ceiling of "fp16-scratch then P1-P3 read fp16, P4 refine fp32" by feeding
+the kernel bf16/fp16 input directly (the zero-overhead best case). `~` = inexact vs fp32
+(bf16/fp16 rounds logits → its top-K ≠ fp32 top-K; the exactness landmine).
+
+Full kernel (rs_exact), cold-L2 — note SEVERE co-tenancy noise at small N (rs_exact
+bf16 N=4K read 14.8µs in one run, 20.4µs in the next):
+| K | N | sglang | fp32 | bf16 | fp16 |
+|---|---|---|---|---|---|
+| 512 | 65536 | 29.6 | 0.95× | 1.37× | 1.38× |
+| 512 | 262144 | 82.8 | 1.38× | 1.74× | 1.74× |
+
+**Decomposition — P1+P2+P3 only (nop4), the part an EXACT (fp32-P4) scheme keeps:**
+| K | N | P1-P3 fp32 | P1-P3 bf16 | bf16 saving |
+|---|---|---|---|---|
+| 512 | 4096 | 10.8 | 9.6 | −1.2µs (11%) |
+| 512 | 8192 | 10.9 | 11.6 | ~0 (noise) |
+| 512 | 16384 | 14.3 | 12.9 | −1.4µs (10%) |
+| 512 | 65536 | 21.2 | 17.7 | −3.5µs (17%) |
+| 512 | 262144 | 49.6 | 43.8 | −5.8µs (12%) |
+
+**Findings (answers the fp16-scratch question)**
+- The big bf16 full-kernel win is mostly from **bf16 collapsing candidate values → cheaper
+  P4** (report: bf16 snaps fastest). But that is exactly what makes it **inexact**, and a
+  scheme with fp32-P4-refine GIVES IT BACK.
+- The EXACT scheme (bf16/fp16 P1-P3 + fp32-reload P4) captures only the **P1-P3 traffic
+  saving: ~1µs at small N (noise-level, doesn't flip the verdict) and ~3-6µs at large N
+  (~+0.1× where GVR already wins 1.6-1.8×)**.
+- So fp16-scratch is a small, real, traffic-proportional win that **does NOT solve the
+  small-N wall** (P4-barrier + ~4µs launch floor, both dtype-independent) and adds a
+  pre-pass/mixed-precision + fp32-gather complexity cost. Marginal net.
+
 ## Verdict
 - **P4 floor-bound** across snap/rs/rs_exact (all cluster ~same) → no in-structure P4
   algo change moves it materially.
