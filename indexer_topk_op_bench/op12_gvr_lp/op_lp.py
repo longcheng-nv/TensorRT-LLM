@@ -46,6 +46,8 @@ _P4_FLAGS = {
     # opt-2 skip paths (new flags added to the kernel)
     "skip":        dict(enable_p4_skip=True, enable_p4_rank_scatter=True, enable_p4_rank_scatter_exact=True),
     "skip_snap":   dict(enable_p4_skip=True),
+    # DEBUG: time P1+P2+P3 floor (inexact) to size the P4 budget.
+    "nop4":        dict(enable_skip_p4_debug=True),
 }
 
 
@@ -57,8 +59,8 @@ def _default_config(bs, n):
 
 
 def compile_lp(dtype, bs, n, K, cr_val, *, num_threads=None, p4_mode="rs_exact",
-               min_bpm=None, use256_override=None):
-    key = (dtype, bs, n, K, cr_val, num_threads, p4_mode, min_bpm, use256_override)
+               min_bpm=None, use256_override=None, kc_accept=None):
+    key = (dtype, bs, n, K, cr_val, num_threads, p4_mode, min_bpm, use256_override, kc_accept)
     if key in _compiled:
         return _compiled[key]
     t_def, use256_def, mbpm_def = _default_config(bs, n)
@@ -69,7 +71,7 @@ def compile_lp(dtype, bs, n, K, cr_val, *, num_threads=None, p4_mode="rs_exact",
     kobj = GvrTopKKernel(
         dtype=_DT[dtype], top_k=K, next_n=1, num_threads=t, compress_ratio=cr_val,
         use_256bit_load=use256, enable_unroll_4=True, enable_phase3_unroll=True,
-        min_blocks_per_mp=mbpm, return_output_values=False, **flags,
+        min_blocks_per_mp=mbpm, return_output_values=False, kc_accept=kc_accept, **flags,
     )
     n_rows, n_cols, n_batch = cute.sym_int(), cute.sym_int(), cute.sym_int()
     in_align = 32 if use256 else 16
@@ -84,12 +86,29 @@ def compile_lp(dtype, bs, n, K, cr_val, *, num_threads=None, p4_mode="rs_exact",
     return compiled
 
 
+def _dispatch_config(bs, n):
+    """Best-achievable regime dispatch (B200, fp32, from the op12 A/B sweeps).
+
+    - Large N (>=131072) at low BS: snap P4 with 1024 threads (best long-context).
+    - Else: rank-scatter-exact P4 with 512 threads (best all-rounder).
+    P4 is barrier-floor-bound, so the choice is dominated by P1-P3 parallelism +
+    the P4 variant's fixed barrier count, both of which favor this split.
+    Returns (p4_mode, num_threads).
+    """
+    if bs <= NUM_SMS and n >= 131072:
+        return "snap", 1024
+    return "rs_exact", 512
+
+
 def gvr_lp(logits, pre_idx, seq_lens, index_topk, compress_ratio=1, out=None,
-           *, num_threads=None, p4_mode="rs_exact", min_bpm=None, use256_override=None):
+           *, num_threads=None, p4_mode="rs_exact", min_bpm=None, use256_override=None,
+           kc_accept=None):
     bs, n = logits.shape
+    if p4_mode == "dispatch":
+        p4_mode, num_threads = _dispatch_config(bs, n)
     compiled = compile_lp(logits.dtype, bs, n, index_topk, compress_ratio,
                           num_threads=num_threads, p4_mode=p4_mode, min_bpm=min_bpm,
-                          use256_override=use256_override)
+                          use256_override=use256_override, kc_accept=kc_accept)
     if out is None:
         out = torch.empty(bs, index_topk, dtype=torch.int32, device="cuda")
     compiled(logits, pre_idx, seq_lens, None, out)

@@ -113,14 +113,20 @@ def main():
 
     configs = []
     for c in args.configs.split(","):
-        mode, thr = c.split(":")
-        configs.append((mode, int(thr)))
+        parts = c.split(":")
+        mode, thr = parts[0], int(parts[1])
+        kca = int(parts[2]) if len(parts) > 2 else None
+        configs.append((mode, thr, kca))
 
     cr_val = args.cr
     print(f"# cells={len(cells)} configs={configs} cr={cr_val}")
+    def cfg_label(cfg):
+        mode, thr, kca = cfg
+        return f"{mode}/{thr}" + (f"/a{kca}" if kca else "")
+
     hdr = f"{'K':>5}{'N':>8}{'BS':>6} {'sglang':>8}"
-    for mode, thr in configs:
-        hdr += f" {mode+'/'+str(thr):>14}"
+    for cfg in configs:
+        hdr += f" {cfg_label(cfg):>16}"
     print(hdr)
 
     ratios = {c: [] for c in configs}
@@ -143,21 +149,22 @@ def main():
             sg = float("nan")
         line = f"{K:>5}{N:>8}{BS:>6} {sg:>8.1f}"
         for cfg in configs:
-            mode, thr = cfg
+            mode, thr, kca = cfg
             try:
-                gvr_lp(logits, pre, seq_div, K, cr_val, out=out, num_threads=thr, p4_mode=mode)
+                gvr_lp(logits, pre, seq_div, K, cr_val, out=out, num_threads=thr,
+                       p4_mode=mode, kc_accept=kca)
                 ok, d, nuniq = _exact(out, logits)
                 t = _time_cold(lambda: gvr_lp(logits, pre, seq_div, K, cr_val, out=out,
-                                              num_threads=thr, p4_mode=mode))
+                                              num_threads=thr, p4_mode=mode, kc_accept=kca))
                 if not ok:
                     fails[cfg] += 1
-                    line += f" {('X%.1f' % t):>14}"
+                    line += f" {('X%.1f' % t):>16}"
                 else:
                     r = sg / t
                     ratios[cfg].append(r)
-                    line += f" {('%.1f(%.2fx)' % (t, r)):>14}"
+                    line += f" {('%.1f(%.2fx)' % (t, r)):>16}"
             except Exception as e:
-                line += f" {('ERR'):>14}"
+                line += f" {('ERR'):>16}"
         print(line, flush=True)
         del logits, pre, out
         gc.collect()
@@ -168,11 +175,11 @@ def main():
         rs = ratios[cfg]
         if rs:
             mn = min(rs)
-            print(f"  {cfg[0]}/{cfg[1]:<5}: median={statistics.median(rs):.3f} "
+            print(f"  {cfg_label(cfg):<18}: median={statistics.median(rs):.3f} "
                   f"mean={statistics.mean(rs):.3f} min={mn:.3f} "
                   f"win={sum(1 for x in rs if x>1)}/{len(rs)} fails={fails[cfg]}")
         else:
-            print(f"  {cfg[0]}/{cfg[1]:<5}: no valid cells fails={fails[cfg]}")
+            print(f"  {cfg_label(cfg):<18}: no valid cells fails={fails[cfg]}")
 
 
 if __name__ == "__main__":

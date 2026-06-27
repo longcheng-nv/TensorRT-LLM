@@ -28,6 +28,20 @@
 - H2: finer coarse histogram in rank_scatter (more bins) to resolve b* in one pass,
   dropping the fine recursion. Risk: continuous data may keep distinct values in b*.
 
+## RESULTS (decisive)
+- **P4 is barrier/latency-floor bound, NOT candidate-count bound.** snap/rs/rs_exact
+  all cluster at the same P4 cost; tightening cand_count via `kc_accept` (opt-2) did
+  NOT shrink P4 and *added* secant passes → worse at N≥16K. **opt-2 rejected by data.**
+- **opt-1 (fp16 traffic) is a no-op for the fp32-vs-SGLang comparison**: candidate keys
+  are already fp32 in smem; input is fixed fp32 in HBM; cutting traffic needs an
+  fp32→fp16 pre-pass that ~cancels its own savings (helps only at very high secant iters).
+- **P4 = 45–50% of GVR time** (4–11µs); P1+P2+P3 floor alone ≈1.2× SGLang at small N.
+- **50%-everywhere is physically infeasible at N≤16K**: shared ~4µs CUDA-graph launch
+  + GVR's intrinsic secant put the floor above SGLang/1.5×. Best small-N ceiling ≈1.2×.
+- **Best achievable op = regime dispatch** (`p4_mode="dispatch"`, the new default):
+  rs_exact/512 for N<131072, snap/1024 for N≥131072. Seqlen sweep (BS=1): wins large N
+  1.2–1.9×, parity/slight-loss small N; median ≈1.05, big large-N gains over any single config.
+
 ## Floor caveat
 - SGLang at N=4K ≈ 12.7µs event-timed; event includes ~4µs CUDA-graph launch overhead
   (report nsys/event ≈ 0.88). Any kernel pays the same launch floor → "50% faster

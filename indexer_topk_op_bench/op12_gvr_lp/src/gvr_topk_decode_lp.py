@@ -145,7 +145,13 @@ class GvrTopKKernel:
         enable_p4_interp_seed: bool = False,
         enable_p4_rank_scatter: bool = False,
         enable_p4_rank_scatter_exact: bool = False,
+        enable_skip_p4_debug: bool = False,
+        kc_accept: Optional[int] = None,
     ):
+        # DEBUG ONLY (inexact): early-return after P3, emitting the first K
+        # candidate indices without selecting. Used to time the P1+P2+P3 floor
+        # so the true P4 budget can be measured. Never enable for production.
+        self.enable_skip_p4_debug = enable_skip_p4_debug
         # P4 recursive-digit refine (bucket p4_recursive_digit): when True, insert
         # a second (fine) histogram over the coarse K-th bin's value range between
         # the coarse bin search and the snap loop, so the snap loop starts within
@@ -255,6 +261,18 @@ class GvrTopKKernel:
         self.kC = params.kC
         self.kNumBins = params.kNumBins
         self.kFTarget = params.kFTarget
+        # opt-2: secant ACCEPTANCE window upper bound (separate from the kC
+        # candidate-buffer cap). Default = kC (== baseline). Tightening this
+        # toward top_k forces the secant to land cand_count near K so Phase-4
+        # has almost nothing to select (→ near-free cand_count==K copy path),
+        # at the cost of more secant iterations (cheap at small N). kFTarget is
+        # also pulled toward this window so the interpolation aims at it.
+        if kc_accept is not None:
+            self.kc_accept = min(kc_accept, self.kC)
+            # aim the secant at the middle of [K, kc_accept]
+            self.kFTarget = (top_k + self.kc_accept) // 2
+        else:
+            self.kc_accept = self.kC
 
         # Kernel-wide constants.
         # self.MAX_REFINE_ITERS: Phase-2 secant refine iteration cap.
@@ -665,7 +683,7 @@ class GvrTopKKernel:
         s_iscalars[1] (done) = 1 on convergence, 2 on bracket exhaustion.
         """
         kK = cutlass.const_expr(self.top_k)
-        kCC = cutlass.const_expr(self.kC)
+        kCC = cutlass.const_expr(self.kc_accept)  # opt-2: acceptance window (≤ kC)
         kFTarget = cutlass.const_expr(self.kFTarget)
 
         # ---- Initial count with the Phase-1 mean as threshold ----
@@ -811,7 +829,8 @@ class GvrTopKKernel:
         block_count_ge inside P2 (or inside the retry-shrink below).
         """
         kK = cutlass.const_expr(self.top_k)
-        kCC = cutlass.const_expr(self.kC)
+        kCC = cutlass.const_expr(self.kC)          # buffer write cap (unchanged)
+        kAcc = cutlass.const_expr(self.kc_accept)  # opt-2: acceptance window (≤ kC)
         num_threads = cutlass.const_expr(self.num_threads)
 
         # ---- Retry-shrink loop (only if P2 didn't converge cleanly) ----
@@ -830,14 +849,14 @@ class GvrTopKKernel:
                 lane,
             )
             if tidx == 0:
-                if s_iscalars[0] > cutlass.Int32(kCC):
+                if s_iscalars[0] > cutlass.Int32(kAcc):
                     s_thr[1] = s_thr[0]  # val_lo = threshold
             cute.arch.barrier()
 
-            # 10-iter retry-shrink. Runtime while with `cand_count > kCC` in the
+            # 10-iter retry-shrink. Runtime while with `cand_count > kAcc` in the
             # loop condition.
             rs = cutlass.Int32(0)
-            while rs < cutlass.Int32(10) and s_iscalars[0] > cutlass.Int32(kCC):
+            while rs < cutlass.Int32(10) and s_iscalars[0] > cutlass.Int32(kAcc):
                 if tidx == 0:
                     lo = s_thr[1]
                     hi = s_thr[2]
@@ -860,7 +879,7 @@ class GvrTopKKernel:
                 )
                 if tidx == 0:
                     c_rs = s_iscalars[0]
-                    if c_rs > cutlass.Int32(kCC):
+                    if c_rs > cutlass.Int32(kAcc):
                         s_thr[1] = s_thr[0]
                     elif c_rs < cutlass.Int32(kK):
                         s_thr[2] = s_thr[0]
@@ -2073,7 +2092,16 @@ class GvrTopKKernel:
                 if cand_count_p4 > cutlass.Int32(self.kC):
                     cand_count_p4 = cutlass.Int32(self.kC)
 
-                if cutlass.const_expr(self.enable_p4_rank_scatter):
+                if cutlass.const_expr(self.enable_skip_p4_debug):
+                    # DEBUG: emit first K candidate indices, skip selection.
+                    isd = tidx
+                    while isd < cutlass.Int32(top_k):
+                        if isd < cand_count_p4:
+                            output_indices_row[isd] = smem_vals[isd]
+                        else:
+                            output_indices_row[isd] = cutlass.Int32(-1)
+                        isd = isd + cutlass.Int32(num_threads)
+                elif cutlass.const_expr(self.enable_p4_rank_scatter):
                     self.phase4_rank_scatter(
                         smem_keys,
                         smem_vals,

@@ -52,3 +52,49 @@ N=16K→rs_exact 1.00–1.05; N≥128K→snap/1024 best.
 **Next (iter 2)**: opt-2. Tighten kFTarget so cand_count ≤ num_threads, then add a
 SGLang-style one-element-per-thread 4-round 8-bit radix P4 (lean refine), keeping
 GVR's secant→refine outline. Targets the small-N P4 wall.
+
+## Iter 2 — P4-budget probe (nop4 = early-return after P3)
+Within-process, cold-L2:
+
+| K | N | sglang | P1+P2+P3 floor | rs_exact | P4 cost |
+|---|---|---|---|---|---|
+| 512 | 4096 | 12.7 | 10.3 | 18.1 | ~7.8 |
+| 512 | 8192 | 13.2 | 11.1 | 15.4 | ~4.3 |
+| 512 | 16384 | 16.5 | 13.8 | 24.1 | ~10.3 |
+| 512 | 65536 | 30.4 | 21.2 | 32.4 | ~11.2 |
+| 1024 | 262144 | 85.7 | 48.8 | 57.2 | ~8.4 |
+
+**Findings (decisive)**
+- **P4 is 45–50% of GVR time** (4–11µs) → the entire reducible opportunity.
+- **P1+P2+P3 floor alone is ~1.2× SGLang at small N** (N=4K: 10.3 vs 12.7). So even
+  a FREE P4 caps small-N at ~1.2×; the shared ~4µs CUDA-graph launch + GVR's intrinsic
+  secant make **1.5× physically UNREACHABLE at N≤16K**.
+- Heavy run-to-run variance (rs_exact N=4K: 14.9–19.9 across runs) — GPU co-tenancy;
+  individual cells ±30%. Trends robust, per-cell numbers noisy.
+
+## Iter 3 — opt-2 test (kc_accept tightening → cand_count ≈ K → cheap P4)
+Added `kc_accept` knob (secant acceptance window upper bound, separate from kC buffer
+cap) + kFTarget pulled to window mid. Exactness held (fails=0). Small-N A/B:
+
+| K | N | sglang | rs_exact (a5120) | rs_exact a768 | snap a768 | snap a640 |
+|---|---|---|---|---|---|---|
+| 512 | 4096 | 12.5 | 0.83× | 0.84× | 0.76× | 0.56× |
+| 512 | 8192 | 13.2 | 0.88× | 0.88× | 0.54× | 0.79× |
+| 512 | 16384 | 16.6 | 1.10× | **0.98×** | 0.89× | 0.58× |
+| 512 | 65536 | 29.6 | 1.20× | **0.95×** | 0.69× | 0.84× |
+
+**Finding (decisive, NEGATIVE)**: tightening the acceptance window does NOT help —
+P4 barely changes (it is **barrier/latency-floor bound, not candidate-count bound**)
+while the extra secant/retry-shrink full-N passes make it *worse* at N≥16K. opt-2
+(candidate reduction) is rejected by data.
+
+## Verdict
+- **P4 floor-bound** across snap/rs/rs_exact (all cluster ~same) → no in-structure P4
+  algo change moves it materially.
+- **opt-1 (fp16 traffic)**: candidate keys already fp32 in smem; input fixed fp32 vs
+  SGLang → no traffic to cut without a pre-pass that cancels savings. Neutral.
+- **opt-2 (candidate reduction)**: rejected (above).
+- **50%-everywhere target is physically infeasible at small N** (floor proof).
+- **Best achievable op = regime dispatch** (rs_exact/512 for N<131072, snap/1024 for
+  N≥131072) → wins large N decisively (1.2–1.9×), parity/slight-loss small N.
+  Set as the `gvr_lp` default (p4_mode="dispatch").
