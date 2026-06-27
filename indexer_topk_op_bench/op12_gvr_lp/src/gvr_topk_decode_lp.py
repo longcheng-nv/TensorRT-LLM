@@ -147,7 +147,17 @@ class GvrTopKKernel:
         enable_p4_rank_scatter_exact: bool = False,
         enable_skip_p4_debug: bool = False,
         kc_accept: Optional[int] = None,
+        enable_lp_scan: bool = False,
     ):
+        # opt-1 MIXED PRECISION (exact): P1-P3 scan the low-precision input
+        # (self.dtype = bf16/fp16, half HBM traffic on the full-N passes), but
+        # Phase-3 RELOADS the original fp32 value (from a second fp32 tensor) for
+        # each collected candidate into smem_keys[fp32], so Phase-4 refines exactly.
+        # The bf16/fp16 threshold collects a superset of the true top-K (round-to-
+        # nearest is monotonic), and the fp32 reload makes the final select exact —
+        # provided cand_count <= kC (else boundary value-collapse drops winners).
+        # Requires the kernel's `input_fp32` arg to hold the original fp32 logits.
+        self.enable_lp_scan = enable_lp_scan
         # DEBUG ONLY (inexact): early-return after P3, emitting the first K
         # candidate indices without selecting. Used to time the P1+P2+P3 floor
         # so the true P4 budget can be measured. Never enable for production.
@@ -819,6 +829,7 @@ class GvrTopKKernel:
         tidx,
         warp_id,
         lane,
+        input_fp32_row=None,  # opt-1 lp-scan: original fp32 row for exact reload
     ):
         """Retry-shrink (if done!=1) + warp/block prefix sum + stream-write.
 
@@ -983,7 +994,10 @@ class GvrTopKKernel:
                         else:
                             vj = cutlass.Float32(rng_frag[j])
                         if vj >= thr_final and wc < cutlass.Int32(kCC):
-                            smem_keys[wc] = vj
+                            if cutlass.const_expr(self.enable_lp_scan):
+                                smem_keys[wc] = input_fp32_row[ic_local + cutlass.Int32(j)]
+                            else:
+                                smem_keys[wc] = vj
                             smem_vals[wc] = ic_local + cutlass.Int32(j)
                             wc = wc + cutlass.Int32(1)
                 # Advance ic past all consumed vec_w-aligned positions.
@@ -1007,7 +1021,10 @@ class GvrTopKKernel:
                 else:
                     vj = cutlass.Float32(tail_frag[j])
                 if vj >= thr_final and wc < cutlass.Int32(kCC):
-                    smem_keys[wc] = vj
+                    if cutlass.const_expr(self.enable_lp_scan):
+                        smem_keys[wc] = input_fp32_row[ic + cutlass.Int32(j)]
+                    else:
+                        smem_keys[wc] = vj
                     smem_vals[wc] = ic + cutlass.Int32(j)
                     wc = wc + cutlass.Int32(1)
             ic = ic + step
@@ -1017,7 +1034,10 @@ class GvrTopKKernel:
         while it < N:
             v = self._load_fp32(input_row, it)
             if v >= thr_final and wc < cutlass.Int32(kCC):
-                smem_keys[wc] = v
+                if cutlass.const_expr(self.enable_lp_scan):
+                    smem_keys[wc] = input_fp32_row[it]
+                else:
+                    smem_keys[wc] = v
                 smem_vals[wc] = it
                 wc = wc + cutlass.Int32(1)
             it = it + cutlass.Int32(num_threads)
@@ -1876,11 +1896,12 @@ class GvrTopKKernel:
     @cute.kernel
     def gvr_topk_kernel(
         self,
-        input_data: cute.Tensor,  # [numRows, stride0] dtype
+        input_data: cute.Tensor,  # [numRows, stride0] dtype (scan dtype; bf16/fp16 in lp-scan)
         pre_idx: cute.Tensor,  # [numRows / next_n, pre_idx_stride] int32
         seq_lens: cute.Tensor,  # [numRows / next_n] int32
         output_values: cute.Tensor,  # [numRows, top_k] dtype
         output_indices: cute.Tensor,  # [numRows, top_k] int32
+        input_fp32: cute.Tensor,  # [numRows, stride0] fp32 (orig; used only in lp-scan P3 reload)
     ):
         """One CTA per row. Grid = (num_rows, 1, 1)."""
         tidx, _, _ = cute.arch.thread_idx()
@@ -1923,6 +1944,10 @@ class GvrTopKKernel:
 
         # Slice per-row views.
         input_row = input_data[row_idx, None]
+        if cutlass.const_expr(self.enable_lp_scan):
+            input_fp32_row = input_fp32[row_idx, None]
+        else:
+            input_fp32_row = None
         pre_idx_row = pre_idx[pre_idx_row_idx, None]
         # When return_output_values=False, ``output_values`` is None at
         # launch and the gated writes below are compiled out; slicing into
@@ -2082,6 +2107,7 @@ class GvrTopKKernel:
                     tidx,
                     warp_id,
                     lane,
+                    input_fp32_row,
                 )
 
                 # =============================================================
@@ -2145,6 +2171,7 @@ class GvrTopKKernel:
         seq_lens: cute.Tensor,
         output_values: cute.Tensor,  # or None.
         output_indices: cute.Tensor,
+        input_fp32: cute.Tensor,  # orig fp32 (lp-scan reload); == input_data when not lp-scan
         stream,
     ):
         num_rows = input_data.shape[0]
@@ -2154,6 +2181,7 @@ class GvrTopKKernel:
             seq_lens,
             output_values,
             output_indices,
+            input_fp32,
         ).launch(
             grid=(num_rows, 1, 1),
             block=(self.num_threads, 1, 1),

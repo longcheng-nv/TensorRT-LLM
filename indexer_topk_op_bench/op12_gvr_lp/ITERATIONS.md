@@ -120,6 +120,42 @@ bf16 N=4K read 14.8µs in one run, 20.4µs in the next):
   small-N wall** (P4-barrier + ~4µs launch floor, both dtype-independent) and adds a
   pre-pass/mixed-precision + fp32-gather complexity cost. Marginal net.
 
+## Iter 5 — IMPLEMENTED the exact mixed-precision scheme (opt-1 full)
+New `enable_lp_scan` kernel path + `lp_bf16`/`lp_fp16` modes: P1-P3 scan the
+bf16/fp16 copy (half-width loads), **Phase-3 reloads the original fp32 value**
+(new `input_fp32` kernel arg) for each collected candidate into smem_keys[fp32],
+so P4 refines EXACTLY. Kernel changes: ctor flag, phase3 3 write-sites, kernel
+sig + fp32 row slice + call, __call__ + wrapper fake tensor. lp timing INCLUDES
+the fp32->bf16 cast (realistic with-pre-pass).
+
+**Exactness: PASS** — valdiff=0, uniq=K for bf16 AND fp16, all N incl. 262144
+(boundary value-collapse did NOT overflow kC). Confirms the monotonic-rounding
+superset argument + fp32-reload gives exact top-K.
+
+**Perf (cold-L2, sglang/new; lp vs the fp32 GVR baseline):**
+| K | N | rs_exact fp32 | lp_bf16 | lp_fp16 | lp vs fp32 |
+|---|---|---|---|---|---|
+| 512 | 4096 | 0.83× | 0.79× | 0.77× | worse |
+| 512 | 8192 | 0.95× | 0.81× | 0.62× | worse |
+| 512 | 16384 | 0.99× | 0.83× | 0.84× | worse |
+| 512 | 32768 | 0.79× | 1.02× | 1.02× | better |
+| 512 | 65536 | 0.91× | 1.15× | 1.19× | **+21%** |
+| 512 | 131072 | 1.15× | 1.37× | 1.35× | **+16%** |
+| 512 | 262144 | 1.36× | 1.59× | 1.55× | **+15%** |
+
+**Validated findings (exactly as analyzed):**
+- The exact scheme HELPS at **large N (+15-23% over fp32 GVR even WITH the cast)** —
+  improves the already-winning region (262K vs SGLang 1.36×→1.59×). lp_fp16 is the
+  best single all-rounder so far (median vs SGLang 1.089).
+- It is **neutral-to-WORSE at small N (4K-16K)**: the half-width P1-P3 saving is
+  tiny there (latency/launch-bound) and the fp32->bf16 cast pre-pass overhead
+  dominates → makes the binding constraint worse, not better.
+- **Does NOT solve the small-N wall** (still 0.62-0.84× at N<=16K). The 50%-everywhere
+  target stays blocked by the small-N floor (launch + P4 barriers + now cast).
+- If the bf16 copy were produced upstream (cast excluded), small N would be ~neutral
+  (per the iter-4 nop4 decomposition ~1µs) and large N even better — but still not a
+  small-N win.
+
 ## Verdict
 - **P4 floor-bound** across snap/rs/rs_exact (all cluster ~same) → no in-structure P4
   algo change moves it materially.

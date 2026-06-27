@@ -50,6 +50,15 @@ _P4_FLAGS = {
     "nop4":        dict(enable_skip_p4_debug=True),
 }
 
+# opt-1 mixed-precision (exact): P1-P3 scan bf16/fp16, P4 reloads fp32. Maps
+# mode -> (scan_dtype, base_p4_flags). Caller passes fp32 logits; the op casts.
+_LP_MODES = {
+    "lp_bf16":      (torch.bfloat16, dict(enable_p4_rank_scatter=True, enable_p4_rank_scatter_exact=True)),
+    "lp_fp16":      (torch.float16,  dict(enable_p4_rank_scatter=True, enable_p4_rank_scatter_exact=True)),
+    "lp_bf16_snap": (torch.bfloat16, dict()),
+    "lp_fp16_snap": (torch.float16,  dict()),
+}
+
 
 def _default_config(bs, n):
     t = 1024 if (bs <= NUM_SMS and n >= 65536) else 512
@@ -67,21 +76,29 @@ def compile_lp(dtype, bs, n, K, cr_val, *, num_threads=None, p4_mode="rs_exact",
     t = num_threads if num_threads is not None else t_def
     use256 = use256_override if use256_override is not None else use256_def
     mbpm = min_bpm if min_bpm is not None else mbpm_def
-    flags = _P4_FLAGS[p4_mode]
+    if p4_mode in _LP_MODES:
+        scan_dt, flags = _LP_MODES[p4_mode]
+        flags = dict(flags, enable_lp_scan=True)
+        scan_cute_dt = _DT[scan_dt]
+    else:
+        flags = _P4_FLAGS[p4_mode]
+        scan_cute_dt = _DT[dtype]
     kobj = GvrTopKKernel(
-        dtype=_DT[dtype], top_k=K, next_n=1, num_threads=t, compress_ratio=cr_val,
+        dtype=scan_cute_dt, top_k=K, next_n=1, num_threads=t, compress_ratio=cr_val,
         use_256bit_load=use256, enable_unroll_4=True, enable_phase3_unroll=True,
         min_blocks_per_mp=mbpm, return_output_values=False, kc_accept=kc_accept, **flags,
     )
     n_rows, n_cols, n_batch = cute.sym_int(), cute.sym_int(), cute.sym_int()
     in_align = 32 if use256 else 16
-    input_fake = cr.make_fake_compact_tensor(_DT[dtype], (n_rows, n_cols), stride_order=(1, 0), assumed_align=in_align)
+    input_fake = cr.make_fake_compact_tensor(scan_cute_dt, (n_rows, n_cols), stride_order=(1, 0), assumed_align=in_align)
     pre_idx_fake = cr.make_fake_compact_tensor(cutlass.Int32, (n_batch, K), stride_order=(1, 0), assumed_align=16)
     seq_lens_fake = cr.make_fake_compact_tensor(cutlass.Int32, (n_batch,), stride_order=(0,))
     out_idx_fake = cr.make_fake_compact_tensor(cutlass.Int32, (n_rows, K), stride_order=(1, 0), assumed_align=16)
+    # orig fp32 tensor for the lp-scan P4 reload (== input for non-lp modes).
+    input_fp32_fake = cr.make_fake_compact_tensor(cutlass.Float32, (n_rows, n_cols), stride_order=(1, 0), assumed_align=16)
     fake_stream = cr.make_fake_stream(use_tvm_ffi_env_stream=True)
     compiled = cute.compile(kobj, input_fake, pre_idx_fake, seq_lens_fake, None, out_idx_fake,
-                            stream=fake_stream, options="--enable-tvm-ffi")
+                            input_fp32_fake, stream=fake_stream, options="--enable-tvm-ffi")
     _compiled[key] = compiled
     return compiled
 
@@ -111,7 +128,14 @@ def gvr_lp(logits, pre_idx, seq_lens, index_topk, compress_ratio=1, out=None,
                           use256_override=use256_override, kc_accept=kc_accept)
     if out is None:
         out = torch.empty(bs, index_topk, dtype=torch.int32, device="cuda")
-    compiled(logits, pre_idx, seq_lens, None, out)
+    if p4_mode in _LP_MODES:
+        # opt-1 mixed precision: input_data = bf16/fp16 scan copy, input_fp32 = orig.
+        assert logits.dtype == torch.float32, "lp modes take fp32 logits (cast internally)"
+        scan_dt = _LP_MODES[p4_mode][0]
+        scan = logits.to(scan_dt).contiguous()
+        compiled(scan, pre_idx, seq_lens, None, out, logits)
+    else:
+        compiled(logits, pre_idx, seq_lens, None, out, logits)
     return out
 
 

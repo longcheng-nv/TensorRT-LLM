@@ -42,6 +42,17 @@
   rs_exact/512 for N<131072, snap/1024 for N≥131072. Seqlen sweep (BS=1): wins large N
   1.2–1.9×, parity/slight-loss small N; median ≈1.05, big large-N gains over any single config.
 
+## Mixed-precision (opt-1 full) — IMPLEMENTED + validated (iter 5)
+- `enable_lp_scan`: P1-P3 scan bf16/fp16, Phase-3 reloads orig fp32 (new `input_fp32`
+  kernel arg) into smem_keys[fp32] → P4 exact. **EXACT confirmed** (valdiff=0 all N,
+  incl 262144; the monotonic-rounding superset + fp32 reload holds, no kC overflow).
+- Perf (cast INCLUDED in timing): **+15-23% over fp32 GVR at large N** (helps the
+  already-winning region; 262K vs SGLang 1.36→1.59); **neutral-to-worse at small N**
+  (cast pre-pass dominates the tiny traffic saving) → does NOT fix the small-N wall.
+- `lp_fp16` is the best single all-rounder (median vs SGLang 1.089) — fold into the
+  large-N dispatch arm. Small N still 0.62-0.84× → 50%-everywhere stays blocked.
+- Implementation cost: +1 kernel arg, 3 phase-3 write-site guards, ctor flag. Low risk.
+
 ## Floor caveat
 - SGLang at N=4K ≈ 12.7µs event-timed; event includes ~4µs CUDA-graph launch overhead
   (report nsys/event ≈ 0.88). Any kernel pays the same launch floor → "50% faster
