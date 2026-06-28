@@ -192,6 +192,43 @@ rs_exact/512 there (a loss). A/B:
 → Removed the `bs<=NUM_SMS` gate: large N (>=131072) now uses snap/1024 for ALL BS.
 Recovers ~0.2x at large-N high BS. dispatch exactness re-verified (valdiff=0, all N).
 
+## Iter 7 — small-N arm control-variable A/B (snap vs rs_exact, threads fixed 512)
+Validate the OTHER dispatch arm (iter6 did large-N). Isolate the P4-algorithm
+variable: hold num_threads=512, vary only p4_mode. small N, full BS. All exact.
+
+| K | N | BS | snap/512 | rs_exact/512 |
+|---|---|---|---|---|
+| 512 | 4096 | 1 | 0.60 | **0.69** |
+| 512 | 4096 | 256 | 0.68 | **0.81** |
+| 512 | 16384 | 1 | 0.54 | **0.67** |
+| 512 | 16384 | 64 | 0.61 | **0.81** |
+| 512 | 65536 | 64 | 0.95 | **1.07** |
+| 1024 | 8192 | 1 | 0.70 | **0.84** |
+| 1024 | 65536 | 1 | 0.86 | **1.08** |
+| **median** | | | 0.735 (0/10) | **0.849 (2/10)** |
+
+**Finding**: rs_exact ≥ snap in ALL 10 small-N cells → the existing small-N arm
+(rs_exact/512) is confirmed optimal; no change. NOT contradicting op#7's production
+"rs ≈0.92× (slower than snap)" verdict — that is a large-N + high-BS-dominated
+aggregate; in the small-N segment rs_exact is consistently better, and the dispatch
+splits by N so each arm takes its best.
+**No new improvement found**: rs_exact still 0.69× at N=4K — the launch + P4-barrier
+floor, exactly as the falsification history (≥18 single-CTA paths ruled out, Pareto
+endpoint) and op12's own small-N-wall proof predicted.
+
+### Alignment with the GVR falsification history (gvr_phase_timing/)
+Prior-session algorithm "insights" checked against the historical experiments:
+- Histogram-replace-P2-secant → P2 is algorithm-internal Pareto optimal (mean 2.13
+  iter, max 6, 100% converged; Q5e). GVR ≈2.5 full-N passes ≈ SGLang's 2. **P2 is
+  not a target; do not replace it** (per user + data).
+- Fuse-collect-into-scan → = **Opt-L**, already falsified: per-element coordination
+  (ballot+popc+shfl+atomicAdd) ≈ one full-N scan; no speedup even at FORCE_HAPPY.
+- rank-scatter P4 → = op#7, already shipped (and production ≈0.92×; the instrumented
+  "P4 win" was a clock64 artifact).
+- preIdx-as-seed → = P1 self-loop v1/v2/v3 (91k cells), net-negative (drift ~symmetric).
+- Lesson: single-CTA fp32 on sm_100 + real data is a Pareto endpoint; verify any
+  "insight" with a control-variable A/B before acting — most are already ruled out.
+
 ## Verdict
 - **P4 floor-bound** across snap/rs/rs_exact (all cluster ~same) → no in-structure P4
   algo change moves it materially.
