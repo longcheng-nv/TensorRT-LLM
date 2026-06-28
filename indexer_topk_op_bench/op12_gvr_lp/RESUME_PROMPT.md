@@ -36,7 +36,12 @@ GVR's secant→refine outline. CTA size may change (512/1024).
   `lp_fp16` best all-rounder, median vs SGLang 1.089); **neutral-to-worse at small N**
   (cast pre-pass dominates). Does NOT fix the small-N wall.
 - Best shippable today = `gvr_lp(..., p4_mode="dispatch")` (rs_exact/512 for N<131072,
-  snap/1024 for N≥131072). lp_fp16 should likely become the large-N arm.
+  snap/1024 for N≥131072, ALL BS).
+- **iter6 (DONE)**: lp_fp16 folding REJECTED — snap/1024 beats lp_fp16 8/8 large-N cells
+  (median 1.516 vs 1.316; iter5's gain was only vs rs_exact, not the real snap incumbent).
+  Also fixed a dispatch bug: removed the `bs<=NUM_SMS` gate on the snap arm so large-N
+  high-BS uses snap/1024 (was wrongly falling back to rs_exact/512, a loss). Code change
+  in `_dispatch_config`. Pending task 1 is now CLOSED.
 
 ### How to run (cwd = op12_gvr_lp/)
 - Exactness smoke:  `python op_lp.py --p4 lp_fp16`  (modes: rs_exact|snap|rs|fine_hist|
@@ -48,9 +53,8 @@ GVR's secant→refine outline. CTA size may change (512/1024).
   `--cells battleground` | `full` | "K,N,BS;...". Summary prints sglang/new median/mean/min/win/fails.
 
 ### Pending tasks (pick up here)
-1. **Fold lp_fp16 (or lp_fp16 + snap + 1024 threads) into the large-N dispatch arm**
-   and validate the combined op on the FULL BS grid (not just BS=1). `_dispatch_config`
-   is in op_lp.py.
+1. ~~Fold lp_fp16 into the large-N dispatch arm~~ **DONE/REJECTED (iter6)** — snap/1024
+   beats lp_fp16 8/8 large-N cells; instead fixed the dispatch BS-boundary bug.
 2. **Best-case (cast-free) measurement**: time lp with the bf16 copy pre-built OUTSIDE
    the timed region (add a `scan=` passthrough to `gvr_lp`), to cleanly isolate the cast
    cost and show the small-N≈neutral / large-N≈better upper bound.

@@ -106,13 +106,17 @@ def compile_lp(dtype, bs, n, K, cr_val, *, num_threads=None, p4_mode="rs_exact",
 def _dispatch_config(bs, n):
     """Best-achievable regime dispatch (B200, fp32, from the op12 A/B sweeps).
 
-    - Large N (>=131072) at low BS: snap P4 with 1024 threads (best long-context).
+    - Large N (>=131072): snap P4 with 1024 threads (best long-context) for ALL
+      BS. iter6 A/B: snap/1024 wins every large-N cell over lp_fp16/1024 (median
+      1.52 vs 1.32) AND, at BS>NUM_SMS, over the old rs_exact/512 fallback
+      (1.09-1.12x vs 0.85-0.95x). The earlier `bs<=NUM_SMS` gate was leaving
+      large-N high-BS perf on the table — removed.
     - Else: rank-scatter-exact P4 with 512 threads (best all-rounder).
     P4 is barrier-floor-bound, so the choice is dominated by P1-P3 parallelism +
     the P4 variant's fixed barrier count, both of which favor this split.
     Returns (p4_mode, num_threads).
     """
-    if bs <= NUM_SMS and n >= 131072:
+    if n >= 131072:
         return "snap", 1024
     return "rs_exact", 512
 

@@ -156,6 +156,42 @@ superset argument + fp32-reload gives exact top-K.
   (per the iter-4 nop4 decomposition ~1µs) and large N even better — but still not a
   small-N win.
 
+## Iter 6 — head-to-head: large-N dispatch arm (snap/1024 vs lp_fp16) + BS sweep
+Pending-task-1 was "fold lp_fp16 into the large-N arm". iter5 only compared lp_fp16
+vs **rs_exact** (never vs the actual incumbent `snap/1024`) and only at BS=1. This
+closes both gaps. All exact (fails=0), cold-L2, within-process.
+
+**Large-N BS sweep (sglang/new):**
+| K | N | BS | snap/1024 | lp_fp16/1024 | lp_fp16/512 |
+|---|---|---|---|---|---|
+| 512 | 131072 | 1 | **1.61** | 1.47 | 1.10 |
+| 512 | 131072 | 64 | **1.39** | 1.14 | 1.03 |
+| 512 | 131072 | 128 | **1.24** | 1.01 | 0.86 |
+| 512 | 131072 | 256 | **1.08** | 0.82 | 0.89 |
+| 512 | 262144 | 1 | **1.64** | 1.57 | 1.36 |
+| 512 | 262144 | 64 | **1.65** | 1.36 | 1.05 |
+| 1024 | 131072 | 1 | **1.42** | 1.27 | 1.10 |
+| 1024 | 262144 | 1 | **1.69** | 1.63 | 1.40 |
+| **median** | | | **1.516** | 1.316 | 1.073 |
+
+**Finding (decisive, NEGATIVE for task-1)**: `snap/1024` BEATS `lp_fp16` in **8/8**
+large-N cells. lp_fp16's gain in iter5 was only relative to rs_exact; snap was always
+the large-N arm and is cheaper still — lp_fp16 pays a full-N fp32→fp16 cast pre-pass
++ rank_scatter_exact fine-hist barriers, which at large N outweigh the half-width
+read saving. **lp_fp16 is NOT folded in; the existing dispatch default already wins.**
+
+**Dispatch-boundary fix (BS>NUM_SMS at large N):** snap/1024 still wins at BS=256/512,
+but the old `_dispatch_config` gated the snap arm on `bs<=NUM_SMS` → fell back to
+rs_exact/512 there (a loss). A/B:
+| K | N | BS | snap/1024 | rs_exact/512 (old fallback) | snap/512 |
+|---|---|---|---|---|---|
+| 512 | 131072 | 256 | **1.12** | 0.87 | 0.95 |
+| 512 | 131072 | 512 | **1.09** | 0.85 | 0.89 |
+| 512 | 262144 | 256 | **0.92** | 0.89 | 0.93 |
+| 1024 | 131072 | 256 | **1.11** | 0.95 | 0.89 |
+→ Removed the `bs<=NUM_SMS` gate: large N (>=131072) now uses snap/1024 for ALL BS.
+Recovers ~0.2x at large-N high BS. dispatch exactness re-verified (valdiff=0, all N).
+
 ## Verdict
 - **P4 floor-bound** across snap/rs/rs_exact (all cluster ~same) → no in-structure P4
   algo change moves it materially.
@@ -163,6 +199,9 @@ superset argument + fp32-reload gives exact top-K.
   SGLang → no traffic to cut without a pre-pass that cancels savings. Neutral.
 - **opt-2 (candidate reduction)**: rejected (above).
 - **50%-everywhere target is physically infeasible at small N** (floor proof).
+- **lp_fp16 folding REJECTED (iter6)**: snap/1024 beats lp_fp16 in 8/8 large-N cells.
+  The exact mixed-precision path stays available but is not on the dispatch frontier.
 - **Best achievable op = regime dispatch** (rs_exact/512 for N<131072, snap/1024 for
-  N≥131072) → wins large N decisively (1.2–1.9×), parity/slight-loss small N.
-  Set as the `gvr_lp` default (p4_mode="dispatch").
+  N≥131072, ALL BS) → wins large N decisively (1.1–1.9×), parity/slight-loss small N.
+  Set as the `gvr_lp` default (p4_mode="dispatch"). iter6 removed the `bs<=NUM_SMS`
+  gate on the snap arm (recovers large-N high-BS).

@@ -53,6 +53,20 @@
   large-N dispatch arm. Small N still 0.62-0.84× → 50%-everywhere stays blocked.
 - Implementation cost: +1 kernel arg, 3 phase-3 write-site guards, ctor flag. Low risk.
 
+## Iter 6 — lp_fp16 does NOT belong in the dispatch; boundary fixed
+- **snap/1024 beats lp_fp16 in 8/8 large-N cells** (median 1.516 vs 1.316). iter5's
+  "lp_fp16 best all-rounder" was only vs **rs_exact** — but snap was always the
+  large-N arm, and snap is cheaper than lp_fp16 (no fp32→fp16 cast pre-pass, no
+  rank_scatter_exact fine-hist recursion). → **task-1 (fold lp_fp16) REJECTED.**
+  lp_fp16 remains as an exact mode but is off the frontier.
+- **Dispatch boundary bug fixed**: the old `bs<=NUM_SMS` gate on the snap arm made
+  large-N high-BS fall back to rs_exact/512 (0.85–0.95×) where snap/1024 wins
+  (1.09–1.12×). Removed → large N (>=131072) uses snap/1024 for ALL BS. Net code
+  change this iter; dispatch re-verified exact (valdiff=0, all N incl 262144).
+- Methodological note: ALWAYS A/B a candidate arm against the **actual incumbent**,
+  not against a non-shipping config — iter5 measured lp_fp16 vs rs_exact and nearly
+  promoted a config that loses to the real default.
+
 ## Floor caveat
 - SGLang at N=4K ≈ 12.7µs event-timed; event includes ~4µs CUDA-graph launch overhead
   (report nsys/event ≈ 0.88). Any kernel pays the same launch floor → "50% faster
