@@ -83,8 +83,10 @@ def gvr_rs_base(logits, pre_idx, seq_lens, index_topk, compress_ratio=1, out=Non
     return out
 
 
-# Scratch cap = 16*K (per ALGORITHM_SPEC §7). Allocated once per (bs, K) and
-# reused across calls so the timing loop sees no per-call alloc overhead.
+# Scratch cap = 32*K. ALGORITHM_SPEC §7 suggested 16*K but the measured
+# survivor count c0 = #{v >= pmin} grows with N (≈11k for K512 at N=262144),
+# so 16*K=8192 overflows → fallback. 32*K keeps the fast path firing across the
+# large-N grid. Allocated once per (bs, K) and reused (no per-call alloc).
 _scratch = {}
 
 
@@ -92,7 +94,7 @@ def _get_scratch(bs, K):
     key = (bs, K)
     s = _scratch.get(key)
     if s is None:
-        cap = 16 * K
+        cap = 32 * K
         cval = torch.empty(bs, cap, dtype=torch.float32, device="cuda")
         cidx = torch.empty(bs, cap, dtype=torch.int32, device="cuda")
         _scratch[key] = (cval, cidx)

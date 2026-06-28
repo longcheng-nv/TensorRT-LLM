@@ -1026,6 +1026,29 @@ class GvrTopKKernel:
     # the kernel falls back to the baseline full-N P2/P3 path.
     # ==================================================================
     @cute.jit
+    def _warp_emit(self, qual, vj, oidx, cand_val, cand_idx, cap, s_slot, lane):
+        """Warp-aggregated compaction emit. All 32 lanes call this lock-step
+        with their own (qual, vj, oidx). Uses ONE smem atomic per warp per call
+        (vs one per survivor) to get a contiguous slot block, then each
+        qualifying lane writes at base + (rank among qualifying lanes below it).
+        Returns the running warp-survivor count contribution implicitly via the
+        atomic; caller accumulates `c` separately for the uncapped total."""
+        ballot = cutlass.Uint32(cute.arch.vote_ballot_sync(qual))
+        warp_cnt = cutlass.Int32(cute.arch.popc(ballot))
+        base = cutlass.Int32(0)
+        if lane == cutlass.Int32(0):
+            base = atomicAdd(s_slot.iterator, warp_cnt)
+        base = cute.arch.shuffle_sync(base, cutlass.Int32(0))
+        # rank = popcount of ballot bits strictly below my lane
+        lane_mask = (cutlass.Uint32(1) << cutlass.Uint32(lane)) - cutlass.Uint32(1)
+        rank = cutlass.Int32(cute.arch.popc(ballot & lane_mask))
+        if qual:
+            slot = base + rank
+            if slot < cap:
+                cand_val[slot] = vj
+                cand_idx[slot] = oidx
+
+    @cute.jit
     def fused_count_compact(
         self,
         input_row,       # cute.Tensor [N] dtype
@@ -1064,7 +1087,42 @@ class GvrTopKKernel:
         i = tidx * cutlass.Int32(vec_w)
         step = cutlass.Int32(step_elem)
 
-        # Vec loop (1-way; survivors are rare so atomic contention is light).
+        # Fast path: 4-way unrolled vec loop — matches block_count_ge so the
+        # full-N read in pass-1 keeps the same LDG ILP / throughput. The atomic
+        # slot bump only fires for the ~c0 (<<N) survivors so it does not gate
+        # the LDG pipeline for the common (non-qualifying) element.
+        if self.enable_unroll_4:
+            rng_frag = cute.make_fragment((vec_w,), self.dtype)
+            big_iters = cutlass.Int32(0)
+            if N > i + cutlass.Int32(vec_w - 1):
+                big_iters = (N - i - cutlass.Int32(vec_w)) // cutlass.Int32(
+                    step_elem
+                ) + cutlass.Int32(1)
+            for k in cutlass.range(big_iters, unroll=4):
+                i_local = i + k * cutlass.Int32(step_elem)
+                src_ptr_k = cute.make_ptr(
+                    self.dtype,
+                    row_addr + cutlass.Int64(i_local) * cutlass.Int64(elem_bytes),
+                    cute.AddressSpace.gmem,
+                    assumed_align=vec_align,
+                )
+                src_k = cute.make_tensor(src_ptr_k, cute.make_layout((vec_w,)))
+                cute.copy(copy_atom, src_k, rng_frag)
+                for j in cutlass.range_constexpr(vec_w):
+                    if cutlass.const_expr(self.dtype == cutlass.Float32):
+                        vj = rng_frag[j]
+                    else:
+                        vj = cutlass.Float32(rng_frag[j])
+                    qual = vj >= threshold
+                    if qual:
+                        c = c + cutlass.Int32(1)
+                    self._warp_emit(
+                        qual, vj, i_local + cutlass.Int32(j),
+                        cand_val, cand_idx, cap, s_slot, lane,
+                    )
+            i = i + big_iters * cutlass.Int32(step_elem)
+
+        # Tail vec loop (1-way) for the remainder < 2*step.
         frag = cute.make_fragment((vec_w,), self.dtype)
         while i + cutlass.Int32(vec_w - 1) < N:
             src_ptr = cute.make_ptr(
@@ -1080,25 +1138,32 @@ class GvrTopKKernel:
                     vj = frag[j]
                 else:
                     vj = cutlass.Float32(frag[j])
-                if vj >= threshold:
+                qual = vj >= threshold
+                if qual:
                     c = c + cutlass.Int32(1)
-                    slot = atomicAdd(s_slot.iterator, cutlass.Int32(1))
-                    if slot < cap:
-                        cand_val[slot] = vj
-                        cand_idx[slot] = i + cutlass.Int32(j)
+                self._warp_emit(
+                    qual, vj, i + cutlass.Int32(j),
+                    cand_val, cand_idx, cap, s_slot, lane,
+                )
             i = i + step
 
-        # Scalar tail (N % vec_w).
+        # Scalar tail (N % vec_w). Lanes that ran out of work pass qual=False so
+        # the warp-collective emit stays lock-step.
         it = n_aligned + tidx
-        while it < N:
-            v = self._load_fp32(input_row, it)
-            if v >= threshold:
-                c = c + cutlass.Int32(1)
-                slot = atomicAdd(s_slot.iterator, cutlass.Int32(1))
-                if slot < cap:
-                    cand_val[slot] = v
-                    cand_idx[slot] = it
+        more = it < N
+        while cute.arch.vote_any_sync(more):
+            vj = cutlass.Float32(self.NEG_FLT_MAX)
+            oidx = cutlass.Int32(0)
+            qual = False
+            if more:
+                vj = self._load_fp32(input_row, it)
+                qual = vj >= threshold
+                oidx = it
+                if qual:
+                    c = c + cutlass.Int32(1)
+            self._warp_emit(qual, vj, oidx, cand_val, cand_idx, cap, s_slot, lane)
             it = it + cutlass.Int32(num_threads)
+            more = it < N
 
         # Block reduce true (uncapped) count -> s_iscalars[0] = c0.
         wc = self.warp_reduce_sum_i32(c)

@@ -108,6 +108,32 @@ Cost model (from op13 phase_ab fractions): at N=262144, P2+P3 ≈ 80% of total.
 3N→~1N traffic ⇒ P2+P3 ≈ −60% ⇒ total ≈ −40% to −50%. **40% avg at large N is
 physically reachable**; small N (≤32K) stays ~neutral (launch + P4 floor).
 
+## 6b. POST-IMPLEMENTATION FALSIFICATION (B200, measured) — the premise is wrong
+
+The measured ceiling in §6 ("3 full-N HBM reads") was derived from a host replay
+that COUNTED logical passes, not HBM bytes. On real B200 hardware the logical
+re-reads never hit HBM:
+
+- **B200 L2 = 126.5 MB.** The fp32 input is `N*4` bytes = **0.25 / 0.5 / 1.0 MB**
+  at N = 65536 / 131072 / 262144 — fits in L2 by 100–500×.
+- **ncu `dram__bytes_read.sum` = 1.11 MB for BOTH baseline and 1pass** at
+  N=262144 (even with `--cache-control all` L2-flush between replay passes). That
+  is ONE input read. The P2-secant + P3-collect re-reads are L2 HITS, not HBM.
+- ⇒ **The baseline is ALREADY ≈1 HBM pass.** Candidate compaction saves zero HBM
+  traffic and only ADDS cost: a full-N pass-1 with a per-element warp-collective
+  emit, a global scratch write of c0 survivors, and scratch re-reads.
+- **nsys ×3 (cold-L2, K512 fp32): 1pass is +68% / +93% / +106% SLOWER** at
+  N=65536 / 131072 / 262144. The loss scales with N (extra streaming work), the
+  opposite of the predicted −40% saving.
+
+**Verdict: NO-SHIP for the DSv4 decode regime (N ≤ 262144).** The optimization
+could only win when the input EXCEEDS L2 (> 126 MB ⇒ N > ~33M fp32 elements),
+which never occurs here. The flag `enable_1pass_compaction` stays OFF by default.
+The fast path is left in place, value-exact (fp32 108/108; bf16 inherits the
+baseline's boundary-tie cases identically) with a correct K≤c0≤cap fallback, in
+case a future >L2 workload appears. The real GVR levers remain the P4 / launch
+floor (op12/op13), not HBM pass count.
+
 ## 7. Concrete kernel-level design (fast path + fallback)
 
 Add a **global scratch** `(cand_val[cap] fp32, cand_idx[cap] int32)`, `cap = 16*K`

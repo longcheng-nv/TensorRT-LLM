@@ -32,3 +32,28 @@ to report.html (get_bundle cfg=beta_moderate seed=42).
   s1) hit BOTH base AND 1pass identically (uniq=1013/1024) — a PRE-EXISTING bf16
   boundary-tie defect (27 elems tie at the K-th bf16 value), NOT a 1pass
   regression. 1pass stays value-equivalent to base on every cell.
+- PERF (nsys ×1, K512 fp32): 1pass LOSES +43%/+94%/+102% at N=65536/131072/262144.
+  Scales with N. Two issues found: (a) c0=#{v>=pmin} grows with N (9.2k/10.9k at
+  131k/262k) > cap=16*K=8192 → large N FELL BACK → wasted pass-1; (b) per-survivor
+  smem atomic + scattered global write.
+
+## Iter 2 — 4-way unroll in pass-1 ✅exact / ✗perf
+- Gave fused_count_compact the same 4-way unrolled LDG as block_count_ge. No
+  change: +43/+95/+103%. The regression is N-proportional, NOT survivor-bound.
+
+## Iter 3 — warp-aggregated emit + cap=32*K ✅exact / ✗perf (FALSIFIED)
+- _warp_emit: one warp atomic per (k,j) via vote_ballot+popc+shuffle instead of
+  per-survivor atomic; cap 16*K→32*K so large N fires the fast path (c0<cap).
+- Exactness: fp32 108/108, bf16 K512 54/54, bf16 K1024 52/54 (2 shared bf16-tie).
+- PERF (nsys ×3 median): +68.1% / +93.3% / +106.0% — WORSE at 65K. Stable.
+- ROOT-CAUSE / FALSIFICATION (ncu): the premise "baseline = 3 HBM passes" is
+  FALSE on B200. B200 L2 = 126.5 MB; the fp32 input at N=262144 is only 1.0 MB
+  → fits in L2 ~100×. ncu dram__bytes_read.sum = 1.11 MB for BOTH base and 1pass
+  (= ONE input read); base's P2/P3 re-reads are L2 HITS, not HBM. So baseline is
+  ALREADY ≈1 HBM pass. Compaction saves zero HBM traffic and only ADDS cost:
+  per-element warp-collective (ballot/popc/shuffle) over all N in pass-1 + a
+  global scratch write + scratch re-reads. Net = pure loss, scaling with N.
+- VERDICT: NO-SHIP at the tested N grid. The optimization can only win when the
+  input EXCEEDS L2 (>126 MB ⇒ N > ~33M fp32 elems), far outside the DSv4 decode
+  regime (N ≤ 262144). Flag stays OFF (default). fp32 exactness + fallback are
+  correct and retained for any future >L2 regime.
