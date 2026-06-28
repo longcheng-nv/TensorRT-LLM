@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<!-- Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>op14 — GVR ≈1-HBM-pass secant (radix compaction): result report</title>
+<style>
+body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#0f1419;color:#e6e6e6;line-height:1.5}
+.wrap{max-width:1180px;margin:0 auto;padding:24px 28px 80px}
+h1{color:#76b900;margin-bottom:4px}
+h2{color:#76b900;border-bottom:1px solid #2a3340;padding-bottom:6px;margin-top:40px}
+h3{color:#9ecb3a;margin-top:26px}
+.sub{color:#9aa7b4;font-size:14px;margin-top:0}
+.card{background:#161b22;border:1px solid #2a3340;border-radius:10px;padding:16px 20px;margin:16px 0}
+.verdict{border-left:5px solid #d9534f;background:#1d1517}
+.verdict.green{border-left-color:#76b900;background:#13190f}
+.verdict b{font-size:17px}
+table{border-collapse:collapse;width:100%;font-size:13px;margin:10px 0}
+th,td{border:1px solid #2a3340;padding:6px 10px;text-align:right}
+th{background:#1c2530;color:#9ecb3a}
+td:first-child,th:first-child{text-align:left}
+.loss{color:#e0736b;font-weight:bold}
+.win{color:#76b900;font-weight:bold}
+.tie{color:#9aa7b4}
+code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;background:#10151b;border:1px solid #2a3340;border-radius:6px}
+code{padding:1px 5px;font-size:12px}
+pre{padding:12px 14px;overflow-x:auto;font-size:12px;color:#cfe6a8}
+.kpi{display:inline-block;background:#1c2530;border-radius:8px;padding:10px 16px;margin:6px 8px 6px 0}
+.kpi b{color:#76b900;font-size:20px;display:block}
+.kpi span{font-size:12px;color:#9aa7b4}
+ul{margin:8px 0}
+li{margin:5px 0}
+.muted{color:#9aa7b4;font-size:13px}
+.tag{display:inline-block;font-size:11px;padding:2px 8px;border-radius:10px;background:#2a3340;color:#cfe6a8;margin-left:8px;vertical-align:middle}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>op14 — GVR ≈1-HBM-pass secant via radix-style candidate compaction</h1>
+<p class="sub">Base op: GVR cuteDSL <b>rank-scatter P4</b> (op#7) · B200 (sm_100) · data byte-identical to <code>report/report.html</code> (<code>get_bundle</code>, <code>beta_moderate</code>, seed 42) · nsys pure-kernel cold-L2, ×3-median · all numbers independently re-verified.</p>
+
+<div class="card verdict">
+<b>Verdict: FALSIFIED — NO-SHIP in the DSv4 decode regime (flag stays OFF, default = unchanged baseline).</b>
+<p style="margin:8px 0 0">The optimization targets HBM input-read passes, but on B200 the baseline already does <b>~1 HBM pass</b>: the decode-regime input (≤1.05 MB at N=262144) is <b>~126× smaller than L2 (132.6 MB)</b>, so the baseline's 2nd/3rd logical passes are served from cache, not HBM. The kernel is in fact <b>L1/TEX-throughput-bound on a single CTA</b> (DRAM utilization 0.25%). Candidate compaction therefore saves zero memory traffic and only <b>adds</b> per-element work + a scatter → it <b>loses +68% / +93% / +106%</b> at N=65536 / 131072 / 262144. The implementation is numerically exact; it is simply the wrong lever for this regime. The 40% target is physically unreachable here via this algorithm.</p>
+</div>
+
+<div>
+<span class="kpi"><b>+68 → +106%</b><span>1pass slowdown (N=65K→262K, K512 fp32)</span></span>
+<span class="kpi"><b>1.14 MB</b><span>baseline DRAM read @N=262144 (input=1.05 MB ⇒ 1 pass)</span></span>
+<span class="kpi"><b>0.25%</b><span>baseline DRAM throughput (ncu SOL) — not HBM-bound</span></span>
+<span class="kpi"><b>72/72</b><span>fp32 exactness (1pass ≡ torch.topk), independently re-run</span></span>
+</div>
+
+<h2>1. The algorithm under test</h2>
+<p>Inspired by SGLang's radix-histogram search narrowing. For a guessed threshold <code>t</code>, maintain a candidate buffer of size <code>C·K</code>:</p>
+<ul>
+<li><b>Undershoot</b> (<code>count(≥t) &lt; K</code>): the ≥t elements are confirmed top-K winners; lower the threshold by secant interpolation between <code>(t, count)</code> and <code>(min preIdx value, ·)</code>, and search only the residual region for the remaining <code>K−count</code>.</li>
+<li><b>Overshoot</b> (<code>N_cand = count(≥t) ≥ K</code>): if <code>N_cand &gt; C·K</code> run a full-N secant <code>count_ge</code> for a higher threshold; <b>converge</b> when <code>K ≤ N_cand ≤ C·K</code> → copy the candidate buffer to shared memory and do an exact size-<code>N_cand</code> top-K refine.</li>
+</ul>
+<p>Goal: drive total HBM element scans toward <b>≈ 1</b>.</p>
+
+<h3>Mapping to GVR's existing phases</h3>
+<table>
+<tr><th>Proposed step</th><th style="text-align:left">GVR today</th></tr>
+<tr><td>converge ≤ C·K → copy to smem → refine</td><td style="text-align:left">P3 collect + P4 rank-scatter, with <code>kCC = C·K</code> (op13 already made kCC tunable)</td></tr>
+<tr><td>secant pick next threshold</td><td style="text-align:left">P2 <code>phase2_secant_search</code> (identical secant)</td></tr>
+<tr><td>full-N <code>count_ge</code> when N_cand &gt; C·K</td><td style="text-align:left"><code>block_count_ge</code> (full-N streaming counter)</td></tr>
+<tr><td>preIdx-min endpoint, preIdx init</td><td style="text-align:left">P1 <code>phase1_preidx_stats</code></td></tr>
+</table>
+<p class="muted">Genuinely new vs current GVR: <b>(N1)</b> cross-iteration candidate buffering — compact survivors to a global scratch on pass 1 so later evals + P3 read the shrunken set; <b>(N2)</b> the undershoot fast-exit. The "refine in smem" and the secant are already GVR.</p>
+
+<h2>2. Hypothesis &amp; pre-registered ceiling</h2>
+<p>Host-replay on the report data showed the baseline does <b>3 logical full-N reads</b> at large N (2 P2 secant evals + 1 P3 collect), with a final candidate count of only ≈4.3–4.6×K. Using op13's phase fractions (P2+P3 ≈ 80% of time at N=262144), reducing 3 passes → ~1 <em>appeared</em> to offer ~40–50%. <b>This estimate was wrong</b> — it assumed pass-count equals HBM traffic. It does not (see §4).</p>
+
+<h2>3. Result — nsys pure-kernel cold-L2 A/B (×3-median, K512 fp32)</h2>
+<p class="muted">1pass = the shipped fast path (cap=32·K, warp-aggregated emit); base = rank-scatter op#7. Independently re-parsed from the agent's three nsys batches.</p>
+<table>
+<tr><th>N</th><th>base µs</th><th>1pass µs</th><th>Δ µs</th><th>Δ %</th><th>verdict</th></tr>
+<tr><td>65536</td><td>18.31</td><td>30.78</td><td>+12.47</td><td class="loss">+68.1%</td><td class="loss">loss</td></tr>
+<tr><td>131072</td><td>24.97</td><td>48.28</td><td>+23.30</td><td class="loss">+93.3%</td><td class="loss">loss</td></tr>
+<tr><td>262144</td><td>37.38</td><td>77.01</td><td>+39.63</td><td class="loss">+106.0%</td><td class="loss">loss</td></tr>
+</table>
+<p>The slowdown <b>scales with N</b> — the signature of an extra per-element pass cost, not a fixed overhead. bf16 and K1024 behave the same (the agent's iter log); no configuration wins, so no <code>seq_len×BS</code> regression-free region exists for this lever.</p>
+
+<h2>4. Root cause — independently confirmed with ncu</h2>
+<p>The premise "baseline = 3 HBM passes" is false on B200. Measured on the baseline GVR kernel at N=262144 fp32 (<code>ncu</code>, single gated launch):</p>
+<table>
+<tr><th style="text-align:left">ncu metric (baseline GVR kernel, N=262144 fp32)</th><th>value</th><th style="text-align:left">reading</th></tr>
+<tr><td><code>dram__bytes_read.sum</code></td><td>1.14 MB</td><td style="text-align:left">input is 1.05 MB ⇒ <b>~1 DRAM read of the input</b></td></tr>
+<tr><td>DRAM Throughput (SOL)</td><td>0.25%</td><td style="text-align:left">not remotely HBM-bound</td></tr>
+<tr><td>L2 Cache Throughput</td><td>0.40%</td><td style="text-align:left">not L2-bound</td></tr>
+<tr><td>Compute (SM) Throughput</td><td>0.35%</td><td style="text-align:left">not compute-bound</td></tr>
+<tr><td><b>L1/TEX Cache Throughput</b></td><td><b>61.5%</b></td><td style="text-align:left"><b>the actual limiter</b></td></tr>
+<tr><td>CTAs launched (BS=1)</td><td>1 / 148 SM</td><td style="text-align:left">occupancy-starved single CTA</td></tr>
+</table>
+<p>Physical picture for the DSv4 decode regime (N ≤ 262144 ⇒ input ≤ 1.05 MB ≪ L2 = 132.6 MB):</p>
+<ul>
+<li>After pass 1 loads the tiny input, it is fully <b>cache-resident</b>. The baseline's later P2/P3 passes are <b>L1/L2 hits</b>, costing ~0 HBM traffic. The baseline already <b>exceeds</b> the "≈1 HBM pass" goal.</li>
+<li>The kernel is <b>L1/TEX-throughput-bound on one SM</b> (BS=1 → 1/148 SMs). Cost is the serial per-element work over N on a single CTA.</li>
+<li>Compaction replaces cheap count-passes with a pass-1 that does <b>more</b> L1 work per element (warp ballot/popc/shuffle) <b>plus</b> a global scatter write and scratch re-reads → strictly more L1/TEX traffic → net loss that grows with N.</li>
+</ul>
+<div class="card">
+<b>Lesson (recorded as a learning):</b> before optimizing input-pass <em>count</em>, verify it is actually HBM traffic with <code>ncu dram__bytes_read.sum</code>. When the working set fits L2, "fewer passes" is a no-op (or worse) — the baseline already gets cache reuse. op13/op12 had flagged "reduce P2 passes" as the big unexploited lever; this measurement shows that lever is only real when the input exceeds L2.
+</div>
+
+<h2>5. Exactness (the implementation is correct)</h2>
+<ul>
+<li><b>fp32: 72/72</b> cells value-equivalent to <code>torch.topk</code> (K∈{512,1024} × N∈{131072,262144} × 3 cfgs × 3 seeds) — independently re-run here.</li>
+<li>Agent's wider grid: 214/216 strict pass. The 2 fails (K1024 bf16, N262144, beta_shallow) are a <b>pre-existing bf16 boundary-tie defect</b> that hits the baseline identically (27 elements tie at the K-th bf16 value) — <b>not</b> a 1pass regression; 1pass is value-equivalent to base on every cell.</li>
+<li>Fast-path exactness gate <code>K ≤ c0 ≤ cap</code> with fallback to the baseline path on undershoot/overflow — correct for any distribution.</li>
+<li>Default flag is OFF ⇒ the production/baseline path is byte-identical and <b>cannot regress</b>.</li>
+</ul>
+
+<h2>6. When this algorithm <em>would</em> win</h2>
+<p>Only when the input exceeds L2 so that multiple passes each hit DRAM: <b>N &gt; ~33M fp32 elements</b> (&gt;126 MB), far outside the DSv4 sparse-attention decode regime (N ≤ 262144). The exact fp32 fast path + fallback are retained in the code for any such future &gt;L2 regime, behind the OFF-by-default flag.</p>
+
+<h2>7. Reproduce</h2>
+<pre>cd indexer_topk_op_bench/op14_gvr_1pass_secant
+# exactness (fp32, independently re-run): 72/72
+python3 scripts/ab.py --exact --K 512  --dt fp32 --ns 131072,262144 --seeds 0,1,2
+python3 scripts/ab.py --exact --K 1024 --dt fp32 --ns 131072,262144 --seeds 0,1,2
+# nsys A/B (×3 median): 1pass +68/+93/+106%
+python3 scripts/ab.py --parse-multi results/nsys/iter3b_K512_fp32_r{1,2,3}.nsys-rep
+# ncu root cause: baseline DRAM read ≈ 1 input pass; L1/TEX-bound single CTA
+ncu --profile-from-start off --section SpeedOfLight python3 &lt;single-launch runner&gt;</pre>
+<p class="muted">Design + full analysis: <code>ALGORITHM_SPEC.md</code>. Iteration log: <code>ITERATIONS.md</code> (iter 0 scaffold → iter 3 falsification). Knowledge base: <code>LEARNINGS.md</code>.</p>
+
+</div>
+</body>
+</html>

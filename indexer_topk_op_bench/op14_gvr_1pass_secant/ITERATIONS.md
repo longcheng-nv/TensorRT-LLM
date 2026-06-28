@@ -57,3 +57,13 @@ to report.html (get_bundle cfg=beta_moderate seed=42).
   input EXCEEDS L2 (>126 MB ⇒ N > ~33M fp32 elems), far outside the DSv4 decode
   regime (N ≤ 262144). Flag stays OFF (default). fp32 exactness + fallback are
   correct and retained for any future >L2 regime.
+
+## Independent verification (orchestrator, post-agent)
+- Re-parsed agent's iter3b ×3 nsys: 1pass +68.1/+93.3/+106.0% (65K/131K/262K) — CONFIRMED.
+- Independent ncu on baseline GVR kernel @N=262144 fp32 (gated single launch):
+  dram__bytes_read.sum = 1.14 MB (input 1.05 MB ⇒ ~1 DRAM pass); SOL: DRAM 0.25%,
+  L2 0.40%, Compute 0.35%, L1/TEX 61.5% (single CTA, 1/148 SM). CONFIRMS the
+  falsification: baseline already ~1 HBM pass + L1-bound; compaction saves 0 HBM,
+  adds L1 work → loss. Hard physical floor for this lever in the decode regime.
+- Independent fp32 exactness: 72/72 (K512/1024 × N131072/262144 × 3 cfgs × 3 seeds).
+- Deliverable: REPORT.html (CSS-only, 0 script tags). Flag stays OFF (no regression).
