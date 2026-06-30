@@ -42,3 +42,30 @@ envelope. No perf measured yet.
 Iter 2: nsys cold-L2 A/B vs baseline rank-scatter on the small-N grid
 (N∈{4096,8192,16384,32768}, K{512,1024}, dt{fp32,bf16,fp16}, cr=4, seed=42),
 pure-kernel time. Expectation per op8: kernel-time ≈ base.
+
+## Iter 2 — 2026-06-30 — nsys cold-L2 A/B (scalar staging load)
+
+**Strategy:** measure SMEM-resident vs baseline rank-scatter, nsys pure-kernel,
+small-N grid (N∈{4096..65536}, K{512,1024,2048}, dt{fp32,bf16,fp16}, cr, BS=1,
+seed=42, 20 cold / 50 warm, identical report methodology).
+
+### Results (cold-L2, ratio = smem/baseline; <1 ⇒ smem faster)
+| regime | median ratio | smem faster |
+|--------|-------------|-------------|
+| resident cells (39) | **1.110 (≈ +11% SLOWER)** | 8/39 |
+| fallback cells (N=65536 fp32, 3) | 0.997 (≈ base, identical kernel) | 2/3 |
+
+- Tiny win ONLY at the very smallest N=4096 (fp32 K512 0.943×, K1024 0.976×);
+  by N≥16384 clearly slower; worst at K=2048 (up to 1.50× at N=32768).
+- **warm-L2 (data hot in L2) is ALSO slower** (e.g. fp32 K2048 N32768: base 13.89
+  vs smem 16.23 = 1.17×) → not a cold-HBM effect; the SMEM-read P1-P3 path + staging
+  is structurally slower than L2-cached vectorized gmem reads.
+
+### Bottleneck / analysis
+The logits are already L2-resident at small N, so baseline's P2/P3 re-reads are cheap
+L2 hits (warm≈cold-20%). Replacing them with a one-time staging load + ld.shared adds
+a full gmem pass + barrier + (here) a SCALAR staging copy, with no traffic saved.
+
+### Next action
+Iter 3: vectorize the staging load (give the idea its best shot) and re-measure. If
+warm-L2 still regresses, the falsification is airtight (impl-independent).
