@@ -69,3 +69,32 @@ a full gmem pass + barrier + (here) a SCALAR staging copy, with no traffic saved
 ### Next action
 Iter 3: vectorize the staging load (give the idea its best shot) and re-measure. If
 warm-L2 still regresses, the falsification is airtight (impl-independent).
+
+## Iter 3 — 2026-06-30 — vectorized staging load (best-effort) + final A/B
+
+**Strategy:** replaced the scalar staging copy with a vectorized one (`_stage_row_to_smem`:
+same 128/256-bit LDG copy_atom as block_count_ge, gmem→fragment→smem). Gives the idea
+its fairest implementation. Re-ran the identical nsys cold-L2 A/B (results/ab3).
+
+### Results (cold-L2, ratio = smem/baseline; <1 ⇒ smem faster)
+| metric | iter2 (scalar stage) | iter3 (vec stage) |
+|--------|---------------------|-------------------|
+| cold resident median | 1.110 (+11%) | **1.021 (+2%)** |
+| warm resident median | (slower) | **1.028 (+3%)** |
+| cold smem-faster cells | 8/39 | 11/39 |
+
+- Vectorizing staging removed most of the cold penalty ⇒ the iter2 +11% was the scalar
+  staging pass, not the smem reads. But **net still slower**, and **warm-L2 (hot data)
+  is also slower (+3%)** — the decisive, implementation-independent evidence.
+- Wins only at N=4096 (~3-4%) + a few bf16/fp16 N=16384; losses at N≥32768 and all K=2048.
+- Fallback cells (N=65536 fp32, smem disabled) = 1.003× ≈ base (sanity: identical kernel).
+
+### FINAL VERDICT (physical floor reached → converge)
+SMEM-resident GVR is **NOT a win on B300**. Best-effort (vectorized staging) nets
++2% cold / +3% warm across the small-N envelope. Confirms & refines the op8_gvr_turbo
+B200 result ("≈base"): with a clean dedicated single-CTA impl it's ≈base-to-slightly-
+slower, never a robust win. ROOT CAUSE (airtight via warm-L2): at small N the logits
+are already L2-resident, so baseline's ~2.5 passes are cheap L2 hits — staging to SMEM
+saves no real traffic while adding a staging pass + barrier and does not touch the
+structural single-CTA ~24% occupancy that actually bounds small-N BS=1. Memory traffic
+is not the small-N bottleneck. No ship.

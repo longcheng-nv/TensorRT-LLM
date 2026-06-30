@@ -320,6 +320,40 @@ class GvrTopKKernel:
             return cute.AddressSpace.smem
         return cute.AddressSpace.gmem
 
+    @cute.jit
+    def _stage_row_to_smem(self, input_row, smem_logits, N, tidx):
+        """Vectorized one-time copy input_row(gmem) -> smem_logits(smem).
+        Same vec_w/copy_atom as block_count_ge so the gmem read is a single
+        128/256-bit LDG per chunk (iter3: replaces the scalar staging copy)."""
+        num_threads = cutlass.const_expr(self.num_threads)
+        vec_w = cutlass.const_expr(self.vec_bits // self.dtype.width)
+        elem_bytes = cutlass.const_expr(self.dtype.width // 8)
+        vec_align = cutlass.const_expr(self.vec_align_bytes)
+        copy_atom = self._make_load_copy_atom()
+        step_elem = cutlass.const_expr(num_threads * vec_w)
+        row_addr = input_row.iterator.toint()
+        frag = cute.make_fragment((vec_w,), self.dtype)
+        i = tidx * cutlass.Int32(vec_w)
+        while i + cutlass.Int32(vec_w - 1) < N:
+            src_ptr = cute.make_ptr(
+                self.dtype,
+                row_addr + cutlass.Int64(i) * cutlass.Int64(elem_bytes),
+                cute.AddressSpace.gmem,
+                assumed_align=vec_align,
+            )
+            src = cute.make_tensor(src_ptr, cute.make_layout((vec_w,)))
+            cute.copy(copy_atom, src, frag)
+            for j in cutlass.range_constexpr(vec_w):
+                smem_logits[i + cutlass.Int32(j)] = frag[j]
+            i = i + cutlass.Int32(step_elem)
+        # scalar tail for the N-mod-(num_threads*vec_w) remainder
+        n_aligned = (N // cutlass.Int32(vec_w)) * cutlass.Int32(vec_w)
+        it = n_aligned + tidx
+        while it < N:
+            smem_logits[it] = input_row[it]
+            it = it + cutlass.Int32(num_threads)
+        cute.arch.barrier()
+
     # ------------------------------------------------------------------
     # Warp-level reductions
     #
@@ -2042,11 +2076,7 @@ class GvrTopKKernel:
             # run P1/P2/P3 from smem. P4 already operates on smem candidates.
             # =================================================================
             if cutlass.const_expr(self.enable_smem_resident):
-                jd = tidx
-                while jd < N:
-                    smem_logits[jd] = input_row[jd]
-                    jd = jd + cutlass.Int32(num_threads)
-                cute.arch.barrier()
+                self._stage_row_to_smem(input_row, smem_logits, N, tidx)
                 logits_src = smem_logits
             else:
                 logits_src = input_row
