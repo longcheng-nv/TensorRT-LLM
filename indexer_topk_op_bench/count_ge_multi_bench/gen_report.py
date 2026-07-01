@@ -181,6 +181,10 @@ table.data td.best{color:#12683a}
 .key{border-left-color:#e0a800;background:#fffdf5}
 .rec{border-left-color:#12683a;background:#f2fbf5}
 code{background:#eef2f9;padding:1px 6px;border-radius:5px;font-size:12.5px;color:#2b3f7a}
+pre{background:#0f1b33;color:#dce6f7;border-radius:9px;padding:13px 15px;overflow-x:auto;
+ font-size:12.5px;line-height:1.5;font-family:'SF Mono',ui-monospace,Menlo,Consolas,monospace;margin:.5em 0}
+pre .c{color:#7f93b8}pre .k{color:#8fd0ff}pre .m{color:#ffcf6b}
+ol{margin:.3em 0 .3em 1.3em;padding:0}ol li{margin:.35em 0}
 details{margin:.4em 0}summary{cursor:pointer;font-weight:600;color:#2b3f7a;padding:4px 0}
 ul{margin:.3em 0 .3em 1.1em;padding:0}li{margin:.25em 0}
 .legend{font-size:11.5px;color:#5a6577}.sw{display:inline-block;width:11px;height:11px;border-radius:2px;vertical-align:middle;margin:0 3px 0 8px}
@@ -240,8 +244,69 @@ add(f"<div class='note'>{bi(
  '<b>计时</b> — nsys cold-L2:每次 launch 前 512 MB 清 L2(对齐 report 的 <code>_EVICT</code>);取 60 次 launch 的 <code>cuda_gpu_kern_sum</code> <b>Med</b>(col5),再取 <b>3 次复现的中位数</b>(避免 Avg 被冷启动抖动抬高)。BS=1(report 的 N-sweep regime)。Tuning 对齐生产:<code>T=1024 if N≥65536 else 512</code>;fp32 在 N≥16384 用 256-bit 向量。')}</div>")
 add("</details></div>")
 
+# ---- §2 current block_count_ge compute logic (M=1) ----
+add(f"<h2><span class='num'>2</span>{bi('Current <code>block_count_ge</code> compute logic (M=1)','当前 <code>block_count_ge</code> 计算逻辑(M=1)')}</h2>")
+add("<div class='card'>")
+add(f"<div class='note'>{bi(
+ 'The production <code>block_count_ge</code> counts <code>input[i] &gt;= threshold</code> over this CTA&#39;s row slice for ONE threshold, and is what Phase-2 (secant) and Phase-3 call repeatedly. It is a memory-bandwidth-bound streaming reduction, near-optimal for a single threshold:',
+ '生产版 <code>block_count_ge</code> 针对<b>单个</b>阈值,统计本 CTA 行切片内 <code>input[i] &gt;= threshold</code> 的数量,是 Phase-2(secant)与 Phase-3 反复调用的原语。它是 memory-bandwidth-bound 的流式归约,对单阈值已近乎最优:')}</div>")
+add("<ol>"
+    f"<li>{bi('Each thread streams its strided slice with 128/256-bit vectorized loads (<code>vec_w = vec_bits/dtype.width</code>), <b>4-way LLVM-unrolled</b> so ~4 <code>LDG</code> stay in flight (LSU ILP).','每线程以 128/256-bit 向量化 load 扫描其跨步切片(<code>vec_w = vec_bits/dtype.width</code>),<b>4-way LLVM 展开</b>,~4 条 <code>LDG</code> 同时在飞(LSU ILP)。')}</li>"
+    f"<li>{bi('Per element a single <b>predicated</b> increment <code>c += (v &gt;= thr)</code> — no branch divergence.','每元素一次<b>谓词化</b>自增 <code>c += (v &gt;= thr)</code> —— 无分支发散。')}</li>"
+    f"<li>{bi('Scalar tail loop for the &lt;vec_w remainder; then <code>smem_ptcnt[tid]=c</code> caches the per-thread count for Phase-3 prefix-sum reuse.','标量尾循环处理 &lt;vec_w 余数;随后 <code>smem_ptcnt[tid]=c</code> 缓存每线程计数供 Phase-3 前缀和复用。')}</li>"
+    f"<li>{bi('Warp-shuffle sum → <code>smem_wcnt[warp]</code> → block reduce (warp-parallel in warp 0, or serial tid0) → <code>s_iscalars[0] = cand_count</code>.','Warp-shuffle 求和 → <code>smem_wcnt[warp]</code> → block 归约(warp 0 并行或 tid0 串行)→ <code>s_iscalars[0] = cand_count</code>。')}</li>"
+    f"<li>{bi('At <code>cluster_size&gt;1</code>: DSMEM <code>mapa.shared::cluster</code> all-reduce across peer CTAs (no GMEM atomics). An optional SMEM-slice cache lets the snap loop re-scan from SMEM instead of GMEM.','<code>cluster_size&gt;1</code> 时:通过 DSMEM <code>mapa.shared::cluster</code> 跨 peer CTA all-reduce(无 GMEM 原子)。可选的 SMEM-slice 缓存让 snap 循环从 SMEM 而非 GMEM 重扫。')}</li>"
+    "</ol>")
+add("<pre><span class='c'># current block_count_ge — ONE threshold</span>\n"
+    "c = 0\n"
+    "<span class='k'>for</span> each vec_w chunk (4-way unrolled):   <span class='c'># 128/256-bit vec load</span>\n"
+    "    <span class='k'>for</span> j <span class='k'>in</span> vec_w: c += (v[j] &gt;= thr)      <span class='c'># 1 predicated add</span>\n"
+    "scalar-tail; smem_ptcnt[tid] = c            <span class='c'># P3 reuse cache</span>\n"
+    "c = warp_reduce_sum(c); smem_wcnt[warp] = c\n"
+    "block_reduce -> s_iscalars[0] = count(v &gt;= thr)   <span class='c'># +DSMEM all-reduce if cluster</span></pre>")
+add("</div>")
+
+# ---- §3 best multi-threshold implementation + shortcomings ----
+add(f"<h2><span class='num'>3</span>{bi('Multi-threshold: best implementation &amp; current gaps','多阈值:最佳实现思路与当前不足')}</h2>")
+add("<div class='card'>")
+add(f"<div class='note'>{bi(
+ 'To evaluate M thresholds in ONE scan, keep the identical vectorized/unrolled <b>memory path</b> (the row is read once) and add M cheap compares. Best shape: M sorted thresholds + M counters in registers, M unrolled predicated adds per element, an M-wide reduce.',
+ '要在一次 scan 内评估 M 个阈值,保持完全相同的向量化/展开<b>内存路径</b>(行只读一次),只增加 M 次廉价比较。最佳形态:M 个有序阈值 + M 个计数器放寄存器,每元素 M 路展开谓词加,末尾 M 宽归约。')}</div>")
+add("<pre><span class='c'># block_count_ge_multi&lt;M&gt; — M compile-time constant</span>\n"
+    "<span class='m'>float</span> thr[M]; <span class='m'>int</span> c[M] = {0}\n"
+    "<span class='k'>for</span> each vec_w chunk (4-way unrolled):     <span class='c'># SAME memory path as M=1</span>\n"
+    "    <span class='k'>for</span> j <span class='k'>in</span> vec_w:\n"
+    "        <span class='k'>for</span> m <span class='k'>in</span> M: c[m] += (v[j] &gt;= thr[m])  <span class='c'># M static predicated adds</span>\n"
+    "M warp_reduce_sum; smem_wcnt[num_warps*M]; <span class='c'>1 barrier</span>; block-reduce M columns</pre>")
+add(f"<h3>{bi('Design choices','设计要点')}</h3>")
+add("<ol>"
+    f"<li>{bi('<b>M static register counters, NOT a difference-array.</b> The “one increment per element” trick (compute <code>k = #(v&gt;=thr_m)</code>, then <code>d[k]++</code>, suffix-sum at the end) needs a <b>dynamically-indexed</b> register array → spills to local memory on GPU. M unrolled predicated adds (M FSETP + M IADD) are branch-free, spill-free, and cheaper for M≤8.',
+ '<b>用 M 个静态寄存器计数器,而非 difference-array。</b>「每元素只加一次」的技巧(算 <code>k = #(v&gt;=thr_m)</code> 再 <code>d[k]++</code>,末尾后缀和)需要<b>动态下标</b>寄存器数组 → GPU 上 spill 到 local memory。M 路展开谓词加(M FSETP + M IADD)无分支、无 spill,M≤8 时更省。')}</li>"
+    f"<li>{bi('<b>Sorted thresholds ⇒ M-ary search.</b> Evaluating M points/scan splits the bracket (M+1)-ways → ~log_(M+1) rounds vs log_2 for M=1. This is a continuum: <b>M=1 = secant</b>, <b>M→kNumBins = the Phase-4 histogram</b>.',
+ '<b>阈值有序 ⇒ M-ary 搜索。</b>一次 scan 评估 M 个点,把区间分成 (M+1) 份 → 约 log_(M+1) 轮(M=1 为 log_2)。这是一个连续谱:<b>M=1=secant</b>,<b>M→kNumBins=Phase-4 直方图</b>。')}</li>"
+    f"<li>{bi('<b>Reduction layout:</b> stage <code>smem_wcnt[num_warps*M]</code> and reduce M columns in warp 0 with a SINGLE barrier — do not do M serial block-reduces.',
+ '<b>归约布局:</b>用 <code>smem_wcnt[num_warps*M]</code> 暂存,在 warp 0 用<b>一个</b> barrier 归约 M 列 —— 不要做 M 次串行 block-reduce。')}</li>"
+    f"<li>{bi('<b>P3 cache:</b> don’t cache all M per-thread counts (M× SMEM). After the M-ary round picks one sub-bracket, recompute a single M=1 <code>block_count_ge</code> at the chosen threshold for the Phase-3 collect (1 extra scan, keeps SMEM flat).',
+ '<b>P3 缓存:</b>不要缓存全部 M 份每线程计数(M× SMEM)。M-ary 一轮定出子区间后,在选定阈值上补跑一次 M=1 <code>block_count_ge</code> 供 Phase-3 collect(多 1 次 scan,SMEM 不膨胀)。')}</li>"
+    "</ol>")
+add(f"<div class='note key'><b>{bi('Current gaps / shortcomings','当前不足')}</b><ol>"
+    f"<li>{bi('<b>Not yet wired into the real kernel</b> — this is a standalone micro-bench; the actual Phase-2 secant still evaluates one threshold/scan. The net-benefit below is a MODEL; the end-to-end P2-refine A/B has not been run.',
+ '<b>尚未接入真实 kernel</b> —— 这是独立微基准;真实 Phase-2 secant 仍每次 scan 一个阈值。下文净收益是<b>模型</b>,端到端 P2 细化 A/B 未跑。')}</li>"
+    f"<li>{bi('<b>M=1 baseline is modeled as bisection</b> (log_2); GVR’s real M=1 is a preIdx-seeded <b>superlinear secant</b>, so the modeled gain of M-ary over the <i>actual</i> secant is optimistic — must be confirmed by a real A/B.',
+ '<b>M=1 基线按 bisection 建模</b>(log_2);GVR 实际 M=1 是 preIdx 播种的<b>超线性 secant</b>,故 M-ary 相对<i>真实</i> secant 的收益偏乐观 —— 需真实 A/B 确认。')}</li>"
+    f"<li>{bi('<b>BS=1 only</b> (matches the report’s N-sweep). The throughput regime (large BS, GPU-saturated) is not measured; M-scaling there may become compute-bound sooner.',
+ '<b>仅 BS=1</b>(对齐 report 的 N-sweep)。吞吐 regime(大 BS、GPU 打满)未测;那里 M-scaling 可能更早变 compute-bound。')}</li>"
+    f"<li>{bi('<b>Register/occupancy at M=6/8 not validated in-kernel.</b> The isolated micro-bench lacks GVR’s ~40–70-reg pressure; adding M counters+thresholds inside the full kernel could cross an occupancy tier (esp. fp32 <code>min_blocks_per_mp=2</code>) and change the curve.',
+ '<b>M=6/8 的寄存器/occupancy 未在完整 kernel 内验证。</b>独立微基准没有 GVR ~40–70 寄存器压力;在完整 kernel 里加 M 计数器+阈值可能跨过 occupancy 档位(尤其 fp32 <code>min_blocks_per_mp=2</code>),改变曲线。')}</li>"
+    f"<li>{bi('<b>fp16/bf16 compare goes through an fp32 cvt</b> (threshold is fp32); a native-precision compare could shave a cvt — unmeasured.',
+ '<b>fp16/bf16 比较经过一次 fp32 cvt</b>(阈值是 fp32);原生精度比较可省一次 cvt —— 未测。')}</li>"
+    f"<li>{bi('<b><code>smem_ptcnt</code> is written every call</b> (existing TODO) — a wasted STS when P3 reuse isn’t needed, and it multiplies by M in a naive multi-threshold version unless guarded.',
+ '<b><code>smem_ptcnt</code> 每次调用都写</b>(已有 TODO)—— 不需要 P3 复用时是浪费的 STS,且朴素多阈值版本若不加保护会乘以 M。')}</li>"
+    "</ol></div>")
+add("</div>")
+
 # results per dtype
-sec = 2
+sec = 4
 for dt in DTS:
     add(f"<h2><span class='num'>{sec}</span>{bi(dt.upper()+' results','结果 '+dt.upper())}</h2>"); sec += 1
     add("<div class='card'>")
