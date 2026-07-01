@@ -203,3 +203,31 @@ Expected: iter2b projection (~1.11-1.26× K512 small/mid N) MINUS the ~2µs 2-ke
 net-positive mainly at mid N (16K-32K where P4 saving > gap); very small N may be gap-limited.
 Cluster fusion (M-way in cooperative cluster scan, ONE kernel, no gap) = iter6 if iter5 shows
 the gap is the limiter.
+
+## Iter 5 result — 2-kernel multi-CTA: EXACT but net-negative (0.63-0.84×)
+
+Fixed (band=[pmin,pmax] since count(pmin)≥K⟺v_K≥pmin; P3 only recounts/populates smem_ptcnt
+when done≠1, so seeded P2 sets done=2 to force the recount). EXACT all K512/1024/2048 fp32.
+A/B (`scripts/iter5_ab.py`, cold-L2): **0.63-0.84× everywhere** (K512 4K 0.77×, 16K 0.84×;
+K2048 262K 0.77×).
+
+**ROOT CAUSE (design-level, as predicted):** the 2-kernel design ADDS ≥1 full-N pass — the
+Triton sweep is a SEPARATE kernel (its own launch + full-N read), and kernel B still needs a
+count pass at thr* to populate smem_ptcnt for the collect. Baseline does P2(1 count, which
+doubles as smem_ptcnt fill) + P3(collect). Portfolio does sweep(1) + B[P1 + recount(1) +
+collect]. So +1 full-N pass + 1 extra launch, NOT offset (K512 P2 is already 1 iter → no
+search saving). The crux's "free redundant reads" is free only as a REPLACEMENT within one
+kernel; as an ADDED kernel it costs a full pass + launch.
+
+**KEY INSIGHT for the only viable design:** in a SINGLE cooperative kernel, the WINNING CTA
+(r==best_m) counted at thr* = ITS OWN threshold → its smem_ptcnt is ALREADY populated at thr*
+→ it can do P3 collect + P4 with ZERO extra pass. The sweep REPLACES P2. This requires:
+grid=(G,) cooperative, cross-CTA count share (DSMEM if G≤16 = one cluster; global+grid.sync
+if G=148), a barrier, then winner does the tail. G=16 (one cluster, reuse the existing
+gvr_topk_decode_cluster.py DSMEM machinery) is the tractable target — coarser resolution
+(cand looser than G=148) but zero extra pass. THIS is the real A1 + cluster-fusion build.
+
+**Status:** two tractable realizations falsified (iter4 single-CTA M-way = ALU not free;
+iter5 2-kernel = +1 pass). Only the single-cooperative-cluster kernel (G=16, winner-does-tail)
+can net-win, and only in small/mid-N (large-N dominated by the existing PR#15198 cluster).
+Measured ceiling remains ~1.2×. That kernel is a large build on the 2292-line cluster file.
