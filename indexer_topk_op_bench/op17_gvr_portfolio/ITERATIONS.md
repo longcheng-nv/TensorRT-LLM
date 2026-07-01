@@ -279,3 +279,21 @@ gvr_cutedsl, up to +48%. Uses idle BS=1 SMs (free per crux); a low-BS/decode-reg
 PR#15198 multicta cluster (portfolio adds tight-cand P4 on top of multi-CTA scan); bf16/fp16;
 high-BS degeneration guard (dispatch G=1→baseline when BS·G>NUM_SMS). Not +40% avg but a real,
 exact, no-regression broad win — B1 delivered.
+
+## Iter 8 — ×3-median, all dtypes, vs BOTH baselines (scripts/iter8_validate.py)
+
+Cooperative-cluster G=16, ×3-median cold-L2, EXACT all 33 cells (fp32/bf16/fp16).
+port/base = vs single-CTA gvr_cutedsl (the target baseline); port/mc = vs PR#15198 multicta.
+
+**vs single-CTA baseline — NO regression anywhere, all dtypes:**
+- fp32: 1.00-1.48× (K512 1.17-1.37, K1024 1.00-1.27, K2048 1.03-1.48)
+- bf16: 1.13-1.39×   fp16: 1.08-1.38×.  Avg ~1.22×.
+
+**vs existing PR#15198 cluster:** WINS N≤65K (1.02-1.29×) but LOSES N=262144 (0.71-0.83×) —
+multicta partitions the scan (cs=4, each CTA scans N/4) so its large-N collect beats the
+portfolio's single-winner full-N collect. Crossover ~131K.
+
+**Verdict:** solid no-regression ~1.22× win over the TARGET baseline (single-CTA gvr_cutedsl),
+all dtypes, exact. NOT +40%. Production dispatch = portfolio for N≤~131K, existing multicta
+cluster for N≥262K (or fuse partition+portfolio = deeper follow-up). Next: nsys-validate the
+positive cells (repo rule); high-BS guard.
