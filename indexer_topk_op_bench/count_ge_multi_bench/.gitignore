@@ -1,0 +1,9 @@
+# heavy / regenerable artifacts — track source + results + report only
+data/
+nsys/
+*.nsys-rep
+*.sqlite
+*.qdstrm
+sweep.log
+__pycache__/
+count_ge_multi
