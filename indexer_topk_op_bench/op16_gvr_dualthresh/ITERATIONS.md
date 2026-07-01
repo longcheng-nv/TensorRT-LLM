@@ -120,3 +120,54 @@ wins. (Corrects the iter-0 "structurally unreachable" verdict, which was for the
 Build sampled-histogram P2 in the kernel (minimal: replace P2 init threshold with
 sampled t0; secant stays as fallback; reuse smem_hist for the sample histogram;
 gate behind `enable_sampled_init`). Then nsys cold-L2 A/B (report protocol).
+
+---
+
+## Iter 3 — nsys cold-L2 A/B (REPORT protocol) — PREMISE FALSIFIED again (L2)
+
+Ran `scripts/nsys_ab.py` under nsys (512MB evict + eager + NVTX-range sync +
+nvtx_kern_sum, report-identical). ANCHOR check: re-measured gvr_cutedsl_rs vs
+report gvr_cutedsl_rs_cold_us = 0.976–1.020 ⇒ protocol comparable to report.html.
+
+### K512 fp32 cr=4 (B300, pure-kernel cold-L2 µs)
+
+| N | rs(base) | op16 | radix | sglang | op16/rs | op16 vs radix |
+|---:|---:|---:|---:|---:|---:|---:|
+| 4096 | 9.81 | 11.26 | 6.47 | 7.64 | **0.87** | 0.57 |
+| 8192 | 9.48 | 12.06 | 7.66 | 8.35 | **0.79** | 0.64 |
+| 16384 | 10.12 | 14.08 | 11.83 | 11.03 | **0.72** | 0.84 |
+| 32768 | 12.76 | 15.68 | 18.66 | 15.46 | 0.81 | 1.19 |
+| 65536 | 16.97 | 17.21 | 18.76 | 24.17 | 0.99 | 1.09 |
+| 131072 | 23.02 | 21.99 | 18.80 | 41.46 | 1.05 | 0.86 |
+| 262144 | 35.44 | 33.09 | 18.65 | 75.81 | 1.07 | 0.56 |
+
+op16 beats BOTH baselines: 1/7 (only N=65536, same as baseline's mid-N win).
+
+### Why the host projection (−40 to −60%) was WRONG — the op14 L2 trap, again
+- host counted LOGICAL full-N passes; but on B300 the fp32 input (≤1MB) fits L2
+  (126MB) ⇒ the baseline's 2–3 secant `count_ge` re-reads are **L2 hits, cheap**.
+  Cutting them saves little (op14's decisive lesson, re-confirmed).
+- the sampling init is **pure ADDED work**: 4096 strided global reads + 4096 SMEM
+  atomic incs + suffix scan. At small/mid N this exceeds the P2 saving → NET
+  SLOWER (0.72–0.87×). At large N the sample amortizes → small net win (+5–7%),
+  but that is the residual P2-compute saving, not the projected 3×-pass cut.
+- P4 collapse (cand 2K→1.1K) is muted: rank-scatter P4 is floor-bound at small N
+  (iter-0), so the tighter cand barely helps where the sampling costs most.
+
+### Structural wall stands (iter-0), independent of P2 method
+Even at large N where op16 nets +5–7% over its own baseline, it still LOSES to
+radix (0.56–0.86×): radix is flat ~18–19µs while op16's P3 full-N collect alone
+is ~17µs @262K. No threshold-streaming GVR variant can match flat radix-select at
+large N. And small-N radix floor (6.5µs) is below GVR's ~9µs floor.
+
+### Verdict
+op16 sampled-init: **NO-SHIP**. It is net SLOWER at small/mid N (added sampling
+cost > L2-cheap pass saving) and only +5–7% at large N (still far behind radix).
+The +40%-over-Radix / 95%-of-cases target is confirmed **physically unreachable**
+for any GVR threshold-streaming variant in the DSv4 decode regime (N≤262144,
+input ⊂ L2). Both attack surfaces (P4 via two-threshold; P2 via sampling) are now
+empirically exhausted on B300.
+
+### Next
+Run full nsys grid (other K/dtype) to confirm the trend is universal, then final
+report + HEAD at baseline (no ship).
