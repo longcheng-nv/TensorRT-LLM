@@ -171,3 +171,47 @@ empirically exhausted on B300.
 ### Next
 Run full nsys grid (other K/dtype) to confirm the trend is universal, then final
 report + HEAD at baseline (no ship).
+
+---
+
+## Iter 4 — PIVOT to secant-framework opt (user constraint) — host analysis
+
+User constraint: stay in the "secant bracket-then-refine" structure; optimize
+the ITERATION only (no sampling replacement). Also clarified algo-A: don't shrink
+the band; get threshold_1 in the SAME secant run — either (1) single-CTA, reuse
+the iteration path's intermediate thresholds, or (2) a 2nd CTA searching
+threshold_1 in parallel, write partial top-K, sync to the main CTA.
+
+### (a) Secant convergence-acceleration variants (`scripts/secant_variants.py`)
+Mean full-N count_ge evals across grid x 3 cfgs x 3 seeds (all EXACT 216/216):
+- base (linear secant): 2.602
+- **quad (inverse-quadratic on last 3 pts, secant fallback): 2.509** ← best, stable
+- illinois: 2.889 (regresses K2048), pquantile init: 3.940 (backfires, per op13)
+quad helps K1024 large N (3.67->2.89, 2.78->2.44); K512/K2048 ~flat. Small (-3.6%
+evals overall) but NO regression. => adopt quad as the interpolation.
+
+### (b) FREE threshold_1 from the single-CTA secant path (`scripts/host_thr1_free.py`)
+threshold_1 = largest path threshold with count<K (=> M definite winners peeled
+for FREE — the secant already evaluated these points):
+
+| K | M(free) | M/K | band=M0-M | band/M0 |
+|--:|--:|--:|--:|--:|
+| 512 | ~360 | 0.70 | 1.4-2.3K | 0.80-0.86 |
+| 1024 | ~750 | 0.71-0.81 | 2.0-3.4K | 0.71-0.83 |
+| 2048 | ~1.5-1.9K | 0.74-0.92 | 0.4-1.0K | 0.19-0.38 |
+
+- Free peel gives M~0.7-0.9xK definite winners at ZERO extra pass.
+- BUT band = M0-M stays LARGE for K512/K1024 (wide accept window kCC=10K => M0
+  2-4K). rank-scatter P4 is floor-bound (iter-0) => peel saves only ~13% of P4.
+- K2048: M0 small + M large => band 0.4-1K (band/M0 0.2-0.4) => real P4 headroom.
+
+### Projected (free peel + quad, NO tax, NO regression)
+K2048 large N ~-15%, K512/K1024 ~-5%. Shrinking K512/K1024 band needs a small M0
+(tight threshold) = the tax; only the 2-CTA path can hide threshold_1's search,
+but not the main CTA's tightening tax.
+
+### Next action
+Build "Scheme X" = quad interpolation + single-CTA free threshold_1 peel + band
+via existing rank-scatter (P3 classifies >=thr1 -> direct output[0:M], [thr,thr1)
+-> smem band; P4 selects top-(K-M) on band). All free/no-tax. nsys-confirm K2048
+gain + K512/K1024 no-regression, then decide on the 2-CTA path.
