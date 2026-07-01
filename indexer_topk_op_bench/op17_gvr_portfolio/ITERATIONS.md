@@ -297,3 +297,20 @@ portfolio's single-winner full-N collect. Crossover ~131K.
 all dtypes, exact. NOT +40%. Production dispatch = portfolio for N≤~131K, existing multicta
 cluster for N≥262K (or fuse partition+portfolio = deeper follow-up). Next: nsys-validate the
 positive cells (repo rule); high-BS guard.
+
+## Iter 9 — nsys pure-kernel validation (repo rule) — win CONFIRMED, LARGER than event
+
+`scripts/nsys_run.py` (cold-L2 flush in cudaProfilerApi window), G=16, fp32, 100 iters,
+cuda_gpu_kern_sum (evict kernel excluded), ×1:
+| cell | base µs | port µs | nsys spdup | event spdup |
+|---|---|---|---|---|
+| K512  N16384  | 16.69 | 9.97  | 1.673× | 1.365× |
+| K512  N65536  | 19.24 | 14.71 | 1.309× | 1.174× |
+| K1024 N65536  | 24.27 | 17.91 | 1.355× | 1.250× |
+| K2048 N262144 | 52.44 | 33.31 | 1.574× | 1.475× |
+| K512  N262144 | 39.20 | 32.50 | 1.206× | 1.174× |
+
+**nsys > event on ALL cells** → event timing penalizes the cluster kernel with launch
+overhead that pure-kernel nsys omits ⇒ the ×3-median event ~1.22× avg is a CONSERVATIVE
+lower bound; true pure-kernel win ~1.3–1.67× here. Repo rule satisfied (positive claim
+nsys-validated). Reps: results/nsys/v2_*.nsys-rep.
