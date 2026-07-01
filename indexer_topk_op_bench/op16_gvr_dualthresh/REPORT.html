@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<!-- Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved. -->
+<!-- op16_gvr_dualthresh optimization report. Bilingual via CSS-only toggle (NO <script>). -->
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>op16 GVR Top-K 优化报告 / Optimization Report</title>
+<style>
+  :root{--fg:#1a1a1a;--mut:#666;--bd:#d0d5dd;--bg:#fff;--acc:#0b7285;--good:#137333;--bad:#b3261e;--warn:#8a6d00;--hl:#f1f8fa;}
+  *{box-sizing:border-box}
+  body{font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Noto Sans CJK SC",sans-serif;color:var(--fg);max-width:1080px;margin:0 auto;padding:24px;line-height:1.55;background:var(--bg)}
+  h1{font-size:24px;margin:.2em 0}
+  h2{font-size:19px;margin-top:1.6em;border-bottom:2px solid var(--acc);padding-bottom:4px;color:var(--acc)}
+  h3{font-size:16px;margin-top:1.2em}
+  code{background:#f3f4f6;padding:1px 5px;border-radius:4px;font-size:.9em}
+  table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13.5px}
+  th,td{border:1px solid var(--bd);padding:6px 9px;text-align:right}
+  th{background:var(--hl);text-align:center}
+  td:first-child,th:first-child{text-align:left}
+  .good{color:var(--good);font-weight:600}.bad{color:var(--bad);font-weight:600}.warn{color:var(--warn);font-weight:600}
+  .mut{color:var(--mut)}
+  .card{border:1px solid var(--bd);border-radius:8px;padding:12px 16px;margin:10px 0;background:#fafcfd}
+  .tl{border-left:3px solid var(--acc);padding:4px 0 4px 14px;margin:10px 0}
+  .tl.dead{border-left-color:var(--bad)}.tl.win{border-left-color:var(--good)}.tl.wip{border-left-color:var(--warn)}
+  nav{position:sticky;top:0;background:var(--bg);padding:8px 0;border-bottom:1px solid var(--bd);z-index:9}
+  nav label{cursor:pointer;border:1px solid var(--acc);color:var(--acc);padding:3px 12px;border-radius:6px;margin-right:6px;font-size:13px;user-select:none}
+  #optzh:checked~nav label[for=optzh],#opten:checked~nav label[for=opten]{background:var(--acc);color:#fff}
+  #optzh,#opten{position:absolute;left:-9999px}
+  .en{display:none}
+  #opten:checked~main .en{display:revert}
+  #opten:checked~main .zh{display:none}
+  .kv{font-variant-numeric:tabular-nums}
+  ul{margin:.3em 0}
+  .badge{display:inline-block;font-size:11px;padding:1px 7px;border-radius:10px;color:#fff;vertical-align:middle}
+  .b-dead{background:var(--bad)}.b-win{background:var(--good)}.b-wip{background:var(--warn)}.b-info{background:var(--acc)}
+</style>
+</head>
+<body>
+<input type="radio" name="opt" id="optzh" checked>
+<input type="radio" name="opt" id="opten">
+<nav><label for="optzh">中文</label><label for="opten">English</label></nav>
+
+<main>
+<h1><span class="zh">op16 · GVR Top-K 优化报告（secant 框架）</span><span class="en">op16 · GVR Top-K Optimization Report (secant framework)</span></h1>
+<p class="mut kv"><span class="zh">硬件 B300 (sm_103) · 基准算子 GVR cuteDSL rank-scatter P4 (op#7) · 数据 = report.html 合成输入 (beta_moderate) · 更新 2026-07-01</span><span class="en">HW B300 (sm_103) · base op GVR cuteDSL rank-scatter P4 (op#7) · data = report.html synth inputs (beta_moderate) · updated 2026-07-01</span></p>
+
+<h2><span class="zh">1. 目标与约束</span><span class="en">1. Goal &amp; Constraints</span></h2>
+<div class="card">
+<ul>
+<li><span class="zh"><b>目标：</b>以 GVR-rs 为起点，在报告合成数据上使 &gt;95% case 超越 Radix-cuteDSL 与 SGLang，且各 seq_len 平均加速比高出两者最高值 40%。</span><span class="en"><b>Goal:</b> starting from GVR-rs, make &gt;95% of report cases beat Radix-cuteDSL and SGLang, with per-seqlen avg speedup 40% above the best of the two.</span></li>
+<li><span class="zh"><b>硬约束（用户）：</b>必须基于 <b>P2 secant method</b>（或其优化形式）——"先 secant 迭代定界，再 refine"，不得替换 secant。</span><span class="en"><b>Hard constraint (user):</b> must stay within the <b>P2 secant</b> method (or optimized forms) — "secant-bracket then refine"; do NOT replace secant.</span></li>
+<li><span class="zh"><b>双阈值算法 A（用户澄清）：</b>在同一次 secant 中同步得到 threshold_1（count&lt;K，确定赢家），path 可为①单 CTA 复用迭代路径中间阈值，或②双 CTA 并行搜 threshold_1。</span><span class="en"><b>Two-threshold algo-A (clarified):</b> obtain threshold_1 (count&lt;K, definite winners) within the SAME secant run — via (1) single-CTA reusing path thresholds, or (2) a 2nd CTA in parallel.</span></li>
+<li><span class="zh"><b>计量：</b>所有性能结论用报告口径 <b>nsys 纯内核冷 L2</b>（512MB evict + eager + NVTX 范围内 sync + nvtx_kern_sum，×3 中位）。</span><span class="en"><b>Metric:</b> all perf claims use the report protocol — <b>nsys pure-kernel cold-L2</b> (512MB evict + eager + in-range sync + nvtx_kern_sum, ×3 median).</span></li>
+</ul>
+</div>
+
+<h2><span class="zh">2. 结论摘要</span><span class="en">2. Executive Summary</span></h2>
+<div class="card">
+<p><span class="zh"><span class="badge b-dead">结论</span> <b>"&gt;95% case 超 Radix 40%" 在此 régime（N≤262144，输入完全放入 L2）结构性不可达</b>——与本仓库 op10–op15 反复得到的物理地板一致。</span><span class="en"><span class="badge b-dead">verdict</span> <b>"&gt;95% cases beat Radix by 40%" is structurally unreachable in this regime</b> (N≤262144, input fits L2) — consistent with the op10–op15 physical floor.</span></p>
+<ul>
+<li><span class="zh"><b>小 N：</b>Radix 地板 (6.5µs) 低于 GVR 内核地板 (~9µs)；</span><span class="en"><b>Small N:</b> Radix floor (6.5µs) is below GVR's kernel floor (~9µs);</span></li>
+<li><span class="zh"><b>大 N：</b>GVR 仅 P3 全 N collect 就 ~17µs @262K ≈ Radix flat 总时 ~19µs；阈值-流式算法无法追平 flat radix-select。</span><span class="en"><b>Large N:</b> GVR's P3 full-N collect alone is ~17µs @262K ≈ Radix's flat ~19µs total; a threshold-streaming kernel cannot match flat radix-select.</span></li>
+<li><span class="zh"><b>secant 框架内最优（免费、无回归）：</b>免费 threshold_1 peel + quad 插值 → <span class="good">K2048 大 N ~−18%</span>，<span class="warn">K512/K1024 ~−3–6%</span>。</span><span class="en"><b>Best within secant (free, no-regression):</b> free threshold_1 peel + quad interp → <span class="good">K2048 large-N ~−18%</span>, <span class="warn">K512/K1024 ~−3–6%</span>.</span></li>
+</ul>
+</div>
+
+<h2><span class="zh">3. 基线对比（B300，冷 L2 µs，BS=1）</span><span class="en">3. Baseline comparison (B300, cold-L2 µs, BS=1)</span></h2>
+<p><span class="zh">GVR-rs 当前仅在 6/60 个报告 case 同时超越 Radix 与 SGLang（全部在 16K–65K 中段）。Radix-cuteDSL 近乎 flat（~14–20µs），是主要约束。K=512 fp32 示例：</span><span class="en">GVR-rs currently beats BOTH Radix and SGLang in only 6/60 report cases (all in the 16K–65K mid-band). Radix-cuteDSL is near-flat (~14–20µs), the binding constraint. K=512 fp32 example:</span></p>
+<table class="kv">
+<tr><th>N</th><th>GVR-rs</th><th>Radix-cuteDSL</th><th>SGLang</th><th><span class="zh">GVR-rs vs Radix</span><span class="en">GVR-rs vs Radix</span></th></tr>
+<tr><td>4096</td><td>9.71</td><td>6.47</td><td>7.70</td><td class="bad">0.66×</td></tr>
+<tr><td>16384</td><td>10.37</td><td>11.83</td><td>11.15</td><td class="good">1.15×</td></tr>
+<tr><td>32768</td><td>12.50</td><td>16.83</td><td>15.53</td><td class="good">1.35×</td></tr>
+<tr><td>65536</td><td>17.26</td><td>16.53</td><td>24.27</td><td class="warn">0.96×</td></tr>
+<tr><td>131072</td><td>23.24</td><td>18.72</td><td>41.45</td><td class="bad">0.81×</td></tr>
+<tr><td>262144</td><td>35.00</td><td>18.89</td><td>75.67</td><td class="bad">0.54×</td></tr>
+</table>
+
+<h2><span class="zh">4. 瓶颈分析</span><span class="en">4. Bottleneck analysis</span></h2>
+<ul>
+<li><span class="zh"><b>相位占比（rank-scatter，K512 fp32）：</b>小 N 时 P4 占 48–64%，大 N 时降到 24%、P2+P3 全 N 流式占 60–70%。</span><span class="en"><b>Phase split (rank-scatter, K512 fp32):</b> P4 is 48–64% at small N, drops to 24% at large N where P2+P3 full-N streaming dominate (60–70%).</span></li>
+<li><span class="zh"><b>P4 是 count-sensitive（非纯 floor-bound）：</b>塌缩点在 cand≈1–2K（K1024：cand 4K→1K ⇒ P4 9963→271 周期；K2048：2K→0.5K ⇒ 10184→576）。</span><span class="en"><b>P4 is count-sensitive (not pure floor-bound):</b> collapse point cand≈1–2K (K1024: cand 4K→1K ⇒ P4 9963→271 cyc; K2048: 2K→0.5K ⇒ 10184→576).</span></li>
+<li><span class="zh"><b>但收紧阈值以塌缩 P4 会引爆 P2（tax）：</b>K1024 kC=1024 时 P2 11085→44760 周期。</span><span class="en"><b>But tightening the threshold to collapse P4 explodes P2 (tax):</b> K1024 kC=1024 ⇒ P2 11085→44760 cyc.</span></li>
+<li><span class="zh"><b>L2 陷阱（决定性）：</b>B300 上输入 ≤1MB ≪ L2 126MB，重复 count_ge pass 是 L2 命中、廉价 ⇒ "减少 pass 数"类优化无效。真正杠杆是 P4/launch floor。</span><span class="en"><b>L2 trap (decisive):</b> on B300 the input ≤1MB ≪ 126MB L2, so repeated count_ge passes are L2 hits (cheap) ⇒ "reduce #passes" optimizations are moot. The real levers are the P4/launch floor.</span></li>
+</ul>
+
+<h2><span class="zh">5. 迭代时间线</span><span class="en">5. Iteration timeline</span></h2>
+
+<div class="tl dead"><b>iter 0 · <span class="badge b-dead">证伪 / falsified</span></b><br>
+<span class="zh">双阈值 <i>band 收缩</i>方案：band 要小必须收紧阈值 ⇒ P2 passes 暴涨 1.3–2.5×，抵消 P4 收益（小/中 N wash、大 N loss）。</span>
+<span class="en">Two-threshold <i>band-shrink</i>: a small band needs a tight threshold ⇒ P2 passes explode 1.3–2.5× ≥ P4 saving (wash small/mid N, loss large N).</span></div>
+
+<div class="tl"><b>iter 1 · <span class="badge b-info">host</span></b><br>
+<span class="zh">采样直方图 P2 初始化：host 预测 1 次全 N pass（基线 2–3.67）+ cand~1.1×K，全网格 9/9 精确，预估 −40~−60%。</span>
+<span class="en">Sampling-histogram P2 init: host predicted 1 full-N pass (base 2–3.67) + cand~1.1×K, 9/9 exact, projected −40 to −60%.</span></div>
+
+<div class="tl"><b>iter 2 · <span class="badge b-info">build</span></b><br>
+<span class="zh">内核实现 <code>enable_sampled_init</code>，正确性门 <b>432/432 精确</b>（fp32/bf16/fp16 × K × N × 3 分布 × 2 种子 × 两条路径）。</span>
+<span class="en">Kernel <code>enable_sampled_init</code>; exactness gate <b>432/432 exact</b> (fp32/bf16/fp16 × K × N × 3 cfgs × 2 seeds × both paths).</span></div>
+
+<div class="tl dead"><b>iter 3 · <span class="badge b-dead">nsys 证伪 / falsified on HW</span></b><br>
+<span class="zh">报告口径 nsys A/B（锚点 0.976–1.020 可比）：采样 <b>小/中 N 反而慢 13–28%</b>（0.72–0.87×），大 N 仅 +5–7%。根因 = op14 的 L2 陷阱：减 pass 在 L2-fit 下无益，采样是纯新增开销。</span>
+<span class="en">nsys A/B (report protocol; anchor 0.976–1.020 comparable): sampling is <b>NET SLOWER at small/mid N (0.72–0.87×)</b>, +5–7% large N only. Root cause = op14 L2 trap: pass-cut is moot when input ⊂ L2; sampling is pure added cost.</span></div>
+
+<div class="tl wip"><b>iter 4 · <span class="badge b-info">host</span> <span class="zh">转向 secant 框架（用户约束）</span><span class="en">pivot to secant framework (user constraint)</span></b><br>
+<span class="zh"><b>quad 插值</b>（末 3 点反二次）= 最稳的 secant 加速（evals 2.602→2.509，无回归，助 K1024 大 N）。<b>免费 threshold_1</b>（复用 secant 路径中 count&lt;K 最优点）：M≈0.7–0.9×K 确定赢家零额外 pass；但 band=M0−M 对 K512/K1024 仍大（宽窗口 M0 2–4K），对 K2048 小（0.4–1K）。</span>
+<span class="en"><b>quad interp</b> (inverse-quadratic on last 3 pts) = most stable secant accel (evals 2.602→2.509, no regression, helps K1024 large N). <b>Free threshold_1</b> (reuse the secant path's best count&lt;K point): M≈0.7–0.9×K definite winners at zero extra pass; but band=M0−M stays large for K512/K1024 (wide-window M0 2–4K), small for K2048 (0.4–1K).</span></div>
+
+<div class="tl wip"><b>iter 5 · <span class="badge b-wip">进行中 / WIP</span> Scheme X</b><br>
+<span class="zh">已完成：P2 secant 中免费记录 threshold_1（gated <code>enable_dual_thresh</code>，smem s_thr[4]/s_iscalars[6]），baseline 仍精确 (vdiff=0)。<b>待做：P4 band-refine</b>（peel M 个赢家直写 output，band 选 top-(K−M)）。</span>
+<span class="en">Done: free threshold_1 recording in the P2 secant (gated <code>enable_dual_thresh</code>, smem s_thr[4]/s_iscalars[6]); baseline still exact (vdiff=0). <b>Pending: P4 band-refine</b> (peel M winners to output, select top-(K−M) on the band).</span></div>
+
+<h2><span class="zh">6. 关键数据表</span><span class="en">6. Key data tables</span></h2>
+
+<h3><span class="zh">6a. 免费 threshold_1（单 CTA 路径，host）</span><span class="en">6a. Free threshold_1 (single-CTA path, host)</span></h3>
+<table class="kv">
+<tr><th>K</th><th>M0 (cand)</th><th>M (free)</th><th>M/K</th><th>band=M0−M</th><th>band/M0</th><th><span class="zh">P4 收益预估</span><span class="en">est. P4 gain</span></th></tr>
+<tr><td>512</td><td>1.8–2.6K</td><td>~360</td><td>0.70</td><td>1.4–2.3K</td><td>0.80–0.86</td><td class="warn">~−6%</td></tr>
+<tr><td>1024</td><td>2.9–4.1K</td><td>~750</td><td>0.71–0.81</td><td>2.0–3.4K</td><td>0.71–0.83</td><td class="warn">~−3%</td></tr>
+<tr><td>2048</td><td>2.3K</td><td>1.5–1.9K</td><td>0.74–0.92</td><td>0.4–1.0K</td><td>0.19–0.38</td><td class="good">~−18%</td></tr>
+</table>
+<p class="mut"><span class="zh">band 大是因为宽窗口下 M0 大；K2048 天然窗口紧 ⇒ band 小 ⇒ P4 过塌缩点。</span><span class="en">band is large because M0 is large under the wide window; K2048's naturally tighter window ⇒ small band ⇒ P4 past the collapse point.</span></p>
+
+<h3><span class="zh">6b. secant 收敛加速变体（host，平均全 N eval 数，越低越好）</span><span class="en">6b. Secant convergence variants (host, mean full-N evals, lower=better)</span></h3>
+<table class="kv">
+<tr><th><span class="zh">变体</span><span class="en">variant</span></th><th><span class="zh">平均 evals</span><span class="en">mean evals</span></th><th><span class="zh">精确</span><span class="en">exact</span></th><th><span class="zh">备注</span><span class="en">note</span></th></tr>
+<tr><td>base (linear)</td><td>2.602</td><td>216/216</td><td class="mut"><span class="zh">基线</span><span class="en">baseline</span></td></tr>
+<tr><td><b>quad</b></td><td class="good">2.509</td><td>216/216</td><td><span class="zh">最优稳定，助 K1024 大 N</span><span class="en">best stable, helps K1024 large N</span></td></tr>
+<tr><td>illinois</td><td class="bad">2.889</td><td>216/216</td><td><span class="zh">K2048 退化</span><span class="en">regresses K2048</span></td></tr>
+<tr><td>pquantile init</td><td class="bad">3.940</td><td>216/216</td><td><span class="zh">宽窗口 init backfire (op13)</span><span class="en">wide-window init backfires (op13)</span></td></tr>
+</table>
+
+<h3><span class="zh">6c. 采样方案 nsys 证伪（K512 fp32，冷 L2 µs）</span><span class="en">6c. Sampling nsys falsification (K512 fp32, cold-L2 µs)</span></h3>
+<table class="kv">
+<tr><th>N</th><th><span class="zh">基线 rs</span><span class="en">base rs</span></th><th>op16 sampled</th><th>op16/rs</th><th><span class="zh">锚点 rs_now/rs_报告</span><span class="en">anchor rs_now/rs_rpt</span></th></tr>
+<tr><td>4096</td><td>9.81</td><td>11.26</td><td class="bad">0.87×</td><td>1.010</td></tr>
+<tr><td>16384</td><td>10.12</td><td>14.08</td><td class="bad">0.72×</td><td>0.976</td></tr>
+<tr><td>65536</td><td>16.97</td><td>17.21</td><td class="warn">0.99×</td><td>0.983</td></tr>
+<tr><td>262144</td><td>35.44</td><td>33.09</td><td class="good">1.07×</td><td>1.013</td></tr>
+</table>
+
+<h2><span class="zh">7. 下一步</span><span class="en">7. Next steps</span></h2>
+<div class="card">
+<ol>
+<li><span class="zh">完成 Scheme X 的 P4 band-refine（优先 in-SMEM 寄存器暂存分区，保持 op 签名不变 = 集成一致）；rank-scatter 参数化 target_k=K−M、out_off=M。</span><span class="en">Finish Scheme X P4 band-refine (prefer in-SMEM register-staged partition to keep the op signature = integration parity); parameterize rank-scatter target_k=K−M, out_off=M.</span></li>
+<li><span class="zh">加 quad 插值（gated），正确性门（值等价 topk + uniq==K），nsys A/B 坐实：预期 K2048 ~−18%、K512/K1024 中性~小赚（注意分区开销可能吃掉小收益）。</span><span class="en">Add quad interp (gated), exactness gate (value-equiv topk + uniq==K), nsys A/B: expect K2048 ~−18%, K512/K1024 neutral-to-small (partition overhead may eat the small gain).</span></li>
+<li><span class="zh">评估双 CTA 路径②（并行搜 threshold_1）：可隐藏 threshold_1 搜索，但隐藏不了主 CTA 收紧 M0 的 tax。</span><span class="en">Evaluate the 2-CTA path (parallel threshold_1): hides threshold_1's search but not the main CTA's M0-tightening tax.</span></li>
+<li><span class="zh">HEAD 停在基线（不 ship），除非某配置 nsys 实测净赚。</span><span class="en">Leave HEAD at baseline (no ship) unless a config nets a real nsys win.</span></li>
+</ol>
+<p class="mut"><span class="zh">续作入口：<code>op16_gvr_dualthresh/RESUME_PROMPT.md</code>；细节：<code>ITERATIONS.md</code> / <code>LEARNINGS.md</code>；数据：<code>results/nsys_ab/</code>。</span><span class="en">Resume entry: <code>op16_gvr_dualthresh/RESUME_PROMPT.md</code>; details: <code>ITERATIONS.md</code> / <code>LEARNINGS.md</code>; data: <code>results/nsys_ab/</code>.</span></p>
+</div>
+
+<p class="mut" style="margin-top:2em;font-size:12px"><span class="zh">生成于 2026-07-01 · B300 · 纯 CSS 双语切换（无脚本）</span><span class="en">Generated 2026-07-01 · B300 · CSS-only bilingual toggle (no script)</span></p>
+</main>
+</body>
+</html>
