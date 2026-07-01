@@ -77,3 +77,46 @@ better init / better root-finder), op13's unbuilt H2.
 Report to user with data + options: (A) build the achievable mid-N band-select
 version (~10–25% mid-N, sub-target); (B) pursue cheaper-P2 lever (uncertain,
 larger); (C) accept target unreachable and stop. Await direction.
+
+---
+
+## Iter 1 — PIVOT to cheaper-P2 (sampling-quantile init); host validation (B300)
+
+User chose: pursue the cheaper-P2 lever (the only path with real upside).
+
+**Idea**: replace P2's iterative full-N secant (2–3.67 passes) with a SMEM
+histogram of a small strided subsample (n_s=4096, N-independent) → estimate the
+K-th-value quantile → ONE full-N confirm pass; existing secant is a rare
+correction fallback. Attacks P2 *compute* (fewer element-comparisons), the real
+large-N cost (op14: HBM is moot, input fits L2). Distinct from op14 compaction.
+
+**Host prototype** (`scripts/host_sample_p2.py` + histogram check), searchsorted
+counts, across full grid × 3 beta cfgs × 3 seeds:
+
+| metric | baseline secant | sampled-hist init |
+|---|---|---|
+| full-N passes (P2) | 2.0–3.67 | **1.00** everywhere |
+| cand entering P4 (K512) | 1706–2627 (~3–5×K) | **513–589 (~1.1×K)** |
+| cand entering P4 (K1024) | 2659–4137 | **~1090–1180 (~1.1×K)** |
+| exactness (value-equiv topk) | — | **9/9 all cells, fp32/bf16/fp16** |
+| compute_ratio (samp/base) | 1.0 | **0.51–0.63 (K512), 0.28–0.38 (K1024/2048)** |
+
+Histogram-of-sample t0 (kernel-realistic, B=512/1024/2048 bins) reproduces
+1-pass + cand~1.1×K + 9/9 exact — the kernel design is de-risked. aim_mult 1.10
+stays exact everywhere (undershoots self-correct, never inexact).
+
+**Two wins at once, no tax:**
+- P2: 2–3.67 passes → 1 (large-N compute saving).
+- cand ~1.1×K (vs 2–5×K) → triggers the P4 collapse (iter-0: cand→K makes
+  rank-scatter P4 ~260 cyc vs ~7000–8600) — the tight threshold now costs 1 pass,
+  not the op13 tax.
+
+**Projected (from iter-0 cycles, to be confirmed by nsys):** ~−40% to −60%
+small/mid N, ~−40% to −45% large N. This would flip many large-N Radix losses to
+wins. (Corrects the iter-0 "structurally unreachable" verdict, which was for the
+*two-threshold* mechanism; sampling breaks the tax.)
+
+### Next action
+Build sampled-histogram P2 in the kernel (minimal: replace P2 init threshold with
+sampled t0; secant stays as fallback; reuse smem_hist for the sample histogram;
+gate behind `enable_sampled_init`). Then nsys cold-L2 A/B (report protocol).
