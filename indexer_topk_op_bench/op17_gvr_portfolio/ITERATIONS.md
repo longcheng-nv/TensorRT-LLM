@@ -183,3 +183,23 @@ unhidden ALU. Next (iter5): build the multi-CTA redundant-threshold kernel.
 K512 N16K M=4 → 1.20× (M=8 1.17×), exact; K512 4K/8K ~1.00-1.01×; K1024 all 0.80-0.95×.
 So single-CTA M-way's only real win is K512 mid-N with small M; not broad. Multi-CTA needed
 to get the tight threshold FREE (removes the M-way ALU tax) and extend the win to K1024.
+
+---
+
+## Iter 5 — 2026-07-01 — multi-CTA redundant-threshold portfolio (BUILD, user chose A1)
+
+Design (2 kernels, minimizes inter-kernel gap vs 3-kernel):
+- **Kernel A (Triton, grid=G=148):** each program computes band=[pmean,pmax] from preIdx
+  logits (redundant, cheap/L2), then ONE normal count_ge over full N at thr[pid]=band_lo+
+  pid*(band_hi-band_lo)/(G-1) → counts[G]; pid0 writes band[2]. Free per crux (memory-bound,
+  1 compare/elem, 148 CTAs = ~1 pass wall-time). This is the tight-threshold search with NO
+  single-CTA ALU tax (the iter4 failure) and NO serial-secant tax (the op13 failure).
+- **Kernel B (cuteDSL, copied gvr_topk_kernel body + counts_g[G]/band_g[2] params):** P1 kept
+  (sets val_lo/val_hi for P3); phase2_seeded: tid0 walks counts high→low, picks tightest
+  count≥K → thr*=band_lo+m*(band_hi-band_lo)/(G-1), s_thr[0]=thr*, done=1 (ZERO count passes);
+  P3 collects tight cand at thr*; P4 snaps. Exact (count≥K guaranteed; P3 retry-shrink covers
+  count>kC edge).
+Expected: iter2b projection (~1.11-1.26× K512 small/mid N) MINUS the ~2µs 2-kernel gap →
+net-positive mainly at mid N (16K-32K where P4 saving > gap); very small N may be gap-limited.
+Cluster fusion (M-way in cooperative cluster scan, ONE kernel, no gap) = iter6 if iter5 shows
+the gap is the limiter.
