@@ -210,7 +210,7 @@ def phase4_partition(smem_keys, thr1, M):                 # register-staged, 1 p
 <span class="zh">报告口径 nsys A/B（锚点 0.976–1.020 可比）：采样 <b>小/中 N 反而慢 13–28%</b>（0.72–0.87×），大 N 仅 +5–7%。根因 = op14 的 L2 陷阱：减 pass 在 L2-fit 下无益，采样是纯新增开销。</span>
 <span class="en">nsys A/B (report protocol; anchor 0.976–1.020 comparable): sampling is <b>NET SLOWER at small/mid N (0.72–0.87×)</b>, +5–7% large N only. Root cause = op14 L2 trap: pass-cut is moot when input ⊂ L2; sampling is pure added cost.</span></div>
 
-<div class="tl wip"><b>iter 4 · <span class="badge b-info">host</span> <span class="zh">转向 secant 框架（用户约束）</span><span class="en">pivot to secant framework (user constraint)</span></b><br>
+<div class="tl"><b>iter 4 · <span class="badge b-info">host</span> <span class="zh">转向 secant 框架（用户约束）</span><span class="en">pivot to secant framework (user constraint)</span></b><br>
 <span class="zh"><b>quad 插值</b>（末 3 点反二次）= 最稳的 secant 加速（evals 2.602→2.509，无回归，助 K1024 大 N）。<b>免费 threshold_1</b>（复用 secant 路径中 count&lt;K 最优点）：M≈0.7–0.9×K 确定赢家零额外 pass；但 band=M0−M 对 K512/K1024 仍大（宽窗口 M0 2–4K），对 K2048 小（0.4–1K）。</span>
 <span class="en"><b>quad interp</b> (inverse-quadratic on last 3 pts) = most stable secant accel (evals 2.602→2.509, no regression, helps K1024 large N). <b>Free threshold_1</b> (reuse the secant path's best count&lt;K point): M≈0.7–0.9×K definite winners at zero extra pass; but band=M0−M stays large for K512/K1024 (wide-window M0 2–4K), small for K2048 (0.4–1K).</span></div>
 
@@ -224,14 +224,14 @@ def phase4_partition(smem_keys, thr1, M):                 # register-staged, 1 p
 
 <h2><span class="zh">7. 关键数据表</span><span class="en">7. Key data tables</span></h2>
 
-<h3><span class="zh">7a. 免费 threshold_1（单 CTA 路径，host）</span><span class="en">7a. Free threshold_1 (single-CTA path, host)</span></h3>
+<h3><span class="zh">7a. 免费 threshold_1（单 CTA 路径，host 预估 — 已被 §7d 实测证伪）</span><span class="en">7a. Free threshold_1 (single-CTA path, HOST projection — falsified by §7d)</span></h3>
 <table class="kv">
-<tr><th>K</th><th>M0 (cand)</th><th>M (free)</th><th>M/K</th><th>band=M0−M</th><th>band/M0</th><th><span class="zh">P4 收益预估</span><span class="en">est. P4 gain</span></th></tr>
-<tr><td>512</td><td>1.8–2.6K</td><td>~360</td><td>0.70</td><td>1.4–2.3K</td><td>0.80–0.86</td><td class="warn">~−6%</td></tr>
-<tr><td>1024</td><td>2.9–4.1K</td><td>~750</td><td>0.71–0.81</td><td>2.0–3.4K</td><td>0.71–0.83</td><td class="warn">~−3%</td></tr>
-<tr><td>2048</td><td>2.3K</td><td>1.5–1.9K</td><td>0.74–0.92</td><td>0.4–1.0K</td><td>0.19–0.38</td><td class="good">~−18%</td></tr>
+<tr><th>K</th><th>M0 (cand)</th><th>M (free)</th><th>M/K</th><th>band=M0−M</th><th>band/M0</th><th><span class="zh">P4 相位收益预估</span><span class="en">est. P4-phase gain</span></th></tr>
+<tr><td>512</td><td>1.8–2.6K</td><td>~360</td><td>0.70</td><td>1.4–2.3K</td><td>0.80–0.86</td><td class="mut">~−6%</td></tr>
+<tr><td>1024</td><td>2.9–4.1K</td><td>~750</td><td>0.71–0.81</td><td>2.0–3.4K</td><td>0.71–0.83</td><td class="mut">~−3%</td></tr>
+<tr><td>2048</td><td>2.3K</td><td>1.5–1.9K</td><td>0.74–0.92</td><td>0.4–1.0K</td><td>0.19–0.38</td><td class="mut">~−18%</td></tr>
 </table>
-<p class="mut"><span class="zh">band 大是因为宽窗口下 M0 大；K2048 天然窗口紧 ⇒ band 小 ⇒ P4 过塌缩点。</span><span class="en">band is large because M0 is large under the wide window; K2048's naturally tighter window ⇒ small band ⇒ P4 past the collapse point.</span></p>
+<p class="cap"><span class="zh">band 大是因为宽窗口下 M0 大；K2048 天然窗口紧 ⇒ band 小 ⇒ P4 过塌缩点。<b>注意：</b>此列是仅 P4 相位的 host 预估；§7d 的整核 nsys 实测显示这些收益被 <code>phase4_partition</code> 开销吞没 —— K2048 实际仅 ~−2%（最好 1.02×）、K512/K1024 转为净亏。以 §7d 为准。</span><span class="en">band is large because M0 is large under the wide window; K2048's naturally tighter window ⇒ small band ⇒ P4 past the collapse point. <b>Note:</b> this column is a P4-phase-only host projection; the whole-kernel nsys measurement in §7d shows these gains are absorbed by <code>phase4_partition</code> overhead — K2048 realizes only ~−2% (best 1.02×) and K512/K1024 turn into net losses. §7d is authoritative.</span></p>
 
 <h3><span class="zh">7b. secant 收敛加速变体（host，平均全 N eval 数，越低越好）</span><span class="en">7b. Secant convergence variants (host, mean full-N evals, lower=better)</span></h3>
 <table class="kv">
