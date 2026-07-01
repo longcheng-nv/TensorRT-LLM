@@ -148,3 +148,38 @@ tail P3/P4 + fallback). Its projected unique win (~1.1-1.26× small/mid-N K512/1
 beats op13 in op13's own regime; its large-N win is dominated by the shipped cluster; it does
 not reach +40%. Recommend: confirm with user whether this envelope justifies the build, or
 whether to fold the one clean delta (tax-free tight-cand P4) into op13 instead.
+
+---
+
+## Iter 4 — 2026-07-01 — single-CTA M-way P2: EXACT but net ≤1.0× (M-way ALU NOT free)
+
+Built `src/gvr_portfolio_op.py`: GvrPortfolioKernel subclass, P2 replaced by one M-way
+(M=16) multi-threshold count over band [pmean,pmax], pick tightest count∈[K,kC], secant
+fallback. Compiles; **EXACT (vdiff=0, uniq=K) on all fp32 K512/1024/2048 cells.**
+
+**A/B (`scripts/iter4_ab.py`, cold-L2, fp32) — SLOWER everywhere:**
+| K | N=4K | 8K | 16K | 32K | 65K | 262K |
+|---|---|---|---|---|---|---|
+| 512 | 0.88× | 0.90× | 1.00× | 0.71× | 0.59× | 0.45× |
+| 1024 | 0.88× | 0.77× | 0.82× | 0.72× | 0.41× | 0.49× |
+| 2048 | 0.84× | 0.79× | 0.63× | — | 0.58× | 0.44× |
+
+**ROOT CAUSE — the "M-way compare is free" assumption is FALSE for a single CTA.** The
+crux's free-ness was bandwidth headroom across 148 CTAs each doing ONE compare. A single
+CTA is memory-LATENCY-bound (few outstanding loads at 1/148 BW), and 16 compares × vec_w=4
+= 64 ALU ops per 128-bit load exceed the latency-hiding slack → P2 becomes ~M×-ALU-bound.
+The falsified "Opt-F 2-way wash" was free because 2 compares fit the slack; 16 do not.
+Overhead grows with N (P2 fraction grows) → 0.45× at 262K. At best small/mid-N cell (16K)
+M-way overhead ≈ P4 saving → net 1.00×. The iter2b projection assumed P2 stayed at baseline
+cost; it does not.
+
+**PIVOT:** the tight threshold must be obtained the way the crux proved free — **multi-CTA
+redundant portfolio** (G CTAs, each ONE normal count_ge at its own threshold, memory-bound,
+~1 pass wall-time per crux) + leader-select (~2µs, iter2) + tail. That is the user's original
+proposal; my single-CTA M-way collapse was a wrong "optimization" that moved cost into
+unhidden ALU. Next (iter5): build the multi-CTA redundant-threshold kernel.
+
+**M-sweep {4,8} (small/mid N, fp32):** narrow single-CTA sweet spot only —
+K512 N16K M=4 → 1.20× (M=8 1.17×), exact; K512 4K/8K ~1.00-1.01×; K1024 all 0.80-0.95×.
+So single-CTA M-way's only real win is K512 mid-N with small M; not broad. Multi-CTA needed
+to get the tight threshold FREE (removes the M-way ALU tax) and extend the win to K1024.
