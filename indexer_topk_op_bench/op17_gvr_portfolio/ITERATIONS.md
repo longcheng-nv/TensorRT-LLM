@@ -98,3 +98,53 @@ unmeasured term: the cross-CTA leader-selection sync at BS=1 (148 CTAs → pick 
 cross-CTA over all SMs needs grid.sync() (cooperative launch) or a 2-kernel split
 (sweep→global[G]; tail-kernel picks leader + P3/P4). Microbench both; net win exists only
 if sync ≲ 5µs at small N. Also re-check large N (P2-collapse lever) separately.
+
+---
+
+## Iter 2 / 2b / 3 — 2026-07-01 — leader-sync cost + projected NET envelope
+
+**iter2** (`scripts/iter2_sync_cost.py`): leader-selection sync (2-kernel proxy, conservative
+upper bound). Overhead t_sweep+B − t_sweep = ~0µs (N≤8K), 1.95µs (16K), 3.42µs (65K), ~2µs
+(131K/262K). Cheap. Also re-confirms t_sweep(G=148) ≈ t_base(G=1) (crux).
+
+**iter2b** (`scripts/iter2b_projection.py`): K512 fp32 P4-shrink net (all terms measured):
+| N | base µs | P4 µs | P4 shrink | sync | proj speedup |
+|---|---|---|---|---|---|
+| 4096 | 16.4 | 9.55 | 0.83 | 0.0 | 1.11× |
+| 8192 | 16.4 | 9.40 | 0.69 | 0.0 | 1.22× |
+| 16384 | 18.4 | 10.34 | 0.44 | 1.95 | 1.26× |
+| 65536 | 26.6 | 10.47 | 0.67 | 3.42 | 1.00× (dispatch to baseline) |
+
+**iter3** (`scripts/iter3_p2collapse.py`): large-N P2-collapse (sweep pins threshold in 1
+pass vs baseline's P2_iters). fp32:
+| K | N | proj speedup |
+|---|---|---|
+| 512 | 65K-262K | 0.89-0.96× (P2 already 1 iter → sync only cost → LOSES, dispatch to baseline) |
+| 1024 | 131K / 262K | 1.27× / 1.17× |
+| 2048 | 65K / 131K / 262K | 1.08× / 1.29× / 1.42× |
+
+**Projected combined envelope (fp32, dispatched, no-regression via baseline fallback):**
+- small/mid-N K512/1024: P4-shrink ~1.1-1.26×
+- large-N K1024/2048: P2-collapse ~1.17-1.42×
+- K512 large-N, K1024 65K, high BS: neutral (baseline)
+- Peak ~1.42× (K2048/262K). Average across all cells ~1.10-1.20×. **NOT +40% universal.**
+
+**CRITICAL STRATEGIC CAVEATS (must weigh before building the real kernel):**
+1. **Large-N P2-collapse is DOMINATED by the existing PR#15198 cluster.** Report by-seqlen:
+   GVR-multiCTA(cuteDSL) cluster is ~1.6×/2.2× vs GVR-CUDA at N=131K/262K BS=1 — far beyond
+   the portfolio's projected 1.42× over single-CTA-cuteDSL. So the portfolio's large-N half
+   does NOT beat what's already shipped; the cluster (cooperative scan) already exploits the
+   same idle bandwidth better for the pure-scan-bound large-N regime.
+2. **P2-collapse projection is OPTIMISTIC** (assumes 148 fixed thresholds pin as tightly as
+   the secant's 2.65 iters in 1 pass). If band placement is coarse, real needs ~1.5 passes →
+   gains ~halve. P4-shrink (small-N) numbers are solid (don't depend on sweep resolution).
+3. ⇒ The portfolio's UNIQUE, defensible value narrows to **small/mid-N P4-shrink (~1.1-1.26×,
+   K512/1024 fp32)** — a regime the cluster degenerates in, but which **op13 already ships**
+   (~1.11-1.17×). Marginal incremental gain over op13, same regime.
+
+**DECISION POINT (analysis phase complete):** the full cooperative multi-CTA portfolio kernel
+is a large build (grid reduction + leader handoff + preIdx-band threshold placement + exact
+tail P3/P4 + fallback). Its projected unique win (~1.1-1.26× small/mid-N K512/1024) modestly
+beats op13 in op13's own regime; its large-N win is dominated by the shipped cluster; it does
+not reach +40%. Recommend: confirm with user whether this envelope justifies the build, or
+whether to fold the one clean delta (tax-free tight-cand P4) into op13 instead.
