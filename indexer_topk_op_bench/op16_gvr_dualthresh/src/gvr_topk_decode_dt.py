@@ -1713,6 +1713,113 @@ class GvrTopKKernel:
     # quantify it (hypothesis test for the barrier-reduction idea).
     # ------------------------------------------------------------------
     @cute.jit
+    def phase4_dual(
+        self,
+        smem_keys,
+        smem_vals,
+        smem_hist,
+        smem_wcnt,
+        s_thr,
+        s_iscalars,
+        output_values_row,
+        output_indices_row,
+        cand_count_p4,
+        tidx,
+        warp_id,
+        lane,
+    ):
+        """op16 Scheme X P4: peel M free winners then band rank-scatter.
+
+        Plain method (no @cute.jit) — inlined by the @cute.kernel, so the
+        runtime `if M>0` + partition/rank-scatter control flow is preprocessed
+        by the kernel (like phase2_secant_search -> block_count_ge). Called from
+        a const_expr(enable_dual_thresh) branch in the kernel.
+        """
+        M_rt = s_iscalars[5]
+        if M_rt > cutlass.Int32(0):
+            self.phase4_partition(
+                smem_keys, smem_vals, smem_wcnt, s_thr, s_iscalars,
+                output_indices_row, cand_count_p4, tidx, warp_id, lane,
+            )
+            band_cnt = s_iscalars[0]
+            tgt = cutlass.Int32(self.top_k) - M_rt
+            self.phase4_rank_scatter(
+                smem_keys, smem_vals, smem_hist, smem_wcnt, s_thr, s_iscalars,
+                output_values_row, output_indices_row, band_cnt,
+                tidx, warp_id, lane, target_k=tgt,
+            )
+        else:
+            self.phase4_rank_scatter(
+                smem_keys, smem_vals, smem_hist, smem_wcnt, s_thr, s_iscalars,
+                output_values_row, output_indices_row, cand_count_p4,
+                tidx, warp_id, lane, target_k=cutlass.Int32(self.top_k),
+            )
+
+    @cute.jit
+    def phase4_partition(
+        self,
+        smem_keys,
+        smem_vals,
+        smem_wcnt,
+        s_thr,
+        s_iscalars,
+        output_indices_row,
+        cand_count,   # M0 (all candidates >= threshold, in smem_keys[0:M0])
+        tidx,
+        warp_id,
+        lane,
+    ):
+        """op16 Scheme X partition (register-staged, no extra buffer).
+
+        Split smem_keys[0:M0] by threshold_1 (s_thr[3]); M = s_iscalars[5]:
+          - v >= threshold_1  -> definite top-K winner, write index to
+            output_indices_row[(K-M) + slot]  (fills the tail [K-M, K)).
+          - v <  threshold_1  -> band, compacted to smem_keys[0:band]/smem_vals.
+        Sets s_iscalars[0] = band count (= new cand_count for the band rank-scatter,
+        which then fills output[0:K-M]). Caller guarantees M>0 (else plain P4).
+        """
+        kK = cutlass.const_expr(self.top_k)
+        num_threads = cutlass.const_expr(self.num_threads)
+        kC = cutlass.const_expr(self.kC)
+        elems = cutlass.const_expr((kC + num_threads - 1) // num_threads)
+
+        thr1 = s_thr[3]
+        M = s_iscalars[5]
+        win_base = cutlass.Int32(kK) - M   # winners fill output[win_base : K]
+
+        # ---- stage this thread's candidates to registers (avoid RAW on smem) ----
+        frag_v = cute.make_fragment((elems,), cutlass.Float32)
+        frag_i = cute.make_fragment((elems,), cutlass.Int32)
+        for u in cutlass.range_constexpr(elems):
+            pos = tidx + cutlass.Int32(u * num_threads)
+            if pos < cand_count:
+                frag_v[u] = smem_keys[pos]
+                frag_i[u] = smem_vals[pos]
+        # counters: smem_wcnt[0]=band, smem_wcnt[1]=winners
+        if tidx == 0:
+            smem_wcnt[0] = cutlass.Int32(0)
+            smem_wcnt[1] = cutlass.Int32(0)
+        cute.arch.barrier()
+
+        # ---- scatter: winners -> output tail, band -> smem_keys front ----
+        for u in cutlass.range_constexpr(elems):
+            pos = tidx + cutlass.Int32(u * num_threads)
+            if pos < cand_count:
+                v = frag_v[u]
+                idx = frag_i[u]
+                if v >= thr1:
+                    ws = atomicAdd(smem_wcnt.iterator + cutlass.Int32(1), cutlass.Int32(1))
+                    output_indices_row[win_base + ws] = idx
+                else:
+                    bs = atomicAdd(smem_wcnt.iterator + cutlass.Int32(0), cutlass.Int32(1))
+                    smem_keys[bs] = v
+                    smem_vals[bs] = idx
+        cute.arch.barrier()
+        if tidx == 0:
+            s_iscalars[0] = smem_wcnt[0]  # band count -> cand_count for band P4
+        cute.arch.barrier()
+
+    @cute.jit
     def phase4_rank_scatter(
         self,
         smem_keys,
@@ -1727,8 +1834,16 @@ class GvrTopKKernel:
         tidx,
         warp_id,
         lane,
+        target_k=None,
     ):
-        kK = cutlass.const_expr(self.top_k)
+        # op16 dual-thresh: when target_k is given (runtime K-M), select the band's
+        # top-(K-M) into output_indices_row[0:K-M]; the M definite winners are
+        # written to output[K-M:K] by phase4_partition BEFORE this call, so NO
+        # output-index offset is needed here (writes stay in [0, target_k)).
+        if cutlass.const_expr(self.enable_dual_thresh):
+            kK = target_k
+        else:
+            kK = cutlass.const_expr(self.top_k)
         kBins = cutlass.const_expr(self.kNumBins)
         num_threads = cutlass.const_expr(self.num_threads)
         num_warps = cutlass.const_expr(self.num_warps)
@@ -2259,7 +2374,14 @@ class GvrTopKKernel:
                 if cand_count_p4 > cutlass.Int32(self.kC):
                     cand_count_p4 = cutlass.Int32(self.kC)
 
-                if cutlass.const_expr(self.enable_p4_rank_scatter):
+                if cutlass.const_expr(self.enable_dual_thresh):
+                    # op16 Scheme X: free threshold_1 peel + band rank-scatter.
+                    self.phase4_dual(
+                        smem_keys, smem_vals, smem_hist, smem_wcnt, s_thr,
+                        s_iscalars, output_values_row, output_indices_row,
+                        cand_count_p4, tidx, warp_id, lane,
+                    )
+                elif cutlass.const_expr(self.enable_p4_rank_scatter):
                     self.phase4_rank_scatter(
                         smem_keys,
                         smem_vals,

@@ -42,8 +42,8 @@ def _config(bs, n):
 
 
 def compile_gvr_dt(dtype, bs, n, K, cr_val, sampled=True,
-                   sample_size=4096, sample_aim_permille=1150):
-    key = (dtype, bs, n, K, cr_val, sampled, sample_size, sample_aim_permille)
+                   sample_size=4096, sample_aim_permille=1150, dual=False):
+    key = (dtype, bs, n, K, cr_val, sampled, sample_size, sample_aim_permille, dual)
     if key in _compiled:
         return _compiled[key]
     t, use256, min_bpm = _config(bs, n)
@@ -53,7 +53,7 @@ def compile_gvr_dt(dtype, bs, n, K, cr_val, sampled=True,
         min_blocks_per_mp=min_bpm, return_output_values=False,
         enable_p4_rank_scatter=True, enable_p4_rank_scatter_exact=True,
         enable_sampled_init=sampled, sample_size=sample_size,
-        sample_aim_permille=sample_aim_permille,
+        sample_aim_permille=sample_aim_permille, enable_dual_thresh=dual,
     )
     n_rows, n_cols, n_batch = cute.sym_int(), cute.sym_int(), cute.sym_int()
     in_align = 32 if use256 else 16
@@ -69,10 +69,10 @@ def compile_gvr_dt(dtype, bs, n, K, cr_val, sampled=True,
 
 
 def gvr_dt(logits, pre_idx, seq_lens, index_topk, compress_ratio=1, out=None,
-           sampled=True, sample_size=4096, sample_aim_permille=1150):
+           sampled=True, sample_size=4096, sample_aim_permille=1150, dual=False):
     bs, n = logits.shape
     compiled = compile_gvr_dt(logits.dtype, bs, n, index_topk, compress_ratio,
-                              sampled, sample_size, sample_aim_permille)
+                              sampled, sample_size, sample_aim_permille, dual)
     if out is None:
         out = torch.empty(bs, index_topk, dtype=torch.int32, device="cuda")
     compiled(logits, pre_idx, seq_lens, None, out)
