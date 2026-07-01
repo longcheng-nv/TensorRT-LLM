@@ -260,3 +260,22 @@ extra pass. Confirms the iter4/iter5 negatives were realization artifacts, not t
 (b) dispatch-guard the 2 K1024 dips to baseline for strict no-regression; (c) ×3-median +
 nsys-validate the wins (repo rule); (d) extend bf16/fp16. Not +40% (avg ~1.18×) but a real,
 broad, exact, ~no-regression win over the single-CTA baseline — the first shippable op17 form.
+
+## Iter 7 — G=16: NO REGRESSIONS, avg ~1.21×, exact
+
+Same kernel, G=16 (finer band → tighter cand). EXACT all cells. A/B (cold-L2):
+| K\N | 4096 | 8192 | 16384 | 32768 | 65536 | 131072 | 262144 |
+|---|---|---|---|---|---|---|---|
+| 512  | 1.148 | 1.145 | 1.422 | 1.180 | 1.230 | 1.130 | 1.148 |
+| 1024 | 1.016 | 1.135 | 1.117 | 1.194 | 1.237 | 1.201 | 1.280 |
+| 2048 | –     | 1.132 | 1.106 | 1.157 | 1.354 | 1.361 | 1.482 |
+
+**min 1.016× (NO regression), avg ~1.21×, max 1.482× (K2048/262K); exact everywhere.** G=16
+fixed the two G=8 dips (K1024 4K 0.988→1.016, 16K 0.997→1.117) and lifted K512/16K to 1.422×.
+This is the first shippable op17 result: exact, no-regression, broad ~21% avg over single-CTA
+gvr_cutedsl, up to +48%. Uses idle BS=1 SMs (free per crux); a low-BS/decode-regime win.
+
+**Next:** ×3-median + nsys-validate (repo rule for positive claims); A/B vs the EXISTING
+PR#15198 multicta cluster (portfolio adds tight-cand P4 on top of multi-CTA scan); bf16/fp16;
+high-BS degeneration guard (dispatch G=1→baseline when BS·G>NUM_SMS). Not +40% avg but a real,
+exact, no-regression broad win — B1 delivered.
