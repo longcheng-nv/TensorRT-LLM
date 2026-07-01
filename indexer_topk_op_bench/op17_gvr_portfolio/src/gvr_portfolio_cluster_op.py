@@ -26,6 +26,7 @@ from cutlass.cute import runtime as cr
 
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parents[1] / "ops"))
+sys.path.insert(0, str(_HERE.parents[1] / "harness"))
 from cute_vendored.blackwell.top_k.gvr_topk_decode import GvrTopKKernel  # noqa: E402
 from cute_vendored.blackwell.utils import (  # noqa: E402
     TRTLLM_ENABLE_PDL, griddepcontrol_launch_dependents, griddepcontrol_wait,
@@ -198,11 +199,30 @@ def _compile(dtype, bs, n, K, cr_val, G, kC):
     return c
 
 
-def gvr_portfolio_cluster(logits, pre_idx, seq_lens, index_topk, compress_ratio=1, out=None, G=8, kC=None):
+def pick_G(bs, G_max=16):
+    """BS-aware G. The redundant scans are free only while bs*G stays well
+    under NUM_SMS; larger G also carries more per-cluster DSMEM-barrier cost.
+    Snap to {16,8,4} keeping bs*G <= NUM_SMS//2 (comfortably free), and return
+    1 (=> single-CTA baseline fallback, no regression) when even G=4 would not
+    fit. G<4 is never emitted (G=2 clusters are unstable here)."""
+    budget = NUM_SMS // 2
+    for g in (16, 8, 4):
+        if bs * g <= budget:
+            return g
+    return 1
+
+
+def gvr_portfolio_cluster(logits, pre_idx, seq_lens, index_topk, compress_ratio=1, out=None, G=16, kC=None):
+    from gvr_cutedsl_op import gvr_cutedsl  # single-CTA baseline (fallback)
     bs, n = logits.shape
-    compiled = _compile(logits.dtype, bs, n, index_topk, compress_ratio, G, kC)
+    if G == "auto":
+        G = pick_G(bs)
     if out is None:
         out = torch.empty(bs, index_topk, dtype=torch.int32, device="cuda")
+    if G < 2:
+        # no spare SMs at this BS -> baseline (guaranteed no regression)
+        return gvr_cutedsl(logits, pre_idx, seq_lens, index_topk, compress_ratio, out=out)
+    compiled = _compile(logits.dtype, bs, n, index_topk, compress_ratio, G, kC)
     compiled(logits, pre_idx, seq_lens, None, out)
     return out
 

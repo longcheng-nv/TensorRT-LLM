@@ -314,3 +314,19 @@ cuda_gpu_kern_sum (evict kernel excluded), ×1:
 overhead that pure-kernel nsys omits ⇒ the ×3-median event ~1.22× avg is a CONSERVATIVE
 lower bound; true pure-kernel win ~1.3–1.67× here. Repo rule satisfied (positive claim
 nsys-validated). Reps: results/nsys/v2_*.nsys-rep.
+
+## Iter 10 — high-BS dispatch guard (pick_G) — no crash, no regression
+
+`pick_G(bs)`: snap G to {16,8,4} keeping bs*G <= NUM_SMS//2 (redundancy stays free +
+bounds per-cluster DSMEM-barrier cost); G<4 → return 1 = single-CTA baseline fallback
+(G=2 clusters were unstable → "unspecified launch failure"). `gvr_portfolio_cluster(...,
+G="auto")` dispatches. BS sweep (K512 fp32 N65536, cold-L2):
+| BS | G | speedup |
+|---|---|---|
+| 1 | 16 | 1.273× |
+| 4 | 16 | 1.203× |
+| 8 | 8 | 1.173× |
+| 16 | 4 | 1.230× |
+| 32/64/128 | 1 (baseline) | ~1.00× (±1.5% noise; identical kernel) |
+
+Portfolio wins BS≤16 (1.17-1.27×); BS≥32 → baseline (no regression). All exact. Complete.
