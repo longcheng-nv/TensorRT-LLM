@@ -215,3 +215,40 @@ Build "Scheme X" = quad interpolation + single-CTA free threshold_1 peel + band
 via existing rank-scatter (P3 classifies >=thr1 -> direct output[0:M], [thr,thr1)
 -> smem band; P4 selects top-(K-M) on band). All free/no-tax. nsys-confirm K2048
 gain + K512/K1024 no-regression, then decide on the 2-CTA path.
+
+---
+
+## Iter 5 — BUILD Scheme X (secant framework, user constraint) — EXACT
+
+Free threshold_1 peel + band rank-scatter (`enable_dual_thresh`):
+- P2 secant records free threshold_1 (s_thr[3], M=s_iscalars[5]) = largest path
+  threshold with count<K (definite winners, zero extra pass).
+- `phase4_dual` dispatcher → `phase4_partition` (register-staged: winners >=thr1
+  → output[K-M:K]; band <thr1 → smem_keys[0:band]) → `phase4_rank_scatter`
+  (target_k=K-M) fills output[0:K-M]. All P4 methods @cute.jit (required).
+- **Exactness: baseline 3/3 + dual 81/81 OK** (fp32/bf16/fp16 × K512/1024/2048 ×
+  N × 3 cfgs). smem s_thr[4]/s_iscalars[6]. Baseline byte-identical (flag off).
+- CuTe DSL decorator gotcha cost 5 turns (see LEARNINGS / learnings yaml).
+
+## Iter 6 — nsys A/B (report protocol) — Scheme X NET NEUTRAL
+
+K2048 fp32 (anchor 0.99–1.02 comparable to report):
+| N | rs | op16X | X/rs | X vs radix |
+|---:|---:|---:|---:|---:|
+| 8192 | 11.51 | 12.12 | 0.95 | 0.65 |
+| 32768 | 16.08 | 15.72 | 1.02 | 1.29 |
+| 65536 | 21.01 | 21.59 | 0.97 | 0.92 |
+| 262144 | 48.96 | 49.60 | 0.99 | 0.40 |
+
+**Scheme X ≈ baseline (X/rs 0.95–1.02×).** The free-peel P4-collapse saving is
+eaten by phase4_partition overhead (M0-wide 2-pass register staging + smem-atomic
+slot contention on 2 counters over ~M0 threads). K512 fp32 pending on resume
+(expect similar/slightly worse — larger band). vs radix still lost at large N
+(structural). NO-SHIP as-is.
+
+### Verdict
+Every op16 lever (P4 two-threshold, P2 sampling, secant accel, free-peel Scheme X)
+nets neutral-to-small on B300: theoretical gains eaten by L2-fit + rank-scatter/
+launch floor + implementation overhead. Target unreachable. One untried refinement:
+cheaper partition (warp-aggregated atomics) — expected large-N-K2048-only even if
+it works. HEAD stays at baseline.
