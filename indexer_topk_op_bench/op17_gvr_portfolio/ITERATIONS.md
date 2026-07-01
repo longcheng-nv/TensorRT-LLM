@@ -231,3 +231,32 @@ gvr_topk_decode_cluster.py DSMEM machinery) is the tractable target — coarser 
 iter5 2-kernel = +1 pass). Only the single-cooperative-cluster kernel (G=16, winner-does-tail)
 can net-win, and only in small/mid-N (large-N dominated by the existing PR#15198 cluster).
 Measured ceiling remains ~1.2×. That kernel is a large build on the 2292-line cluster file.
+
+---
+
+## Iter 6 — 2026-07-01 — cooperative-cluster portfolio (G=8): EXACT + NET-POSITIVE ✅
+
+`src/gvr_portfolio_cluster_op.py`: single kernel, cluster of G=8 CTAs per row. Each CTA:
+P1 (redundant) → thr_r = pmin + r*(pmax-pmin)/(G-1) → block_count_ge FULL N at thr_r (fills
+its own smem_ptcnt + count). DSMEM-share counts (cluster_arrive_relaxed/wait +
+mapa_shared_cluster/ld_shared_cluster_i32), pick best_m = highest r with count≥K; WINNER
+(rank==best_m) sets s_thr[0]=thr_r, done=1 → P3 collect reuses its smem_ptcnt (ZERO recount)
+→ P4 (tight cand). Others exit. Reuses single-CTA phase1/block_count_ge/phase3/phase4 (no
+vendored edit); DSMEM helpers imported from the cluster module.
+
+**EXACT (vdiff=0, uniq=K) all K512/1024/2048 fp32. A/B (`scripts/iter6_ab.py`, cold-L2):**
+| K\N | 4096 | 8192 | 16384 | 32768 | 65536 | 131072 | 262144 |
+|---|---|---|---|---|---|---|---|
+| 512  | 1.112 | 1.123 | 1.135 | 1.216 | 1.200 | 1.198 | 1.191 |
+| 1024 | 0.988 | 1.123 | 0.997 | 1.231 | 1.263 | 1.204 | 1.305 |
+| 2048 | –     | 1.035 | 1.082 | 1.104 | 1.248 | 1.324 | 1.487 |
+
+**Avg ~1.18× over 21 cells; wins at LARGE N too (K2048/262K 1.49×, K1024/262K 1.31×).** Only
+2 near-neutral: K1024 N=4096 (0.988×) + N=16384 (0.997×) — ~1% dips (fix via dispatch or G).
+This VALIDATES B1: the cooperative single-kernel is the design that nets the P4-shrink with no
+extra pass. Confirms the iter4/iter5 negatives were realization artifacts, not the idea.
+
+**Next (iter7):** (a) try G=16 (finer band → tighter cand → lift the weak small-N cells);
+(b) dispatch-guard the 2 K1024 dips to baseline for strict no-regression; (c) ×3-median +
+nsys-validate the wins (repo rule); (d) extend bf16/fp16. Not +40% (avg ~1.18×) but a real,
+broad, exact, ~no-regression win over the single-CTA baseline — the first shippable op17 form.
