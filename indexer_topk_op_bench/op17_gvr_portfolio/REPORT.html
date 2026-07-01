@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>op17 GVR Threshold-Portfolio — Optimization Report</title>
+<style>
+  :root{--bg:#0f1420;--card:#161d2e;--ink:#e6edf6;--mut:#93a1b5;--acc:#5db0ff;--good:#3fd07a;--bad:#ff7a7a;--warn:#ffcf5d;--line:#26314a}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 -apple-system,Segoe UI,Roboto,Helvetica,Arial,"Noto Sans CJK SC",sans-serif}
+  .wrap{max-width:1080px;margin:0 auto;padding:28px 20px 80px}
+  h1{font-size:26px;margin:.2em 0}
+  h2{font-size:20px;margin:1.6em 0 .5em;padding-bottom:.25em;border-bottom:1px solid var(--line);color:var(--acc)}
+  h3{font-size:16px;margin:1.2em 0 .4em;color:#cfe0f5}
+  p{margin:.5em 0}
+  code,kbd{background:#0b1020;border:1px solid var(--line);border-radius:5px;padding:1px 5px;font-size:.9em;color:#bfe0ff}
+  table{border-collapse:collapse;width:100%;margin:.7em 0;font-size:13.5px;background:var(--card);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  th,td{padding:6px 9px;text-align:center;border-bottom:1px solid var(--line)}
+  th{background:#1c2740;color:#cfe0f5;font-weight:600}
+  td.l,th.l{text-align:left}
+  tr:last-child td{border-bottom:none}
+  .win{color:var(--good);font-weight:600}
+  .neu{color:var(--warn)}
+  .loss{color:var(--bad)}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 18px;margin:.8em 0}
+  .badges{display:flex;flex-wrap:wrap;gap:8px;margin:.6em 0}
+  .b{background:#12203a;border:1px solid #244a7a;color:#bfe0ff;border-radius:999px;padding:4px 12px;font-size:13px}
+  .b.g{background:#0f2a1c;border-color:#1f6b41;color:#8ff0b6}
+  .mut{color:var(--mut)}
+  pre{background:#0b1020;border:1px solid var(--line);border-radius:8px;padding:12px;overflow:auto;font-size:12.5px;color:#cfe0f5}
+  .bar{position:sticky;top:0;z-index:5;background:var(--bg);padding:10px 0;border-bottom:1px solid var(--line);margin-bottom:8px}
+  .bar label{cursor:pointer;border:1px solid var(--line);border-radius:8px;padding:6px 14px;margin-right:6px;background:var(--card);color:var(--mut)}
+  /* language toggle (CSS-only, no JS) */
+  #lang-en,#lang-cn{position:absolute;left:-9999px}
+  .cn{display:none}
+  #lang-cn:checked ~ #wrap .en{display:none}
+  #lang-cn:checked ~ #wrap .cn{display:revert}
+  #lang-en:checked ~ .bar label[for=lang-en],#lang-cn:checked ~ .bar label[for=lang-cn]{background:#12203a;border-color:#244a7a;color:#bfe0ff}
+  .small{font-size:12.5px}
+</style>
+</head>
+<body>
+<input type="radio" name="lang" id="lang-en" checked>
+<input type="radio" name="lang" id="lang-cn">
+<div class="bar">
+  <label for="lang-en">English</label><label for="lang-cn">中文</label>
+</div>
+<div id="wrap"><div class="wrap">
+
+<h1><span class="en">op17 — GVR Threshold-Portfolio Kernel</span><span class="cn">op17 — GVR 阈值-Portfolio 算子</span></h1>
+<p class="mut small"><span class="en">Cooperative-cluster speculative threshold portfolio for the DSv4 indexer Top-K (GVR, cuteDSL). B200 sm_100. All numbers on the report's synthetic data (byte-identical inputs across ops).</span><span class="cn">面向 DSv4 indexer Top-K(GVR,cuteDSL)的 cooperative-cluster 推测式阈值 portfolio 算子。B200 sm_100。所有数字基于报告合成数据(各算子字节一致输入)。</span></p>
+
+<div class="badges">
+  <span class="b g">EXACT (vdiff=0)</span>
+  <span class="b g"><span class="en">no regression vs baseline</span><span class="cn">对 baseline 无回退</span></span>
+  <span class="b"><span class="en">BS=1 nsys 1.21–1.67×</span><span class="cn">BS=1 nsys 1.21–1.67×</span></span>
+  <span class="b"><span class="en">event ×3-median avg ~1.22×</span><span class="cn">event ×3-median 均值 ~1.22×</span></span>
+  <span class="b">fp32 / bf16 / fp16</span>
+</div>
+
+<h2><span class="en">1 · Goal &amp; honest scope</span><span class="cn">1 · 目标与诚实定位</span></h2>
+<p><span class="en">Start from the single-CTA GVR (cuteDSL) op and improve per-(seqlen,BS) performance while keeping the GVR structure (preIdx → threshold search → refine) and absorbing the multi-CTA idea. The original ask — <b>+40% average across all seqlen/BS with no regression</b> — was shown to be physically out of reach for this kernel family (P2 already ~1 pass at K512; P3 full-N-read-bound; single-CTA at 1/148 HBM BW). This report delivers the achievable target: a <b>real, exact, no-regression, all-dtype speedup over the single-CTA baseline</b>, largest in the low-BS / long-context decode regime that DSv4 actually runs.</span>
+<span class="cn">以单-CTA GVR(cuteDSL)算子为起点,在保持 GVR 结构(preIdx → 阈值搜索 → refine)、吸收 multi-CTA 思想的前提下提升各 (seqlen,BS) 性能。原始目标——<b>各 seqlen/BS 平均 +40% 且无回退</b>——已论证对该核族物理不可达(K512 的 P2 已是 ~1 趟;P3 受全-N 读约束;单-CTA 仅 1/148 HBM 带宽)。本报告交付可达目标:<b>对单-CTA baseline 真实、exact、无回退、覆盖全 dtype 的加速</b>,在 DSv4 实际运行的低-BS / 长上下文 decode 区间最显著。</span></p>
+
+<h2><span class="en">2 · Optimization journey (10 iterations)</span><span class="cn">2 · 优化过程(10 次迭代)</span></h2>
+<table>
+<tr><th>iter</th><th class="l"><span class="en">approach</span><span class="cn">做法</span></th><th class="l"><span class="en">outcome</span><span class="cn">结论</span></th></tr>
+<tr><td>0</td><td class="l"><span class="en">Crux: are G redundant full-N scans free at BS=1?</span><span class="cn">命门:BS=1 时 G 个冗余全-N 扫描是否免费?</span></td><td class="l win"><span class="en">YES — G=148 ≈ 1 pass (single CTA ~0.35% peak BW)</span><span class="cn">是——G=148 ≈ 1 趟(单 CTA 仅 ~0.35% 峰值带宽)</span></td></tr>
+<tr><td>1</td><td class="l"><span class="en">Is P4 candidate-linear? (decoupled via clock64)</span><span class="cn">P4 是否随 cand 线性?(clock64 解耦)</span></td><td class="l win"><span class="en">YES — P4 −58% @N16K with a tight threshold</span><span class="cn">是——紧阈值下 P4 −58% @N16K</span></td></tr>
+<tr><td>2</td><td class="l"><span class="en">Leader-selection sync cost</span><span class="cn">选 leader 的同步成本</span></td><td class="l"><span class="en">~2 µs (cheap)</span><span class="cn">~2 µs(便宜)</span></td></tr>
+<tr><td>4</td><td class="l"><span class="en">Single-CTA M-way multi-threshold P2</span><span class="cn">单-CTA M-路多阈值 P2</span></td><td class="l loss"><span class="en">FALSIFIED — M compares/elem not hidden (≤1.0×)</span><span class="cn">证伪——M 路比较 ALU 藏不住(≤1.0×)</span></td></tr>
+<tr><td>5</td><td class="l"><span class="en">2-kernel multi-CTA (sweep + seeded tail)</span><span class="cn">2-kernel 多-CTA(sweep + seeded 尾核)</span></td><td class="l loss"><span class="en">FALSIFIED — adds a full pass + launch (0.63–0.84×)</span><span class="cn">证伪——多一整趟 pass + launch(0.63–0.84×)</span></td></tr>
+<tr><td>6–7</td><td class="l"><span class="en"><b>Cooperative-cluster (single kernel, G=8/16)</b></span><span class="cn"><b>cooperative-cluster(单 kernel,G=8/16)</b></span></td><td class="l win"><span class="en"><b>WIN — exact, no regression, avg ~1.21×</b></span><span class="cn"><b>成功——exact、无回退、均值 ~1.21×</b></span></td></tr>
+<tr><td>8</td><td class="l"><span class="en">×3-median, all dtypes, vs both baselines</span><span class="cn">×3-median、全 dtype、对两个 baseline</span></td><td class="l win"><span class="en">no regression vs single-CTA; vs multicta wins ≤65K</span><span class="cn">对单-CTA 无回退;对 multicta 在 ≤65K 胜</span></td></tr>
+<tr><td>9</td><td class="l"><span class="en">nsys pure-kernel validation (repo rule)</span><span class="cn">nsys 纯核验证(repo 规则)</span></td><td class="l win"><span class="en">CONFIRMED — nsys 1.21–1.67× &gt; event</span><span class="cn">确认——nsys 1.21–1.67× &gt; event</span></td></tr>
+<tr><td>10</td><td class="l"><span class="en">High-BS dispatch guard (pick_G)</span><span class="cn">高-BS dispatch guard(pick_G)</span></td><td class="l win"><span class="en">BS≤16 win; BS≥32 → baseline (no regression)</span><span class="cn">BS≤16 胜;BS≥32 → baseline(无回退)</span></td></tr>
+</table>
+<p class="small mut"><span class="en">Key lesson: the tight threshold is "free" only as a multi-CTA <em>replacement</em> of the search pass in ONE cooperative kernel — folding it into one CTA's ALU (iter4) or a separate kernel (iter5) both lose.</span><span class="cn">关键教训:紧阈值只有在<em>单个</em> cooperative kernel 里作为多-CTA 对搜索 pass 的<em>替换</em>时才"免费"——塞进单 CTA 的 ALU(iter4)或独立 kernel(iter5)都会亏。</span></p>
+
+<h2><span class="en">3 · Current best design</span><span class="cn">3 · 当前最优方案</span></h2>
+<div class="card">
+<p class="small"><code>src/gvr_portfolio_cluster_op.py</code> — <span class="en">one cluster of <b>G</b> CTAs per row:</span><span class="cn">每行一个 <b>G</b>-CTA cluster:</span></p>
+<pre>
+P1  each CTA computes band [pmin,pmax] from preIdx (redundant, cheap)
+    thr_r = pmin + rank*(pmax-pmin)/(G-1)
+P2  each CTA runs ONE block_count_ge over FULL N at thr_r
+    -> fills ITS OWN smem_ptcnt + count_r     (free: G redundant scans ~= 1 pass)
+    DSMEM-share counts (mapa.shared::cluster + cluster_arrive/wait)
+    pick best_r = highest rank with count_r >= K   (tightest)
+P3  WINNER (rank==best_r) already holds smem_ptcnt at thr* -> collect, NO recount
+P4  WINNER snaps exact top-K from the TIGHT candidate set (small P4); others exit
+</pre>
+<p class="small"><span class="en"><b>Why it wins:</b> the sweep <em>replaces</em> P2 (zero extra pass); the winning CTA reuses the exact per-thread count cache its own pass produced; a tighter threshold ⇒ fewer candidates ⇒ smaller candidate-linear P4. band=[pmin,pmax] because all K preIdx ≥ pmin ⇒ count(pmin)≥K ⇔ v_K≥pmin, so it always brackets the K-th value.</span>
+<span class="cn"><b>为什么赢:</b>sweep <em>替换</em>了 P2(零额外 pass);获胜 CTA 复用自己那趟已算好的 per-thread count 缓存;更紧的阈值 ⇒ 更少候选 ⇒ 更小的(随 cand 线性的)P4。band 取 [pmin,pmax] 是因为所有 K 个 preIdx ≥ pmin ⇒ count(pmin)≥K ⇔ v_K≥pmin,故必然括住第 K 大值。</span></p>
+<p class="small mut"><span class="en">Dispatch <code>pick_G</code>: G∈{16,8,4} with bs·G ≤ NUM_SMS/2; else G=1 → single-CTA baseline. Never emits G=2 (unstable). Reuses vendored phase1/block_count_ge/phase3/phase4 (no vendored edit); DSMEM helpers imported from the PR#15198 cluster module.</span>
+<span class="cn">Dispatch <code>pick_G</code>:G∈{16,8,4} 且 bs·G ≤ NUM_SMS/2;否则 G=1 → 单-CTA baseline。绝不发 G=2(不稳定)。复用 vendored 的 phase1/block_count_ge/phase3/phase4(不改 vendored);DSMEM 原语从 PR#15198 cluster 模块导入。</span></p>
+</div>
+
+<h2><span class="en">4 · Performance</span><span class="cn">4 · 性能对比</span></h2>
+
+<h3><span class="en">4.1 · nsys pure-kernel (BS=1, fp32) — the canonical metric</span><span class="cn">4.1 · nsys 纯核(BS=1,fp32)——权威指标</span></h3>
+<table>
+<tr><th class="l">cell</th><th>base µs</th><th>port µs</th><th>nsys</th><th>event</th></tr>
+<tr><td class="l">K512 · N16384</td><td>16.69</td><td>9.97</td><td class="win">1.673×</td><td>1.365×</td></tr>
+<tr><td class="l">K512 · N65536</td><td>19.24</td><td>14.71</td><td class="win">1.309×</td><td>1.174×</td></tr>
+<tr><td class="l">K1024 · N65536</td><td>24.27</td><td>17.91</td><td class="win">1.355×</td><td>1.250×</td></tr>
+<tr><td class="l">K2048 · N262144</td><td>52.44</td><td>33.31</td><td class="win">1.574×</td><td>1.475×</td></tr>
+<tr><td class="l">K512 · N262144</td><td>39.20</td><td>32.50</td><td class="win">1.206×</td><td>1.174×</td></tr>
+</table>
+<p class="small mut"><span class="en">nsys &gt; event on every cell: CUDA-graph/event timing folds in the cluster's launch overhead, so the event speedup is a conservative lower bound for this cluster kernel.</span><span class="cn">每个 cell nsys &gt; event:CUDA-graph/event 计时把 cluster 的 launch 开销算了进去,故对该 cluster 核而言 event 加速是保守下界。</span></p>
+
+<h3><span class="en">4.2 · ×3-median cold-L2 (BS=1) vs both baselines</span><span class="cn">4.2 · ×3-median cold-L2(BS=1)对两个 baseline</span></h3>
+<p class="small"><span class="en"><b>port/base</b> = vs single-CTA <code>gvr_cutedsl</code> (the target). <b>port/mc</b> = vs the existing PR#15198 multicta cluster.</span><span class="cn"><b>port/base</b> = 对单-CTA <code>gvr_cutedsl</code>(目标)。<b>port/mc</b> = 对现有 PR#15198 multicta cluster。</span></p>
+<table>
+<tr><th>dtype</th><th>K</th><th>N=4096</th><th>N=16384</th><th>N=65536</th><th>N=262144</th></tr>
+<tr><td rowspan="3">fp32</td><td>512</td><td class="win">1.166 / 1.16</td><td class="win">1.365 / 1.36</td><td class="win">1.174 / 1.02</td><td class="win">1.174 / <span class="loss">0.71</span></td></tr>
+<tr><td>1024</td><td class="neu">1.002 / 0.97</td><td class="win">1.216 / 1.22</td><td class="win">1.250 / 1.15</td><td class="win">1.270 / <span class="loss">0.78</span></td></tr>
+<tr><td>2048</td><td class="mut">–</td><td class="win">1.030 / 1.03</td><td class="win">1.363 / 1.16</td><td class="win">1.475 / <span class="loss">0.83</span></td></tr>
+<tr><td rowspan="3">bf16</td><td>512</td><td class="win">1.156 / 1.17</td><td class="win">1.147 / 1.13</td><td class="win">1.146 / 1.11</td><td class="win">1.234 / <span class="loss">0.75</span></td></tr>
+<tr><td>1024</td><td class="win">1.216 / 1.19</td><td class="win">1.190 / 1.14</td><td class="win">1.128 / 1.10</td><td class="win">1.227 / <span class="loss">0.76</span></td></tr>
+<tr><td>2048</td><td class="mut">–</td><td class="win">1.136 / 1.13</td><td class="win">1.154 / 1.06</td><td class="win">1.386 / <span class="loss">0.80</span></td></tr>
+<tr><td rowspan="3">fp16</td><td>512</td><td class="win">1.137 / 1.14</td><td class="win">1.076 / 1.03</td><td class="win">1.223 / 1.18</td><td class="win">1.224 / <span class="loss">0.79</span></td></tr>
+<tr><td>1024</td><td class="win">1.149 / 1.16</td><td class="win">1.301 / 1.29</td><td class="win">1.197 / 1.17</td><td class="win">1.303 / <span class="loss">0.81</span></td></tr>
+<tr><td>2048</td><td class="mut">–</td><td class="win">1.135 / 1.11</td><td class="win">1.169 / 1.12</td><td class="win">1.376 / <span class="loss">0.82</span></td></tr>
+</table>
+<p class="small mut"><span class="en">vs single-CTA baseline: no regression anywhere, all dtypes (min 1.00×, avg ~1.22×, max 1.48×). vs the existing multicta cluster: portfolio wins N≤65K but loses N≥262K (multicta partitions the scan) — crossover ~131K ⇒ production dispatch uses portfolio for mid-N, multicta for very-large-N.</span><span class="cn">对单-CTA baseline:全区间无回退,全 dtype(min 1.00×,均值 ~1.22×,max 1.48×)。对现有 multicta cluster:portfolio 在 N≤65K 胜,N≥262K 输(multicta 分片扫描)——交叉点 ~131K ⇒ 生产 dispatch 中 portfolio 用于中 N,multicta 用于超大 N。</span></p>
+
+<h3><span class="en">4.3 · Batch-size sweep (K512 fp32 N65536, auto-G)</span><span class="cn">4.3 · Batch-size 扫描(K512 fp32 N65536,auto-G)</span></h3>
+<table>
+<tr><th>BS</th><th>1</th><th>4</th><th>8</th><th>16</th><th>32</th><th>64</th><th>128</th></tr>
+<tr><td class="l">G</td><td>16</td><td>16</td><td>8</td><td>4</td><td>1</td><td>1</td><td>1</td></tr>
+<tr><td class="l">port/base</td><td class="win">1.273</td><td class="win">1.203</td><td class="win">1.173</td><td class="win">1.230</td><td class="neu">1.020</td><td class="neu">0.986</td><td class="neu">1.000</td></tr>
+</table>
+<p class="small mut"><span class="en">BS≤16 → portfolio (1.17–1.27×). BS≥32 → single-CTA baseline fallback; 0.986/1.02 are ±1.5% cold-L2 noise on the identical kernel (no real regression).</span><span class="cn">BS≤16 → portfolio(1.17–1.27×)。BS≥32 → 退回单-CTA baseline;0.986/1.02 是同一核的 ±1.5% cold-L2 噪声(非真实回退)。</span></p>
+
+<h2><span class="en">5 · Verdict</span><span class="cn">5 · 结论</span></h2>
+<p><span class="en">A shippable, exact, no-regression Top-K operator that beats the single-CTA GVR baseline broadly — <b>BS=1 pure-kernel 1.21–1.67×</b>, all three dtypes, up to <b>+48%</b> at K2048/262K. It confirms the multi-CTA multi-threshold portfolio direction. It does <b>not</b> reach the original +40%-universal target (physically unreachable here), and it cedes the very-large-N regime to the existing PR#15198 cluster; a per-(N,BS) dispatch combines the two with no regression.</span>
+<span class="cn">一个可落地、exact、无回退的 Top-K 算子,宽区间超越单-CTA GVR baseline——<b>BS=1 纯核 1.21–1.67×</b>,三种 dtype 全覆盖,K2048/262K 最高 <b>+48%</b>。它验证了多-CTA 多阈值 portfolio 方向。它<b>没有</b>达到原始 +40% 全区间目标(此处物理不可达),且把超大 N 区间让给现有 PR#15198 cluster;按 (N,BS) dispatch 可将两者组合且无回退。</span></p>
+
+<h2><span class="en">6 · Remaining optional deep-dives (future directions)</span><span class="cn">6 · 剩余可选深化(后续优化方向)</span></h2>
+
+<h3><span class="en">D1 · Partition + portfolio fusion (highest value)</span><span class="cn">D1 · 分片 + portfolio 融合(价值最高)</span></h3>
+<p class="small"><span class="en">Today each CTA scans the FULL N (redundant); at N≥262K the single-winner full-N collect loses to multicta's partitioned scan. Fusion: split the cluster into <code>P</code> partition-groups × <code>T</code> threshold-slots (G=P·T). Each group scans N/P (bandwidth-parallel, like multicta) while the T slots within a group cover distinct thresholds; DSMEM-reduce counts across the P×T grid. This should reclaim N≥262K (multicta's scan speed) AND keep the tight-cand P4 win — potentially beating both baselines everywhere. Cost: a 2-D DSMEM reduction + partitioned collect on the winner group.</span>
+<span class="cn">当前每个 CTA 扫全 N(冗余);N≥262K 时单-winner 的全-N collect 输给 multicta 的分片扫描。融合:把 cluster 拆成 <code>P</code> 个分片组 × <code>T</code> 个阈值槽(G=P·T)。每组扫 N/P(带宽并行,像 multicta),组内 T 槽覆盖不同阈值;在 P×T 网格上做 DSMEM 归约。这应能夺回 N≥262K(multicta 的扫描速度)且保留紧-cand 的 P4 收益——有望在所有区间同时超越两个 baseline。代价:二维 DSMEM 归约 + 获胜组上的分片 collect。</span></p>
+
+<h3><span class="en">D2 · Adaptive band from a coarse first pass</span><span class="cn">D2 · 由粗扫自适应确定 band</span></h3>
+<p class="small"><span class="en">Instead of a fixed [pmin,pmax], let the first (free) sweep also return a coarse CCDF and concentrate the G thresholds where count crosses K on the next launch (or via a 2-level in-kernel refine on the winning slot). Tighter cand at the same G ⇒ larger P4 shrink, especially at small N where cand headroom is limited.</span>
+<span class="cn">不用固定 [pmin,pmax],让第一趟(免费)sweep 顺带返回粗 CCDF,在下一次(或核内对获胜槽做 2 级 refine)把 G 个阈值集中到 count 跨越 K 的区间。同 G 下更紧的 cand ⇒ 更大的 P4 缩减,尤其在小 N(cand 余量有限)时。</span></p>
+
+<h3><span class="en">D3 · G-2 cluster stability + larger G</span><span class="cn">D3 · G=2 cluster 稳定性 + 更大 G</span></h3>
+<p class="small"><span class="en">Diagnose the G=2 "unspecified launch failure" (smem/occupancy vs launch API) to open the BS=32–64 band to a small cluster; and try G&gt;16 via the non-portable-cluster-size opt-in for finer resolution at BS=1.</span>
+<span class="cn">诊断 G=2 的 "unspecified launch failure"(smem/占用率 vs launch API),以便把 BS=32–64 带打开给小 cluster;并通过 non-portable-cluster-size opt-in 尝试 G&gt;16,在 BS=1 获得更细分辨率。</span></p>
+
+<h3><span class="en">D4 · Productionization</span><span class="cn">D4 · 产品化</span></h3>
+<p class="small"><span class="en">Register as a report op column; full-grid ×3-median nsys; wire into the <code>torch.ops.trtllm.indexer_topk_decode</code> path behind an (N,BS,dtype) dispatch; GSM8K accuracy gate on real DSv4 data (exactness is proven on synth, but validate the tie-boundary on quantized inputs).</span>
+<span class="cn">注册为 report 算子列;全网格 ×3-median nsys;在 (N,BS,dtype) dispatch 下接入 <code>torch.ops.trtllm.indexer_topk_decode</code> 生产路径;在真实 DSv4 数据上做 GSM8K 精度门(合成数据已证 exact,但需在量化输入上验证 tie 边界)。</span></p>
+
+<h2><span class="en">7 · Files (local snapshot)</span><span class="cn">7 · 文件(本地归档)</span></h2>
+<table>
+<tr><th class="l"><span class="en">path</span><span class="cn">路径</span></th><th class="l"><span class="en">what</span><span class="cn">内容</span></th></tr>
+<tr><td class="l"><code>src/gvr_portfolio_cluster_op.py</code></td><td class="l"><span class="en"><b>the operator</b> (current best)</span><span class="cn"><b>算子</b>(当前最优)</span></td></tr>
+<tr><td class="l"><code>src/gvr_portfolio_op.py</code> · <code>gvr_portfolio_mcta_op.py</code></td><td class="l"><span class="en">falsified iter4 / iter5 variants (kept for the record)</span><span class="cn">已证伪的 iter4 / iter5 变体(存档)</span></td></tr>
+<tr><td class="l"><code>scripts/iter{1b,2,2b,3,4,5,6,7,8}*.py</code>, <code>nsys_run.py</code></td><td class="l"><span class="en">all measurement scripts</span><span class="cn">全部测量脚本</span></td></tr>
+<tr><td class="l"><code>results/nsys/v2_*.nsys-rep</code></td><td class="l"><span class="en">nsys pure-kernel captures</span><span class="cn">nsys 纯核采集</span></td></tr>
+<tr><td class="l"><code>RESULTS_SUMMARY.md</code></td><td class="l"><span class="en">all perf tables (machine-readable)</span><span class="cn">全部性能表(可读)</span></td></tr>
+<tr><td class="l"><code>ITERATIONS.md</code> · <code>LEARNINGS.md</code></td><td class="l"><span class="en">full iteration log &amp; knowledge base</span><span class="cn">完整迭代日志与知识库</span></td></tr>
+</table>
+
+<p class="small mut" style="margin-top:2em">HW B200 sm_100 · NUM_SMS=148 · cold-L2 512MB-evict + CUDA-graph + cudaEvent (event tables) / nsys cuda_gpu_kern_sum (nsys table) · synth data = report bundles (seed=42, preIdx hit-rate 0.6).</p>
+
+</div></div>
+</body>
+</html>
