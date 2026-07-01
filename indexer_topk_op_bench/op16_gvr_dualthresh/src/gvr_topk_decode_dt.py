@@ -148,7 +148,16 @@ class GvrTopKKernel:
         enable_sampled_init: bool = False,
         sample_size: int = 4096,
         sample_aim_permille: int = 1150,
+        enable_dual_thresh: bool = False,
     ):
+        # op16 Scheme X (user's clarified algo-A, secant framework): during the
+        # SAME secant bracketing, record threshold_1 = the path threshold with the
+        # largest count < K (FREE — already evaluated). Its M elements (>= thr1)
+        # are definite top-K winners written directly; P4 then refines only the
+        # band [threshold, threshold_1) (M0-M elems) for the remaining K-M. No
+        # tax (uses the existing iteration path), no sampling. Default False =>
+        # baseline path untouched.
+        self.enable_dual_thresh = enable_dual_thresh
         # op16 cheaper-P2 lever: replace P2's iterative full-N secant init
         # (thr0 = pmean, needs 2-3.67 full-N count_ge passes to converge) with a
         # SMEM histogram of a strided ~sample_size-element subsample -> t0 at the
@@ -827,6 +836,10 @@ class GvrTopKKernel:
 
         # tid==0 classifies the initial count.
         if tidx == 0:
+            # op16 dual-thresh: init threshold_1 slots (FREE path recording).
+            if cutlass.const_expr(self.enable_dual_thresh):
+                s_thr[3] = cutlass.Float32(self.NEG_FLT_MAX)  # threshold_1
+                s_iscalars[5] = cutlass.Int32(0)              # M (count>=thr1)
             c0 = s_iscalars[0]
             t0 = s_thr[0]
             if c0 >= cutlass.Int32(kK) and c0 <= cutlass.Int32(kCC):
@@ -839,6 +852,11 @@ class GvrTopKKernel:
                 # too few → threshold is the new upper bound (search LOWER)
                 s_thr[2] = t0
                 s_iscalars[3] = c0
+                # dual: c0<K and it's a definite-winner threshold candidate
+                if cutlass.const_expr(self.enable_dual_thresh):
+                    if c0 > s_iscalars[5]:
+                        s_thr[3] = t0
+                        s_iscalars[5] = c0
         cute.arch.barrier()
 
         # ---- Secant refinement loop ----
@@ -908,6 +926,11 @@ class GvrTopKKernel:
                     else:
                         s_thr[2] = t_new
                         s_iscalars[3] = c_new
+                        # dual: record best (largest-count) threshold_1 with count<K
+                        if cutlass.const_expr(self.enable_dual_thresh):
+                            if c_new > s_iscalars[5]:
+                                s_thr[3] = t_new
+                                s_iscalars[5] = c_new
                 cute.arch.barrier()
             it = it + cutlass.Int32(1)
 
@@ -2118,16 +2141,16 @@ class GvrTopKKernel:
             layout=cute.make_ordered_layout((num_warps,), order=(0,)),
             byte_alignment=64,
         )
-        # Float scalars: threshold, val_lo, val_hi
+        # Float scalars: threshold, val_lo, val_hi, threshold_1 (op16 dual-thresh)
         s_thr = smem.allocate_tensor(
             element_type=cutlass.Float32,
-            layout=cute.make_ordered_layout((3,), order=(0,)),
+            layout=cute.make_ordered_layout((4,), order=(0,)),
             byte_alignment=16,
         )
-        # Int scalars: cand_count, done, cnt_lo, cnt_hi, out_count
+        # Int scalars: cand_count, done, cnt_lo, cnt_hi, out_count, M (op16 dual)
         s_iscalars = smem.allocate_tensor(
             element_type=cutlass.Int32,
-            layout=cute.make_ordered_layout((5,), order=(0,)),
+            layout=cute.make_ordered_layout((6,), order=(0,)),
             byte_alignment=16,
         )
 
