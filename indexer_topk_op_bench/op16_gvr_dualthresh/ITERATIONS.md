@@ -264,6 +264,25 @@ M0-wide 2-pass + atomic contention on top. The overhead is a larger fraction at
 small/mid N (0.86–0.91 @ 4K–32K), decaying toward 1.0 only as N grows and P2+P3
 dominate. Data: `results/nsys_ab/abX_K512_fp32.jsonl` + `nsys_reps/abX_K512_fp32.nsys-rep`.
 
+### Full K×dtype grid (all 9 configs, X/rs = Scheme X vs own baseline; anchors 0.94–1.03)
+Per-N X/rs (`<1` = slower). Data: `results/nsys_ab/abX_K{512,1024,2048}_{fp32,bf16,fp16}.jsonl`.
+
+| N | K512 f32 | K512 bf16 | K512 f16 | K1024 f32 | K1024 bf16 | K1024 f16 | K2048 f32 | K2048 bf16 | K2048 f16 |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 4096 | 0.89 | 0.89 | 0.89 | 0.88 | 0.92 | 0.91 | — | — | — |
+| 8192 | 0.86 | 0.87 | 0.87 | 0.86 | 0.84 | 0.86 | 0.95 | 0.92 | 0.91 |
+| 16384 | 0.91 | 0.88 | 0.91 | 0.87 | 0.85 | 0.86 | 0.97 | 0.92 | 0.91 |
+| 32768 | 0.91 | 0.91 | 0.90 | 0.96 | 0.97 | 0.95 | **1.02** | 0.94 | 0.94 |
+| 65536 | 0.96 | 0.95 | 0.95 | 0.91 | 0.91 | 0.90 | 0.97 | 0.95 | 0.94 |
+| 131072 | 0.98 | 0.96 | 0.97 | 0.94 | 0.93 | 0.94 | 0.98 | 0.95 | 0.95 |
+| 262144 | 0.95 | 0.96 | 0.96 | 0.96 | 0.95 | 0.95 | 0.99 | 0.97 | 0.96 |
+
+**Universal: X/rs ∈ 0.845–1.022; exactly ONE cell >1.0 (K2048 fp32@32K, 1.02×), all
+others <1.** (1) smaller K worse (larger band ⇒ rank-scatter floor barely collapses);
+(2) bf16/fp16 consistently slightly worse than fp32 (partition overhead dtype-independent,
+baseline a touch cheaper); (3) large N → 1.0 (P2+P3 dominate) but never wins. Confirms
+the iter-6 fp32 read is not a dtype/K artifact.
+
 ### FINAL VERDICT (iter 6 complete)
 Every op16 lever (P4 two-threshold band-shrink, P2 sampling, secant accel, free-peel
 Scheme X) nets neutral-to-NEGATIVE on B300: theoretical gains eaten by L2-fit +
