@@ -33,6 +33,10 @@
   ul{margin:.3em 0}
   .badge{display:inline-block;font-size:11px;padding:1px 7px;border-radius:10px;color:#fff;vertical-align:middle}
   .b-dead{background:var(--bad)}.b-win{background:var(--good)}.b-wip{background:var(--warn)}.b-info{background:var(--acc)}
+  pre{background:#0f172a;color:#e6edf3;border-radius:8px;padding:12px 14px;overflow-x:auto;font-size:12.5px;line-height:1.45;margin:10px 0}
+  pre code{background:none;color:inherit;padding:0;font-size:inherit}
+  pre.flow{background:#f6f8fa;color:#1a2733;border:1px solid var(--bd);line-height:1.3}
+  .cap{font-size:12.5px;color:var(--mut);margin:2px 0 10px}
 </style>
 </head>
 <body>
@@ -60,7 +64,7 @@
 <ul>
 <li><span class="zh"><b>小 N：</b>Radix 地板 (6.5µs) 低于 GVR 内核地板 (~9µs)；</span><span class="en"><b>Small N:</b> Radix floor (6.5µs) is below GVR's kernel floor (~9µs);</span></li>
 <li><span class="zh"><b>大 N：</b>GVR 仅 P3 全 N collect 就 ~17µs @262K ≈ Radix flat 总时 ~19µs；阈值-流式算法无法追平 flat radix-select。</span><span class="en"><b>Large N:</b> GVR's P3 full-N collect alone is ~17µs @262K ≈ Radix's flat ~19µs total; a threshold-streaming kernel cannot match flat radix-select.</span></li>
-<li><span class="zh"><b>secant 框架内最优（免费、无回归）：</b>免费 threshold_1 peel + quad 插值 → <span class="good">K2048 大 N ~−18%</span>，<span class="warn">K512/K1024 ~−3–6%</span>。</span><span class="en"><b>Best within secant (free, no-regression):</b> free threshold_1 peel + quad interp → <span class="good">K2048 large-N ~−18%</span>, <span class="warn">K512/K1024 ~−3–6%</span>.</span></li>
+<li><span class="zh"><b>secant 框架内最优（Scheme X）经 nsys 实测证伪 host 预估：</b>免费 threshold_1 peel + band rank-scatter 精确无回归（flag off byte-identical），但开 flag 后 <span class="warn">K2048 净中性 0.95–1.02×</span>、<span class="bad">K512 全 N 净亏 0.86–0.98×</span>（host 预估的 K2048 −18% 被 phase4_partition 开销吃掉）⇒ <b>NO-SHIP，HEAD 停在 baseline</b>。</span><span class="en"><b>Best within secant (Scheme X) — host projection falsified by nsys:</b> free threshold_1 peel + band rank-scatter is exact &amp; no-regression (flag-off byte-identical), but with the flag ON it is <span class="warn">K2048 net-neutral 0.95–1.02×</span> and <span class="bad">K512 a net LOSS at every N (0.86–0.98×)</span> — the host-projected K2048 −18% is eaten by phase4_partition overhead ⇒ <b>NO-SHIP, HEAD stays at baseline</b>.</span></li>
 </ul>
 </div>
 
@@ -84,7 +88,111 @@
 <li><span class="zh"><b>L2 陷阱（决定性）：</b>B300 上输入 ≤1MB ≪ L2 126MB，重复 count_ge pass 是 L2 命中、廉价 ⇒ "减少 pass 数"类优化无效。真正杠杆是 P4/launch floor。</span><span class="en"><b>L2 trap (decisive):</b> on B300 the input ≤1MB ≪ 126MB L2, so repeated count_ge passes are L2 hits (cheap) ⇒ "reduce #passes" optimizations are moot. The real levers are the P4/launch floor.</span></li>
 </ul>
 
-<h2><span class="zh">5. 迭代时间线</span><span class="en">5. Iteration timeline</span></h2>
+<h2><span class="zh">5. 双阈值算法细节（流程图 + 伪代码）</span><span class="en">5. Two-threshold algorithm details (flowchart + pseudocode)</span></h2>
+<div class="card">
+<p><span class="zh">"双阈值"指在 GVR 的 <b>P2 secant</b> 中同时确定两个阈值：主阈值 <code>threshold</code>（使候选数 <code>M0∈[K,kCC]</code>）与 <b>threshold_1</b>（count <code>M&lt;K</code>，这 M 个是<b>确定的 top-K 赢家</b>）。P4 只需在窄带 <code>[threshold, threshold_1)</code> 上精挑剩余 <code>K−M</code> 个。共尝试过两种变体：</span><span class="en">"Two-threshold" means the <b>P2 secant</b> pins two thresholds at once: the main <code>threshold</code> (candidate count <code>M0∈[K,kCC]</code>) and <b>threshold_1</b> (count <code>M&lt;K</code> — those M are <b>definite top-K winners</b>). P4 then only refines the narrow band <code>[threshold, threshold_1)</code> for the remaining <code>K−M</code>. Two variants were tried:</span></p>
+<ul>
+<li><span class="zh"><b>变体 0 — band-shrink（iter 0，<span class="bad">已证伪</span>）：</b>主动收紧 <code>threshold</code> 使 band 足够小，P4 用廉价单-warp select。</span><span class="en"><b>Variant 0 — band-shrink (iter 0, <span class="bad">falsified</span>):</b> actively tighten <code>threshold</code> so the band is small enough for a cheap single-warp select in P4.</span></li>
+<li><span class="zh"><b>Scheme X — free threshold_1 peel（iter 4–5，<span class="warn">已实现·精确·净中性</span>）：</b>不收紧阈值；<code>threshold_1</code> 免费取自 secant 迭代路径上"count&lt;K 的最大阈值"（这些点 secant 已经算过，零额外 pass）。</span><span class="en"><b>Scheme X — free threshold_1 peel (iter 4–5, <span class="warn">built · exact · net-neutral</span>):</b> do NOT tighten the threshold; <code>threshold_1</code> is taken for FREE as the "largest path threshold with count&lt;K" that the secant already evaluated (zero extra pass).</span></li>
+</ul>
+</div>
+
+<h3><span class="zh">5a. 整体流水线与双阈值挂载点</span><span class="en">5a. Overall pipeline &amp; where the two thresholds hook in</span></h3>
+<pre class="flow"><code>          GVR Top-K single-CTA pipeline (op#7 rank-scatter base)
+ +-----------------------------------------------------------------------+
+ | P1  preIdx stats  -&gt; pmean, pmin, pmax, bracket seed                   |
+ +----------------------------------+------------------------------------+
+                                    v
+ +-----------------------------------------------------------------------+
+ | P2  SECANT SEARCH (full-N count_ge passes, 2-3.67x)                    |
+ |     iterate threshold until candidate count M0 in [K, kCC]            |
+ |   ......................  DUAL HOOK (free)  ........................   |
+ |   : whenever a probed threshold has count &lt; K, keep the LARGEST   :   |
+ |   : such threshold -&gt; threshold_1 , M = its count (definite wins) :   |
+ |   :................. no extra count_ge pass .......................:   |
+ +----------------------------------+------------------------------------+
+                                    v
+ +-----------------------------------------------------------------------+
+ | P3  collect all v &gt;= threshold  -&gt; smem_keys[0:M0]  (M0 candidates)   |
+ +----------------------------------+------------------------------------+
+                                    v
+              baseline P4                       Scheme X P4 (M &gt; 0)
+ +--------------------------+     +--------------------------------------+
+ | rank_scatter(            |     | phase4_partition: 1 pass over M0      |
+ |   smem_keys[0:M0],       |     |   v &gt;= thr1 -&gt; WINNER, output[K-M+ws]  |
+ |   target_k = K)          |     |   v &lt;  thr1 -&gt; BAND,   smem_keys[bs]   |
+ | -&gt; output[0:K]           |     +------------------+-------------------+
+ +--------------------------+                        v
+                                  +--------------------------------------+
+                                  | rank_scatter(band[0:band_cnt],       |
+                                  |   target_k = K - M) -&gt; output[0:K-M]  |
+                                  +--------------------------------------+
+                                  M winners already in output[K-M:K]</code></pre>
+<p class="cap"><span class="zh">双阈值只改动 P2（免费记录 threshold_1）与 P4（先 peel M 个赢家、再对 band 精挑 K−M）；P1/P3 不变，op 签名不变（集成一致）。</span><span class="en">The two-threshold change touches only P2 (free threshold_1 recording) and P4 (peel M winners, then refine K−M on the band). P1/P3 and the op signature are unchanged (integration parity).</span></p>
+
+<h3><span class="zh">5b. Scheme X 伪代码 — P2 secant 免费记录 threshold_1</span><span class="en">5b. Scheme X pseudocode — P2 secant recording threshold_1 for free</span></h3>
+<pre><code># state: threshold (thr), bracket (val_lo/val_hi, cnt_lo/cnt_hi)
+#        dual: thr1 = -inf , M = 0
+thr   = pmean                              # P1 seed
+count = block_count_ge(row, N, thr)        # 1st full-N pass
+thr1  = NEG_FLT_MAX ;  M = 0               # dual-thresh slots (s_thr[3], s_iscalars[5])
+
+it = 0
+while it &lt; MAX_REFINE_ITERS and not done:
+    if K &lt;= count &lt;= kCC:                   # converged: M0 = count candidates
+        done = 1 ; break
+    elif count &gt; kCC:                       # too many -&gt; search HIGHER
+        val_lo, cnt_lo = thr, count
+    else:                                  # count &lt; K -&gt; search LOWER
+        val_hi, cnt_hi = thr, count
+        if count &gt; M:                       # *** FREE dual hook ***
+            thr1, M = thr, count           #   largest count&lt;K threshold so far
+    # secant interpolation toward kFTarget (optional inverse-quadratic on last 3 pts)
+    f   = clamp((cnt_lo - kFTarget) / (cnt_lo - cnt_hi), 0.05, 0.95)
+    thr = clamp(val_lo + (val_hi - val_lo) * f, val_lo, val_hi)
+    count = block_count_ge(row, N, thr)    # next full-N pass
+    it += 1
+# result: threshold=thr (M0 candidates in [K,kCC]) ; threshold_1=thr1 (M&lt;K definite winners)</code></pre>
+<p class="cap"><span class="zh">"免费"的含义：threshold_1 是 secant 迭代<b>已经评估过</b>的某个 count&lt;K 的点，只是把它记下来 —— 不增加任何 <code>count_ge</code> full-N pass，因此对 P2 零 tax。这与变体 0 的"主动收紧阈值"根本不同。</span><span class="en">"Free" = threshold_1 is a count&lt;K point the secant <b>already evaluated</b>; we merely record it — no extra <code>count_ge</code> full-N pass, so zero P2 tax. This is fundamentally different from variant 0's "actively tighten the threshold".</span></p>
+
+<h3><span class="zh">5c. Scheme X 伪代码 — P4 dual dispatch + partition</span><span class="en">5c. Scheme X pseudocode — P4 dual dispatch + partition</span></h3>
+<pre><code>def phase4_dual(smem_keys, smem_vals, ..., M0):
+    if M &gt; 0:
+        band_cnt = phase4_partition(smem_keys, thr1, M)   # split M0 by threshold_1
+        rank_scatter(smem_keys[0:band_cnt], target_k = K - M) -&gt; output[0:K-M]
+    else:                                                 # no free winners -&gt; plain P4
+        rank_scatter(smem_keys[0:M0],       target_k = K) -&gt; output[0:K]
+
+def phase4_partition(smem_keys, thr1, M):                 # register-staged, 1 pass over M0
+    win_base = K - M                                      # winners fill output[K-M : K]
+    frag_v, frag_i = load smem_keys/vals at (tid, tid+T, tid+2T, ...)   # stage to regs
+    barrier                                               # avoid RAW on smem below
+    band_cnt = win_cnt = 0                                # smem_wcnt[0], smem_wcnt[1]
+    for (v, idx) in this thread's staged frags:
+        if v &gt;= thr1:                                     # definite winner
+            ws = atomicAdd(&amp;win_cnt, 1)
+            output_indices[win_base + ws] = idx           # -&gt; output tail [K-M, K)
+        else:                                             # band candidate
+            bs = atomicAdd(&amp;band_cnt, 1)
+            smem_keys[bs] = v ; smem_vals[bs] = idx        # compact band to front
+    barrier
+    return band_cnt                                       # = new cand_count for band P4</code></pre>
+<p class="cap"><span class="zh"><b>为何净中性（iter 6 nsys）：</b>free-peel 确实把 band 缩小、逼近 P4 塌缩点，但 <code>phase4_partition</code> 的开销吃掉了收益 —— 对 M0 个元素的<b>寄存器暂存 + 2 遍</b>、以及 2 个 smem 计数器上 ~M0 线程的<b>原子槽位竞争</b>。K2048（band/M0 小）净中性 0.95–1.02×，K512（band 大）<b>全 N 净亏 0.86–0.98×</b>（实测，见 §7d）。仅存未试改进：warp 聚合原子的更廉价 partition —— 但即便如此也只可能救 K2048 大 N，救不了 K512（大 band 即便 partition 免费，P4 也几乎不塌缩）。</span><span class="en"><b>Why net-neutral (iter 6 nsys):</b> free-peel does shrink the band toward the P4 collapse point, but <code>phase4_partition</code>'s overhead eats the gain — a <b>register-staged 2-pass</b> over M0 elements plus <b>smem-atomic slot contention</b> on 2 counters across ~M0 threads. K2048 (small band/M0) net-neutral 0.95–1.02×; K512 (large band) is a <b>net LOSS at every N, 0.86–0.98×</b> (measured, see §7d). Only untried refinement — a cheaper warp-aggregated-atomic partition — could at best help K2048 large-N; it cannot fix K512 (a large band barely collapses P4 even with a free partition).</span></p>
+
+<h3><span class="zh">5d. 变体 0 — band-shrink（已证伪的原始双阈值形式）</span><span class="en">5d. Variant 0 — band-shrink (the falsified original two-threshold form)</span></h3>
+<p><span class="zh">最初的双阈值设想是<b>主动收紧</b> <code>threshold</code>（即降低 kC/收紧 kFTarget），让 band = M0 − c_hi 足够小（≤256），P4 换成廉价单-warp select。代数上：band ≥ M0 − K 且 c_hi &lt; K，要 band ≤ 256 必须 M0 ≈ K，即阈值钉得极紧。</span><span class="en">The original two-threshold idea was to <b>actively tighten</b> <code>threshold</code> (lower kC / tighten kFTarget) so band = M0 − c_hi is small enough (≤256) for a cheap single-warp select. Algebraically: band ≥ M0 − K and c_hi &lt; K, so band ≤ 256 forces M0 ≈ K — the threshold must be pinned very tight.</span></p>
+<pre class="flow"><code>  tighten threshold  =====================================&gt;  band shrinks (good for P4)
+                      \                                   /
+                       \  each tightening needs MORE       (P4 cost drops ~15% only,
+                        \ full-N count_ge passes            floor-bound until cand-&gt;K)
+                         v
+             P2 passes EXPLODE 1.3 - 2.5x   &lt;== the TAX
+             ---------------------------------------------------------------
+             net:  small/mid N = WASH (tax ~= P4 saving)
+                   N &gt;= 65536  = LOSS  (tax &gt; P4 saving)          [FALSIFIED]</code></pre>
+<p class="cap"><span class="zh">iter 0 实测（K512 fp32，clock64 周期）：收紧到 kC=1024 时 P2 65536 从 11030→15999 周期（+45%），而 P4 仅 8656→6972（−20%）⇒ 大 N 净亏。即便假设 band-select P4 <b>完全免费</b>，天花板也只有 −27%@4K、−11%@16K、≈0@65K、≥131K 亏 —— 且小 N 仍输给 Radix 地板（6.5µs &lt; GVR 9µs）。这正是 Scheme X 改用"免费"记录、拒绝收紧的原因。</span><span class="en">iter 0 measured (K512 fp32, clock64 cycles): tightening to kC=1024 pushed P2 @65536 from 11030→15999 cyc (+45%) while P4 only 8656→6972 (−20%) ⇒ net loss at large N. Even assuming a <b>completely free</b> band-select P4, the ceiling is only −27%@4K, −11%@16K, ≈0@65K, loss @≥131K — and small N still loses to the Radix floor (6.5µs &lt; GVR 9µs). This is exactly why Scheme X switched to "free" recording and refuses to tighten.</span></p>
+
+<h2><span class="zh">6. 迭代时间线</span><span class="en">6. Iteration timeline</span></h2>
 
 <div class="tl dead"><b>iter 0 · <span class="badge b-dead">证伪 / falsified</span></b><br>
 <span class="zh">双阈值 <i>band 收缩</i>方案：band 要小必须收紧阈值 ⇒ P2 passes 暴涨 1.3–2.5×，抵消 P4 收益（小/中 N wash、大 N loss）。</span>
@@ -106,13 +214,17 @@
 <span class="zh"><b>quad 插值</b>（末 3 点反二次）= 最稳的 secant 加速（evals 2.602→2.509，无回归，助 K1024 大 N）。<b>免费 threshold_1</b>（复用 secant 路径中 count&lt;K 最优点）：M≈0.7–0.9×K 确定赢家零额外 pass；但 band=M0−M 对 K512/K1024 仍大（宽窗口 M0 2–4K），对 K2048 小（0.4–1K）。</span>
 <span class="en"><b>quad interp</b> (inverse-quadratic on last 3 pts) = most stable secant accel (evals 2.602→2.509, no regression, helps K1024 large N). <b>Free threshold_1</b> (reuse the secant path's best count&lt;K point): M≈0.7–0.9×K definite winners at zero extra pass; but band=M0−M stays large for K512/K1024 (wide-window M0 2–4K), small for K2048 (0.4–1K).</span></div>
 
-<div class="tl wip"><b>iter 5 · <span class="badge b-wip">进行中 / WIP</span> Scheme X</b><br>
-<span class="zh">已完成：P2 secant 中免费记录 threshold_1（gated <code>enable_dual_thresh</code>，smem s_thr[4]/s_iscalars[6]），baseline 仍精确 (vdiff=0)。<b>待做：P4 band-refine</b>（peel M 个赢家直写 output，band 选 top-(K−M)）。</span>
-<span class="en">Done: free threshold_1 recording in the P2 secant (gated <code>enable_dual_thresh</code>, smem s_thr[4]/s_iscalars[6]); baseline still exact (vdiff=0). <b>Pending: P4 band-refine</b> (peel M winners to output, select top-(K−M) on the band).</span></div>
+<div class="tl win"><b>iter 5 · <span class="badge b-win">已实现·精确 / built·exact</span> Scheme X</b><br>
+<span class="zh">P2 secant 免费记录 threshold_1（gated <code>enable_dual_thresh</code>，smem s_thr[4]/s_iscalars[6]）+ <code>phase4_dual</code>/<code>phase4_partition</code> band-refine（peel M 赢家→output[K−M:K]，band 选 top-(K−M)）。正确性门 baseline 3/3 + dual 81/81 精确，flag off 时字节一致。</span>
+<span class="en">Free threshold_1 recording in the P2 secant (gated <code>enable_dual_thresh</code>, smem s_thr[4]/s_iscalars[6]) + <code>phase4_dual</code>/<code>phase4_partition</code> band-refine (peel M winners→output[K−M:K], select top-(K−M) on the band). Exactness gate baseline 3/3 + dual 81/81 exact; byte-identical with the flag off.</span></div>
 
-<h2><span class="zh">6. 关键数据表</span><span class="en">6. Key data tables</span></h2>
+<div class="tl dead"><b>iter 6 · <span class="badge b-dead">nsys 证伪 / falsified on HW</span> NO-SHIP</b><br>
+<span class="zh">报告口径 nsys A/B（K2048 锚 0.99–1.02、K512 锚 0.94–1.02，均可比）：<b>K2048 净中性 0.95–1.02×</b>，<b>K512 全 N 净亏 0.86–0.98×</b>（band 大、rank-scatter 地板不塌缩，partition 开销纯增）。host 预估的 K2048 −18% 被 partition 开销吃光。每一个 op16 杠杆（P4 band-shrink、P2 采样、secant 加速、免费 peel Scheme X）在 B300 都净中性到净亏 ⇒ 目标结构性不可达，<b>HEAD 停在 baseline</b>。数据见 §7d。</span>
+<span class="en">nsys A/B (report protocol; K2048 anchor 0.99–1.02, K512 anchor 0.94–1.02, both comparable): <b>K2048 net-neutral 0.95–1.02×</b>, <b>K512 a net LOSS at every N 0.86–0.98×</b> (large band, rank-scatter floor won't collapse, partition is pure added cost). The host-projected K2048 −18% is eaten by partition overhead. Every op16 lever (P4 band-shrink, P2 sampling, secant accel, free-peel Scheme X) is net-neutral-to-loss on B300 ⇒ target structurally unreachable, <b>HEAD stays at baseline</b>. Data in §7d.</span></div>
 
-<h3><span class="zh">6a. 免费 threshold_1（单 CTA 路径，host）</span><span class="en">6a. Free threshold_1 (single-CTA path, host)</span></h3>
+<h2><span class="zh">7. 关键数据表</span><span class="en">7. Key data tables</span></h2>
+
+<h3><span class="zh">7a. 免费 threshold_1（单 CTA 路径，host）</span><span class="en">7a. Free threshold_1 (single-CTA path, host)</span></h3>
 <table class="kv">
 <tr><th>K</th><th>M0 (cand)</th><th>M (free)</th><th>M/K</th><th>band=M0−M</th><th>band/M0</th><th><span class="zh">P4 收益预估</span><span class="en">est. P4 gain</span></th></tr>
 <tr><td>512</td><td>1.8–2.6K</td><td>~360</td><td>0.70</td><td>1.4–2.3K</td><td>0.80–0.86</td><td class="warn">~−6%</td></tr>
@@ -121,7 +233,7 @@
 </table>
 <p class="mut"><span class="zh">band 大是因为宽窗口下 M0 大；K2048 天然窗口紧 ⇒ band 小 ⇒ P4 过塌缩点。</span><span class="en">band is large because M0 is large under the wide window; K2048's naturally tighter window ⇒ small band ⇒ P4 past the collapse point.</span></p>
 
-<h3><span class="zh">6b. secant 收敛加速变体（host，平均全 N eval 数，越低越好）</span><span class="en">6b. Secant convergence variants (host, mean full-N evals, lower=better)</span></h3>
+<h3><span class="zh">7b. secant 收敛加速变体（host，平均全 N eval 数，越低越好）</span><span class="en">7b. Secant convergence variants (host, mean full-N evals, lower=better)</span></h3>
 <table class="kv">
 <tr><th><span class="zh">变体</span><span class="en">variant</span></th><th><span class="zh">平均 evals</span><span class="en">mean evals</span></th><th><span class="zh">精确</span><span class="en">exact</span></th><th><span class="zh">备注</span><span class="en">note</span></th></tr>
 <tr><td>base (linear)</td><td>2.602</td><td>216/216</td><td class="mut"><span class="zh">基线</span><span class="en">baseline</span></td></tr>
@@ -130,7 +242,7 @@
 <tr><td>pquantile init</td><td class="bad">3.940</td><td>216/216</td><td><span class="zh">宽窗口 init backfire (op13)</span><span class="en">wide-window init backfires (op13)</span></td></tr>
 </table>
 
-<h3><span class="zh">6c. 采样方案 nsys 证伪（K512 fp32，冷 L2 µs）</span><span class="en">6c. Sampling nsys falsification (K512 fp32, cold-L2 µs)</span></h3>
+<h3><span class="zh">7c. 采样方案 nsys 证伪（K512 fp32，冷 L2 µs）</span><span class="en">7c. Sampling nsys falsification (K512 fp32, cold-L2 µs)</span></h3>
 <table class="kv">
 <tr><th>N</th><th><span class="zh">基线 rs</span><span class="en">base rs</span></th><th>op16 sampled</th><th>op16/rs</th><th><span class="zh">锚点 rs_now/rs_报告</span><span class="en">anchor rs_now/rs_rpt</span></th></tr>
 <tr><td>4096</td><td>9.81</td><td>11.26</td><td class="bad">0.87×</td><td>1.010</td></tr>
@@ -139,13 +251,25 @@
 <tr><td>262144</td><td>35.44</td><td>33.09</td><td class="good">1.07×</td><td>1.013</td></tr>
 </table>
 
-<h2><span class="zh">7. 下一步</span><span class="en">7. Next steps</span></h2>
+<h3><span class="zh">7d. Scheme X（免费 threshold_1 peel）nsys A/B — 最终数据（冷 L2 µs，BS=1）</span><span class="en">7d. Scheme X (free threshold_1 peel) nsys A/B — final data (cold-L2 µs, BS=1)</span></h3>
+<p><span class="zh">口径同报告；锚点 rs_now/rs_报告 K2048 0.99–1.02、K512 0.94–1.02（可比）。<b>X/rs&lt;1 = Scheme X 比其自身 baseline 慢。</b></span><span class="en">Report protocol; anchor rs_now/rs_rpt K2048 0.99–1.02, K512 0.94–1.02 (comparable). <b>X/rs&lt;1 = Scheme X slower than its own baseline.</b></span></p>
+<table class="kv">
+<tr><th>N</th><th>K2048 rs</th><th>K2048 X</th><th>K2048 X/rs</th><th>K512 rs</th><th>K512 X</th><th>K512 X/rs</th></tr>
+<tr><td>8192</td><td>11.51</td><td>12.12</td><td class="bad">0.95×</td><td>9.38</td><td>10.85</td><td class="bad">0.86×</td></tr>
+<tr><td>16384</td><td class="mut">—</td><td class="mut">—</td><td class="mut">—</td><td>10.18</td><td>11.22</td><td class="bad">0.91×</td></tr>
+<tr><td>32768</td><td>16.08</td><td>15.72</td><td class="good">1.02×</td><td>12.74</td><td>14.02</td><td class="bad">0.91×</td></tr>
+<tr><td>65536</td><td>21.01</td><td>21.59</td><td class="warn">0.97×</td><td>17.20</td><td>18.01</td><td class="warn">0.96×</td></tr>
+<tr><td>262144</td><td>48.96</td><td>49.60</td><td class="warn">0.99×</td><td>35.34</td><td>37.03</td><td class="bad">0.95×</td></tr>
+</table>
+<p class="cap"><span class="zh"><b>K2048 净中性（0.95–1.02×），K512 全 N 净亏（0.86–0.98×）。</b>K512 更差因 band 大（M0≈1.8–2.6K、M(free)≈360 ⇒ band ~1.4–2.3K，仅比 baseline M0 少 ~15%），rank-scatter 地板几乎不塌缩，而 <code>phase4_partition</code> 的 M0-wide 2-pass + 原子竞争纯增；小/中 N 开销占比最大（0.86–0.91 @ 4K–32K）。⇒ NO-SHIP，HEAD 停在 baseline。</span><span class="en"><b>K2048 net-neutral (0.95–1.02×); K512 a net loss at every N (0.86–0.98×).</b> K512 is worse because the band is large (M0≈1.8–2.6K, M(free)≈360 ⇒ band ~1.4–2.3K, only ~15% below baseline M0), so the rank-scatter floor barely collapses while <code>phase4_partition</code>'s M0-wide 2-pass + atomic contention is pure added cost; the overhead is the largest fraction at small/mid N (0.86–0.91 @ 4K–32K). ⇒ NO-SHIP, HEAD stays at baseline.</span></p>
+
+<h2><span class="zh">8. 下一步 / 结论</span><span class="en">8. Next steps / conclusion</span></h2>
 <div class="card">
+<p><span class="zh"><span class="badge b-dead">最终</span> op16 双阈值全部路径已在 B300 用报告口径 nsys 走完并证伪。Scheme X 精确、baseline 字节一致，但开 flag 后 K2048 净中性 / K512 净亏 ⇒ <b>NO-SHIP，HEAD 停在 baseline</b>。>95%-case / +40%-over-Radix 目标在 DSv4 decode régime（N≤262144、输入⊂L2）结构性不可达。</span><span class="en"><span class="badge b-dead">final</span> All op16 two-threshold paths have been run to completion under the report nsys protocol on B300 and falsified. Scheme X is exact with a byte-identical baseline, but with the flag on it is K2048 net-neutral / K512 net-loss ⇒ <b>NO-SHIP, HEAD stays at baseline</b>. The &gt;95%-cases / +40%-over-Radix target is structurally unreachable in the DSv4 decode regime (N≤262144, input ⊂ L2).</span></p>
 <ol>
-<li><span class="zh">完成 Scheme X 的 P4 band-refine（优先 in-SMEM 寄存器暂存分区，保持 op 签名不变 = 集成一致）；rank-scatter 参数化 target_k=K−M、out_off=M。</span><span class="en">Finish Scheme X P4 band-refine (prefer in-SMEM register-staged partition to keep the op signature = integration parity); parameterize rank-scatter target_k=K−M, out_off=M.</span></li>
-<li><span class="zh">加 quad 插值（gated），正确性门（值等价 topk + uniq==K），nsys A/B 坐实：预期 K2048 ~−18%、K512/K1024 中性~小赚（注意分区开销可能吃掉小收益）。</span><span class="en">Add quad interp (gated), exactness gate (value-equiv topk + uniq==K), nsys A/B: expect K2048 ~−18%, K512/K1024 neutral-to-small (partition overhead may eat the small gain).</span></li>
-<li><span class="zh">评估双 CTA 路径②（并行搜 threshold_1）：可隐藏 threshold_1 搜索，但隐藏不了主 CTA 收紧 M0 的 tax。</span><span class="en">Evaluate the 2-CTA path (parallel threshold_1): hides threshold_1's search but not the main CTA's M0-tightening tax.</span></li>
-<li><span class="zh">HEAD 停在基线（不 ship），除非某配置 nsys 实测净赚。</span><span class="en">Leave HEAD at baseline (no ship) unless a config nets a real nsys win.</span></li>
+<li><span class="zh"><b>关闭 op16。</b>保留 gated-off 的 dual-thresh 精确实现（<code>enable_dual_thresh</code>）作参考，不集成到生产路径。</span><span class="en"><b>Close op16.</b> Keep the gated-off, exact dual-thresh implementation (<code>enable_dual_thresh</code>) for reference; do not integrate into the production path.</span></li>
+<li><span class="zh"><b>唯一未试改进（不建议投入）：</b>把 <code>phase4_partition</code> 的 smem 原子槽位分配换成 warp 聚合 / prefix-sum 压缩。天花板仅 K2048 大 N；救不了 K512（大 band 即便 partition 免费 P4 也几乎不塌缩），也改变不了大 N 输给 flat radix 的结构墙。</span><span class="en"><b>Sole untried refinement (not recommended):</b> replace <code>phase4_partition</code>'s smem-atomic slot allocation with warp-aggregated / prefix-sum compaction. Ceiling is K2048 large-N only; it cannot fix K512 (a large band barely collapses P4 even with a free partition) and does not change the structural wall vs flat radix-select at large N.</span></li>
+<li><span class="zh"><b>真正的杠杆（另开工单）：</b>op13 未建的"更廉价 P2"——用更少的 full-N <code>count_ge</code> pass 钉紧阈值（CDF-aware / 高阶 root-finder / 更好的 preIdx 种子 t0）。它同时 (a) 让 cand→K 变便宜以解锁 P4 塌缩、(b) 直接削减大 N 的 P2 成本。</span><span class="en"><b>The real lever (separate ticket):</b> op13's unbuilt "cheaper P2" — pin a tight threshold in far fewer full-N <code>count_ge</code> passes (CDF-aware / higher-order root-finder / better preIdx-seeded t0). It both (a) makes cand→K cheap to unlock the P4 collapse and (b) directly cuts the large-N P2 cost.</span></li>
 </ol>
 <p class="mut"><span class="zh">续作入口：<code>op16_gvr_dualthresh/RESUME_PROMPT.md</code>；细节：<code>ITERATIONS.md</code> / <code>LEARNINGS.md</code>；数据：<code>results/nsys_ab/</code>。</span><span class="en">Resume entry: <code>op16_gvr_dualthresh/RESUME_PROMPT.md</code>; details: <code>ITERATIONS.md</code> / <code>LEARNINGS.md</code>; data: <code>results/nsys_ab/</code>.</span></p>
 </div>

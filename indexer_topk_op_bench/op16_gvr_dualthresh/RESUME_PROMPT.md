@@ -28,6 +28,16 @@ B300 only for now. **Perf claims MUST use the report protocol**: nsys pure-kerne
 cold-L2 (512MB evict + eager + in-range sync + nvtx_kern_sum, ×3-median); anchor-
 check by re-measuring gvr_cutedsl_rs vs report seqlen_data.csv (validated 0.98–1.02).
 
+STATUS 2026-07-01 (RESUMED & COMPLETED): op16 is CLOSED — NO-SHIP, HEAD at baseline.
+  - K512 fp32 nsys A/B finished: X/rs 0.86–0.98× (net LOSS every N; anchor 0.94–1.02).
+    K2048 was 0.95–1.02× (neutral). Data: results/nsys_ab/abX_K512_fp32.{jsonl,nsys-rep}.
+  - REPORT.html / ITERATIONS.md / LEARNINGS.md finalized (iter 6 + §7d table + §8 conclusion).
+  - Resume-hang root cause fixed: stale torch cpp_extension baton at
+    `_build/radix_cuda/lock` (prior host died mid-JIT) hung imports ∞; removed → ~6s.
+    See LEARNINGS "Resume gotcha".
+  - Nothing left to do unless pursuing op13's cheaper-P2 lever (separate ticket).
+
+--- Original immediate task (now DONE, kept for provenance) ---
 IMMEDIATE TASK ON RESUME:
 1. Finish/parse the K512 fp32 nsys A/B (a run may have been in flight when the
    prior host expired). Run:

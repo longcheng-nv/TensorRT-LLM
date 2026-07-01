@@ -242,13 +242,41 @@ K2048 fp32 (anchor 0.99–1.02 comparable to report):
 
 **Scheme X ≈ baseline (X/rs 0.95–1.02×).** The free-peel P4-collapse saving is
 eaten by phase4_partition overhead (M0-wide 2-pass register staging + smem-atomic
-slot contention on 2 counters over ~M0 threads). K512 fp32 pending on resume
-(expect similar/slightly worse — larger band). vs radix still lost at large N
+slot contention on 2 counters over ~M0 threads). vs radix still lost at large N
 (structural). NO-SHIP as-is.
 
-### Verdict
-Every op16 lever (P4 two-threshold, P2 sampling, secant accel, free-peel Scheme X)
-nets neutral-to-small on B300: theoretical gains eaten by L2-fit + rank-scatter/
-launch floor + implementation overhead. Target unreachable. One untried refinement:
-cheaper partition (warp-aggregated atomics) — expected large-N-K2048-only even if
-it works. HEAD stays at baseline.
+### K512 fp32 (resumed run — anchor 0.939–1.019 comparable to report)
+| N | rs | op16X | radix | sglang | X/rs | X vs radix |
+|---:|---:|---:|---:|---:|---:|---:|
+| 4096 | 9.13 | 10.22 | 6.08 | 7.15 | **0.89** | 0.60 |
+| 8192 | 9.38 | 10.85 | 7.73 | 8.28 | **0.86** | 0.71 |
+| 16384 | 10.18 | 11.22 | 11.87 | 10.93 | **0.91** | 1.06 |
+| 32768 | 12.74 | 14.02 | 19.77 | 15.37 | **0.91** | 1.41 |
+| 65536 | 17.20 | 18.01 | 19.57 | 23.97 | **0.96** | 1.09 |
+| 131072 | 23.40 | 23.90 | 19.11 | 41.15 | **0.98** | 0.80 |
+| 262144 | 35.34 | 37.03 | 19.19 | 75.46 | **0.95** | 0.52 |
+
+**K512 Scheme X is NET SLOWER at EVERY N (X/rs 0.86–0.98×)** — worse than K2048,
+as predicted for the larger K512 band. Root: at K512 M0≈1.8–2.6K but M(free)≈360,
+so P4 still rank-scatters a ~1.4–2.3K band (only cand-count ~15% less than baseline
+M0) — the rank-scatter floor barely moves — while phase4_partition adds a full
+M0-wide 2-pass + atomic contention on top. The overhead is a larger fraction at
+small/mid N (0.86–0.91 @ 4K–32K), decaying toward 1.0 only as N grows and P2+P3
+dominate. Data: `results/nsys_ab/abX_K512_fp32.jsonl` + `nsys_reps/abX_K512_fp32.nsys-rep`.
+
+### FINAL VERDICT (iter 6 complete)
+Every op16 lever (P4 two-threshold band-shrink, P2 sampling, secant accel, free-peel
+Scheme X) nets neutral-to-NEGATIVE on B300: theoretical gains eaten by L2-fit +
+rank-scatter/launch floor + implementation overhead. K2048 neutral (0.95–1.02×),
+K512 regresses (0.86–0.98×). The >95%-cases / +40%-over-Radix target is
+**structurally unreachable** in the DSv4 decode regime (N≤262144, input ⊂ L2).
+Scheme X is EXACT + no-regression on the baseline path (flag off) but a net loss
+with the flag on ⇒ **NO-SHIP**. **HEAD stays at baseline.**
+
+One untried refinement (not pursued — ceiling too small to matter): replace
+phase4_partition's smem-atomic slot allocation with a warp-aggregated / prefix-sum
+compaction. Expected to help K2048-large-N only; cannot fix the K512 regression
+(K512's large band barely collapses P4 even with a *free* partition — iter-0
+free-select ceiling was only mild mid-N), and does not change the structural wall
+vs flat radix-select. Recommendation: close op16, keep the exact dual-thresh code
+gated-off for reference, spend effort on op13's cheaper-P2 lever instead.
