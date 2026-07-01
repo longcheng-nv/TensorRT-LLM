@@ -145,7 +145,21 @@ class GvrTopKKernel:
         enable_p4_interp_seed: bool = False,
         enable_p4_rank_scatter: bool = False,
         enable_p4_rank_scatter_exact: bool = False,
+        enable_sampled_init: bool = False,
+        sample_size: int = 4096,
+        sample_aim_permille: int = 1150,
     ):
+        # op16 cheaper-P2 lever: replace P2's iterative full-N secant init
+        # (thr0 = pmean, needs 2-3.67 full-N count_ge passes to converge) with a
+        # SMEM histogram of a strided ~sample_size-element subsample -> t0 at the
+        # aim*K quantile. The existing secant then confirms in ONE count_ge and
+        # corrects only on the rare miss. Yields ~1 full-N pass (vs 2-3.67) AND a
+        # tight cand ~1.1xK (vs 2-5xK) => P4 collapses, with NO op13 eval tax.
+        # sample_aim_permille = 1000*aim_mult (1150 = aim 1.15x K, biased high so
+        # count_ge(t0) >= K => exact superset). Default False => baseline path.
+        self.enable_sampled_init = enable_sampled_init
+        self.sample_size = sample_size
+        self.sample_aim_permille = sample_aim_permille
         # P4 recursive-digit refine (bucket p4_recursive_digit): when True, insert
         # a second (fine) histogram over the coarse K-th bin's value range between
         # the coarse bin search and the snap loop, so the snap loop starts within
@@ -638,6 +652,133 @@ class GvrTopKKernel:
                 for w in cutlass.range_constexpr(self.num_warps):
                     total = total + smem_wcnt[w]
                 s_iscalars[0] = total
+
+    # ------------------------------------------------------------------
+    # Phase 2 (op16): Sampled-histogram threshold init (cheaper-P2 lever)
+    # Build a kNumBins histogram of a strided ~sample_size-element subsample
+    # over [pmin, pmax], pick t0 = low edge of the bin where the suffix count
+    # crosses aim*K*(n_eff/N). Overwrites s_thr[0]; the following secant then
+    # confirms in ONE full-N count_ge and corrects only on the rare miss.
+    # Reuses smem_hist (free before P4) + smem_wcnt (scan scratch).
+    # ------------------------------------------------------------------
+    @cute.jit
+    def phase2_sampled_init(
+        self,
+        input_row,
+        N,
+        smem_hist,
+        smem_wcnt,
+        s_thr,
+        s_iscalars,
+        tidx,
+        warp_id,
+        lane,
+    ):
+        kK = cutlass.const_expr(self.top_k)
+        kBins = cutlass.const_expr(self.kNumBins)
+        num_threads = cutlass.const_expr(self.num_threads)
+        num_warps = cutlass.const_expr(self.num_warps)
+        n_sample = cutlass.const_expr(self.sample_size)
+        aim_pm = cutlass.const_expr(self.sample_aim_permille)
+        bins_per_warp = cutlass.const_expr(kBins // self.num_warps)
+
+        lo = s_thr[1]  # pmin (preIdx-value range from P1)
+        hi = s_thr[2]  # pmax
+        range_v = hi - lo
+        if range_v <= cutlass.Float32(0.0):
+            range_v = cutlass.Float32(1e-6)
+        inv = (cutlass.Float32(kBins - 1) + cutlass.Float32(0.99)) / range_v
+
+        # strided sample: ~n_sample positions, stride = max(1, N//n_sample)
+        stride = N // cutlass.Int32(n_sample)
+        if stride < cutlass.Int32(1):
+            stride = cutlass.Int32(1)
+        n_eff = (N + stride - cutlass.Int32(1)) // stride
+
+        # ---- zero histogram ----
+        iz = tidx
+        while iz < cutlass.Int32(kBins):
+            smem_hist[iz] = cutlass.Int32(0)
+            iz = iz + cutlass.Int32(num_threads)
+        cute.arch.barrier()
+
+        # ---- strided sample read + histogram (smem atomic) ----
+        js = tidx
+        while js < n_eff:
+            pos = js * stride
+            if pos < N:
+                v = self._load_fp32(input_row, pos)
+                bin_i = cutlass.Int32((v - lo) * inv)
+                if bin_i < cutlass.Int32(0):
+                    bin_i = cutlass.Int32(0)
+                if bin_i > cutlass.Int32(kBins - 1):
+                    bin_i = cutlass.Int32(kBins - 1)
+                atomicAdd(smem_hist.iterator + bin_i, cutlass.Int32(1))
+            js = js + cutlass.Int32(num_threads)
+        cute.arch.barrier()
+
+        # ---- suffix-target in sample units: aim*K scaled by n_eff/N ----
+        # aim_count_full = aim_pm/1000 * K ; aim_s = aim_count_full * n_eff / N.
+        aim_full = cutlass.Int32(kK) * cutlass.Int32(aim_pm) // cutlass.Int32(1000)
+        aim_s = aim_full * n_eff // N
+        if aim_s < cutlass.Int32(1):
+            aim_s = cutlass.Int32(1)
+
+        # ---- warp-partitioned reverse (suffix) scan → crossing bin b* ----
+        warp_bin_sum = cutlass.Int32(0)
+        for jb in cutlass.range_constexpr(bins_per_warp):
+            bidx_s = (cutlass.Int32(kBins - 1) - warp_id * cutlass.Int32(bins_per_warp)
+                      - cutlass.Int32(jb))
+            warp_bin_sum = warp_bin_sum + smem_hist[bidx_s]
+        if lane == cutlass.Int32(0):
+            smem_wcnt[warp_id] = warp_bin_sum
+        cute.arch.barrier()
+
+        # tid==0: find target warp (suffix crosses aim_s) + prefix above it.
+        # Temporarily stash prefix/tw in s_iscalars[2]/[3]; restored below.
+        if tidx == cutlass.Int32(0):
+            cum = cutlass.Int32(0)
+            tw = cutlass.Int32(num_warps - 1)
+            found = cutlass.Int32(0)
+            for w2 in cutlass.range_constexpr(num_warps):
+                cum = cum + smem_wcnt[w2]
+                if cum >= aim_s and found == cutlass.Int32(0):
+                    tw = cutlass.Int32(w2)
+                    found = cutlass.Int32(1)
+            cum2 = cutlass.Int32(0)
+            for w3 in cutlass.range_constexpr(num_warps):
+                if cutlass.Int32(w3) < tw:
+                    cum2 = cum2 + smem_wcnt[w3]
+            s_iscalars[2] = cum2
+            s_iscalars[3] = tw
+        cute.arch.barrier()
+
+        # target warp lane0: reverse-scan its block for b*, set t0 = low edge.
+        tw_r = s_iscalars[3]
+        if warp_id == tw_r and lane == cutlass.Int32(0):
+            base_cum = s_iscalars[2]
+            b_star = cutlass.Int32(0)
+            set_d = cutlass.Int32(0)
+            for jb2 in cutlass.range_constexpr(bins_per_warp):
+                bidx2 = (cutlass.Int32(kBins - 1) - tw_r * cutlass.Int32(bins_per_warp)
+                         - cutlass.Int32(jb2))
+                base_cum = base_cum + smem_hist[bidx2]
+                if base_cum >= aim_s and set_d == cutlass.Int32(0):
+                    b_star = bidx2
+                    set_d = cutlass.Int32(1)
+            # low edge of bin b*: count_ge(t0) includes all of bin b* and above
+            t0 = lo + cutlass.Float32(b_star) / inv
+            s_thr[0] = t0
+        cute.arch.barrier()
+
+        # restore P1's bracket seeds (we clobbered s_iscalars[2]/[3] above).
+        # val_lo/val_hi (s_thr[1]/[2]) are untouched = pmin/pmax.
+        if tidx == cutlass.Int32(0):
+            s_iscalars[0] = cutlass.Int32(0)                       # cand_count
+            s_iscalars[1] = cutlass.Int32(0)                       # done
+            s_iscalars[2] = cutlass.Int32(kK + (kK >> 2))          # cnt_lo seed
+            s_iscalars[3] = cutlass.Int32(1)                       # cnt_hi seed
+        cute.arch.barrier()
 
     # ------------------------------------------------------------------
     # Phase 2: Secant-interpolation threshold search
@@ -2039,6 +2180,22 @@ class GvrTopKKernel:
                             output_values_row[je] = input_row[je]
                         je = je + cutlass.Int32(1)
             else:
+                # =============================================================
+                # Phase 2 (op16) — Sampled-histogram threshold init (cheaper-P2)
+                # =============================================================
+                if cutlass.const_expr(self.enable_sampled_init):
+                    self.phase2_sampled_init(
+                        input_row,
+                        N,
+                        smem_hist,
+                        smem_wcnt,
+                        s_thr,
+                        s_iscalars,
+                        tidx,
+                        warp_id,
+                        lane,
+                    )
+
                 # =============================================================
                 # Phase 2 — Secant threshold search
                 # =============================================================

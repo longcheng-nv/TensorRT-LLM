@@ -2,16 +2,18 @@
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
-"""Op #7: GVR (cuteDSL) with EXACT fused rank-and-scatter P4.
+"""op16 GVR (cuteDSL, rank-scatter P4) + sampled-histogram P2 init (cheaper-P2).
 
-Same kernel as gvr_cutedsl_op.py (single-CTA GVR), but P4 (the in-SMEM exact
-top-K from candidates) uses `phase4_rank_scatter` + a fixed-256-bin fine
-recursion instead of the iterative histogram-snap. Eliminates the snap loop +
-2-pass writeback (~14 block barriers → ~7); resolves the straddling bin by value
-(vdiff=0, exact). See p4_recursive_digit/REPORT.md for the B200 A/B.
+Mirrors ``harness/gvr_cutedsl_rs_op.py`` EXACTLY (same launch config, same
+compile path → local perf == integration perf), but the kernel is the op16
+``gvr_topk_decode_dt.GvrTopKKernel`` with the ``enable_sampled_init`` flag.
 
-Kernel source: p4_recursive_digit/src/gvr_topk_decode_p4.py (the vendored
-GvrTopKKernel + the two gated P4 flags enable_p4_rank_scatter[_exact]).
+- ``gvr_dt(..., sampled=False)`` → byte-identical to op#7 rank-scatter (baseline).
+- ``gvr_dt(..., sampled=True)``  → sampled-histogram P2 init (op16).
+
+The sampled path replaces P2's iterative full-N secant with a strided-subsample
+SMEM histogram → t0 at the aim*K quantile → 1 full-N confirm (secant corrects on
+the rare miss). Host-validated 1 pass (vs 2-3.67) + cand~1.1×K + exact.
 """
 import sys
 from pathlib import Path
@@ -22,10 +24,9 @@ import cutlass.cute as cute
 from cutlass.cute import runtime as cr
 
 _HERE = Path(__file__).resolve().parent
-_BUCKET_SRC = _HERE.parent / "p4_recursive_digit" / "src"
-sys.path.insert(0, str(_HERE.parent / "ops"))   # cute_vendored importable
-sys.path.insert(0, str(_BUCKET_SRC))             # bucket kernel with P4 flags
-from gvr_topk_decode_p4 import GvrTopKKernel  # noqa: E402
+sys.path.insert(0, str(_HERE.parent.parent / "ops"))   # cute_vendored importable
+sys.path.insert(0, str(_HERE))                          # op16 kernel
+from gvr_topk_decode_dt import GvrTopKKernel  # noqa: E402
 
 NUM_SMS = torch.cuda.get_device_properties(0).multi_processor_count
 _DT = {torch.float32: cutlass.Float32, torch.bfloat16: cutlass.BFloat16, torch.float16: cutlass.Float16}
@@ -33,15 +34,16 @@ _compiled = {}
 
 
 def _config(bs, n):
-    """Identical launch-config heuristic to gvr_cutedsl_op.py."""
+    """Identical launch-config heuristic to gvr_cutedsl_rs_op.py."""
     t = 1024 if (bs <= NUM_SMS and n >= 65536) else 512
     use256 = (n >= 16384)
     min_bpm = 1 if bs <= NUM_SMS else 3
     return t, use256, min_bpm
 
 
-def compile_gvr_cute_rs(dtype, bs, n, K, cr_val):
-    key = (dtype, bs, n, K, cr_val)
+def compile_gvr_dt(dtype, bs, n, K, cr_val, sampled=True,
+                   sample_size=4096, sample_aim_permille=1150):
+    key = (dtype, bs, n, K, cr_val, sampled, sample_size, sample_aim_permille)
     if key in _compiled:
         return _compiled[key]
     t, use256, min_bpm = _config(bs, n)
@@ -50,6 +52,8 @@ def compile_gvr_cute_rs(dtype, bs, n, K, cr_val):
         use_256bit_load=use256, enable_unroll_4=True, enable_phase3_unroll=True,
         min_blocks_per_mp=min_bpm, return_output_values=False,
         enable_p4_rank_scatter=True, enable_p4_rank_scatter_exact=True,
+        enable_sampled_init=sampled, sample_size=sample_size,
+        sample_aim_permille=sample_aim_permille,
     )
     n_rows, n_cols, n_batch = cute.sym_int(), cute.sym_int(), cute.sym_int()
     in_align = 32 if use256 else 16
@@ -64,9 +68,11 @@ def compile_gvr_cute_rs(dtype, bs, n, K, cr_val):
     return compiled
 
 
-def gvr_cutedsl_rs(logits, pre_idx, seq_lens, index_topk, compress_ratio=1, out=None):
+def gvr_dt(logits, pre_idx, seq_lens, index_topk, compress_ratio=1, out=None,
+           sampled=True, sample_size=4096, sample_aim_permille=1150):
     bs, n = logits.shape
-    compiled = compile_gvr_cute_rs(logits.dtype, bs, n, index_topk, compress_ratio)
+    compiled = compile_gvr_dt(logits.dtype, bs, n, index_topk, compress_ratio,
+                              sampled, sample_size, sample_aim_permille)
     if out is None:
         out = torch.empty(bs, index_topk, dtype=torch.int32, device="cuda")
     compiled(logits, pre_idx, seq_lens, None, out)
@@ -74,28 +80,32 @@ def gvr_cutedsl_rs(logits, pre_idx, seq_lens, index_topk, compress_ratio=1, out=
 
 
 if __name__ == "__main__":
-    # Use the REAL synth bundles (beta_moderate, hit-rate 0.6) — the exact data
-    # the report/sweep use — so this is a faithful exactness gate. (NOTE: on
-    # torch.randn→bf16 the values collapse to ~256 distinct levels → extreme ties
-    # at the K-th boundary can break the rank-scatter contiguity; that adversarial
-    # case is NOT what the report measures. On the synth/real DSv4 distribution
-    # all dtypes are vdiff=0 — see p4_recursive_digit/data/matrix_exact_bs1.log.)
+    # Exactness gate on the REAL synth bundles (the report's exact inputs).
+    sys.path.insert(0, str(_HERE.parent.parent / "harness"))
     from synth_data import get_bundle  # noqa: E402
     bad = 0
-    for dt in (torch.float32, torch.bfloat16, torch.float16):
-        for K, crv, N in ((2048, 1, 32768), (512, 4, 65536), (1024, 4, 32768)):
-            b = get_bundle(K, dt, N, cfg="beta_moderate", seed=0)
-            logits = b["logits"].to(dt).contiguous()
-            pre_idx = b["preIdx"].contiguous()
-            seq_lens = torch.full((1,), N * crv, dtype=torch.int32, device="cuda")
-            out = gvr_cutedsl_rs(logits, pre_idx, seq_lens, K, crv)
-            torch.cuda.synchronize()
-            idx = out[0].clamp(min=0).long()
-            v = logits[0].float().gather(0, idx).sort(descending=True).values
-            ref = torch.topk(logits[0].float(), K).values
-            d = (v - ref).abs().max().item()
-            nuniq = len(set(out[0].tolist()))
-            if d > 1e-5 or nuniq < K:
-                bad += 1
-            print(f"  {str(dt):14s} K={K:4d} cr={crv} N={N:6d}: uniq={nuniq}/{K} valdiff_vs_topk={d:.2e}")
-    print("GVR cuteDSL rank-scatter-exact smoke " + ("OK" if bad == 0 else f"FAIL ({bad} cells)"))
+    ncell = 0
+    for sampled in (False, True):
+        tag = "sampled" if sampled else "baseline"
+        for dt in (torch.float32, torch.bfloat16, torch.float16):
+            for K, crv in ((512, 4), (1024, 4), (2048, 1)):
+                for N in (8192, 16384, 65536, 262144):
+                    for cfg in ("beta_shallow", "beta_moderate", "beta_deep"):
+                        for seed in (0, 1):
+                            b = get_bundle(K, dt, N, cfg=cfg, seed=seed)
+                            logits = b["logits"].to(dt).contiguous()
+                            pre_idx = b["preIdx"].contiguous()
+                            seq_lens = torch.full((1,), N * crv, dtype=torch.int32, device="cuda")
+                            out = gvr_dt(logits, pre_idx, seq_lens, K, crv, sampled=sampled)
+                            torch.cuda.synchronize()
+                            idx = out[0].clamp(min=0).long()
+                            v = logits[0].float().gather(0, idx).sort(descending=True).values
+                            ref = torch.topk(logits[0].float(), K).values
+                            d = (v - ref).abs().max().item()
+                            nuniq = len(set(out[0].tolist()))
+                            ok = (d <= 1e-5 and nuniq >= K)
+                            ncell += 1
+                            if not ok:
+                                bad += 1
+                                print(f"  FAIL[{tag}] {str(dt):14s} K={K} cr={crv} N={N:6d} {cfg} s{seed}: uniq={nuniq}/{K} vdiff={d:.2e}")
+    print(f"op16 exactness: {ncell-bad}/{ncell} OK" + ("" if bad == 0 else f"  ({bad} FAIL)"))
