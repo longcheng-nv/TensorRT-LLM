@@ -43,16 +43,17 @@ OP16 = "gvr_dt"
 def build_call(op, K, dtype, N, BS, cr, logits_row, preidx_row,
                sample_size, sample_aim_permille):
     if op == OP16:
+        # op16 Scheme X = free threshold_1 peel + band rank-scatter (dual=True).
+        # sampled=False (sampling was falsified iter-3; kept in the codebase only).
         logits = logits_row.to(dtype).expand(BS, -1).contiguous()
         seq_div = torch.full((BS,), N * cr, dtype=torch.int32, device=DEV)
         out = torch.empty((BS, K), dtype=torch.int32, device=DEV)
         pre = preidx_row.expand(BS, -1).contiguous()
         keep = [logits, seq_div, out, pre]
-        gvr_dt(logits, pre, seq_div, K, compress_ratio=cr, out=out, sampled=True,
-               sample_size=sample_size, sample_aim_permille=sample_aim_permille)  # warm compile
+        gvr_dt(logits, pre, seq_div, K, compress_ratio=cr, out=out,
+               sampled=False, dual=True)  # warm compile
         return (lambda: gvr_dt(logits, pre, seq_div, K, compress_ratio=cr, out=out,
-                               sampled=True, sample_size=sample_size,
-                               sample_aim_permille=sample_aim_permille)), keep
+                               sampled=False, dual=True)), keep
     return _build_inputs(op, K, dtype, N, BS, cr, logits_row, preidx_row)
 
 
