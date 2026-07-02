@@ -199,3 +199,48 @@ records the measurement); post-revert re-check: 0.924 (matches iter7-era).
 fp32 fullgrid numbers were measured pre-union -> remain valid.
 Lesson: "free" smem savings are not free — occupancy changes are a first-
 class perf variable in BOTH directions.
+## Iter 16 — 2026-07-02 — 16-bit fullgrids COMPLETE; dispatch tables completed+hardened; FINAL
+
+Recovery: the iter15 fullgrids died with the network drop (bf16 87/240,
+fp16 84/240, logs stale at 07:09Z); relaunched detached (setsid nohup) with
+jsonl resume; both completed clean.
+
+**Root cause of every sub-1.0 cell: out-of-table default fall-through.**
+The 88-key iter15 tables sent 152/240 fullgrid cells to default M4R1p4;
+in-table predictions had ZERO misses. Fix: tables completed to 240 keys per
+dtype from the fullgrid measurements; buckets measured <0.99 hardened to
+baseline (bf16 18, fp16 7, fp32 3 — fp32's were the iter12 noise-level
+cells; list in results/iter16_hardened_cells.json, pre-completion backups
+dispatch_table_*.json.pre_iter16). Hardened cells re-run: gm 1.000/1.002
+(baseline-vs-baseline, as expected).
+
+**FINAL 720-cell fullgrid (all exact):**
+
+| dtype | gm | avg | min | max | <0.97 |
+|---|---|---|---|---|---|
+| fp32 | 1.164 | 1.172 | 0.985 | 1.855 | 0 |
+| bf16 | 1.085 | 1.088 | 0.981 | 1.398 | 0 |
+| fp16 | 1.119 | 1.124 | 0.969 | 1.455 | 1 (hardened-bucket noise) |
+| ALL  | **1.122** | 1.128 | 0.969 | 1.855 | 1 |
+
+By K (fp32/bf16/fp16 gm): K512 1.138/1.068/1.110, K1024 1.183/1.121/1.154,
+K2048 1.172/1.063/1.091. Dispatch composition (240 keys): fp32
+52 cluster/175 single/13 baseline; bf16 30/175/35; fp16 31/185/24.
+
+**16-bit nsys pure-kernel validation 6/6 (scripts/drive_nsys_16bit.sh,
+env -u tokens; results/nsys_drive_16bit.log):** bf16 K2048/262K/BS1
+cluster16 1.521 (event 1.398), K1024/8K/BS8 1.223 (1.260), K1024/16K/BS2048
+1.370 (1.352); fp16 K2048/262K/BS1 1.529 (1.455), K1024/32K/BS4 1.290
+(1.262), K1024/16K/BS2048 1.476 (1.451).
+
+The >=1.5x-average target is NOT met and is structurally unreachable inside
+the pure GVR family (op12 floor: small-N barrier-bound, BS=1 large-N
+L2-trap); 1.5x+ holds only in the high-BS x large-N spill quadrant
+(measured 1.4-1.86x). Honest-gap analysis + cross-op comparison + roadmap
+in REPORT.html (bilingual, CSS-only toggle, zero <script>).
+
+SECURITY note: results/nsys/*.sqlite embed the process env (tokens
+confirmed present); 16 fp32 sqlite/nsys-rep files are TRACKED since
+iter12b/13 (branch is local-only, never pushed). Untracking was proposed
+and declined mid-session — resolve before any push of this branch
+(orphan-snapshot or history rewrite per repo convention).

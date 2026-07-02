@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>op19 — Sandwich Two-Threshold GVR Top-K (双语报告 / Bilingual Report)</title>
+<style>
+:root{--ink:#1a202c;--mut:#4a5568;--line:#e2e8f0;--acc:#2b6cb0;--good:#276749;--bad:#9b2c2c;--bg:#f7fafc;}
+*{box-sizing:border-box}
+body{margin:0;font-family:"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif;color:var(--ink);background:var(--bg);line-height:1.62}
+input[name=lang]{position:absolute;left:-9999px}
+.wrap{max-width:1080px;margin:0 auto;padding:28px 34px 80px}
+.langbar{position:sticky;top:0;z-index:9;background:var(--bg);padding:10px 0;border-bottom:1px solid var(--line);margin-bottom:18px}
+.langbar label{display:inline-block;padding:5px 18px;border:1px solid var(--acc);color:var(--acc);cursor:pointer;font-weight:600;border-radius:4px;margin-right:8px;user-select:none}
+#lang-zh:checked ~ .wrap label[for=lang-zh],#lang-en:checked ~ .wrap label[for=lang-en]{background:var(--acc);color:#fff}
+#lang-zh:checked ~ .wrap .en{display:none}
+#lang-en:checked ~ .wrap .zh{display:none}
+h1{font-size:26px;margin:8px 0 2px}
+h2{font-size:20px;margin:38px 0 10px;padding-bottom:6px;border-bottom:2px solid var(--acc)}
+h3{font-size:16px;margin:24px 0 8px;color:var(--acc)}
+.meta{color:var(--mut);font-size:13px;margin-bottom:6px}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13.5px;background:#fff}
+th,td{border:1px solid var(--line);padding:6px 9px;text-align:left;vertical-align:top}
+th{background:#edf2f7;font-weight:600}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+.good{color:var(--good);font-weight:600}
+.bad{color:var(--bad);font-weight:600}
+.card{background:#fff;border:1px solid var(--line);border-radius:6px;padding:14px 18px;margin:14px 0}
+.tldr{border-left:4px solid var(--acc)}
+.warn{border-left:4px solid #c05621;background:#fffaf0}
+.fig{background:#fff;border:1px solid var(--line);border-radius:6px;padding:10px;margin:16px 0;overflow-x:auto}
+.fig svg{max-width:100%;height:auto}
+.figcap{font-size:12.5px;color:var(--mut);margin-top:4px}
+code,.mono{font-family:ui-monospace,Consolas,monospace;font-size:0.92em;background:#edf2f7;padding:1px 4px;border-radius:3px}
+.small{font-size:12.5px;color:var(--mut)}
+ol li,ul li{margin:4px 0}
+.kbd{display:inline-block;border:1px solid #cbd5e0;border-bottom-width:2px;border-radius:3px;padding:0 5px;font-size:.85em;background:#fff}
+</style>
+</head>
+<body>
+<input type="radio" name="lang" id="lang-zh" checked>
+<input type="radio" name="lang" id="lang-en">
+<div class="wrap">
+<div class="langbar">
+  <label for="lang-zh">中文</label><label for="lang-en">English</label>
+  <span class="small" style="margin-left:12px" >CSS-only toggle · zero JavaScript</span>
+</div>
+
+<h1>op19 — Sandwich 双阈值 GVR Top-K 算子<span class="en" style="display:none"></span></h1>
+<div class="zh"><h1 style="font-size:17px;color:var(--mut);margin:0">Sandwich Two-Threshold GVR Top-K Operator — 优化全记录</h1></div>
+<div class="en"><h1 style="font-size:17px;color:var(--mut);margin:0">Sandwich Two-Threshold GVR Top-K Operator — full optimization log</h1></div>
+<p class="meta">2026-07-02 · B200 (sm_100, 148 SMs) · branch <code>omni/gvr-1cta-multithresh</code> · bucket <code>indexer_topk_op_bench/op19_gvr_sandwich/</code> · baseline = 单 CTA <code>gvr_cutedsl</code> / single-CTA <code>gvr_cutedsl</code> · 协议 / protocol: cold-L2 (512 MB evict) + CUDA-graph + cudaEvent 中位数 / median, 正收益 nsys 纯核复验 / positive claims re-validated by nsys pure-kernel</p>
+
+<div class="card tldr">
+<div class="zh"><b>TL;DR</b> — 720/720 cell 全部 exact;整体几何均值 <b>1.122×</b>(fp32 <b>1.164×</b> / fp16 <b>1.119×</b> / bf16 <b>1.085×</b>),最大 <b>1.855×</b>(K2048/262K/BS512 fp32),最小 0.969×(唯一 &lt;0.97 的 cell,为 baseline 回退桶的噪声)。nsys 纯核验证:fp32 8/8、16-bit 6/6 正收益成立。dispatch 表已补全为每 dtype 240 键,无表外兜底。≥1.5× 平均的原始目标<b>未达成</b>——按 op12 的地板分析这在纯 GVR 家族内结构性不可达(详见 §7 诚实差距)。</div>
+<div class="en"><b>TL;DR</b> — 720/720 cells exact; overall geomean <b>1.122×</b> (fp32 <b>1.164×</b> / fp16 <b>1.119×</b> / bf16 <b>1.085×</b>), max <b>1.855×</b> (K2048/262K/BS512 fp32), min 0.969× (the only cell &lt;0.97, noise on a baseline-fallback bucket). nsys pure-kernel validation: fp32 8/8 and 16-bit 6/6 positive claims hold. Dispatch tables completed to 240 keys per dtype — no out-of-table fall-through. The original ≥1.5× average target was <b>not met</b> — structurally unreachable inside the pure GVR family per op12's floor analysis (see §7 Honest gap).</div>
+</div>
+
+<h2><span class="zh">1. 优化目标</span><span class="en">1. Optimization goal</span></h2>
+<div class="zh">
+<p>围绕 <b>SANDWICH 双阈值</b>思想构建完整 GVR 优化桶:从 op18 的一次 M 叉阶梯扫描(<code>block_count_ge_multi</code>)中<b>免费</b>取得一对阈值——</p>
+<ul>
+<li><b>thr0</b>:计数 M0 &lt; K 的最紧阈值 → 这 M0 个元素<b>保证</b>是 top-K 成员,P3 阶段直接写出;</li>
+<li><b>thr1</b>:计数 M1 ∈ [K, kC] 的接受阈值 → P4 只需在带 [thr1, thr0) 内的 M1−M0 个候选中精化余下 K−M0 个名额。</li>
+</ul>
+<p>目标:最大化 M0、最小化 M1、压低 P2 轮数;变体覆盖单 CTA(扩展 op18)与多 CTA cluster(扩展 op17 portfolio);在 report 网格全部 <b>720 个 B200 cell</b>(K×dtype×N×BS)上击败单 CTA <code>gvr_cutedsl</code>,冲击平均 ≥1.5×(iter0 即声明:若地板数学证明不可达,则如实报告差距)。</p>
+</div>
+<div class="en">
+<p>Build a full GVR optimization bucket around the <b>SANDWICH two-threshold</b> idea: from op18's single M-ary ladder pass (<code>block_count_ge_multi</code>), obtain a threshold pair <b>for free</b> —</p>
+<ul>
+<li><b>thr0</b>: tightest threshold whose count M0 &lt; K → those M0 elements are <b>guaranteed</b> top-K members, direct-written in P3;</li>
+<li><b>thr1</b>: the accepted threshold with count M1 ∈ [K, kC] → P4 only refines the band [thr1, thr0) of M1−M0 candidates for the remaining K−M0 slots.</li>
+</ul>
+<p>Goals: maximize M0, minimize M1, keep P2 rounds low; variants cover single-CTA (extending op18) and multi-CTA cluster (extending op17's portfolio); beat single-CTA <code>gvr_cutedsl</code> on ALL <b>720 B200 cells</b> of the report grid (K×dtype×N×BS), targeting ≥1.5× average (with the iter0 commitment: if floor math proves the target unreachable, report the gap honestly).</p>
+</div>
+
+<h2><span class="zh">2. 最终算法</span><span class="en">2. Final algorithm</span></h2>
+<div class="zh">
+<p>最终交付为<b>三件套</b>:两个内核策略 + 一张按 cell 完备的调度表。</p>
+<h3>Strategy-A — 单 CTA sandwich(<code>src/gvr_sw_op.py</code>, GvrSandwichKernel)</h3>
+<ol>
+<li><b>P2 = 一次 M 叉阶梯扫描</b>:一遍全 N 扫描同时评估 M 个阈值(向量化、逐元素 M 谓词加,单次 M 列 barrier),阈值位置来自离线 <b>straddle-fracs</b>(每 (K,N,dtype,M) 5 种子优化:{0 锚点, l1=全种子 count≥K 的最大 frac, l0=全种子 count&lt;K 的最小 frac, 内插点},保证从两侧夹住 v<sub>K</sub>);全部 M 列 per-thread 计数缓存于 smem,P3 零重算。</li>
+<li><b>P3 = sandwich 收集</b>:单个稀有外层分支 <code>if v≥thr1</code> 内嵌分类(≥thr0 → 直写候选;带内 → smem);两个前缀和打包进一个 warp scan(<code>(up&lt;&lt;16)|band</code>);<b>defer-direct</b>:直写索引先缓冲 smem,barrier 后合并冲刷(避免散射存储打断 4 路 LSU 流水,iter5 教训)。</li>
+<li><b>P4 = 带内 band-snap</b>:runtime-k(k_rem = K−M0)+ 直方图范围以 [thr1, thr0) 播种,工作集从数千候选坍缩到数十。</li>
+<li>接受条件是 <b>band≤kC</b> 而非 M1≤kC(smem 只装带内),M1 超 kC 的 cell(如 K2048/65K M1≈6.6K)照常 sandwich;无对/超界时 done=2 精确 retry-shrink,无静默截断。</li>
+</ol>
+<h3>Strategy-B — 多 CTA cluster sandwich(<code>src/gvr_swc_op.py</code>, 承自 op17)</h3>
+<p>G 个 slot 按 straddle-aware fracs {0 锚点} + linspace(l1,l0,G−1) 布点;DSMEM 共享计数;所有 rank 同时计算阈值对(r1=最紧 ≥K,r0=r1+1 &lt;K);胜者 CTA 经 DSM 拷贝 r0 的 per-thread 计数列后,<b>直写 CTA 与带内精化 CTA 并发工作</b>(thr0 列就在其自身 smem,零额外 DSMEM 拷贝)。顺带修复 op17 D0 exactness bug(count&gt;kC 时 P3 静默截断 → 改为 done=2 retry-shrink)。</p>
+<h3>Strategy-C — 按 (K,N,BS,dtype) 完备调度</h3>
+<p><code>gvr_sw_auto</code> 查 <code>dispatch_table_{fp32,bf16,fp16}.json</code>(iter16 起每 dtype <b>240 键全覆盖</b>,无默认兜底):</p>
+</div>
+<div class="en">
+<p>The final deliverable is a <b>triple</b>: two kernel strategies + a per-cell-complete dispatch table.</p>
+<h3>Strategy-A — single-CTA sandwich (<code>src/gvr_sw_op.py</code>, GvrSandwichKernel)</h3>
+<ol>
+<li><b>P2 = one M-ary ladder pass</b>: a single full-N scan evaluates M thresholds simultaneously (vectorized, per-element M-predicated adds, one M-column barrier). Threshold placement comes from offline <b>straddle-fracs</b> (per (K,N,dtype,M), optimized over 5 seeds: {0 anchor, l1 = max frac with count≥K on all seeds, l0 = min frac with count&lt;K on all seeds, interpolated inner points} — guaranteed to bracket v<sub>K</sub> from both sides). All M per-thread count columns are cached in smem; P3 recounts nothing.</li>
+<li><b>P3 = sandwich collect</b>: one rare outer branch <code>if v≥thr1</code> with nested classification (≥thr0 → direct-write candidate; in-band → smem); both prefix sums packed into ONE warp scan (<code>(up&lt;&lt;16)|band</code>); <b>defer-direct</b>: direct indices are buffered in smem and flushed coalesced after the scan barrier (scattered stores inside the hot loop broke the 4-way LSU pipeline — iter5 lesson).</li>
+<li><b>P4 = in-band band-snap</b>: runtime-k (k_rem = K−M0) + histogram range seeded with [thr1, thr0); the working set collapses from thousands of candidates to tens.</li>
+<li>Acceptance is <b>band≤kC</b>, not M1≤kC (smem only holds the band), so cells whose tightest M1 exceeds kC (e.g. K2048/65K, M1≈6.6K) still sandwich; no-pair/overflow → done=2 exact retry-shrink, no silent truncation.</li>
+</ol>
+<h3>Strategy-B — multi-CTA cluster sandwich (<code>src/gvr_swc_op.py</code>, inherited from op17)</h3>
+<p>G slots placed at straddle-aware fracs {0 anchor} + linspace(l1,l0,G−1); DSMEM count sharing; all ranks compute the pair (r1 = tightest ≥K, r0 = r1+1 &lt;K); after the winner DSM-copies r0's per-thread count column, the <b>direct-write CTA and the band-refine CTA work concurrently</b> (the thr0 column lives in that CTA's own smem — zero extra DSMEM copies). op17's D0 exactness bug fixed en passant (count&gt;kC silent P3 truncation → done=2 retry-shrink).</p>
+<h3>Strategy-C — complete per-(K,N,BS,dtype) dispatch</h3>
+<p><code>gvr_sw_auto</code> looks up <code>dispatch_table_{fp32,bf16,fp16}.json</code> (since iter16, <b>240 keys per dtype, full coverage</b>, no default fall-through):</p>
+</div>
+<table>
+<tr><th>dtype</th><th class="num">cluster&lt;G&gt;</th><th class="num">M4R1p4</th><th class="num">M2R1p4</th><th class="num">M3R1p4</th><th class="num">baseline</th></tr>
+<tr><td>fp32</td><td class="num">52</td><td class="num">141</td><td class="num">34</td><td class="num">0</td><td class="num">13</td></tr>
+<tr><td>bf16</td><td class="num">30</td><td class="num">143</td><td class="num">30</td><td class="num">2</td><td class="num">35</td></tr>
+<tr><td>fp16</td><td class="num">31</td><td class="num">152</td><td class="num">33</td><td class="num">0</td><td class="num">24</td></tr>
+</table>
+<p class="small"><span class="zh">读法:cluster 承包 BS≤16 的低批多数 cell;M4R1p4(单遍 4 叉、straddle 布点)是主力;M2R1p4 承包超大 N 的 BS=1(M 叉冷遍税最低);baseline 回退集中在 bf16 K2048 中 N(结构性,见 §5 iter11)与噪声级 cell。</span><span class="en">Reading: cluster owns most low-batch BS≤16 cells; M4R1p4 (one-pass 4-ary, straddle placement) is the workhorse; M2R1p4 owns BS=1 at the largest N (lowest M-ary cold-pass tax); baseline fallbacks concentrate in bf16 K2048 mid-N (structural, §5 iter11) and noise-level cells.</span></p>
+
+<h2><span class="zh">3. 优化路径与迭代过程</span><span class="en">3. Optimization path &amp; iterations</span></h2>
+<div class="fig">{{FIG1}}
+<div class="figcap"><span class="zh">图 1 — 各方案性能随迭代的变化(fp32 主线;bf16/fp16 于 iter15–16 汇入)。三次关键拐点:iter2 证伪"高 BS 必赢"(ACTIVE-SET L2 陷阱)、iter3 straddle-fracs 使单遍 R1 成立、iter7 P3 双分支税重构。</span><span class="en">Fig. 1 — per-track performance vs iteration (fp32 mainline; bf16/fp16 join at iter15–16). Three inflection points: iter2 falsifies "high-BS always wins" (ACTIVE-SET L2 trap), iter3 straddle-fracs make one-pass R1 viable, iter7 kills the P3 dual-branch tax.</span></div></div>
+
+<table>
+<tr><th style="width:52px">iter</th><th><span class="zh">内容</span><span class="en">What happened</span></th><th style="width:34%"><span class="zh">量化结果 / 教训</span><span class="en">Measured outcome / lesson</span></th></tr>
+<tr><td>0</td><td><span class="zh">离线上限仿真(<code>sim_sandwich.py</code>,真实 fp32 bundle 重放 op18 M 叉轮):阈值对<b>零额外遍</b>即可得。</span><span class="en">Offline ceiling sim (<code>sim_sandwich.py</code>, replaying op18 M-ary rounds on real fp32 bundles): the threshold pair costs <b>zero extra passes</b>.</span></td><td><span class="zh">2–3 轮阶梯后 95–100% 的 top-K 可直写,P4 工作集从 1.3–5.2K 候选坍缩到数十;但 op18 的 f3 fracs 未夹 K → K1024 全 N M0=0,催生 straddle-fracs。</span><span class="en">After 2–3 ladder rounds 95–100% of top-K is direct-writable; P4's set collapses from 1.3–5.2K candidates to tens. But op18's f3 fracs don't straddle K → K1024 all-N M0=0, motivating straddle-fracs.</span></td></tr>
+<tr><td>1</td><td><span class="zh">Strategy-A 内核落地 + exactness 门(uniq=K, valdiff=0)。</span><span class="en">Strategy-A kernel bring-up + exactness gate (uniq=K, valdiff=0).</span></td><td><span class="zh">全部 cell 过门后才允许计时。</span><span class="en">No timing before all cells pass the gate.</span></td></tr>
+<tr><td>2</td><td><span class="zh">首次高 BS A/B(M4R2p3)。</span><span class="en">First high-BS A/B (M4R2p3).</span></td><td><span class="zh"><b>WASH,avg 0.96×</b>(0.73–1.28)。根因 = <b>ACTIVE-SET L2 陷阱</b>:需要溢出 L2 的是活跃工作集(~148 SM × 驻留 CTA × 行字节 ≈ 400 行),不是整个 batch;N≤32K fp32 时 51 MB &lt; L2,baseline 的额外遍仍然 L2 温;R2 还把 sandwich 的冷遍翻倍。⇒ 高 BS 必须 R1,且 pass-collapse 只在 N≥~131K 付账。</span><span class="en"><b>WASH, avg 0.96×</b> (0.73–1.28). Root cause = the <b>ACTIVE-SET L2 trap</b>: what must spill L2 is the active working set (~148 SMs × resident CTAs × rowbytes ≈ 400 rows), not the whole batch; at N≤32K fp32 that's 51 MB &lt; L2, so the baseline's extra passes stay L2-warm — and R2 doubles the sandwich's cold passes. ⇒ high-BS must be R1, and pass-collapse only pays at N≥~131K.</span></td></tr>
+<tr><td>3</td><td><span class="zh"><b>straddle-fracs</b>(<code>optimize_straddle_fracs.py</code>,5 种子 × 1024 点 λ 网格)→ 单遍 R1 sandwich 处处成立(place_mode=4)。</span><span class="en"><b>Straddle-fracs</b> (<code>optimize_straddle_fracs.py</code>, 5 seeds × 1024-pt λ grid) → one-pass R1 sandwich everywhere (place_mode=4).</span></td><td><span class="zh">高 BS 重测 M4R1p4:<b>avg 1.22×</b>,262K 行 1.16–1.71×——pass-collapse 假设在活跃集溢出 L2 处<b>确认</b>。</span><span class="en">High-BS re-run with M4R1p4: <b>avg 1.22×</b>, the 262K row 1.16–1.71× — the pass-collapse hypothesis <b>confirmed</b> where the active set spills L2.</span></td></tr>
+<tr><td>4</td><td><span class="zh">Strategy-B cluster sandwich 落地。</span><span class="en">Strategy-B cluster sandwich bring-up.</span></td><td><span class="zh">G∈{4,8,16} 20/20 fp32 cell exact;op17 D0 顺带修复。</span><span class="en">Exact on 20/20 fp32 cells × G∈{4,8,16}; op17's D0 fixed en passant.</span></td></tr>
+<tr><td>5</td><td><span class="zh"><b>defer-direct</b>:P3 热循环内禁止散射 gmem store。</span><span class="en"><b>Defer-direct</b>: no scattered gmem stores inside the hot P3 vector loop.</span></td><td><span class="zh">K2048 小 N(M0/N 高达 23%)逐元素发散存储砸到 0.72–0.93× → smem 缓冲 + barrier 后合并冲刷修复。</span><span class="en">At K2048 small-N (M0/N up to 23%) per-element divergent stores crushed perf to 0.72–0.93× → fixed by smem buffering + coalesced flush after the barrier.</span></td></tr>
+<tr><td>7</td><td><span class="zh"><b>P3 热循环重构</b>:bisect(sw_enable 开关)定位双分支税。</span><span class="en"><b>P3 hot-loop restructure</b>: bisect (sw_enable flag) isolates the dual-branch tax.</span></td><td><span class="zh">if/elif 逐元素链打断 4 路 LSU 流水(swcON/OFF 差 6–15%)→ 单稀有外层分支 + 双前缀和打包单 warp scan + push/ld-copy 可选同步;cluster swc/op17 从 0.78–0.88 修到 0.94–1.01。</span><span class="en">The per-element if/elif chain broke the 4-way LSU pipeline (6–15% swcON/OFF gap) → one rare outer branch + both prefix sums packed into one warp scan + selectable push/ld-copy sync; cluster swc/op17 recovered from 0.78–0.88 to 0.94–1.01.</span></td></tr>
+<tr><td>8</td><td><span class="zh">iter7 内核复测轮(fp32)。</span><span class="en">Re-measurement round on the iter7 kernel (fp32).</span></td><td><span class="zh">BS=1 oracle gm <b>1.147</b>(80/80,零 cell 低于 baseline);cluster A/B gm <b>1.189</b>(min 0.993,vs op17 gm 1.010 净胜)。</span><span class="en">BS=1 oracle gm <b>1.147</b> (80/80, zero cells below baseline); cluster A/B gm <b>1.189</b> (min 0.993; net ≥ op17 at gm 1.010).</span></td></tr>
+<tr><td>9–11</td><td><span class="zh">按 dtype 原生 straddle-fracs 表 + dtype-aware 加载;16-bit 摸底。</span><span class="en">Per-dtype native straddle-fracs tables + dtype-aware loader; 16-bit exploration.</span></td><td><span class="zh">fp32 fracs 迁移全 exact 但有性能坑(bf16 BS1 K512/16K 0.86);原生表修复(bf16 worst 0.864→0.975)。<b>bf16 K2048 中 N 高 BS 0.72 = 结构性</b>:行字节减半使 L2-warm 区间外扩 → 调度回退 baseline。</span><span class="en">fp32-fracs transfer is all-exact but leaves perf holes (bf16 BS1 K512/16K 0.86); native tables fix them (bf16 worst 0.864→0.975). <b>bf16 K2048 mid-N high-BS 0.72 is structural</b>: halved rowbytes extend the L2-warm regime → dispatch falls back to baseline there.</span></td></tr>
+<tr><td>10, 12</td><td><span class="zh">fp32 调度表(120 实测 cell)+ 全网格。</span><span class="en">fp32 dispatch table (120 measured cells) + fullgrid.</span></td><td><span class="zh">调度表 gm 1.201 min 1.000;<b>fp32 FULLGRID 240/240 exact,gm 1.164 min 0.985 max 1.855</b>;编译键改挂派生桶(编译量减半)。</span><span class="en">Dispatch gm 1.201 min 1.000; <b>fp32 FULLGRID 240/240 exact, gm 1.164 min 0.985 max 1.855</b>; compile-key moved to the derived bucket (halves compile count).</span></td></tr>
+<tr><td>13</td><td><span class="zh">nsys 纯核验证(8 个代表 fp32 cell)。</span><span class="en">nsys pure-kernel validation (8 representative fp32 cells).</span></td><td><span class="zh"><b>8/8 成立</b>,nsys≥event 7/8(cluster cell 的 event 数含启动开销,同 op17 §4.1)。</span><span class="en"><b>8/8 confirmed</b>, nsys≥event on 7/8 (cluster cells carry launch overhead in the event number, as in op17 §4.1).</span></td></tr>
+<tr><td>14</td><td><span class="zh">K2048 高 BS 抢救尝试:两条都被证伪/回退。</span><span class="en">K2048 high-BS rescue attempts: both falsified/reverted.</span></td><td><span class="zh">(a) M1R1(零税单遍)0.78–0.98 仍输 → 该 ~10 cell 的劣势非配置可调;(b) smem union(−8 KB)使驻留 2→3 CTA/SM 反而 0.918→0.745 <b>回退</b>。教训:<b>"免费"的 smem 节省不免费——占用率变化是双向的一等性能变量</b>。</span><span class="en">(a) M1R1 (zero-tax one-pass) still loses at 0.78–0.98 → the deficit there is not config-tunable; (b) the smem union (−8 KB) lifted residency 2→3 CTAs/SM and REGRESSED 0.918→0.745 → <b>REVERTED</b>. Lesson: <b>"free" smem savings aren't free — occupancy shifts are a first-class perf variable in both directions</b>.</span></td></tr>
+<tr><td>15</td><td><span class="zh">bf16/fp16 调度表(实测 cell gm 1.134/1.171,min 1.000)+ 双 GPU 16-bit 全网格启动。</span><span class="en">bf16/fp16 dispatch tables (measured-cell gm 1.134/1.171, min 1.000) + 16-bit fullgrids launched on both GPUs.</span></td><td><span class="zh">网络中断杀死两个 sweep(bf16 87/240、fp16 84/240)→ 以 setsid 脱离方式断点续跑恢复。</span><span class="en">A network drop killed both sweeps (bf16 87/240, fp16 84/240) → recovered via detached setsid relaunch with jsonl resume.</span></td></tr>
+<tr><td>16</td><td><span class="zh">16-bit 全网格完成;<b>调度表补全 + 硬化</b>;16-bit nsys 验证。</span><span class="en">16-bit fullgrids complete; <b>dispatch tables completed + hardened</b>; 16-bit nsys validation.</span></td><td><span class="zh">发现全部亏损 cell 均为<b>表外默认兜底</b>(88 键表 → 152/240 cell 落默认 M4R1p4,表内预测零失误)→ 每 dtype 补全至 240 键,实测 &lt;0.99 的桶硬化为 baseline(bf16 18 / fp16 7 / fp32 3),重测恢复 ≈1.0。<b>最终 720 cell:gm 1.122,全 exact</b>。</span><span class="en">All losing cells were <b>out-of-table default fall-through</b> (88-key tables → 152/240 cells hit default M4R1p4; in-table predictions had zero misses) → tables completed to 240 keys/dtype, buckets measured &lt;0.99 hardened to baseline (bf16 18 / fp16 7 / fp32 3), re-runs restore ≈1.0. <b>Final 720 cells: gm 1.122, all exact.</b></span></td></tr>
+</table>
+
+<h2><span class="zh">4. 最终性能结果(720-cell 全网格)</span><span class="en">4. Final performance (720-cell fullgrid)</span></h2>
+<table>
+<tr><th>dtype</th><th class="num">cells</th><th class="num">exact</th><th class="num">geomean</th><th class="num">avg</th><th class="num">min</th><th class="num">max</th><th class="num">&lt;0.97</th></tr>
+<tr><td>fp32</td><td class="num">240</td><td class="num">240</td><td class="num good">1.164</td><td class="num">1.172</td><td class="num">0.985</td><td class="num">1.855</td><td class="num">0</td></tr>
+<tr><td>bf16</td><td class="num">240</td><td class="num">240</td><td class="num good">1.085</td><td class="num">1.088</td><td class="num">0.981</td><td class="num">1.398</td><td class="num">0</td></tr>
+<tr><td>fp16</td><td class="num">240</td><td class="num">240</td><td class="num good">1.119</td><td class="num">1.124</td><td class="num">0.969</td><td class="num">1.455</td><td class="num">1</td></tr>
+<tr><td><b>ALL</b></td><td class="num">720</td><td class="num">720</td><td class="num good"><b>1.122</b></td><td class="num">1.128</td><td class="num">0.969</td><td class="num">1.855</td><td class="num">1</td></tr>
+</table>
+<p class="small"><span class="zh">按 K 的几何均值:K512 = 1.138/1.068/1.110,K1024 = 1.183/1.121/1.154,K2048 = 1.172/1.063/1.091(fp32/bf16/fp16)。唯一 &lt;0.97 的 cell(fp16 K2048/131K/BS1024,0.969)是 baseline 硬化桶上的 baseline-vs-baseline 噪声。</span><span class="en">Geomean by K: K512 = 1.138/1.068/1.110, K1024 = 1.183/1.121/1.154, K2048 = 1.172/1.063/1.091 (fp32/bf16/fp16). The single cell &lt;0.97 (fp16 K2048/131K/BS1024, 0.969) is baseline-vs-baseline noise on a hardened bucket.</span></p>
+
+<div class="fig">{{FIG2}}<div class="figcap"><span class="zh">图 2 — 几何均值 vs BS:高 BS 端(≥256)由单 CTA R1 pass-collapse 驱动,fp32 增益最大(冷遍最贵);低 BS 端由 cluster 驱动。</span><span class="en">Fig. 2 — geomean vs BS: the high-BS end (≥256) is driven by single-CTA R1 pass-collapse, strongest in fp32 (cold passes cost the most); the low-BS end is driven by the cluster.</span></div></div>
+<div class="fig">{{FIG3}}<div class="figcap"><span class="zh">图 3 — 几何均值 vs N:N≥131K 处 pass-collapse 全面付账;bf16 在中 N 因 L2-warm 区间外扩而回退 baseline(增益≈1)。</span><span class="en">Fig. 3 — geomean vs N: pass-collapse pays fully at N≥131K; bf16 falls back to baseline in mid-N (gain≈1) because its L2-warm regime extends further.</span></div></div>
+<div class="fig">{{FIG4}}<div class="figcap"><span class="zh">图 4 — (N×BS) 热力图(对 K 取几何均值)。绿色主对角带 = cluster(左下,低 BS)与 pass-collapse(右上,大 N 高 BS)两大增益源;bf16 中 N 条带的 ≈1.0 为结构性 baseline 回退。</span><span class="en">Fig. 4 — (N×BS) heatmap (geomean over K). The two green regions = cluster gains (bottom-left, low BS) and pass-collapse gains (top-right, large N × high BS); the ≈1.0 bf16 mid-N band is the structural baseline fallback.</span></div></div>
+
+<h3><span class="zh">nsys 纯核验证</span><span class="en">nsys pure-kernel validation</span></h3>
+<div class="zh"><p>正收益声明全部经 nsys 复验(cudaProfilerApi 窗口内 cold-L2,<code>cuda_gpu_kern_sum</code> 中位数;event 计时对 cluster cell 含启动开销,故 nsys 常略高):fp32 8/8(iter13)+ 16-bit 6/6(iter16):</p></div>
+<div class="en"><p>All positive claims re-validated by nsys (cold-L2 inside a cudaProfilerApi window, <code>cuda_gpu_kern_sum</code> median; event timing carries launch overhead on cluster cells, so nsys typically reads slightly higher): fp32 8/8 (iter13) + 16-bit 6/6 (iter16):</p></div>
+<table>
+<tr><th>cell (fp32, iter13)</th><th>dispatch</th><th class="num">event</th><th class="num">nsys</th></tr>
+<tr><td>K512/16K BS1</td><td>cluster16</td><td class="num">1.28</td><td class="num">1.368</td></tr>
+<tr><td>K512/262K BS1</td><td>cluster16</td><td class="num">1.18</td><td class="num">1.165</td></tr>
+<tr><td>K1024/32K BS1</td><td>cluster16</td><td class="num">1.44</td><td class="num">1.517</td></tr>
+<tr><td>K1024/262K BS16</td><td>cluster4</td><td class="num">1.28</td><td class="num">1.336</td></tr>
+<tr><td>K2048/262K BS16</td><td>cluster4</td><td class="num">1.47</td><td class="num">1.531</td></tr>
+<tr><td>K512/262K BS2048</td><td>M4R1p4</td><td class="num">1.416</td><td class="num">1.419</td></tr>
+<tr><td>K1024/32K BS2048</td><td>M4R1p4</td><td class="num">1.446</td><td class="num">1.463</td></tr>
+<tr><td>K2048/262K BS2048</td><td>M4R1p4</td><td class="num">1.852</td><td class="num">1.856</td></tr>
+</table>
+{{NSYS16}}
+
+<h2><span class="zh">5. 横向对比:七个 top-K 算子</span><span class="en">5. Cross-operator comparison: seven top-K operators</span></h2>
+<div class="zh"><p>下表汇总同一 bench 家族(<code>indexer_topk_op_bench</code>,720 cell/硬件,B200/B300 双测硬件不变)中的关键算子。注意基线口径:前四行的主报告数字以 <b>GVR-CUDA</b> 为时间基准(表中已换算为"耗时比,越小越快");op17/18/19 以<b>单 CTA gvr_cutedsl</b> 为加速比基准(越大越快)。</p></div>
+<div class="en"><p>The table summarizes the key operators of the same bench family (<code>indexer_topk_op_bench</code>, 720 cells/HW, measured on both B200/B300, hardware-invariant). Mind the baseline convention: the first four rows quote the main report's numbers as <b>time ratio vs GVR-CUDA</b> (smaller = faster); op17/18/19 quote <b>speedup vs single-CTA gvr_cutedsl</b> (larger = faster).</p></div>
+<table>
+<tr><th style="width:15%"><span class="zh">算子</span><span class="en">Operator</span></th><th><span class="zh">架构一句话</span><span class="en">Architecture in one line</span></th><th><span class="zh">强势域</span><span class="en">Strong regime</span></th><th><span class="zh">弱势域 / 缺陷</span><span class="en">Weak regime / caveats</span></th><th style="width:13%"><span class="zh">exactness</span><span class="en">Exactness</span></th></tr>
+<tr><td><b>GVR (cuteDSL)</b><br><span class="small">单 CTA 基线 / single-CTA baseline</span></td>
+<td><span class="zh">P1 preIdx 带播种 → P2 自适应割线阈值搜索(全 N 计数遍)→ P3 收集 → P4 直方图 snap;1024 线程、向量化、少 barrier。</span><span class="en">P1 preIdx band seeding → P2 adaptive secant threshold search (full-N count passes) → P3 collect → P4 histogram snap; 1024 threads, vectorized, few barriers.</span></td>
+<td><span class="zh">全域均匀(生产内核,耗时比 GVR-CUDA ≈0.93);preIdx 时域提示利用是家族独有优势。</span><span class="en">Uniform everywhere (production kernel, ≈0.93 time-ratio vs GVR-CUDA); exploiting the temporal preIdx hint is unique to this family.</span></td>
+<td><span class="zh">大 N 低 BS:多次冷全 N 遍(262K/BS1 是其最差域);对 radix 家族在 BS=1 无并行度回应。</span><span class="en">Large-N low-BS: multiple cold full-N passes (262K/BS1 is its worst regime); no parallelism answer to the radix family at BS=1.</span></td>
+<td class="good">EXACT</td></tr>
+<tr><td><b>GVR multi-CTA</b><br><span class="small">cuteDSL, PR#15198</span></td>
+<td><span class="zh">每行协作多 CTA + DSMEM 驻留直方图(单 launch 无 merge 核)+ 生产启发式自适应 cluster_size。</span><span class="en">Cooperative multi-CTA per row + DSMEM-resident histogram (single launch, no merge kernel) + adaptive cluster_size via the production heuristic.</span></td>
+<td><span class="zh">长上下文单流解码:N=131K/BS1 1.62×、N=262K/BS1 2.16×(vs GVR-CUDA);189/720 cell 启用 cluster,中位 1.26× vs 单 CTA。</span><span class="en">Long-context single-stream decode: N=131K/BS1 1.62×, N=262K/BS1 2.16× (vs GVR-CUDA); cluster active on 189/720 cells, median 1.26× vs single-CTA.</span></td>
+<td><span class="zh">高 BS(≥256)退化为 1 CTA/行,无增益(但也无回退)。</span><span class="en">High BS (≥256) degenerates to 1 CTA/row, no gain (but no regression either).</span></td>
+<td class="good">EXACT</td></tr>
+<tr><td><b>Radix (cuteDSL)</b></td>
+<td><span class="zh">单遍逐位基数直方图 → 逐位 pivot → 收集;chunk 启发式(≥8192 元素/CTA)随 N 扩 CTA,无 merge 核。</span><span class="en">Single-pass per-bit radix histogram → per-bit pivot → collect; chunk heuristic (≥8192 elem/CTA) scales CTAs with N, no merge kernel.</span></td>
+<td><span class="zh"><b>BS=1 全 N 段最强对手</b>:耗时比 GVR-CUDA 0.69–0.77(小 N)、0.53–0.64(大 N)——每行 4–32 个 CTA 的并行度是 GVR 单 CTA 给不出的。</span><span class="en"><b>Strongest rival across BS=1</b>: time-ratio 0.69–0.77 (small N) and 0.53–0.64 (large N) vs GVR-CUDA — 4–32 CTAs/row of parallelism a single-CTA GVR cannot match.</span></td>
+<td><span class="zh">高 BS(≥256)多 CTA 同步反噬(1.30× 更慢);单 CTA 路径 smem 顶到 ~57K fp32,N≥131K 不可行。</span><span class="en">High BS (≥256): multi-CTA sync backfires (1.30× slower); single-CTA path hits the smem ceiling ~57K fp32, infeasible N≥131K.</span></td>
+<td class="good">EXACT</td></tr>
+<tr><td><b>SGLang StreamingTopK</b><br><span class="small">op#11, fp32, K≤1024</span></td>
+<td><span class="zh">FP16 粗 4096-bin 直方图(流式扫一遍)→ 从高到低走 bin 至 rank-K 边界 → ≤1024 边界候选做 4 轮 8-bit 基数精化;无提示、无 smem 上限。</span><span class="en">FP16 coarse 4096-bin histogram (one streaming pass) → walk bins high→low to the rank-K boundary → exact 4-round 8-bit radix tie-refine on ≤1024 boundary candidates; hint-free, no smem ceiling.</span></td>
+<td><span class="zh">中小 N × 高 BS(耗时比 0.78–0.96 vs GVR-CUDA);182 个合规 cell 中 138 个快过 GVR-CUDA。</span><span class="en">Small-to-mid N × high BS (time-ratio 0.78–0.96 vs GVR-CUDA); faster than GVR-CUDA on 138/182 eligible cells.</span></td>
+<td><span class="zh">长上下文低 BS 反输 1.20×(无 preIdx 带优势);<b>fp32-only</b>(TMA float 装载);K=2048 超出设计包线(kMaxTies=1024,不 exact,已从对比剔除)。</span><span class="en">Loses 1.20× at long-context low-BS (no preIdx band advantage); <b>fp32-only</b> (TMA float loads); K=2048 outside the envelope (kMaxTies=1024, non-exact, excluded).</span></td>
+<td><span class="good">EXACT</span><br><span class="small">K∈{512,1024} fp32</span></td></tr>
+<tr><td><b>op17 — GVR Threshold-Portfolio</b><br><span class="small">multi-CTA cluster</span></td>
+<td><span class="zh">G 路 cluster 阈值组合投资(G∈{1,4,8,16}):G 个 CTA 各测一个阈值,DSMEM 汇总选最紧收敛者;高 BS 回退 G=1。</span><span class="en">G-way cluster threshold portfolio (G∈{1,4,8,16}): G CTAs each probe one threshold, DSMEM-merged, tightest-converged wins; falls back to G=1 at high BS.</span></td>
+<td><span class="zh">中 N 低 BS:nsys 1.21–1.67×;BS≤16 逐 BS 几何均值 1.15–1.20×;300/720 cell G&gt;1(中位 1.164×)。</span><span class="en">Mid-N low-BS: nsys 1.21–1.67×; per-BS geomean 1.15–1.20× at BS≤16; 300/720 cells with G&gt;1 (median 1.164×).</span></td>
+<td><span class="zh">高 BS 无增益(G=1 噪声);N≥262K 个别 cell min 0.694×;<b>D0 bug:2/720 cell 不 exact</b>(count&gt;kC 静默截断)——该 bug 已在 op19 内核中修复。</span><span class="en">No gain at high BS (G=1 noise); a few N≥262K cells min 0.694×; <b>D0 bug: 2/720 cells inexact</b> (count&gt;kC silent truncation) — fixed in the op19 kernel.</span></td>
+<td><span class="bad">718/720</span><br><span class="small">D0 → fixed in op19</span></td></tr>
+<tr><td><b>op18 — 1-CTA Multi-Threshold</b></td>
+<td><span class="zh">单 CTA M 叉 <code>block_count_ge_multi</code>:一遍全 N 同时评 M 个阈值(向量化、无分支 M 谓词加),M 列计数缓存 smem 零重算;CDF-aware 离线 fracs。</span><span class="en">Single-CTA M-ary <code>block_count_ge_multi</code>: one full-N scan evaluates M thresholds (vectorized, branchless M-predicated adds), M count columns cached in smem with zero recount; CDF-aware offline fracs.</span></td>
+<td><span class="zh">BS=1 中大 N:avg 1.14×(min 1.01,max 1.34),零回退;增益随 BS 升(1.08→1.16×,BS 1→128)。</span><span class="en">BS=1 mid-to-large N: avg 1.14× (min 1.01, max 1.34), zero regressions; gain grows with BS (1.08→1.16×, BS 1→128).</span></td>
+<td><span class="zh">小 N 近中性(1.01–1.02×);只扫过 BS=1(60 cell);单阈值输出,无直写通道。</span><span class="en">Near-neutral at small N (1.01–1.02×); only swept at BS=1 (60 cells); single-threshold output, no direct-write path.</span></td>
+<td class="good">EXACT</td></tr>
+<tr><td><b>op19 — Sandwich(本文)</b><br><span class="small">this work</span></td>
+<td><span class="zh">op18 的 M 叉阶梯 + <b>免费双阈值</b>(thr0 直写 / thr1 带内)+ defer-direct P3 + runtime-k 带内 snap P4 + cluster 变体 + 240 键/dtype 完备调度。</span><span class="en">op18's M-ary ladder + <b>free two-threshold pair</b> (thr0 direct-write / thr1 band) + defer-direct P3 + runtime-k in-band snap P4 + cluster variant + complete 240-key/dtype dispatch.</span></td>
+<td><span class="zh"><b>唯一同时吃下两端的 GVR</b>:高 BS 大 N pass-collapse(fp32 262K/BS≥256 至 1.86×,nsys 证实)+ 低 BS cluster(1.17–1.53× nsys);720 cell gm 1.122×,全 exact,≤1 个噪声级回退。</span><span class="en"><b>The only GVR that wins both ends</b>: high-BS large-N pass-collapse (fp32 262K/BS≥256 up to 1.86×, nsys-confirmed) + low-BS cluster (1.17–1.53× nsys); 720-cell gm 1.122×, all exact, ≤1 noise-level fallback.</span></td>
+<td><span class="zh">bf16 K2048 中 N(L2-warm 区间外扩,结构性,回退 baseline);中 BS(32–128)cluster 与 pass-collapse 都够不着的空档;vs radix 的 BS=1 并行度差距未消除。</span><span class="en">bf16 K2048 mid-N (extended L2-warm regime, structural, baseline fallback); the mid-BS (32–128) gap that neither cluster nor pass-collapse reaches; the BS=1 parallelism gap vs radix remains.</span></td>
+<td class="good">EXACT 720/720</td></tr>
+</table>
+<div class="zh"><p class="small">补充:op#7(GVR rank-scatter P4,PR #15709 已合入)把 P4 的迭代 snap 换成融合 rank-scatter(直方图 → 高到低前缀 → 候选按全局 rank 一遍散射),总核 1.00–1.50×、P4 相 1.11–2.12×,B200/B300 不变(~1.078×);其 P4 思想与本算子的带内 snap 正交,可叠加评估。主报告结论:跨算子按域最优 = BS=1 归 Radix-cuteDSL,BS≥512 归 GVR 家族,长上下文低 BS 归 GVR multi-CTA;所有排序 B200/B300 硬件不变(比值 1.00–1.03)。</p></div>
+<div class="en"><p class="small">Addendum: op#7 (GVR rank-scatter P4, merged as PR #15709) replaces P4's iterative snap with a fused rank-and-scatter (histogram → high→low prefix → each candidate scatters at its global rank), 1.00–1.50× total / 1.11–2.12× P4-phase, arch-invariant (~1.078× on both B200/B300); its P4 idea is orthogonal to this operator's in-band snap and stackable. Main-report verdict: cross-operator best-per-regime = Radix-cuteDSL at BS=1, the GVR family at BS≥512, GVR multi-CTA at long-context low-BS; all rankings hardware-invariant across B200/B300 (ratio 1.00–1.03).</p></div>
+
+<h2><span class="zh">6. 关键教训(证伪记录)</span><span class="en">6. Key lessons (falsification log)</span></h2>
+<div class="zh"><ul>
+<li><b>ACTIVE-SET L2 陷阱</b>:判断 baseline 额外遍是否"真冷",看的是活跃集(SM×驻留CTA×行字节)对 L2 的溢出,与 batch 总量无关。这一修正把"高 BS 必赢"改写为"高 BS × N≥131K(fp32)才赢"。</li>
+<li><b>占用率是双向一等变量</b>(iter14):−8 KB smem"白捡"却把驻留从 2 抬到 3 CTA/SM,L1/LSU 争用反亏 19%;任何 smem/寄存器变化都要 A/B 驻留档位。</li>
+<li><b>热循环里的第二个分支比多算一遍更贵</b>(iter5/7):散射存储与 if/elif 链都会打断 LSU 流水;稀有外层分支 + 延迟合并冲刷是标准解法。</li>
+<li><b>调度表的空键 = 隐性回退</b>(iter16):88 键表让 152/240 cell 落到默认配置,而表内预测零失误——全部亏损来自"没测过的桶"。完备化(240 键)+ 亏损桶硬化 baseline 是廉价且彻底的修复。</li>
+<li><b>16-bit 不是免费的 fp32</b>(iter9/11):行字节减半外扩 L2-warm 区间(bf16 K2048 中 N 结构性输)且需原生 straddle-fracs 表;dtype 是调度维度,不是编译细节。</li>
+</ul></div>
+<div class="en"><ul>
+<li><b>The ACTIVE-SET L2 trap</b>: whether the baseline's extra passes are "truly cold" depends on the active set (SMs × resident CTAs × rowbytes) spilling L2 — not on total batch size. This rewrites "high-BS always wins" into "high-BS × N≥131K (fp32) wins".</li>
+<li><b>Occupancy is a first-class, bidirectional variable</b> (iter14): a "free" −8 KB smem saving lifted residency 2→3 CTAs/SM and lost 19% to L1/LSU contention; every smem/register change must be A/B'd across residency tiers.</li>
+<li><b>A second branch in the hot loop costs more than an extra pass</b> (iter5/7): scattered stores and if/elif chains both break the LSU pipeline; one rare outer branch + deferred coalesced flush is the standard fix.</li>
+<li><b>Empty dispatch keys are silent fallbacks</b> (iter16): the 88-key tables sent 152/240 cells to the default config while in-table predictions had zero misses — every loss came from an unmeasured bucket. Completing the table (240 keys) + hardening losing buckets to baseline is the cheap, thorough fix.</li>
+<li><b>16-bit is not free fp32</b> (iter9/11): halved rowbytes extend the L2-warm regime (bf16 K2048 mid-N loses structurally) and need native straddle-frac tables; dtype is a dispatch dimension, not a compile detail.</li>
+</ul></div>
+
+<h2><span class="zh">7. 诚实差距与下一步:让 GVR 在 Blackwell 全域最优</span><span class="en">7. Honest gap &amp; next steps: making GVR optimal everywhere on Blackwell</span></h2>
+<div class="card warn">
+<div class="zh"><b>诚实差距</b> — 720 cell 平均 ≥1.5× 未达成(实测 gm 1.122×)。这与 op12 的地板分析一致:小 N 受 barrier 地板(P1–P3 ≈1.2× SGLang 下限)、BS=1 大 N 受 L2 陷阱(baseline 第二遍近乎免费)约束,二者共同压低全网格均值;1.5× 只在"活跃集溢出 L2"的高 BS×大 N 象限内可达(该象限实测 1.4–1.86×)。在纯 GVR 家族内继续堆单点优化无法改变这个结构。</div>
+<div class="en"><b>Honest gap</b> — the ≥1.5× 720-cell average was not met (measured gm 1.122×). Consistent with op12's floor analysis: small-N is barrier-floor-bound (P1–P3 ≈1.2× of the SGLang lower bound) and BS=1 large-N is L2-trap-bound (the baseline's second pass is nearly free), jointly capping the grid mean; 1.5× is only reachable inside the high-BS × large-N quadrant where the active set spills L2 (measured 1.4–1.86× there). No amount of point optimization inside the pure GVR family changes this structure.</div>
+</div>
+<div class="zh"><p>要在<b>所有 seq_len × BS × dtype × top-K</b> 上成为最优,路线按预期收益/风险排序:</p>
+<ol>
+<li><b>跨家族组合调度(收益最大、零内核工作)</b>:本工作已证明"表驱动按 cell 调度"的机制有效(表内预测零失误)。把调度键的取值从 {sandwich 配置, cluster, baseline} 扩到 {…, radix_cutedsl, streaming_topk}:BS=1 段交给 radix(耗时比 0.53–0.77)、中小 N 高 BS 段可用 streaming、其余归 sandwich。以各家族全网格实测直接填表即可,预计把"全域最优缺口"一次性关死——代价是维护两套内核的 exactness 门与 preIdx 契约适配。</li>
+<li><b>GVR 自身的 BS=1 并行度补课</b>:radix 在 BS=1 赢在每行 4–32 CTA 的读带宽。cluster sandwich 目前 G 个 CTA <b>冗余</b>扫同一行(拿并行度换阈值组合),下一步让 G 个 CTA <b>分段</b>扫行(每 CTA 1/G 行 + DSMEM 计数归约),P2 遍时间除以 G——这是把 radix 的分块思想移植进 GVR 阈值机制,保留 preIdx 带播种优势。风险:分段计数归约的 barrier 链可能吃掉小 N 收益(op17 iter5 双核方案 0.63–0.84× 的前车之鉴,但那是跨 launch,cluster 内 DSMEM 归约无此开销)。</li>
+<li><b>中 BS(32–128)空档</b>:pick_G 约束 bs×G ≤ SMs/2 使 BS≥32 时 G=1,而 pass-collapse 又要 N≥131K 才付账。行配对 cluster(2 行共享一个 G=2 组,DSMEM 各自计数)可在 BS 32–128 × N 32–131K 的空档内把活跃集×并行度同时抬高;需先离线仿真验证驻留档位。</li>
+<li><b>bf16/K2048 结构域</b>:行字节减半 → 活跃集更难溢出 L2 → pass-collapse 无账可付。对策是<b>每 CTA 多行粗化</b>(单 CTA 串行处理 2–4 行,活跃行数×2–4,行间复用阈值表),把"溢出点"拉回中 N;或该域永久 baseline(当前方案,零风险)。</li>
+<li><b>运行时自适应 fracs</b>:离线 straddle 表是对合成分布的拟合;线上流量分布漂移会侵蚀 M0/K。以 EMA 跟踪实测 (M0, M1) 并微调 frac 锚点(P1 内标量工作,~0 开销),换取真实服务负载下的鲁棒性;可与 dsv4 真实 capture(§C/§D)回放先行验证。</li>
+<li><b>P4 叠加 rank-scatter(op#7)</b>:带内 snap 与 rank-scatter 正交——带内候选数十时 snap 已近地板,但 K2048 大带 cell(band 数百)仍可能吃到 P4 相 1.1–1.5×;一次 A/B 即可裁决。</li>
+<li><b>协议提醒</b>:以上任何单点在宣称收益前必须过三关——exactness 门 → cold-L2 event → nsys 纯核;并对照 <code>gvr_phase_timing/</code> 的 12 条已证伪路径与本文 §6,避免重走死路。</li>
+</ol></div>
+<div class="en"><p>To become optimal on <b>every seq_len × BS × dtype × top-K</b>, the roadmap ordered by expected gain/risk:</p>
+<ol>
+<li><b>Cross-family portfolio dispatch (largest gain, zero kernel work)</b>: this work proved the table-driven per-cell dispatch machinery (zero in-table prediction misses). Extend the key's value set from {sandwich configs, cluster, baseline} to {…, radix_cutedsl, streaming_topk}: hand BS=1 to radix (time-ratio 0.53–0.77), small-to-mid N × high BS optionally to streaming, the rest to sandwich. Populate directly from each family's measured fullgrids — expected to close the "optimal everywhere" gap in one move; the cost is maintaining exactness gates and preIdx-contract adaptation for two extra kernel families.</li>
+<li><b>Fixing GVR's own BS=1 parallelism deficit</b>: radix wins BS=1 through 4–32 CTAs/row of read bandwidth. The cluster sandwich currently has G CTAs scan the same row <b>redundantly</b> (spending parallelism on threshold portfolio); next, let G CTAs scan row <b>segments</b> (1/G row each + DSMEM count reduction), dividing P2 pass time by G — porting radix's chunking into the GVR threshold machinery while keeping the preIdx band advantage. Risk: the segmented-count reduction barrier chain may eat the small-N gain (op17 iter5's two-kernel attempt hit 0.63–0.84×, but that was cross-launch; intra-cluster DSMEM reduction has no such overhead).</li>
+<li><b>The mid-BS (32–128) gap</b>: pick_G's bs×G ≤ SMs/2 forces G=1 at BS≥32, while pass-collapse only pays at N≥131K. Row-paired clusters (2 rows share a G=2 group, per-row DSMEM counts) can lift active-set × parallelism simultaneously in the BS 32–128 × N 32–131K void; validate residency tiers in offline sim first.</li>
+<li><b>The bf16/K2048 structural regime</b>: halved rowbytes → the active set spills L2 later → pass-collapse has nothing to collect. Counter with <b>multi-row-per-CTA coarsening</b> (one CTA serially handles 2–4 rows, ×2–4 active rows, threshold tables reused across rows), pulling the spill point back to mid-N; or keep the permanent baseline fallback (current solution, zero risk).</li>
+<li><b>Runtime-adaptive fracs</b>: offline straddle tables fit the synthetic distribution; live-traffic drift erodes M0/K. Track realized (M0, M1) with an EMA and nudge the frac anchors (scalar work in P1, ~zero cost) for robustness on real serving load; validate first by replaying the real DSv4 captures (§C/§D).</li>
+<li><b>Stack rank-scatter (op#7) into P4</b>: the in-band snap and rank-scatter are orthogonal — with tens of in-band candidates snap is near its floor, but K2048 wide-band cells (hundreds) may still take the 1.1–1.5× P4-phase gain; one A/B settles it.</li>
+<li><b>Protocol reminder</b>: any of the above must pass three gates before claiming gains — exactness gate → cold-L2 event → nsys pure-kernel — and be checked against the 12 falsified paths in <code>gvr_phase_timing/</code> plus §6 here, to avoid re-walking dead ends.</li>
+</ol></div>
+
+<h2><span class="zh">附录 — 工件与协议</span><span class="en">Appendix — artifacts &amp; protocol</span></h2>
+<div class="zh"><ul class="small">
+<li>计时:cold-L2(512 MB evict)+ CUDA-graph + cudaEvent 中位数(<code>harness/sweep.py _time_both</code>);正收益 nsys 纯核复验;任何计时前先过 exactness 门(set 语义:uniq=K, valdiff=0,输出顺序自由)。</li>
+<li>数据:合成 bundle seed=42(swebench-temporal 系),preIdx 命中率按 dtype/模型标定;每 cell BS 经 <code>expand().contiguous()</code> 复制。</li>
+<li>结果文件:<code>results/fullgrid_b200.jsonl</code>(fp32+bf16)、<code>results/fullgrid_b200_fp16.jsonl</code>、<code>results/dispatch_table_{fp32,bf16,fp16}.json</code>(240 键/dtype,<code>.pre_iter16</code> 为补全前备份)、<code>results/iter16_hardened_cells.json</code>、nsys 工件在 <code>results/nsys/</code>(含 token 环境,不入 git)。</li>
+<li>迭代日志:<code>ITERATIONS.md</code>;知识库:<code>LEARNINGS.md</code>;内核:<code>src/gvr_sw_op.py</code>(A)/<code>src/gvr_swc_op.py</code>(B)。</li>
+</ul></div>
+<div class="en"><ul class="small">
+<li>Timing: cold-L2 (512 MB evict) + CUDA-graph + cudaEvent median (<code>harness/sweep.py _time_both</code>); positive claims re-validated by nsys pure-kernel; the exactness gate (set semantics: uniq=K, valdiff=0, output order free) precedes any timing.</li>
+<li>Data: synthetic bundles seed=42 (swebench-temporal family), preIdx hit-rate calibrated per dtype/model; per-cell BS replicated via <code>expand().contiguous()</code>.</li>
+<li>Result files: <code>results/fullgrid_b200.jsonl</code> (fp32+bf16), <code>results/fullgrid_b200_fp16.jsonl</code>, <code>results/dispatch_table_{fp32,bf16,fp16}.json</code> (240 keys/dtype; <code>.pre_iter16</code> = pre-completion backup), <code>results/iter16_hardened_cells.json</code>; nsys artifacts under <code>results/nsys/</code> (they embed the process env incl. tokens — never committed).</li>
+<li>Iteration log: <code>ITERATIONS.md</code>; knowledge base: <code>LEARNINGS.md</code>; kernels: <code>src/gvr_sw_op.py</code> (A) / <code>src/gvr_swc_op.py</code> (B).</li>
+</ul></div>
+
+</div>
+</body>
+</html>
