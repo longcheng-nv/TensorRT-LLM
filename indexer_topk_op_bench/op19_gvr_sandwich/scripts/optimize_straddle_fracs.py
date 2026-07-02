@@ -83,7 +83,27 @@ if __name__ == "__main__":
             l1 = max(0.0, min(l_geK) - step)          # count>=K on all seeds
             l0 = min(0.999, max(l_ltK) + step)        # count<K on all seeds
 
-            for M in (3, 4, 6, 8):
+            for M in (2, 3, 4, 6, 8):
+                if M == 2:
+                    # NO 0-anchor: zero-tax pass; rare all-counts<K seeds fall
+                    # back to done=2 retry-shrink (exact, slow) in-kernel.
+                    fr = [l1, l0]
+                    worst = dict(M1=0, M0=1 << 30, band=0, d2=0)
+                    for (pm, px, sv) in states:
+                        cnt = lambda f: int(torch.searchsorted(
+                            sv, -(pm + f * (px - pm)), right=True).item())
+                        M1, M0, band, d2 = sim_round(cnt, fr, K)
+                        worst["M1"] = max(worst["M1"], M1 or 0)
+                        worst["M0"] = min(worst["M0"], M0)
+                        worst["band"] = max(worst["band"], band or 0)
+                        worst["d2"] += int(d2 or M1 is None)
+                    out[f"{K}_{N}_{M}"] = dict(fracs=[round(f, 6) for f in fr],
+                                               val=worst)
+                    print(f"{K:>5} {N:>7} {M:>2} | l1={l1:.4f} l0={l0:.4f} -> "
+                          f"M1<={worst['M1']:>5} M0>={worst['M0']:>5} "
+                          f"band<={worst['band']:>5} d2={worst['d2']}",
+                          flush=True)
+                    continue
                 inner = []
                 if M > 3:
                     n_in = M - 3
