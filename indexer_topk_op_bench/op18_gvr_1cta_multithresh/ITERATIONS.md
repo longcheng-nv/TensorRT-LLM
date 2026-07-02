@@ -35,3 +35,25 @@ Design (src/gvr_mt_op.py):
 
 M=4 R=2 acc=2.0 place=uniform. All 14 fp32 cells (K512/1024/2048 × N4K..262K):
 uniq=K, valdiff=0 → exactness gate passed. Next: A/B grid vs gvr_cutedsl.
+
+---
+
+## Iter 1 — 2026-07-02 — first A/B (M4 R2 u a2.0): avg 0.93x, large-N tax-bound
+
+Full fp32 grid, cold-L2 event median (`scripts/ab_grid.py`): min 0.694x (K512/262K),
+avg 0.930x, max 1.268x (K512/16K). Wins only at scattered small/mid-N; loses
+0.69-0.85x at N>=131K — the unconditional round-2 pass (x1.46 M4 tax at 262K)
+cannot be paid back by the P4-shrink (~2µs) at large N.
+
+**Offline policy simulator** (`scripts/simulate_placement.py` — replicates P1 band
+incl. cr=1 +1 preIdx offset, baseline secant w/ kFTarget, M-ary rounds, done=2
+retry-shrink passes; validated cand/passes on the real bundles):
+- Baseline burns 2 full-N passes at EVERY K512/K1024 cell (count(pmean) always
+  outside [K,kC]); K2048: 2-3 passes. Final cand: K512 1.3-2.3K, K1024 2.4-4.6K,
+  K2048 2.2-5.2K.
+- M4 R1: ONE pass, cand 0.9-1.8K (K512) / 2.3-4.5K (K1024) — replaces baseline's
+  2 passes with one x1.25-1.46 pass -> the LARGE-N play (saves ~0.5-0.7 pass).
+- M4/M8 R2 + accept: 2 passes, cand 0.5-0.7K (K512) / 1.0-1.5K (K1024) /
+  2.1-2.6K (K2048) -> the SMALL-N play (P4-shrink, passes are latency-cheap).
+=> per-(K,N) config dispatch needed (mirrors op17 pick_G). Running 9-config
+empirical sweep (`scripts/config_sweep.py`) to build the dispatch table.
