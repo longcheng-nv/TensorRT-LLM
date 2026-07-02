@@ -21,6 +21,11 @@ def load(paths):
                 r = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            if "vs_base" in r and r.get("exact"):
+                # cluster A/B rows -> cfg=cluster<G>
+                r = dict(K=r["K"], dtype=r["dtype"], N=r["N"], BS=r["BS"],
+                         cfg=f"cluster{r['G']}", speedup=r["vs_base"],
+                         exact=True)
             if "speedup" in r and r.get("exact"):
                 rows.append(r)
     return rows

@@ -152,3 +152,17 @@ ahead of push at 262K (1.010 vs 0.976). All exact 20/20 x 4 smokes.
 Data points pre-fix: BS1 oracle gm 1.086 (M2R1p4 dominant; large-N <1 traced
 to this tax); BS2048 oracle gm 1.227 (defer fixed K2048 small-N 0.75->0.91+).
 Re-sweeping both BS regimes + full cluster A/B with the fixed kernel.
+## Iter 8 — 2026-07-02 — iter7-kernel measurement round (fp32)
+
+**BS=1 (results/cfg_bs1_fp32.jsonl, 80/80):** oracle gm 1.147, min 1.012 —
+**zero cells below baseline** (pre-iter7: gm 1.086, several <1). M2R1p4
+dominates (K512/262K 0.949 -> 1.171; K2048/262K 1.352).
+
+**Cluster A/B (results/ab_cluster_fp32.jsonl, 60/60, ld-copy):** vs baseline
+gm 1.189, min 0.993, max 1.467, ALL exact; vs op17 gm 1.010 (29/60 wins) —
+sandwich cluster >= op17 net, and beats single-CTA at many BS<=16 cells
+(K1024/32K 1.44 vs 1.28; K2048/262K 1.47 vs 1.35).
+
+Running: BS=2048 + BS mid (16/64/256) fp32 re-sweeps (GPU1); bf16/fp16
+transfer validation of fp32 straddle fracs (GPU0). build_dispatch extended to
+ingest cluster rows as cfg=cluster<G>.

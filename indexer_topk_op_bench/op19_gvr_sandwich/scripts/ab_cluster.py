@@ -63,7 +63,7 @@ if __name__ == "__main__":
                 oc = torch.empty(BS, K, dtype=torch.int32, device=DEV)
                 cb = lambda: gvr_cutedsl(logits, pre, seq, K, cr_val, out=ob)
                 c17 = lambda: gvr_portfolio_cluster(logits, pre, seq, K, cr_val, out=op17o, G=G)
-                cc = lambda: gvr_swc(logits, pre, seq, K, cr_val, out=oc, G=G)
+                cc = lambda: gvr_swc(logits, pre, seq, K, cr_val, out=oc, G=G, use_push=False)
                 cb(); c17(); cc(); torch.cuda.synchronize()
                 ok = exact_all(oc, logits, K)
                 tb = cold_us(cb, reps=args.reps)
