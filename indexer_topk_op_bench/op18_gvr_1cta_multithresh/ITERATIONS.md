@@ -57,3 +57,58 @@ retry-shrink passes; validated cand/passes on the real bundles):
   2.1-2.6K (K2048) -> the SMALL-N play (P4-shrink, passes are latency-cheap).
 => per-(K,N) config dispatch needed (mirrors op17 pick_G). Running 9-config
 empirical sweep (`scripts/config_sweep.py`) to build the dispatch table.
+
+---
+
+## Iter 2 — 2026-07-02 — 9-config sweep + phase localization: the L2 trap, again
+
+**9-config full-grid sweep** (results/config_sweep_fp32.jsonl): best fixed config
+M4R1u avg 0.993x (min 0.856, max 1.230); ORACLE per-cell best only avg 1.023x.
+Wins concentrate at N<=16K (1.10-1.24x) + 65K (1.06-1.11x); all configs lose at
+131K/262K. M6/M8 R2 disasters at large N (0.49-0.66x).
+
+**Phase localization** (`scripts/measure_mt_phases.py`, clock64, K512/262K, cyc):
+- baseline: P1 3.5K | P2 27.3K (2 evals: COLD ~22K + L2-WARM ~5K) | P3 29K | P4 10.2K
+- mt M4R1u: P1 3.6K | P2 33K (ONE cold M4 pass) | P3 28K | P4 15.3K (cand 1821)
+- ROOT CAUSE of the sweep miss vs sim: **the L2 trap (op14/15/17-iter0 pattern)**.
+  The sim counted baseline's 2nd pass as a full pass; it is L2-resident (~5K cyc,
+  row 1MB << 50MB L2). So "pass-collapse" reclaims only ~5K cyc while the M4
+  compare tax on the COLD pass costs +10K cyc at 262K -> structural large-N loss.
+- In-kernel M-scaling == count_ge_multi microbench (M2 22K free, M4 32K x1.46,
+  M8 59K x2.7 at 262K); branchless Int32(cmp) rewrite and unroll 8/16: NO effect
+  (the pass is latency-exposure-bound, not branch- or unroll-bound).
+- **P4 snap is placement-sensitive, not cand-linear alone**: P4 = 15.3K @cand
+  1821 (uniform thr) but 7.2K @cand 669 (M8 uniform) and 12.6K @cand 532
+  (R2-refined thr) — same-cand configs differ ~2x by where thr lands.
+
+**PIVOT (op16's 'cheaper P2' lever, CDF-aware form):** one free-ish pass (M2/M3
+large-N, M4-M8 small-N) with **offline-tuned CDF-aware thresholds**:
+`scripts/optimize_fracs.py` (5 seeds) picks per-(K,N,M) fracs on [pmin,pmax]
+targeting a count ladder; fracs[0]=0 anchors exactness. Multi-seed tightest
+count: K512 ~520-840 (vs baseline cand 1327-2680), K1024 ~1.0-2.2K (vs
+2.4-4.9K), K2048 ~2.1-3.5K (parity — baseline already tight there). M=2 is
+seed-fragile (done2 1-2/5 seeds); M>=3 safe (done2=0 everywhere).
+place_mode=3 (compile-time frac table) implemented; EXACT. f3 config sweep
+running (M2R2f3_a2, M3R1f3, M3R2f3_a13, M4R1f3, M6R1f3, M8R1f3).
+
+---
+
+## Iter 3 — 2026-07-02 — CDF-aware sweep: BROAD WIN, dispatch table built
+
+f3 sweep (results/config_sweep_f3.jsonl, fp32, cold-L2 event, exact everywhere):
+| config | min | avg | max |
+|---|---|---|---|
+| M2R2f3_a2 | 0.880 | 1.099 | 1.349 |
+| M3R1f3 | 0.892 | 1.096 | 1.285 |
+| M4R1f3 | 0.969 | 1.081 | 1.284 |
+| ORACLE per-cell | 1.004 | 1.143 | 1.349 |
+
+CDF-aware placement turned the large-N regime from 0.70-0.99x into 1.06-1.35x:
+M2 (free pass) + R2 accept-guard wins every N>=131K cell (K512 1.06/1.11,
+K1024 1.09/1.10, K2048 65K 1.34 / 262K 1.35). Small/mid-N: M3R1/M4R1 1.10-1.29x.
+Weakest cells: K1024/4K (1.004), K2048/16K (1.014).
+
+**Dispatch table** `_DISPATCH` + `gvr_mt_auto()` added to src/gvr_mt_op.py
+(per-(K, N-bucket) -> (M, R, accept_mult), place_mode=3 everywhere).
+Next: x3-median validation (all dtypes) + nsys pure-kernel on positives +
+BS sweep guard.

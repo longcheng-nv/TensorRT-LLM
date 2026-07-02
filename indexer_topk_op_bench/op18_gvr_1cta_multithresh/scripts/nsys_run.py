@@ -36,6 +36,9 @@ def main():
     out = torch.empty(1, K, dtype=torch.int32, device="cuda")
     if which == "base":
         call = lambda: gvr_cutedsl(lo, pr, sl, K, crv, out=out)
+    elif which == "auto":
+        from gvr_mt_op import gvr_mt_auto
+        call = lambda: gvr_mt_auto(lo, pr, sl, K, crv, out=out)
     else:
         call = lambda: gvr_mt(lo, pr, sl, K, crv, out=out, M=M, R=R,
                               accept_mult=acc, place_mode=place)

@@ -429,6 +429,38 @@ def gvr_mt(logits, pre_idx, seq_lens, index_topk, compress_ratio=1, out=None,
     return out
 
 
+# ---------------------------------------------------------------------------
+# Tuned per-(K, N-bucket) dispatch (fp32 sweep 2026-07-02, CDF-aware place=3).
+# Entry = (M, R, accept_mult). Buckets = sweep N grid; nearest bucket is used.
+# ---------------------------------------------------------------------------
+_DISPATCH = {
+    512: {4096: (4, 1, 1.0), 8192: (3, 2, 1.3), 16384: (3, 1, 1.0),
+          32768: (3, 1, 1.0), 65536: (3, 1, 1.0), 131072: (2, 2, 2.0),
+          262144: (2, 2, 2.0)},
+    1024: {4096: (6, 1, 1.0), 8192: (4, 1, 1.0), 16384: (3, 1, 1.0),
+           32768: (3, 1, 1.0), 65536: (3, 1, 1.0), 131072: (2, 2, 2.0),
+           262144: (2, 2, 2.0)},
+    2048: {8192: (3, 2, 1.3), 16384: (2, 2, 2.0), 32768: (4, 1, 1.0),
+           65536: (2, 2, 2.0), 131072: (4, 1, 1.0), 262144: (2, 2, 2.0)},
+}
+
+
+def pick_config(K, n):
+    tbl = _DISPATCH.get(K)
+    if tbl is None:
+        return (3, 1, 1.0)
+    nb = min(tbl, key=lambda b: abs(b - n))
+    return tbl[nb]
+
+
+def gvr_mt_auto(logits, pre_idx, seq_lens, index_topk, compress_ratio=1, out=None):
+    """Tuned dispatch entry point: per-(K,N) config, CDF-aware placement."""
+    bs, n = logits.shape
+    M, R, acc = pick_config(index_topk, n)
+    return gvr_mt(logits, pre_idx, seq_lens, index_topk, compress_ratio, out=out,
+                  M=M, R=R, accept_mult=acc, place_mode=3)
+
+
 if __name__ == "__main__":
     import synth_data
     M = int(sys.argv[1]) if len(sys.argv) > 1 else 4
