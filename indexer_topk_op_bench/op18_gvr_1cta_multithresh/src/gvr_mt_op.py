@@ -50,12 +50,16 @@ class GvrMultiThreshKernel(GvrTopKKernel):
     c_accept (absolute count), place_mode, kC_override, num_threads."""
 
     def __init__(self, *a, M_thr=4, R_rounds=2, c_accept=1024, place_mode=0,
-                 kC_override=None, **kw):
+                 kC_override=None, mt_unroll=4, fracs=None, **kw):
         super().__init__(*a, **kw)
         self.M_thr = int(M_thr)
         self.R_rounds = int(R_rounds)
         self.c_accept = int(c_accept)
         self.place_mode = int(place_mode)
+        self.mt_unroll = int(mt_unroll)  # LSU-ILP unroll depth of the M-ary scan
+        # place_mode=3: CDF-aware compile-time frac table (round-1 thresholds
+        # thr_m = pmin + fracs[m]*(pmax-pmin); fracs[0] must be 0.0 = safety anchor)
+        self.fracs = tuple(float(f) for f in fracs) if fracs is not None else None
         if kC_override is not None:
             self.kC = int(kC_override)
 
@@ -97,7 +101,7 @@ class GvrMultiThreshKernel(GvrTopKKernel):
             big_iters = cutlass.Int32(0)
             if N > i + cutlass.Int32(vec_w - 1):
                 big_iters = (N - i - cutlass.Int32(vec_w)) // cutlass.Int32(step_elem) + cutlass.Int32(1)
-            for k in cutlass.range(big_iters, unroll=4):
+            for k in cutlass.range(big_iters, unroll=self.mt_unroll):
                 i_local = i + k * cutlass.Int32(step_elem)
                 src_ptr_k = cute.make_ptr(
                     self.dtype, row_addr + cutlass.Int64(i_local) * cutlass.Int64(elem_bytes),
@@ -110,8 +114,8 @@ class GvrMultiThreshKernel(GvrTopKKernel):
                     else:
                         vj = cutlass.Float32(rng_frag[j])
                     for m in cutlass.range_constexpr(M):
-                        if vj >= thr_frag[m]:
-                            cnt_frag[m] = cnt_frag[m] + cutlass.Int32(1)
+                        # branchless predicated add (FSETP+IADD, no divergence)
+                        cnt_frag[m] = cnt_frag[m] + cutlass.Int32(vj >= thr_frag[m])
             i = i + big_iters * cutlass.Int32(step_elem)
 
         tail_frag = cute.make_fragment((vec_w,), self.dtype)
@@ -127,16 +131,14 @@ class GvrMultiThreshKernel(GvrTopKKernel):
                 else:
                     vj = cutlass.Float32(tail_frag[j])
                 for m in cutlass.range_constexpr(M):
-                    if vj >= thr_frag[m]:
-                        cnt_frag[m] = cnt_frag[m] + cutlass.Int32(1)
+                    cnt_frag[m] = cnt_frag[m] + cutlass.Int32(vj >= thr_frag[m])
             i = i + step
 
         it = n_aligned + tidx
         while it < N:
             v = self._load_fp32(input_row, it)
             for m in cutlass.range_constexpr(M):
-                if v >= thr_frag[m]:
-                    cnt_frag[m] = cnt_frag[m] + cutlass.Int32(1)
+                cnt_frag[m] = cnt_frag[m] + cutlass.Int32(v >= thr_frag[m])
             it = it + cutlass.Int32(num_threads)
 
         # Cache all M per-thread columns (P3 seed for the winning column).
@@ -258,7 +260,11 @@ class GvrMultiThreshKernel(GvrTopKKernel):
                         hi = s_mstf[1]
                         d = hi - lo
                         if rr == cutlass.Int32(0):
-                            if cutlass.const_expr(self.place_mode == 0):
+                            if cutlass.const_expr(self.place_mode == 3):
+                                # CDF-aware compile-time fracs (per K,N,M table)
+                                for m in cutlass.range_constexpr(M):
+                                    s_mt_thr[m] = lo + d * cutlass.Float32(self.fracs[m])
+                            elif cutlass.const_expr(self.place_mode == 0):
                                 # uniform [pmin, pmax): frac m/M (m=0 -> pmin)
                                 for m in cutlass.range_constexpr(M):
                                     s_mt_thr[m] = lo + d * (cutlass.Float32(m) / cutlass.Float32(M))
@@ -355,6 +361,28 @@ class GvrMultiThreshKernel(GvrTopKKernel):
 
 
 _compiled = {}
+_FRACS_TABLE = None
+
+
+def _load_fracs(K, n, M):
+    """CDF-aware round-1 fracs from results/fracs_table.json (nearest N)."""
+    global _FRACS_TABLE
+    if _FRACS_TABLE is None:
+        import json
+        p = _HERE.parent / "results" / "fracs_table.json"
+        _FRACS_TABLE = json.load(open(p)) if p.exists() else {}
+    cands = []
+    for key, v in _FRACS_TABLE.items():
+        k_, n_, m_ = (int(x) for x in key.split("_"))
+        if k_ == K and m_ == M:
+            cands.append((abs(n_ - n), v["fracs"]))
+    if not cands:
+        raise KeyError(f"no fracs for K={K} M={M}")
+    fr = sorted(cands)[0][1]
+    # pad to exactly M entries (dedup in the optimizer may shorten the list)
+    while len(fr) < M:
+        fr = fr + [min(0.999, fr[-1] + 0.01)]
+    return tuple(fr[:M])
 
 
 def _config(bs, n):
@@ -364,18 +392,19 @@ def _config(bs, n):
     return t, use256, min_bpm
 
 
-def _compile(dtype, bs, n, K, cr_val, M, R, c_accept, place_mode, kC, threads):
-    key = (dtype, bs, n, K, cr_val, M, R, c_accept, place_mode, kC, threads)
+def _compile(dtype, bs, n, K, cr_val, M, R, c_accept, place_mode, kC, threads, unroll=4):
+    key = (dtype, bs, n, K, cr_val, M, R, c_accept, place_mode, kC, threads, unroll)
     if key in _compiled:
         return _compiled[key]
     t, use256, min_bpm = _config(bs, n)
     if threads is not None:
         t = threads
+    fracs = _load_fracs(K, n, M) if place_mode == 3 else None
     kobj = GvrMultiThreshKernel(dtype=_DT[dtype], top_k=K, next_n=1, num_threads=t, compress_ratio=cr_val,
                                 use_256bit_load=use256, enable_unroll_4=True, enable_phase3_unroll=True,
                                 min_blocks_per_mp=min_bpm, return_output_values=False,
                                 M_thr=M, R_rounds=R, c_accept=c_accept, place_mode=place_mode,
-                                kC_override=kC)
+                                kC_override=kC, mt_unroll=unroll, fracs=fracs)
     nr, nc, nb = cute.sym_int(), cute.sym_int(), cute.sym_int()
     ia = 32 if use256 else 16
     in_f = cr.make_fake_compact_tensor(_DT[dtype], (nr, nc), stride_order=(1, 0), assumed_align=ia)
@@ -389,13 +418,13 @@ def _compile(dtype, bs, n, K, cr_val, M, R, c_accept, place_mode, kC, threads):
 
 
 def gvr_mt(logits, pre_idx, seq_lens, index_topk, compress_ratio=1, out=None,
-           M=4, R=2, accept_mult=2.0, place_mode=0, kC=None, threads=None):
+           M=4, R=2, accept_mult=2.0, place_mode=0, kC=None, threads=None, unroll=4):
     bs, n = logits.shape
     if out is None:
         out = torch.empty(bs, index_topk, dtype=torch.int32, device="cuda")
     c_accept = int(index_topk * accept_mult)
     compiled = _compile(logits.dtype, bs, n, index_topk, compress_ratio, int(M), int(R),
-                        c_accept, int(place_mode), kC, threads)
+                        c_accept, int(place_mode), kC, threads, int(unroll))
     compiled(logits, pre_idx, seq_lens, None, out)
     return out
 

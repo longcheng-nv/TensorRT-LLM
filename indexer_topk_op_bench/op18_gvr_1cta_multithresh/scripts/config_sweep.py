@@ -33,6 +33,16 @@ CONFIGS = [
     ("M4R2pm_a15", 4, 2, 1.5, 2, 0),
 ]
 
+# CDF-aware (place_mode=3, fracs from results/fracs_table.json)
+CONFIGS_F3 = [
+    ("M2R2f3_a2", 2, 2, 2.0, 3, 0),
+    ("M3R1f3", 3, 1, 1.0, 3, 0),
+    ("M3R2f3_a13", 3, 2, 1.3, 3, 0),
+    ("M4R1f3", 4, 1, 1.0, 3, 0),
+    ("M6R1f3", 6, 1, 1.0, 3, 0),
+    ("M8R1f3", 8, 1, 1.0, 3, 0),
+]
+
 
 def main():
     ap = argparse.ArgumentParser()
@@ -41,11 +51,13 @@ def main():
     ap.add_argument("--Ns", default="4096,8192,16384,32768,65536,131072,262144")
     ap.add_argument("--out", default=str(_HERE.parent / "results" / "config_sweep_fp32.jsonl"))
     ap.add_argument("--configs", default="")  # comma names filter
+    ap.add_argument("--f3", action="store_true", help="use the CDF-aware config set")
     args = ap.parse_args()
     dtype = {"fp32": torch.float32, "bf16": torch.bfloat16, "fp16": torch.float16}[args.dtype]
     crmap = {512: 4, 1024: 4, 2048: 1}
     Ns = [int(x) for x in args.Ns.split(",")]
-    cfgs = CONFIGS if not args.configs else [c for c in CONFIGS if c[0] in args.configs.split(",")]
+    pool = CONFIGS_F3 if args.f3 else CONFIGS
+    cfgs = pool if not args.configs else [c for c in pool if c[0] in args.configs.split(",")]
     outp = Path(args.out)
     outp.parent.mkdir(parents=True, exist_ok=True)
     fh = open(outp, "a")
