@@ -98,3 +98,29 @@ Findings:
    + P3 + tiny P4 -> theoretical ~1.55-1.75x. Validate FIRST after exactness.
 
 Next (iter1): Strategy-A kernel bring-up + exactness gate.
+## Iter 2 — 2026-07-02 — first high-BS A/B (M4R2p3): WASH — the ACTIVE-SET L2 trap
+
+results/ab_highbs_fp32.jsonl (M4R2b64p3): avg 0.96x (0.73-1.28). Root cause
+of the miss vs the iter0 hypothesis: at high BS what must exceed L2 is the
+ACTIVE working set (~148 SMs x min_bpm CTAs x rowbytes ~= 400 rows), not the
+whole batch. N<=32K fp32: 400 x 128KB = 51MB < L2 -> baseline's extra passes
+are STILL L2-warm; and R2 doubles the sandwich's COLD passes (round 2 is not
+warm at high BS). Only K2048/262K won (1.22-1.28x). => high-BS config must be
+R1 (one pass), and the pass-collapse pays only at N >= ~131K (fp32).
+
+## Iter 3 — 2026-07-02 — straddle-fracs: R1 single-pass sandwich everywhere
+
+`scripts/optimize_straddle_fracs.py` (5 seeds, 1024-pt lambda grid): fracs =
+{0 anchor, l1 = max frac w/ count>=K all seeds, l0 = min frac w/ count<K all
+seeds, + linspace(l1,l0) self-sorting inner points}. results/straddle_fracs.json:
+d2=0 everywhere; worst-seed M4: band 129-946 M0/K 0.57-0.86; M8: band 38-510.
+Kernel place_mode=4 loads it (same codegen as 3).
+
+High-BS re-run with M4R1p4 (results/ab_highbs_fp32.jsonl): avg 1.22x, and the
+262K row = **1.16-1.71x** (K512 1.16/1.32, K1024 1.17/1.33, K2048 1.55/1.71)
+— the pass-collapse hypothesis CONFIRMED where the active set spills L2.
+Remaining losses: K2048/32K 0.81-0.87 (M4 tax on a warm-extra-pass regime;
+try M3R1p4) and K512/32K wash 1.01-1.02. All cells exact at every BS so far.
+
+Running: BS=1 config sweep (R2 refine configs, results/cfg_bs1_fp32.jsonl) +
+BS=2048 R1 config sweep (results/cfg_bs2048_fp32.jsonl) -> dispatch table.

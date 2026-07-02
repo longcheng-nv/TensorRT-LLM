@@ -676,6 +676,27 @@ class GvrSandwichKernel(GvrMultiThreshKernel):
 
 
 _compiled = {}
+_STRADDLE_TABLE = None
+
+
+def _load_straddle(K, n, M):
+    """op19 straddle-fracs from results/straddle_fracs.json (nearest N)."""
+    global _STRADDLE_TABLE
+    if _STRADDLE_TABLE is None:
+        import json
+        p = _HERE.parent / "results" / "straddle_fracs.json"
+        _STRADDLE_TABLE = json.load(open(p)) if p.exists() else {}
+    cands = []
+    for key, v in _STRADDLE_TABLE.items():
+        k_, n_, m_ = (int(x) for x in key.split("_"))
+        if k_ == K and m_ == M:
+            cands.append((abs(n_ - n), v["fracs"]))
+    if not cands:
+        raise KeyError(f"no straddle fracs for K={K} M={M}")
+    fr = sorted(cands)[0][1]
+    while len(fr) < M:
+        fr = fr + [min(0.999, fr[-1] + 0.01)]
+    return tuple(fr[:M])
 
 
 def _config(bs, n):
@@ -692,11 +713,16 @@ def _compile(dtype, bs, n, K, cr_val, M, R, band_acc, place_mode, kC, threads, u
     t, use256, min_bpm = _config(bs, n)
     if threads is not None:
         t = threads
-    fracs = _load_fracs(K, n, M) if place_mode == 3 else None
+    if place_mode == 4:
+        fracs = _load_straddle(K, n, M)
+        kernel_place = 3  # same codegen: compile-time frac table
+    else:
+        fracs = _load_fracs(K, n, M) if place_mode == 3 else None
+        kernel_place = place_mode
     kobj = GvrSandwichKernel(dtype=_DT[dtype], top_k=K, next_n=1, num_threads=t, compress_ratio=cr_val,
                              use_256bit_load=use256, enable_unroll_4=True, enable_phase3_unroll=True,
                              min_blocks_per_mp=min_bpm, return_output_values=False,
-                             M_thr=M, R_rounds=R, band_accept=band_acc, place_mode=place_mode,
+                             M_thr=M, R_rounds=R, band_accept=band_acc, place_mode=kernel_place,
                              kC_override=kC, fracs=fracs)
     nr, nc, nb = cute.sym_int(), cute.sym_int(), cute.sym_int()
     ia = 32 if use256 else 16
