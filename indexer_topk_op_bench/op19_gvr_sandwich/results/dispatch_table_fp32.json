@@ -478,5 +478,29 @@
  "2048_262144_2048": {
   "cfg": "M4R1p4",
   "speedup": 1.852
+ },
+ "2048_8192_512": {
+  "cfg": "baseline",
+  "speedup": 1.0
+ },
+ "2048_8192_1024": {
+  "cfg": "baseline",
+  "speedup": 1.0
+ },
+ "2048_16384_512": {
+  "cfg": "baseline",
+  "speedup": 1.0
+ },
+ "2048_16384_1024": {
+  "cfg": "baseline",
+  "speedup": 1.0
+ },
+ "2048_32768_512": {
+  "cfg": "baseline",
+  "speedup": 1.0
+ },
+ "2048_32768_1024": {
+  "cfg": "baseline",
+  "speedup": 1.0
  }
 }
