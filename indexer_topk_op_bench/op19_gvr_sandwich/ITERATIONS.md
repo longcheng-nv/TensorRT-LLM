@@ -124,3 +124,13 @@ try M3R1p4) and K512/32K wash 1.01-1.02. All cells exact at every BS so far.
 
 Running: BS=1 config sweep (R2 refine configs, results/cfg_bs1_fp32.jsonl) +
 BS=2048 R1 config sweep (results/cfg_bs2048_fp32.jsonl) -> dispatch table.
+## Iter 4 — 2026-07-02 — Strategy-B cluster sandwich: EXACT at G=4/8/16
+
+`src/gvr_swc_op.py` (GvrClusterSandwichKernel <- GvrSandwichKernel): G slots at
+straddle-aware fracs {0 anchor} + linspace(l1,l0,G-1); DSMEM count share; all
+ranks compute pair (r1 tightest>=K, r0=r1+1 <K); winner DSM-copies r0's
+per-thread count column into smem_ptcnt_up (barrier #2 covers smem lifetime)
+then reuses Strategy-A phase3_sandwich + phase4_band_snap verbatim. op17 D0
+fixed en passant: no-pair && M1>kC -> done=2 retry-shrink (no silent cap).
+Exactness: 20/20 fp32 cells x G in {4,8,16} (GPU0, op18 idle-window).
+Perf A/B queued behind the GPU1 config sweeps.
