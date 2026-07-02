@@ -478,6 +478,10 @@ class GvrSandwichKernel(GvrMultiThreshKernel):
         smem = SmemAllocator()
         smem_keys = smem.allocate_tensor(element_type=cutlass.Float32, layout=cute.make_ordered_layout((kC,), order=(0,)), byte_alignment=128)
         smem_vals = smem.allocate_tensor(element_type=cutlass.Int32, layout=cute.make_ordered_layout((kC,), order=(0,)), byte_alignment=128)
+        # NOTE: keep hist and didx SEPARATE. A union buffer (8KB less smem at
+        # K2048) raises residency 2->3 CTAs/SM at high BS and measures 0.745x
+        # vs separate's 0.893x at K2048/16K/BS2048 — lower occupancy wins in
+        # that regime. (measured 2026-07-02)
         smem_hist = smem.allocate_tensor(element_type=cutlass.Int32, layout=cute.make_ordered_layout((kNumBins,), order=(0,)), byte_alignment=128)
         smem_ptcnt = smem.allocate_tensor(element_type=cutlass.Int32, layout=cute.make_ordered_layout((num_threads,), order=(0,)), byte_alignment=128)
         smem_wcnt = smem.allocate_tensor(element_type=cutlass.Int32, layout=cute.make_ordered_layout((num_warps,), order=(0,)), byte_alignment=128)

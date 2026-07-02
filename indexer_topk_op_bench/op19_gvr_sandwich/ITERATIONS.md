@@ -185,3 +185,17 @@ iters, cuda_gpu_kern_sum median (results/nsys/, results/nsys_drive.log):
 nsys >= event on 7/8 (cluster cells largest gap: launch overhead sits in the
 event number, as in op17 §4.1); single-CTA high-BS cells match within 0.3%.
 The fp32 fullgrid claims stand on pure-kernel evidence.
+## Iter 14 — 2026-07-02 — K2048 high-BS rescue attempts: M1 falsified, union-buffer REVERTED
+
+(a) M1R1p4 (zero-tax single pass at l1): 0.78-0.98 at K2048 midN highBS —
+LOSES even with baseline-identical pass structure. The deficit there is not
+config-tunable; baseline dispatch stands for those ~10 cells.
+(b) smem union (didx aliasing hist, -8KB at K2048) REGRESSED 0.918 -> 0.745
+at K2048/16K/BS2048. Bisect chain: iter7-worktree repro 0.916; HEAD 0.748;
+direct union-vs-separate A/B: union 0.745 / separate 0.893. Root cause:
+-8KB smem lifts residency 2 -> 3 CTAs/SM in that regime and 3-resident is
+SLOWER (L1/LSU contention). REVERTED to separate buffers (kernel comment
+records the measurement); post-revert re-check: 0.924 (matches iter7-era).
+fp32 fullgrid numbers were measured pre-union -> remain valid.
+Lesson: "free" smem savings are not free — occupancy changes are a first-
+class perf variable in BOTH directions.
