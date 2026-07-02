@@ -134,3 +134,21 @@ then reuses Strategy-A phase3_sandwich + phase4_band_snap verbatim. op17 D0
 fixed en passant: no-pair && M1>kC -> done=2 retry-shrink (no silent cap).
 Exactness: 20/20 fp32 cells x G in {4,8,16} (GPU0, op18 idle-window).
 Perf A/B queued behind the GPU1 config sweeps.
+## Iter 7 — 2026-07-02 — P3 hot-loop restructure: the dual-branch tax, killed
+
+Bisect (sw_enable flag, G16 BS1): swcOFF/op17 = 0.91-0.94 (push+release-fence
+~6-9%) and swcON/swcOFF another 6-15% -> the sandwich P3's if/elif per-element
+chain was breaking the 4-way LSU pipeline (op18's P3 has ONE rare outer
+branch). BS=1 sweeps confirmed machinery-not-fracs (M2R2p3b64 == M2R2p4b64
+both ~0.77 at 262K).
+
+Fixes: (1) single rare outer `if vj>=thr1` with nested classify (all 3 scan
+loops); (2) both prefix sums packed into ONE warp scan ((up<<16)|band, bounds
+M0<=2048, band<=6144 < 2^16); (3) cluster sync selectable use_push (st+release
+arrive) vs ld-copy (+relaxed barrier #2).
+
+After fix (G16, BS1): swc/op17 0.94-1.01 (was 0.78-0.88); ld-copy slightly
+ahead of push at 262K (1.010 vs 0.976). All exact 20/20 x 4 smokes.
+Data points pre-fix: BS1 oracle gm 1.086 (M2R1p4 dominant; large-N <1 traced
+to this tax); BS2048 oracle gm 1.227 (defer fixed K2048 small-N 0.75->0.91+).
+Re-sweeping both BS regimes + full cluster A/B with the fixed kernel.

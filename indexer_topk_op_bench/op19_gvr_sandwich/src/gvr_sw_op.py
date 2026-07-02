@@ -77,18 +77,22 @@ class GvrSandwichKernel(GvrMultiThreshKernel):
         kCC = cutlass.const_expr(self.kC)
         num_threads = cutlass.const_expr(self.num_threads)
 
-        # ---- prefix sum #1: direct-write positions (thr0 column) ----
+        # ---- ONE packed prefix sum: (direct << 16) | band positions ----
+        # Safe: per-thread counts < 2^16, block totals M0 <= K <= 2048 and
+        # band <= kC <= 6144 (same bound as block_fused_snap_iter packing).
         my_up = smem_ptcnt_up[tidx]
-        tp0 = my_up
+        my_band = smem_ptcnt[tidx] - my_up
+        my_pk = (my_up << cutlass.Int32(16)) | my_band
+        tp0 = my_pk
         for off_i in cutlass.range_constexpr(5):
             off_v = cutlass.const_expr(1 << off_i)
             other = cute.arch.shuffle_sync_up(tp0, off_v, mask_and_clamp=0)
             if lane >= cutlass.Int32(off_v):
                 tp0 = tp0 + other
-        my_excl0 = tp0 - my_up
-        warp_tot0 = cute.arch.shuffle_sync(tp0, cutlass.Int32(self.WARP_SIZE - 1))
+        my_excl_pk = tp0 - my_pk
+        warp_tot_pk = cute.arch.shuffle_sync(tp0, cutlass.Int32(self.WARP_SIZE - 1))
         if lane == 0:
-            smem_wcnt[warp_id] = warp_tot0
+            smem_wcnt[warp_id] = warp_tot_pk
         cute.arch.barrier()
         if tidx == 0:
             tot = cutlass.Int32(0)
@@ -96,33 +100,12 @@ class GvrSandwichKernel(GvrMultiThreshKernel):
                 c = smem_wcnt[w]
                 smem_wcnt[w] = tot
                 tot = tot + c
-            s_iscalars[4] = tot  # M0 total (deferred-flush bound)
+            s_iscalars[4] = tot >> cutlass.Int32(16)          # M0 total
+            s_iscalars[0] = tot & cutlass.Int32(0xFFFF)       # band count
         cute.arch.barrier()
-        my_pos0 = smem_wcnt[warp_id] + my_excl0
-        cute.arch.barrier()  # all reads of smem_wcnt done before reuse
-
-        # ---- prefix sum #2: band positions (thr1 col - thr0 col) ----
-        my_band = smem_ptcnt[tidx] - my_up
-        tpb = my_band
-        for off_i in cutlass.range_constexpr(5):
-            off_v = cutlass.const_expr(1 << off_i)
-            other = cute.arch.shuffle_sync_up(tpb, off_v, mask_and_clamp=0)
-            if lane >= cutlass.Int32(off_v):
-                tpb = tpb + other
-        my_exclb = tpb - my_band
-        warp_totb = cute.arch.shuffle_sync(tpb, cutlass.Int32(self.WARP_SIZE - 1))
-        if lane == 0:
-            smem_wcnt[warp_id] = warp_totb
-        cute.arch.barrier()
-        if tidx == 0:
-            tot = cutlass.Int32(0)
-            for w in cutlass.range_constexpr(self.num_warps):
-                c = smem_wcnt[w]
-                smem_wcnt[w] = tot
-                tot = tot + c
-            s_iscalars[0] = tot  # band count
-        cute.arch.barrier()
-        my_posb = smem_wcnt[warp_id] + my_exclb
+        base_pk = smem_wcnt[warp_id] + my_excl_pk
+        my_pos0 = base_pk >> cutlass.Int32(16)
+        my_posb = base_pk & cutlass.Int32(0xFFFF)
 
         # ---- fused stream-write scan ----
         thr1 = s_thr[0]
@@ -160,14 +143,17 @@ class GvrSandwichKernel(GvrMultiThreshKernel):
                             vj = rng_frag[j]
                         else:
                             vj = cutlass.Float32(rng_frag[j])
-                        if vj >= thr0:
-                            if wc0 < cutlass.Int32(self.top_k):
-                                smem_didx[wc0] = ic_local + cutlass.Int32(j)
-                                wc0 = wc0 + cutlass.Int32(1)
-                        elif vj >= thr1 and wcb < cutlass.Int32(kCC):
-                            smem_keys[wcb] = vj
-                            smem_vals[wcb] = ic_local + cutlass.Int32(j)
-                            wcb = wcb + cutlass.Int32(1)
+                        # single rare outer branch (op18-P3 shape): keeps the
+                        # 4-way LSU pipeline intact on the common miss path
+                        if vj >= thr1:
+                            if vj >= thr0:
+                                if wc0 < cutlass.Int32(self.top_k):
+                                    smem_didx[wc0] = ic_local + cutlass.Int32(j)
+                                    wc0 = wc0 + cutlass.Int32(1)
+                            elif wcb < cutlass.Int32(kCC):
+                                smem_keys[wcb] = vj
+                                smem_vals[wcb] = ic_local + cutlass.Int32(j)
+                                wcb = wcb + cutlass.Int32(1)
                 ic = ic + big_iters * cutlass.Int32(step_elem)
 
         tail_frag = cute.make_fragment((vec_w,), self.dtype)
@@ -182,27 +168,29 @@ class GvrSandwichKernel(GvrMultiThreshKernel):
                     vj = tail_frag[j]
                 else:
                     vj = cutlass.Float32(tail_frag[j])
-                if vj >= thr0:
-                    if wc0 < cutlass.Int32(self.top_k):
-                        smem_didx[wc0] = ic + cutlass.Int32(j)
-                        wc0 = wc0 + cutlass.Int32(1)
-                elif vj >= thr1 and wcb < cutlass.Int32(kCC):
-                    smem_keys[wcb] = vj
-                    smem_vals[wcb] = ic + cutlass.Int32(j)
-                    wcb = wcb + cutlass.Int32(1)
+                if vj >= thr1:
+                    if vj >= thr0:
+                        if wc0 < cutlass.Int32(self.top_k):
+                            smem_didx[wc0] = ic + cutlass.Int32(j)
+                            wc0 = wc0 + cutlass.Int32(1)
+                    elif wcb < cutlass.Int32(kCC):
+                        smem_keys[wcb] = vj
+                        smem_vals[wcb] = ic + cutlass.Int32(j)
+                        wcb = wcb + cutlass.Int32(1)
             ic = ic + step
 
         it = n_aligned + tidx
         while it < N:
             v = self._load_fp32(input_row, it)
-            if v >= thr0:
-                if wc0 < cutlass.Int32(self.top_k):
-                    smem_didx[wc0] = it
-                    wc0 = wc0 + cutlass.Int32(1)
-            elif v >= thr1 and wcb < cutlass.Int32(kCC):
-                smem_keys[wcb] = v
-                smem_vals[wcb] = it
-                wcb = wcb + cutlass.Int32(1)
+            if v >= thr1:
+                if v >= thr0:
+                    if wc0 < cutlass.Int32(self.top_k):
+                        smem_didx[wc0] = it
+                        wc0 = wc0 + cutlass.Int32(1)
+                elif wcb < cutlass.Int32(kCC):
+                    smem_keys[wcb] = v
+                    smem_vals[wcb] = it
+                    wcb = wcb + cutlass.Int32(1)
             it = it + cutlass.Int32(num_threads)
         cute.arch.barrier()
 

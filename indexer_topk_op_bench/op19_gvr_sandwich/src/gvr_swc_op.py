@@ -69,9 +69,12 @@ class GvrClusterSandwichKernel(GvrSandwichKernel):
     """G-CTA cluster; slot fracs are a compile-time tuple of length G
     (fracs[0] MUST be 0.0 — the count(pmin)>=K exactness anchor)."""
 
-    def __init__(self, *a, G_thr=8, slot_fracs=None, **kw):
+    def __init__(self, *a, G_thr=8, slot_fracs=None, sw_enable=True,
+                 use_push=True, **kw):
         super().__init__(*a, **kw)
         self.G_thr = int(G_thr)
+        self.sw_enable = bool(sw_enable)  # False -> op17 path (bisect flag)
+        self.use_push = bool(use_push)    # False -> ld-copy + barrier #2
         self.slot_fracs = tuple(float(f) for f in slot_fracs)
         assert len(self.slot_fracs) == self.G_thr and self.slot_fracs[0] == 0.0
 
@@ -174,13 +177,17 @@ class GvrClusterSandwichKernel(GvrSandwichKernel):
                 # smem_ptcnt_up BEFORE the (single) cluster barrier — the
                 # eventual winner r1 then already holds r0=r1+1's column
                 # locally, killing op17-style barrier #2 entirely.
-                if rank > cutlass.Int32(0):
-                    up_slot = smem_ptcnt_up.iterator + tidx
-                    peer_addr = mapa_shared_cluster(up_slot, rank - cutlass.Int32(1))
-                    st_shared_cluster_i32(peer_addr, smem_ptcnt[tidx])
+                if cutlass.const_expr(self.use_push):
+                    if rank > cutlass.Int32(0):
+                        up_slot = smem_ptcnt_up.iterator + tidx
+                        peer_addr = mapa_shared_cluster(up_slot, rank - cutlass.Int32(1))
+                        st_shared_cluster_i32(peer_addr, smem_ptcnt[tidx])
                 if tidx == cutlass.Int32(0):
                     s_cluster[0] = s_iscalars[0]
-                cute.arch.cluster_arrive()
+                if cutlass.const_expr(self.use_push):
+                    cute.arch.cluster_arrive()
+                else:
+                    cute.arch.cluster_arrive_relaxed()
                 cute.arch.cluster_wait()
 
                 # all ranks: find sandwich pair (r1 tightest >=K; r0 = r1+1)
@@ -210,7 +217,14 @@ class GvrClusterSandwichKernel(GvrSandwichKernel):
                 # winner setup (r0's column already pushed into ptcnt_up)
                 is_winner = rank == r1
                 use_sw = (m0 > cutlass.Int32(0)) and (band_cnt <= cutlass.Int32(kC))
+                if cutlass.const_expr(not self.sw_enable):
+                    use_sw = False
                 if is_winner:
+                    if cutlass.const_expr(not self.use_push):
+                        if use_sw:
+                            my_slot = smem_ptcnt.iterator + tidx
+                            peer_addr = mapa_shared_cluster(my_slot, r1 + cutlass.Int32(1))
+                            smem_ptcnt_up[tidx] = ld_shared_cluster_i32(peer_addr)
                     if tidx == cutlass.Int32(0):
                         s_swi[0] = m0 if use_sw else cutlass.Int32(0)
                         # thr0 value: recompute from r0's frac
@@ -223,6 +237,10 @@ class GvrClusterSandwichKernel(GvrSandwichKernel):
                     if not use_sw:
                         smem_ptcnt_up[tidx] = cutlass.Int32(0)
                     cute.arch.barrier()
+                if cutlass.const_expr(not self.use_push):
+                    # barrier #2: r0's smem must stay alive through the ld-copy
+                    cute.arch.cluster_arrive_relaxed()
+                    cute.arch.cluster_wait()
 
                 if is_winner:
                     if use_sw:
@@ -288,15 +306,15 @@ def _config(bs, n):
     return t, use256, min_bpm
 
 
-def _compile(dtype, bs, n, K, cr_val, G, kC):
-    key = (dtype, bs, n, K, cr_val, G, kC)
+def _compile(dtype, bs, n, K, cr_val, G, kC, sw_enable=True, use_push=True):
+    key = (dtype, bs, n, K, cr_val, G, kC, sw_enable, use_push)
     if key in _compiled:
         return _compiled[key]
     t, use256, min_bpm = _config(bs, n)
     kobj = GvrClusterSandwichKernel(dtype=_DT[dtype], top_k=K, next_n=1, num_threads=t, compress_ratio=cr_val,
                                     use_256bit_load=use256, enable_unroll_4=True, enable_phase3_unroll=True,
                                     min_blocks_per_mp=min_bpm, return_output_values=False,
-                                    G_thr=G, slot_fracs=_slot_fracs(K, n, G),
+                                    G_thr=G, slot_fracs=_slot_fracs(K, n, G), sw_enable=sw_enable, use_push=use_push,
                                     kC_override=kC, M_thr=2, R_rounds=1)
     nr, nc, nb = cute.sym_int(), cute.sym_int(), cute.sym_int()
     ia = 32 if use256 else 16
@@ -318,7 +336,7 @@ def pick_G(bs, G_max=16):
     return 1
 
 
-def gvr_swc(logits, pre_idx, seq_lens, index_topk, compress_ratio=1, out=None, G=16, kC=None):
+def gvr_swc(logits, pre_idx, seq_lens, index_topk, compress_ratio=1, out=None, G=16, kC=None, sw_enable=True, use_push=True):
     from gvr_cutedsl_op import gvr_cutedsl
     bs, n = logits.shape
     if G == "auto":
@@ -327,7 +345,7 @@ def gvr_swc(logits, pre_idx, seq_lens, index_topk, compress_ratio=1, out=None, G
         out = torch.empty(bs, index_topk, dtype=torch.int32, device="cuda")
     if G < 2:
         return gvr_cutedsl(logits, pre_idx, seq_lens, index_topk, compress_ratio, out=out)
-    compiled = _compile(logits.dtype, bs, n, index_topk, compress_ratio, G, kC)
+    compiled = _compile(logits.dtype, bs, n, index_topk, compress_ratio, G, kC, sw_enable, use_push)
     compiled(logits, pre_idx, seq_lens, None, out)
     return out
 
