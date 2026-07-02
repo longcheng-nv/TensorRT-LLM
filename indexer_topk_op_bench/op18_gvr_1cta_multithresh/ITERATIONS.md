@@ -112,3 +112,33 @@ Weakest cells: K1024/4K (1.004), K2048/16K (1.014).
 (per-(K, N-bucket) -> (M, R, accept_mult), place_mode=3 everywhere).
 Next: x3-median validation (all dtypes) + nsys pure-kernel on positives +
 BS sweep guard.
+
+---
+
+## Iter 4 — 2026-07-02 — FINAL VALIDATION: no-regression broad win, all dtypes
+
+**x3-median cold-L2 event, full grid, gvr_mt_auto vs gvr_cutedsl
+(results/validate_x3.jsonl), 60/60 cells EXACT:**
+| dtype | min | avg | max |
+|---|---|---|---|
+| fp32 | 1.010 | 1.144 | 1.344 |
+| bf16 | 1.000 | 1.114 | 1.244 |
+| fp16 | 1.012 | 1.143 | 1.364 |
+Zero cells < 0.99 in ANY dtype (fp32 fracs table generalizes to bf16/fp16).
+
+**BS sweep (K512 N65536 fp32, M3R1, results/bs_sweep_k512_n65536.csv):**
+1.076-1.164x at BS 1..128, win GROWS with BS — no high-BS guard needed
+(unlike op17's cluster which degenerates at BS>=32).
+
+**nsys pure-kernel (100 iters, cold-L2 in cudaProfilerApi window, median,
+results/nsys_summary.csv):**
+| cell | base us | mt us | nsys spdup | event spdup |
+|---|---|---|---|---|
+| K512  N16384  | 15.31 | 10.59 | 1.446x | 1.289x |
+| K512  N65536  | 18.82 | 16.77 | 1.122x | 1.113x |
+| K512  N262144 | 38.46 | 35.10 | 1.096x | 1.080x |
+| K1024 N32768  | 21.92 | 16.19 | 1.354x | 1.297x |
+| K1024 N262144 | 41.47 | 36.38 | 1.140x | 1.130x |
+| K2048 N65536  | 25.06 | 18.37 | 1.364x | 1.313x |
+| K2048 N262144 | 51.07 | 36.93 | 1.383x | 1.344x |
+nsys >= event on every cell (repo rule satisfied). COMPLETE.
