@@ -166,3 +166,22 @@ sandwich cluster >= op17 net, and beats single-CTA at many BS<=16 cells
 Running: BS=2048 + BS mid (16/64/256) fp32 re-sweeps (GPU1); bf16/fp16
 transfer validation of fp32 straddle fracs (GPU0). build_dispatch extended to
 ingest cluster rows as cfg=cluster<G>.
+## Iter 13 — 2026-07-02 — nsys pure-kernel validation: all positives CONFIRMED
+
+8 representative fp32 cells, cold-L2 inside cudaProfilerApi window, 20-60
+iters, cuda_gpu_kern_sum median (results/nsys/, results/nsys_drive.log):
+
+| cell | dispatch | event | nsys |
+|---|---|---|---|
+| K512/16K BS1 | cluster16 | 1.28 | 1.368 |
+| K512/262K BS1 | cluster16 | 1.18 | 1.165 |
+| K1024/32K BS1 | cluster16 | 1.44 | 1.517 |
+| K1024/262K BS16 | cluster4 | 1.28 | 1.336 |
+| K2048/262K BS16 | cluster4 | 1.47 | 1.531 |
+| K512/262K BS2048 | M4R1p4 | 1.416 | 1.419 |
+| K1024/32K BS2048 | M4R1p4 | 1.446 | 1.463 |
+| K2048/262K BS2048 | M4R1p4 | 1.852 | 1.856 |
+
+nsys >= event on 7/8 (cluster cells largest gap: launch overhead sits in the
+event number, as in op17 §4.1); single-CTA high-BS cells match within 0.3%.
+The fp32 fullgrid claims stand on pure-kernel evidence.
