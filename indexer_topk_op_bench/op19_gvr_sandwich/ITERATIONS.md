@@ -1,0 +1,100 @@
+# op19 sandwich two-threshold GVR top-K — iteration log
+
+**Goal (user 2026-07-02):** full GVR optimization bucket around the SANDWICH
+two-threshold idea: from one M-ary ladder pass (op18 block_count_ge_multi),
+pick thr0 (count M0 < K → those M0 elements are GUARANTEED top-K members,
+direct-write them in P3) and thr1 (count M1 ∈ [K,kC], the accepted threshold);
+P4 then refines ONLY the band [thr1, thr0) of M1−M0 candidates for the
+remaining K−M0 slots. Maximize M0, minimize M1, keep P2 rounds low.
+Variants: single-CTA (extend op18 src/gvr_mt_op.py) and multi-CTA cluster
+(extend op17 portfolio). Target: ALL 720 B200 cells (K×dtype×N×BS grid of
+report/report.html) beat single-CTA gvr_cutedsl; average speedup ≥1.5×.
+
+## 📋 Resolved Plan (omni-kernel Phase 0/1)
+- **Operator** — DSv4 indexer top-K decode, GVR family (P1 preIdx band → P2
+  threshold search → P3 collect → P4 refine), memory-bound selection/reduction.
+- **Shape grid** — K{512,1024,2048} × dtype{fp32,bf16,fp16} × N{4096..262144}
+  × BS{1..2048} = 720 cells (K2048/N4096 excluded), synth bundles seed=42.
+- **Reference** — torch.topk exactness gate: uniq=K, valdiff=0 (set-based;
+  output order is free — P4 writeback order is atomic/arbitrary already).
+- **Baseline** — harness/gvr_cutedsl_op.py single-CTA (report column), B200
+  numbers in report/bs_data.csv (hw=B200).
+- **Target GPU** — B200 sm_100, 148 SMs. **GPU 1 ONLY while op18's session
+  drives nsys on GPU 0** (co-tenancy detected 2026-07-02 03:48 UTC).
+- **SOL%/roofline frame** — single-CTA floor = 2 full-N passes (1 M-ary count
+  + 1 collect) vs baseline ~2.5-3.5 passes + cand-linear P4; multi-CTA opens
+  the small-N floor (op17: cluster 1.21-1.67× nsys).
+- **Language priority** — CuTe DSL only (family constraint: extends vendored
+  GvrTopKKernel; op16 falsified separate-kernel approaches).
+- **Protocol** — cold-L2 512MB-evict + CUDA-graph + cudaEvent median
+  (harness/sweep.py `_time_both`); nsys pure-kernel for positive claims;
+  exactness gate before ANY timing. Per-iter commit `[op19 iterN] ...`
+  (op19 paths only — branch shared with op18's live session).
+
+## Strategy roster (Arch-Strategy for this op family)
+- **Strategy-A** — single-CTA sandwich: op18 M-ary P2 + snapshot of the
+  (thr0, col0) pair + fused P3 (direct-write ≥thr0 to gmem output at
+  prefix positions; band → smem) + runtime-k band-snap P4 with histogram
+  range seeded [thr1, thr0).
+- **Strategy-B** — multi-CTA cluster sandwich: op17 portfolio; the CTA owning
+  thr0 direct-writes its M0 elements CONCURRENTLY with the winner CTA's
+  band refine (thr0 column lives in that CTA's own smem — zero DSMEM copies).
+- **Strategy-C** — per-(K,N,BS) dispatch combining A, B, op18-auto, baseline;
+  high-BS is A's home turf (aggregate working set ≫ L2 → baseline's 2nd
+  pass is truly cold → pass-collapse pays full price; op18 only swept BS=1).
+
+## Priors (falsification-aware, MUST respect)
+- op16: two-threshold via SERIAL secant = tax-bound (extra full-N passes);
+  Scheme X free-peel lost b/c band stayed wide (M0 far below K) + M0-wide
+  2-pass partition cost. op19 differs: thr0/M0 come FREE off the same M-ary
+  ladder pass; band collect replaces (not augments) normal collect; P4 gets
+  runtime-k + seeded histogram range.
+- op18 iter2: the L2 trap — at BS=1 baseline's 2nd P2 pass is L2-resident
+  (~5K cyc); never count it as a full pass. CDF-aware fracs (place_mode=3)
+  fixed it: iter3 avg 1.08-1.10×, max 1.35×.
+- op18 iter2: P4 snap is placement-sensitive, NOT cand-linear alone: 15.3K
+  cyc @cand1821 (loose thr) vs 12.6K @cand532 (refined thr) vs 7.2K @cand669
+  (M8 uniform). Tight bracket [thr1,thr0) + tiny k_rem is the fix hypothesis.
+- op12: P4 ~45-50% of kernel time at small N but partially barrier-floor-bound;
+  op17 iter1b: P4 cand-linear with ~7500cyc floor.
+- op17: single-CTA M-way compares in P2 cost ≤1.0× at M=16 (ALU tax) — keep
+  M ≤ 8; M2 free, M4 ~×1.25, M8 ~×1.77 per pass (count_ge_multi bench).
+- GVR falsification history (gvr_phase_timing/): 12 ruled-out paths; do not
+  revisit Opt-L fuse, P1 self-loop, Opt-F, cluster-DSM-highBS.
+
+## Honest ceiling note (to re-verify in iter0 sim)
+±50% avg over gvr_cutedsl across ALL 720 cells was proven out of reach for
+PURE single-CTA (op12/op17). The path to ≥1.5× avg: (a) sandwich P4-collapse
+everywhere, (b) multi-CTA at BS≤16 (op17 already 1.18× gm alone), (c) high-BS
+large-N pass-collapse (unmeasured, L2 trap absent), (d) dispatch. If the
+ceiling math says the target is unreachable, report the gap honestly.
+
+---
+## Iter 0 — 2026-07-02 — offline sandwich ceiling sim: the pair is nearly free
+
+`scripts/sim_sandwich.py` on the real fp32 bundles (results/sim_sandwich_fp32.jsonl),
+replaying op18 M-ary rounds (CDF-aware f3 fracs) + tracking the sandwich pair
+(thr1: tightest count>=K -> M1; thr0: max count<K -> M0) — zero extra passes:
+
+| pass budget | typical band | typical M0/K | weak cells |
+|---|---|---|---|
+| 1 (M8R1f3) | 76-561 (K512), 105-2259 (K2048) | 0.83-0.98 where straddled | K1024 ALL N: M0=0 (fracs not straddle-aware); K512 4/8/65K, K2048 16/262K: M0=0 |
+| 2 (M8R2_b64) | 10-777 | 0.55-1.00 | K1024 mid: band ~430-650 |
+| 3 (R3_b64) | 10-97 | 0.95-1.00 | none |
+
+Findings:
+1. With 2-3 ladder rounds, 95-100% of top-K is DIRECT-WRITABLE and P4's
+   working set collapses from 1.3-5.2K cand to a band of tens. k_rem tens.
+2. op18's f3 fracs were optimized to pin M1 tight, NOT to straddle K ->
+   R1 M0=0 at K1024 all-N + 5 more cells. New lever: straddle-fracs
+   (re-run optimize_fracs targeting one frac each side of v_K). R1-straddle
+   is the high-BS play (every pass cold there; minimize passes).
+3. M must dispatch on (N, BS): M8 cold-pass tax x2.7 @262K forbids M8 at
+   large-N BS=1 -> M2/M3 multi-round (refine rounds are L2-warm ~5K cyc);
+   M8R2 at small N; M3/M4 R1-straddle at high BS.
+4. High-BS is the make-or-break for the >=1.5x avg target (420/720 cells
+   BS>=32, never measured in op18): aggregate working set >> L2 kills the
+   L2 trap -> baseline's 2.5 P2 passes go truly cold vs sandwich's 1 M-pass
+   + P3 + tiny P4 -> theoretical ~1.55-1.75x. Validate FIRST after exactness.
+
+Next (iter1): Strategy-A kernel bring-up + exactness gate.
