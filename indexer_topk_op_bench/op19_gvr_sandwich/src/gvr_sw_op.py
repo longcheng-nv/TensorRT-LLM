@@ -57,6 +57,8 @@ class GvrSandwichKernel(GvrMultiThreshKernel):
     def __init__(self, *a, band_accept=64, **kw):
         super().__init__(*a, **kw)
         self.band_accept = int(band_accept)
+        # deferred direct-write stores values nowhere; indices-only op
+        assert not self.return_output_values, "sandwich is indices-only"
 
     # ------------------------------------------------------------------
     # Phase-3 sandwich: dual-predicate scan, direct-write + band-collect.
@@ -69,7 +71,7 @@ class GvrSandwichKernel(GvrMultiThreshKernel):
     @cute.jit
     def phase3_sandwich(
         self, input_row, N, smem_keys, smem_vals, smem_ptcnt, smem_ptcnt_up,
-        smem_wcnt, s_thr, s_swf, s_iscalars,
+        smem_wcnt, smem_didx, s_thr, s_swf, s_iscalars,
         output_values_row, output_indices_row, tidx, warp_id, lane,
     ):
         kCC = cutlass.const_expr(self.kC)
@@ -94,6 +96,7 @@ class GvrSandwichKernel(GvrMultiThreshKernel):
                 c = smem_wcnt[w]
                 smem_wcnt[w] = tot
                 tot = tot + c
+            s_iscalars[4] = tot  # M0 total (deferred-flush bound)
         cute.arch.barrier()
         my_pos0 = smem_wcnt[warp_id] + my_excl0
         cute.arch.barrier()  # all reads of smem_wcnt done before reuse
@@ -159,9 +162,7 @@ class GvrSandwichKernel(GvrMultiThreshKernel):
                             vj = cutlass.Float32(rng_frag[j])
                         if vj >= thr0:
                             if wc0 < cutlass.Int32(self.top_k):
-                                if cutlass.const_expr(self.return_output_values):
-                                    output_values_row[wc0] = self.dtype(vj)
-                                output_indices_row[wc0] = ic_local + cutlass.Int32(j)
+                                smem_didx[wc0] = ic_local + cutlass.Int32(j)
                                 wc0 = wc0 + cutlass.Int32(1)
                         elif vj >= thr1 and wcb < cutlass.Int32(kCC):
                             smem_keys[wcb] = vj
@@ -183,9 +184,7 @@ class GvrSandwichKernel(GvrMultiThreshKernel):
                     vj = cutlass.Float32(tail_frag[j])
                 if vj >= thr0:
                     if wc0 < cutlass.Int32(self.top_k):
-                        if cutlass.const_expr(self.return_output_values):
-                            output_values_row[wc0] = self.dtype(vj)
-                        output_indices_row[wc0] = ic + cutlass.Int32(j)
+                        smem_didx[wc0] = ic + cutlass.Int32(j)
                         wc0 = wc0 + cutlass.Int32(1)
                 elif vj >= thr1 and wcb < cutlass.Int32(kCC):
                     smem_keys[wcb] = vj
@@ -198,9 +197,7 @@ class GvrSandwichKernel(GvrMultiThreshKernel):
             v = self._load_fp32(input_row, it)
             if v >= thr0:
                 if wc0 < cutlass.Int32(self.top_k):
-                    if cutlass.const_expr(self.return_output_values):
-                        output_values_row[wc0] = self.dtype(v)
-                    output_indices_row[wc0] = it
+                    smem_didx[wc0] = it
                     wc0 = wc0 + cutlass.Int32(1)
             elif v >= thr1 and wcb < cutlass.Int32(kCC):
                 smem_keys[wcb] = v
@@ -208,6 +205,13 @@ class GvrSandwichKernel(GvrMultiThreshKernel):
                 wcb = wcb + cutlass.Int32(1)
             it = it + cutlass.Int32(num_threads)
         cute.arch.barrier()
+
+        # coalesced flush of the deferred direct-write indices -> output[0:M0)
+        m0t = s_iscalars[4]
+        iF = tidx
+        while iF < m0t:
+            output_indices_row[iF] = smem_didx[iF]
+            iF = iF + cutlass.Int32(num_threads)
 
     # ------------------------------------------------------------------
     # Runtime-k snap iteration (block_fused_snap_iter with k_target arg).
@@ -505,6 +509,7 @@ class GvrSandwichKernel(GvrMultiThreshKernel):
         s_msti = smem.allocate_tensor(element_type=cutlass.Int32, layout=cute.make_ordered_layout((3,), order=(0,)), byte_alignment=16)
         # op19 additions: sandwich upper threshold snapshot
         smem_ptcnt_up = smem.allocate_tensor(element_type=cutlass.Int32, layout=cute.make_ordered_layout((num_threads,), order=(0,)), byte_alignment=128)
+        smem_didx = smem.allocate_tensor(element_type=cutlass.Int32, layout=cute.make_ordered_layout((top_k,), order=(0,)), byte_alignment=128)
         # [0]=thr0
         s_swf = smem.allocate_tensor(element_type=cutlass.Float32, layout=cute.make_ordered_layout((1,), order=(0,)), byte_alignment=16)
         # [0]=M0, [1]=up_col_this_round (-1 none)
@@ -651,7 +656,7 @@ class GvrSandwichKernel(GvrMultiThreshKernel):
                     # ---- sandwich path ----
                     self.phase3_sandwich(input_row, N, smem_keys, smem_vals,
                                          smem_ptcnt, smem_ptcnt_up, smem_wcnt,
-                                         s_thr, s_swf, s_iscalars,
+                                         smem_didx, s_thr, s_swf, s_iscalars,
                                          output_values_row, output_indices_row,
                                          tidx, warp_id, lane)
                     band = s_iscalars[0]

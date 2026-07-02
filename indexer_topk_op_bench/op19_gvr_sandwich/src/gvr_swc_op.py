@@ -103,6 +103,7 @@ class GvrClusterSandwichKernel(GvrSandwichKernel):
         s_iscalars = smem.allocate_tensor(element_type=cutlass.Int32, layout=cute.make_ordered_layout((5,), order=(0,)), byte_alignment=16)
         # op19 sandwich scratch
         smem_ptcnt_up = smem.allocate_tensor(element_type=cutlass.Int32, layout=cute.make_ordered_layout((num_threads,), order=(0,)), byte_alignment=128)
+        smem_didx = smem.allocate_tensor(element_type=cutlass.Int32, layout=cute.make_ordered_layout((top_k,), order=(0,)), byte_alignment=128)
         s_swf = smem.allocate_tensor(element_type=cutlass.Float32, layout=cute.make_ordered_layout((1,), order=(0,)), byte_alignment=16)
         s_swi = smem.allocate_tensor(element_type=cutlass.Int32, layout=cute.make_ordered_layout((2,), order=(0,)), byte_alignment=16)
         # cluster scratch: [0]=this CTA's count (DSMEM-shared), [1]=r1, [2]=M1, [3]=M0
@@ -203,7 +204,7 @@ class GvrClusterSandwichKernel(GvrSandwichKernel):
                     if use_sw:
                         self.phase3_sandwich(input_row, N, smem_keys, smem_vals,
                                              smem_ptcnt, smem_ptcnt_up, smem_wcnt,
-                                             s_thr, s_swf, s_iscalars,
+                                             smem_didx, s_thr, s_swf, s_iscalars,
                                              output_values_row, output_indices_row,
                                              tidx, warp_id, lane)
                         band = s_iscalars[0]
