@@ -705,12 +705,14 @@ def _config(bs, n):
 
 
 def _compile(dtype, bs, n, K, cr_val, M, R, band_acc, place_mode, kC, threads, unroll=4):
-    key = (dtype, bs, n, K, cr_val, M, R, band_acc, place_mode, kC, threads, unroll)
-    if key in _compiled:
-        return _compiled[key]
     t, use256, min_bpm = _config(bs, n)
     if threads is not None:
         t = threads
+    # key on DERIVED compile inputs (t/use256/min_bpm), not raw bs — one
+    # binary serves every BS in the same bucket (n stays: per-N fracs)
+    key = (dtype, t, use256, min_bpm, n, K, cr_val, M, R, band_acc, place_mode, kC, unroll)
+    if key in _compiled:
+        return _compiled[key]
     _dtn = {torch.float32: "fp32", torch.bfloat16: "bf16",
             torch.float16: "fp16"}[dtype]
     if place_mode == 4:
