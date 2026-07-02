@@ -232,7 +232,10 @@ op18 M4R1：P1 3.6K | P2 33K（一遍冷 M4）| P3 28K | P4 15.3K</pre>
 </div>
 
 <h2>8. {bi("Files & reproduction", "文件与复现")}</h2>
-<div class="card"><pre>
+<div class="card">
+{bi('<p><b>Code location:</b> branch <a href="https://github.com/longcheng-nv/TensorRT-LLM/tree/omni/gvr-1cta-multithresh/indexer_topk_op_bench/op18_gvr_1cta_multithresh"><code>omni/gvr-1cta-multithresh</code> on github.com/longcheng-nv/TensorRT-LLM</a>, directory <code>indexer_topk_op_bench/op18_gvr_1cta_multithresh/</code>.</p>',
+    '<p><b>代码位置：</b><a href="https://github.com/longcheng-nv/TensorRT-LLM/tree/omni/gvr-1cta-multithresh/indexer_topk_op_bench/op18_gvr_1cta_multithresh">github.com/longcheng-nv/TensorRT-LLM 的 <code>omni/gvr-1cta-multithresh</code> 分支</a>，目录 <code>indexer_topk_op_bench/op18_gvr_1cta_multithresh/</code>。</p>', "div")}
+<pre>
 src/gvr_mt_op.py                  {bi("kernel + gvr_mt_auto dispatch", "内核 + gvr_mt_auto 分派")}
 scripts/optimize_fracs.py         {bi("CDF-aware frac fitting (5 seeds) -> results/fracs_table.json", "CDF 感知分数拟合（5 种子）-> results/fracs_table.json")}
 scripts/config_sweep.py --f3      {bi("config sweep", "配置扫描")}

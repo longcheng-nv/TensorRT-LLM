@@ -4,6 +4,8 @@ Operator: `src/gvr_mt_op.py` (`gvr_mt_auto(...)` — per-(K,N) dispatch, CDF-awa
 placement). Baseline: single-CTA `gvr_cutedsl`. Synth = report bundles (seed 42).
 All cells EXACT (vdiff=0, uniq=K).
 
+Code: https://github.com/longcheng-nv/TensorRT-LLM/tree/omni/gvr-1cta-multithresh/indexer_topk_op_bench/op18_gvr_1cta_multithresh
+
 ## x3-median cold-L2 event, full grid (results/validate_x3.jsonl)
 dtype,min,avg,max,exact
 fp32,1.010,1.144,1.344,60/60 (20 cells)
