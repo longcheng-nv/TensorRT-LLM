@@ -290,10 +290,10 @@ class GvrClusterSandwichKernel(GvrSandwichKernel):
 _compiled = {}
 
 
-def _slot_fracs(K, n, G):
+def _slot_fracs(K, n, G, dtype_name="fp32"):
     """G slot fracs: {0 anchor} + linspace(l1, l0, G-1) from the straddle
     table (l1 = fracs[1], l0 = fracs[-1] of the M=4 entry)."""
-    base = _load_straddle(K, n, 4)
+    base = _load_straddle(K, n, 4, dtype_name)
     l1, l0 = base[1], base[-1]
     inner = [l1 + (l0 - l1) * j / (G - 2) for j in range(G - 1)]
     return tuple([0.0] + inner)
@@ -310,11 +310,13 @@ def _compile(dtype, bs, n, K, cr_val, G, kC, sw_enable=True, use_push=True):
     key = (dtype, bs, n, K, cr_val, G, kC, sw_enable, use_push)
     if key in _compiled:
         return _compiled[key]
+    dtn = {torch.float32: "fp32", torch.bfloat16: "bf16",
+           torch.float16: "fp16"}[dtype]
     t, use256, min_bpm = _config(bs, n)
     kobj = GvrClusterSandwichKernel(dtype=_DT[dtype], top_k=K, next_n=1, num_threads=t, compress_ratio=cr_val,
                                     use_256bit_load=use256, enable_unroll_4=True, enable_phase3_unroll=True,
                                     min_blocks_per_mp=min_bpm, return_output_values=False,
-                                    G_thr=G, slot_fracs=_slot_fracs(K, n, G), sw_enable=sw_enable, use_push=use_push,
+                                    G_thr=G, slot_fracs=_slot_fracs(K, n, G, dtn), sw_enable=sw_enable, use_push=use_push,
                                     kC_override=kC, M_thr=2, R_rounds=1)
     nr, nc, nb = cute.sym_int(), cute.sym_int(), cute.sym_int()
     ia = 32 if use256 else 16
