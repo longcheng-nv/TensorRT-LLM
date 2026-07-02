@@ -1,5 +1,20 @@
 # op19 sandwich GVR — knowledge base
 
+## op19-native findings
+- **ACTIVE-SET L2 rule (iter2)**: at high BS the L2-trap survives whenever
+  (SMs x blocks/SM x rowbytes) < L2 (~126MB) — i.e. N<=32K fp32. The batch
+  being huge is irrelevant; only the ~400 concurrently-active rows matter.
+  Pass-collapse pays only when the ACTIVE set spills (N>=131K fp32).
+- **Straddle-fracs (iter3)**: optimize per-(K,N,M) round-1 fracs to bracket
+  v_K from BOTH sides on all seeds ({0, l1, inner..., l0}); M=2 no-anchor
+  variant = zero-tax pass, rare all-<K seeds fall back to exact retry-shrink.
+- **Defer-direct (iter5)**: NEVER scatter gmem stores inside the hot P3 vec
+  loop. K2048 small-N has M0/N up to 23% -> per-element divergent stores
+  crushed perf (0.72-0.93x). Buffer direct indices in smem (top_k i32),
+  flush coalesced after the scan barrier.
+- **Sandwich accept is band<=kC, not M1<=kC**: smem only holds the band ->
+  cells whose tightest M1 exceeds kC (e.g. K2048/65K M1~6.6K) still sandwich.
+
 ## Effective techniques (inherited, sorted by impact)
 - **CDF-aware compile-time frac placement (op18 place_mode=3)**: turned
   large-N 0.70-0.99x into 1.06-1.35x. Multi-seed (5) tightest-count fracs;

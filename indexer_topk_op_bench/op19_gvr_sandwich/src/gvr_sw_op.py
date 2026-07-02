@@ -752,6 +752,52 @@ def gvr_sw(logits, pre_idx, seq_lens, index_topk, compress_ratio=1, out=None,
     return out
 
 
+_DISPATCH_TABLE = None
+_BS_GRID = (1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048)
+
+
+def _load_dispatch(dtype_name):
+    global _DISPATCH_TABLE
+    if _DISPATCH_TABLE is None:
+        import json
+        _DISPATCH_TABLE = {}
+        for dt in ("fp32", "bf16", "fp16"):
+            p = _HERE.parent / "results" / f"dispatch_table_{dt}.json"
+            if p.exists():
+                _DISPATCH_TABLE[dt] = json.load(open(p))
+    return _DISPATCH_TABLE.get(dtype_name, {})
+
+
+def gvr_sw_auto(logits, pre_idx, seq_lens, index_topk, compress_ratio=1, out=None):
+    """Dispatch entry: per-(K, N-bucket, BS-bucket) best config from the
+    sweep-built table; 'baseline' falls back to gvr_cutedsl; 'clusterG'
+    dispatches to the Strategy-B cluster op."""
+    import re as _re
+    from gvr_cutedsl_op import gvr_cutedsl
+    bs, n = logits.shape
+    dtn = {torch.float32: "fp32", torch.bfloat16: "bf16",
+           torch.float16: "fp16"}[logits.dtype]
+    tbl = _load_dispatch(dtn) or _load_dispatch("fp32")
+    K = index_topk
+    ns = (4096, 8192, 16384, 32768, 65536, 131072, 262144)
+    nb = min(ns, key=lambda x: abs(x - n))
+    bb = min(_BS_GRID, key=lambda x: abs(x - bs))
+    ent = tbl.get(f"{K}_{nb}_{bb}")
+    cfg = ent["cfg"] if ent else "M4R1p4"
+    if cfg == "baseline":
+        return gvr_cutedsl(logits, pre_idx, seq_lens, index_topk,
+                           compress_ratio, out=out)
+    if cfg.startswith("cluster"):
+        from gvr_swc_op import gvr_swc
+        return gvr_swc(logits, pre_idx, seq_lens, index_topk, compress_ratio,
+                       out=out, G=int(cfg[7:]))
+    m = _re.match(r"M(\d+)R(\d+)p(\d+)(?:b(\d+))?$", cfg)
+    return gvr_sw(logits, pre_idx, seq_lens, index_topk, compress_ratio,
+                  out=out, M=int(m.group(1)), R=int(m.group(2)),
+                  place_mode=int(m.group(3)),
+                  band_acc=int(m.group(4)) if m.group(4) else 64)
+
+
 if __name__ == "__main__":
     import synth_data
     M = int(sys.argv[1]) if len(sys.argv) > 1 else 4

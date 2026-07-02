@@ -35,7 +35,30 @@ from cute_vendored.blackwell.utils import (  # noqa: E402
 from cute_vendored.blackwell.top_k.gvr_topk_decode_cluster import (  # noqa: E402
     mapa_shared_cluster, ld_shared_cluster_i32,
 )
+from cutlass._mlir.dialects import llvm  # noqa: E402
+from cutlass.cutlass_dsl import T, dsl_user_op  # noqa: E402
 from cutlass.utils.smem_allocator import SmemAllocator  # noqa: E402
+
+
+@dsl_user_op
+def _st_shared_cluster_i32(mapped_addr, val, *, loc=None, ip=None):
+    """Store an int32 to a peer CTA's SMEM via cluster mapped address."""
+    llvm.inline_asm(
+        None,
+        [mapped_addr.ir_value(loc=loc, ip=ip), val.ir_value(loc=loc, ip=ip)],
+        "st.shared::cluster.u32 [$0], $1;",
+        "r,r",
+        has_side_effects=True,
+        is_align_stack=False,
+        asm_dialect=llvm.AsmDialect.AD_ATT,
+        loc=loc,
+        ip=ip,
+    )
+
+
+@cute.jit
+def st_shared_cluster_i32(mapped_addr, val):
+    _st_shared_cluster_i32(mapped_addr, val)
 
 NUM_SMS = torch.cuda.get_device_properties(0).multi_processor_count
 _DT = {torch.float32: cutlass.Float32, torch.bfloat16: cutlass.BFloat16,
@@ -144,11 +167,20 @@ class GvrClusterSandwichKernel(GvrSandwichKernel):
                 for g in cutlass.range_constexpr(G):
                     if rank == cutlass.Int32(g):
                         thr_r = band_lo + d * cutlass.Float32(self.slot_fracs[g])
+                smem_ptcnt_up[tidx] = cutlass.Int32(0)
                 self.block_count_ge(input_row, N, thr_r, smem_ptcnt, smem_wcnt, s_iscalars, tidx, warp_id, lane)
                 cute.arch.barrier()
+                # proactive push: rank r stores its column into rank r-1's
+                # smem_ptcnt_up BEFORE the (single) cluster barrier — the
+                # eventual winner r1 then already holds r0=r1+1's column
+                # locally, killing op17-style barrier #2 entirely.
+                if rank > cutlass.Int32(0):
+                    up_slot = smem_ptcnt_up.iterator + tidx
+                    peer_addr = mapa_shared_cluster(up_slot, rank - cutlass.Int32(1))
+                    st_shared_cluster_i32(peer_addr, smem_ptcnt[tidx])
                 if tidx == cutlass.Int32(0):
                     s_cluster[0] = s_iscalars[0]
-                cute.arch.cluster_arrive_relaxed()
+                cute.arch.cluster_arrive()
                 cute.arch.cluster_wait()
 
                 # all ranks: find sandwich pair (r1 tightest >=K; r0 = r1+1)
@@ -175,17 +207,10 @@ class GvrClusterSandwichKernel(GvrSandwichKernel):
                 m0 = s_cluster[3]
                 band_cnt = m1 - m0
 
-                # winner pre-barrier work: DSM-copy r0's ptcnt column
+                # winner setup (r0's column already pushed into ptcnt_up)
                 is_winner = rank == r1
                 use_sw = (m0 > cutlass.Int32(0)) and (band_cnt <= cutlass.Int32(kC))
                 if is_winner:
-                    if use_sw:
-                        r0 = r1 + cutlass.Int32(1)
-                        my_slot = smem_ptcnt.iterator + tidx
-                        peer_addr = mapa_shared_cluster(my_slot, r0)
-                        smem_ptcnt_up[tidx] = ld_shared_cluster_i32(peer_addr)
-                    else:
-                        smem_ptcnt_up[tidx] = cutlass.Int32(0)
                     if tidx == cutlass.Int32(0):
                         s_swi[0] = m0 if use_sw else cutlass.Int32(0)
                         # thr0 value: recompute from r0's frac
@@ -195,10 +220,9 @@ class GvrClusterSandwichKernel(GvrSandwichKernel):
                                 t0 = band_lo + d * cutlass.Float32(self.slot_fracs[g])
                         s_swf[0] = t0
                         s_thr[0] = thr_r  # == thr1 on the winner
-                cute.arch.barrier()
-                # barrier #2: r0's smem must stay alive until the copy is done
-                cute.arch.cluster_arrive_relaxed()
-                cute.arch.cluster_wait()
+                    if not use_sw:
+                        smem_ptcnt_up[tidx] = cutlass.Int32(0)
+                    cute.arch.barrier()
 
                 if is_winner:
                     if use_sw:
