@@ -672,15 +672,20 @@ _compiled = {}
 _STRADDLE_TABLE = None
 
 
-def _load_straddle(K, n, M):
-    """op19 straddle-fracs from results/straddle_fracs.json (nearest N)."""
+def _load_straddle(K, n, M, dtype_name="fp32"):
+    """op19 straddle-fracs, per-dtype table w/ fp32 fallback (nearest N)."""
     global _STRADDLE_TABLE
     if _STRADDLE_TABLE is None:
         import json
-        p = _HERE.parent / "results" / "straddle_fracs.json"
-        _STRADDLE_TABLE = json.load(open(p)) if p.exists() else {}
+        _STRADDLE_TABLE = {}
+        for dt in ("fp32", "bf16", "fp16"):
+            sfx = "" if dt == "fp32" else f"_{dt}"
+            p = _HERE.parent / "results" / f"straddle_fracs{sfx}.json"
+            if p.exists():
+                _STRADDLE_TABLE[dt] = json.load(open(p))
+    tbl = _STRADDLE_TABLE.get(dtype_name) or _STRADDLE_TABLE.get("fp32", {})
     cands = []
-    for key, v in _STRADDLE_TABLE.items():
+    for key, v in tbl.items():
         k_, n_, m_ = (int(x) for x in key.split("_"))
         if k_ == K and m_ == M:
             cands.append((abs(n_ - n), v["fracs"]))
@@ -706,8 +711,10 @@ def _compile(dtype, bs, n, K, cr_val, M, R, band_acc, place_mode, kC, threads, u
     t, use256, min_bpm = _config(bs, n)
     if threads is not None:
         t = threads
+    _dtn = {torch.float32: "fp32", torch.bfloat16: "bf16",
+            torch.float16: "fp16"}[dtype]
     if place_mode == 4:
-        fracs = _load_straddle(K, n, M)
+        fracs = _load_straddle(K, n, M, _dtn)
         kernel_place = 3  # same codegen: compile-time frac table
     else:
         fracs = _load_fracs(K, n, M) if place_mode == 3 else None
