@@ -113,6 +113,16 @@ def main():
     args = ap.parse_args()
     BSs = [int(x) for x in args.BSs.split(",")]
     Ns = [int(x) for x in args.Ns.split(",")]
+    # resume: skip (dtype,K,N,BS) keys already in the out JSONL (node-loss
+    # recovery; done rows still feed the summary)
+    done = {}
+    if args.out and Path(args.out).exists():
+        for line in open(args.out):
+            try:
+                r = json.loads(line)
+                done[(r["dtype"], r["K"], r["N"], r["BS"])] = r
+            except ValueError:
+                pass
     fout = open(args.out, "a") if args.out else None
     import math
     sx, sv, nwin = [], [], 0
@@ -125,6 +135,11 @@ def main():
             if N <= 2 * K:
                 continue
             for BS in BSs:
+                d = done.get((dtn, K, N, BS))
+                if d:
+                    tb, tx, tv, ok = d["base_us"], d["x_us"], d["rival_us"], d["exact"]
+                    sx.append(tb / tx); sv.append(tv / tx); nwin += tv / tx >= 1.0
+                    continue
                 tb, tx, tv, ok = run(K, dtn, N, BS, args)
                 f = "OK" if ok else "**FAIL**"
                 sx.append(tb / tx); sv.append(tv / tx); nwin += tv / tx >= 1.0
