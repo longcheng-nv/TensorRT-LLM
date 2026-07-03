@@ -190,3 +190,26 @@ lever after mc-smem-cache and P1-subsampling).
 rival/x gm 1.345, x/base gm 1.255, exact 84/84. The 15 losing cells are all
 N4096/8192 (0.78-0.88) = accepted structural wall. Next phase: tier2 (fp32
 K2048), tier3 (16-bit) via the same probe->dispatch->fullgrid protocol.
+
+## Tier2 iter — 2026-07-03 — K2048 fp32: fusP4T4/mc routing at large N; N8192 wall accepted
+
+**Baseline (tier2_iter0, auto-gate active on bare cfgs)**: 22/36 fastest,
+rival/x gm 1.197, 36/36 exact. Holes: 262K BS1/4 catastrophic (0.59-0.60,
+cluster16 O(N)/CTA), 131K BS1/4 (0.81-0.85), N8192 all-BS wall (0.75-0.78),
+16384 BS16/64 (0.90).
+
+**Probe (exact buckets, cr=1)**: fusP4T4 wins 131K/262K BS1/4 (25.1-28.1us
+vs cluster16 29-41.5; 262K 1.48-1.50x); mc-auto wins 262K BS16 (33.4 vs
+38.9); fusion collapses at BS16 (66-70us, not routed — same over-extension
+law as tier1); N8192/16384 wall: every variant (M2/4/6 x f/nf, swc16)
+16.5-21us vs radix 12.9-19 — structural (N/K=4 with cr=1), current cfgs
+already per-bucket best, ACCEPTED per tier1 precedent.
+
+**Dispatch (5 keys, backup .pre_tier2)**: 2048_{131072,262144}_{1,4} ->
+fusP4T4; 2048_262144_16 -> mc.
+
+**Acceptance (tier2_iter1)**: 36/36 exact; fastest 22->24/36; rival/x gm
+1.197->1.251; x/base gm 1.267. Changed keys: 262K BS1/4 0.593/0.601 ->
+0.914/0.920 (x 41->27us), BS16 0.947->1.075 (FLIPPED), 131K BS1/4 ->
+0.979/0.952. Remaining losses: 4x N8192 wall (0.75-0.81) + 16K BS16/64
+(0.90-0.93) + 262K BS1/4 residual (~0.92) + parity noise. TIER2 CLOSED.
