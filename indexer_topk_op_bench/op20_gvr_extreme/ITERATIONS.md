@@ -91,3 +91,57 @@ a dispatch key to a config not probed at that BS bucket.
 collect-at-loosest-column in the SAME N-scan; valid where falsified Opt-L was
 not, because secant needed converged thr first) + P1 gather trim.
 K1024-262K residual -> chunked-sandwich (iter5).
+
+## Iter 4 — 2026-07-03 — fused P2+P3 (found half-written after node loss; validated + dispatch re-tune)
+
+**Recovery**: node interruption left iter4 code uncommitted in src/gvr_x_op.py
+(+266 lines, no validation data). Smoke first: exact 18/18 cells x3 perturbed
+inputs, 0 bad => code was complete and correct.
+
+**Change**: block_count_collect_multi — during the (single) R==1 ladder pass,
+also append every v >= thr[pred_col=l1] into per-thread smem slots
+(slot_cap=max(8,kC/nt)); phase3_from_slots replaces the P3 full-N rescan with
+a per-thread slot walk (prefix-sum via packed up|band counters). Overflow
+(per-thread l1 count > slot_cap) or best-col < l1 => classic P3 fallback.
+Auto-gate: R==1 & p4 & bs<=NUM_SMS. cfg suffix f/nf forces on/off (bare cfg
+= auto-gate).
+
+**HYPOTHESIS FALSIFIED, LEVER REDIRECTED**: small-N wall (N4-8K) is fuse-
+INSENSITIVE (~14.8us flat) — the wall is P1+barrier fixed cost, NOT the P3
+rescan. But at large N the fusion is decisive: the P3 cost stops scaling
+with N (slot walk ~ candidates), so (a) iter4 auto-gate tier1: fastest 60->65,
+big wins at 131K/262K BS16/64 R1p4 cells (1.22-1.58x); (b) iter4b re-tune of
+all M*R1p4 keys BS<=64 ({M2,M4,M6}x{f,nf} per exact bucket): 15 keys ->
+explicit fused cfgs, and fusion SHIFTS BEST M DOWN (4->2 on 4 keys: looser
+thresholds are cheap when P3 ~ candidates, and M2's wider band no longer
+hurts). Gains scale with N: 8K ~1.05x, 32K ~1.11x, 131K ~1.23x, 262K ~1.43x.
+
+**Acceptance (iter4b full tier1)**: exact 84/84; kernel gm 1.034 vs iter3a
+(max 1.590 @1024-262K-BS16); x/base gm 1.249; rival/x gm 1.323; fastest
+64/84. Losses: 16 small-N wall + K1024-262K BS1/4 (0.909/0.934) + 4 near-
+parity. Data: results/iter4_tier1.jsonl (auto-gate), iter4b_retune.log,
+iter4b_tier1.jsonl; table backup .pre_iter4b.
+
+## Iter 5 — 2026-07-03 — fusP4T4 routing at 131K/262K BS1-4 (the K1024-262K residual)
+
+**Change**: cfg "fusP<P>T<T>" in gvr_sw_auto routes to op17-v2
+gvr_portfolio_fusion (P partition-slices x T threshold-slots in one cluster —
+the queued "chunked-cluster sandwich" already built and nsys-validated in
+op17 D1). Probe at the exact buckets (red line): fusP4T4 beats mc/mcC8 on all
+8 low-BS large-N keys, 1.05-1.15x; BS16 collapses (49-64us, bs*P over-
+extension) => NOT routed; fusP8T4 cannot launch (P*T=32 > 16-CTA cluster cap).
+Dispatch: K{512,1024} x N{131072,262144} x BS{1,4} -> fusP4T4
+(backup .pre_iter5).
+
+**Acceptance (full tier1)**: exact 84/84; all 8 keys improved, e.g.
+1024-131072-1 23.0->20.8us (rival/x 1.079->1.169); the two hole cells
+1024-262144 BS1/4: 0.934->0.991, 0.909->0.953 (kernel -8%/-5%; residual is
+the in-run rival's run-to-run variance — probe showed both > 1.0). No
+regression elsewhere (iter4b/iter5 gm 1.006). Composite: x/base gm 1.255,
+rival/x gm 1.345, fastest 65/84.
+
+**State after iter5**: losses = 15 small-N wall cells (N4-8K, 0.78-0.88,
+P1+barrier fixed cost — needs kernel surgery, config-insensitive) + 4 near-
+parity (0.95-1.00). Next: iter6 = small-N fixed-cost surgery (P1 gather trim
+via sampled stats; barrier-chain shortening; or accept the wall and close
+tier1 at ~65+15-parity/84).
