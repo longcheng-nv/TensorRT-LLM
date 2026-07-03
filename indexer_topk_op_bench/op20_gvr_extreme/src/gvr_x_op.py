@@ -788,6 +788,13 @@ def gvr_sw_auto(logits, pre_idx, seq_lens, index_topk, compress_ratio=1, out=Non
     if cfg == "baseline":
         return gvr_cutedsl(logits, pre_idx, seq_lens, index_topk,
                            compress_ratio, out=out)
+    if cfg == "mc":
+        # op20 iter2: data-parallel cluster GVR (PR#15198) — each CTA scans an
+        # N/cluster_size chunk, unlike swc's threshold-parallel O(N)-per-CTA.
+        # Decisive at N>=131K low-BS (probe: 131K BS1 20.9us vs radix 24.7).
+        from gvr_multicta_cutedsl_op import gvr_multicta_cutedsl
+        return gvr_multicta_cutedsl(logits, pre_idx, seq_lens, index_topk,
+                                    compress_ratio, out=out)
     if cfg.startswith("cluster"):
         from gvr_swc_op import gvr_swc
         return gvr_swc(logits, pre_idx, seq_lens, index_topk, compress_ratio,

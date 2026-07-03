@@ -50,3 +50,26 @@ for accept/reject; full solo A/B only.
 **Action**: revert src to iter0 (level-2 kept in git history); iter2 = measure
 op19's OWN phase budget at the losing cells before touching code again
 (clock64/nsys on N4096/N8192 BS1-64 and N131K/262K BS1-4).
+
+## Iter 2 — 2026-07-03 — attribution + GVR-internal mc routing (D5 step 1)
+
+**Attribution (probe_variants.py + mc probe, GPU0 solo)**:
+- N262K BS<=4: ALL existing variants lose big (best swcG4 33.4 vs radix 24.2);
+  M-column cost is linear-in-N (M2 37 -> M6 50 @262K) => threshold-parallel
+  cluster (swc) keeps O(N) per CTA. STRUCTURAL.
+- mc (PR#15198, DATA-parallel cluster_size<=4): 131K BS1 20.9 vs radix 24.7
+  (1.18x WIN); 262K 26.1-29.5 vs 24.7-25.1 (0.85-0.95). Confirms chunking is
+  the lever; C=4 is not enough at 262K.
+- N131K holes were mostly a dispatch mis-pick (cluster16 26.7 vs swcG4 24.6).
+- Small-N (4-8K): config-INSENSITIVE ~13-15us floor across all M/G vs radix
+  10.4-12.9 => fixed-cost wall (P1 + barrier chain + P4), needs kernel surgery.
+
+**Change**: gvr_sw_auto learns cfg="mc" (routes to gvr_multicta_cutedsl, a GVR
+kernel); dispatch_table_fp32 rekeys 18 entries (K512/1024 x {131K BS1-8,
+262K BS1-16}) to mc. dispatch_table_fp32.json.pre_iter2 = backup.
+
+Smoke (GPU0 solo, 8 hole cells): 131K 0.85-0.89 -> 0.95-1.10 (K512 flips to
+win); 262K 0.62-0.63 -> 0.83-0.93. Full tier1: results/iter2_tier1.jsonl.
+
+**Next**: iter3 = chunked-cluster sandwich kernel (extend data-parallel to
+C=8/16 + sandwich band P3/P4) to push 262K past 1.0; iter4 = small-N fixed cost.
