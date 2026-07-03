@@ -145,3 +145,25 @@ P1+barrier fixed cost — needs kernel surgery, config-insensitive) + 4 near-
 parity (0.95-1.00). Next: iter6 = small-N fixed-cost surgery (P1 gather trim
 via sampled stats; barrier-chain shortening; or accept the wall and close
 tier1 at ~65+15-parity/84).
+
+## Iter 6a — 2026-07-03 — small-N wall attribution (scoping, no code change)
+
+**Probe 1 (mc smem-cache at N4-8K)**: FALSIFIED — mcAuto/mcC1/mcC2 all
+16.0-22.4us vs swM2f 14.2-16.4 (radix 11.8-14.4). The mc secant chain is
+longer than sandwich's ladder; whole-row smem cache does not compensate at
+small N.
+
+**Analysis**: gap to radix is ~2.3us and the wall is CHAIN LATENCY, not
+bandwidth: P1 gather is ONE parallel L2 round-trip (K loads spread over
+threads) => subsampling preIdx (K/4 stats) shortens nothing. The serial
+chain is P1(gather L2 + reduce + bcast) -> ladder(scan L2 + reduce +
+leader) -> P4(slot walk + snap) with 6-8 block barriers; radix has fewer
+serial stages.
+
+**iter6 design (queued)**: smem-resident sandwich for N<=8192 — cooperative
+row->smem bulk load FIRST (no dependency), then P1 gathers FROM SMEM
+(~30cy vs ~200cy L2), ladder counts from smem, P4 collects from smem. Removes
+every post-load L2 round-trip from the critical chain. smem budget at N8192
+fp32: row 32KB + slots 2*kC*4B + band buffers — fits 1 CTA/SM. Implementation:
+smem-path variants of phase1/block_count_collect_multi/phase3_from_slots that
+take a smem row view (addrspace differs, _load_fp32 hard-codes gmem).

@@ -19,9 +19,10 @@
   4 个准平局(0.95–1.00)。
 
 ## Next actions (queued)
-- **iter6(小 N 固定成本手术)**:P1 gather 精简(采样 K/4 statistics)、
-  barrier 链缩短、或单 kernel 处理整个 BS 批(小 N 时 launch/tail 占比大)。
-  注意:调参已证无效,必须动内核结构;若手术亦无效,接受墙并收 tier1。
+- **iter6(小 N 墙 = 链延迟,已归因 iter6a)**:smem-resident sandwich
+  (N≤8192:整行先协同载入 smem,P1/ladder/P4 全部从 smem 读,砍掉链上所有
+  L2 round-trip)。已证伪:mc smem-cache(16-19µs 更差)、P1 子采样(gather
+  是单次并行 round-trip,采样无用)。若 smem-resident 亦无效,接受墙收 tier1。
 - **tier2/tier3**:tier1 收口后按同法推 K2048、16-bit(16-bit 洞需 2.1×,
   数据并行 + 单趟 16-bit key 直方图阈值)。
 
