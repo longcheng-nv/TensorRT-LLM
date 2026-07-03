@@ -167,3 +167,26 @@ every post-load L2 round-trip from the critical chain. smem budget at N8192
 fp32: row 32KB + slots 2*kC*4B + band buffers — fits 1 CTA/SM. Implementation:
 smem-path variants of phase1/block_count_collect_multi/phase3_from_slots that
 take a smem row view (addrspace differs, _load_fp32 hard-codes gmem).
+
+## Iter 6 — 2026-07-03 — smem-resident sandwich FALSIFIED; small-N wall ACCEPTED, tier1 CLOSED
+
+**Decisive pre-probe (warm vs cold)**: N8192 warm gap vs radix = 0.01us (pure
+cold-memory story) BUT N4096 warm gap = +2.05us and sw warm time is FLAT
+10.25us across N4-8K — a phase-chain floor. Cold-warm delta-of-deltas is only
+~0.5us => at most ~0.5-1.8us was ever recoverable from memory tiers.
+
+**Change (kept, default OFF)**: smem_row_elems knob — whole row bulk-loaded
+to smem CONCURRENTLY with P1's gather, ladder reads smem
+(block_count_collect_multi_smem); cfg suffix s/ns, auto-gate default False.
+
+**Result**: exact 12/12 cells x3 inputs, perf NO-OP (14.2-15.6us with or
+without smem; radix 11.7-14.5). The wall is the serial phase chain
+(P1 -> thr place -> ladder -> best-col -> P3-slots -> P4 snap, ~12+ barriers
++ leader-serial segments) vs radix's shorter pipeline — a structural GVR-
+lineage floor at N<=8K, NOT a memory-tier or config problem (3rd falsified
+lever after mc-smem-cache and P1-subsampling).
+
+**TIER1 CLOSED** per red line: 65/84 fastest + 4 near-parity (0.95-1.00),
+rival/x gm 1.345, x/base gm 1.255, exact 84/84. The 15 losing cells are all
+N4096/8192 (0.78-0.88) = accepted structural wall. Next phase: tier2 (fp32
+K2048), tier3 (16-bit) via the same probe->dispatch->fullgrid protocol.

@@ -54,9 +54,17 @@ class GvrSandwichKernel(GvrMultiThreshKernel):
     """Sandwich two-threshold single-CTA kernel. New tunable: band_accept
     (stop refining once band <= band_accept; replaces op18 c_accept)."""
 
-    def __init__(self, *a, band_accept=64, fuse_collect=False, **kw):
+    def __init__(self, *a, band_accept=64, fuse_collect=False, smem_row_elems=0, **kw):
         super().__init__(*a, **kw)
         self.band_accept = int(band_accept)
+        # op20 iter6: smem-resident row for small N — the whole row is bulk-
+        # loaded into smem CONCURRENTLY with P1's gmem gather (both issue in
+        # one cold-DRAM latency window), and the ladder pass then reads smem,
+        # collapsing the cold critical chain from 2 serial trips to 1.
+        # 0 = disabled; >0 = compile-time smem row capacity (elements).
+        self.smem_row_elems = int(smem_row_elems)
+        assert self.smem_row_elems == 0 or fuse_collect, \
+            "smem_row requires the fused P2+P3 path"
         # op20 iter4: fused P2+P3 — during the (single) ladder pass, also
         # append every v >= thr[pred_col] into per-thread smem slots, where
         # pred_col = the l1 straddle column (tightest frac with count>=K by
@@ -180,6 +188,57 @@ class GvrSandwichKernel(GvrMultiThreshKernel):
                 if lane < cutlass.Int32(num_warps):
                     v = smem_wcnt_multi[m * num_warps + lane]
                 total = self.warp_reduce_sum_i32(v)
+                if lane == 0:
+                    s_mt_cnt[m] = total
+
+    # ------------------------------------------------------------------
+    # op20 iter6: ladder pass reading the smem-resident row (small N). Same
+    # contract as block_count_collect_multi; scalar smem reads (row is fp32
+    # in smem; smem BW is not the bottleneck at N<=8K).
+    # ------------------------------------------------------------------
+    @cute.jit
+    def block_count_collect_multi_smem(
+        self, smem_rowbuf, N, s_mt_thr, smem_ptcnt_multi, smem_wcnt_multi,
+        s_mt_cnt, smem_slotk, smem_slotv, tidx, warp_id, lane,
+    ):
+        M = cutlass.const_expr(self.M_thr)
+        PC = cutlass.const_expr(self.pred_col)
+        S = cutlass.const_expr(self.slot_cap)
+        num_threads = cutlass.const_expr(self.num_threads)
+        num_warps = cutlass.const_expr(self.num_warps)
+
+        thr_frag = cute.make_fragment((M,), cutlass.Float32)
+        cnt_frag = cute.make_fragment((M,), cutlass.Int32)
+        for m in cutlass.range_constexpr(M):
+            thr_frag[m] = s_mt_thr[m]
+            cnt_frag[m] = cutlass.Int32(0)
+        slot_base = tidx * cutlass.Int32(S)
+
+        i = cutlass.Int32(tidx)
+        while i < N:
+            v = smem_rowbuf[i]
+            if v >= thr_frag[PC]:
+                cpos = cnt_frag[PC]
+                if cpos < cutlass.Int32(S):
+                    smem_slotk[slot_base + cpos] = v
+                    smem_slotv[slot_base + cpos] = i
+            for m in cutlass.range_constexpr(M):
+                cnt_frag[m] = cnt_frag[m] + cutlass.Int32(v >= thr_frag[m])
+            i = i + cutlass.Int32(num_threads)
+
+        for m in cutlass.range_constexpr(M):
+            smem_ptcnt_multi[m * num_threads + tidx] = cnt_frag[m]
+        for m in cutlass.range_constexpr(M):
+            wc = self.warp_reduce_sum_i32(cnt_frag[m])
+            if lane == 0:
+                smem_wcnt_multi[m * num_warps + warp_id] = wc
+        cute.arch.barrier()
+        if warp_id == cutlass.Int32(0):
+            for m in cutlass.range_constexpr(M):
+                vv = cutlass.Int32(0)
+                if lane < cutlass.Int32(num_warps):
+                    vv = smem_wcnt_multi[m * num_warps + lane]
+                total = self.warp_reduce_sum_i32(vv)
                 if lane == 0:
                     s_mt_cnt[m] = total
 
@@ -709,6 +768,10 @@ class GvrSandwichKernel(GvrMultiThreshKernel):
             slot_elems = cutlass.const_expr(self.num_threads * self.slot_cap)
             smem_slotk = smem.allocate_tensor(element_type=cutlass.Float32, layout=cute.make_ordered_layout((slot_elems,), order=(0,)), byte_alignment=128)
             smem_slotv = smem.allocate_tensor(element_type=cutlass.Int32, layout=cute.make_ordered_layout((slot_elems,), order=(0,)), byte_alignment=128)
+        # op20 iter6: smem-resident row buffer (small N)
+        smem_rowbuf = None
+        if cutlass.const_expr(self.smem_row_elems > 0):
+            smem_rowbuf = smem.allocate_tensor(element_type=cutlass.Float32, layout=cute.make_ordered_layout((self.smem_row_elems,), order=(0,)), byte_alignment=128)
 
         if N <= cutlass.Int32(top_k):
             jd = tidx
@@ -720,6 +783,15 @@ class GvrSandwichKernel(GvrMultiThreshKernel):
                 output_indices_row[jp] = cutlass.Int32(-1)
                 jp = jp + cutlass.Int32(num_threads)
         else:
+            row_in_smem = cutlass.Int32(0)
+            if cutlass.const_expr(self.smem_row_elems > 0):
+                if N <= cutlass.Int32(self.smem_row_elems):
+                    row_in_smem = cutlass.Int32(1)
+                    ib = cutlass.Int32(tidx)
+                    while ib < N:
+                        smem_rowbuf[ib] = self._load_fp32(input_row, ib)
+                        ib = ib + cutlass.Int32(num_threads)
+            # phase1's internal barrier also publishes the bulk-load stores
             self.phase1_preidx_stats(input_row, N, pre_idx_row, pre_idx_count, pre_idx_offset,
                                      smem_wmin, smem_wmax, smem_wsum, smem_wcnt_p1, s_thr, s_iscalars, tidx, warp_id, lane)
             v_lo = s_thr[1]
@@ -781,10 +853,22 @@ class GvrSandwichKernel(GvrMultiThreshKernel):
                     if cutlass.const_expr(self.fuse_collect):
                         # R==1 gated: all thresholds known up-front, collect at
                         # the l1 column during the same pass (op20 iter4)
-                        self.block_count_collect_multi(
-                            input_row, N, s_mt_thr, smem_ptcnt_multi,
-                            smem_wcnt_multi, s_mt_cnt, smem_slotk, smem_slotv,
-                            tidx, warp_id, lane)
+                        if cutlass.const_expr(self.smem_row_elems > 0):
+                            if row_in_smem == cutlass.Int32(1):
+                                self.block_count_collect_multi_smem(
+                                    smem_rowbuf, N, s_mt_thr, smem_ptcnt_multi,
+                                    smem_wcnt_multi, s_mt_cnt, smem_slotk,
+                                    smem_slotv, tidx, warp_id, lane)
+                            else:
+                                self.block_count_collect_multi(
+                                    input_row, N, s_mt_thr, smem_ptcnt_multi,
+                                    smem_wcnt_multi, s_mt_cnt, smem_slotk,
+                                    smem_slotv, tidx, warp_id, lane)
+                        else:
+                            self.block_count_collect_multi(
+                                input_row, N, s_mt_thr, smem_ptcnt_multi,
+                                smem_wcnt_multi, s_mt_cnt, smem_slotk, smem_slotv,
+                                tidx, warp_id, lane)
                     else:
                         self.block_count_ge_multi(input_row, N, s_mt_thr, smem_ptcnt_multi,
                                                   smem_wcnt_multi, s_mt_cnt, tidx, warp_id, lane)
@@ -956,13 +1040,13 @@ def _config(bs, n):
 
 
 def _compile(dtype, bs, n, K, cr_val, M, R, band_acc, place_mode, kC, threads, unroll=4,
-             fuse=False):
+             fuse=False, smem=False):
     t, use256, min_bpm = _config(bs, n)
     if threads is not None:
         t = threads
     # key on DERIVED compile inputs (t/use256/min_bpm), not raw bs — one
     # binary serves every BS in the same bucket (n stays: per-N fracs)
-    key = (dtype, t, use256, min_bpm, n, K, cr_val, M, R, band_acc, place_mode, kC, unroll, fuse)
+    key = (dtype, t, use256, min_bpm, n, K, cr_val, M, R, band_acc, place_mode, kC, unroll, fuse, smem)
     if key in _compiled:
         return _compiled[key]
     _dtn = {torch.float32: "fp32", torch.bfloat16: "bf16",
@@ -977,7 +1061,8 @@ def _compile(dtype, bs, n, K, cr_val, M, R, band_acc, place_mode, kC, threads, u
                              use_256bit_load=use256, enable_unroll_4=True, enable_phase3_unroll=True,
                              min_blocks_per_mp=min_bpm, return_output_values=False,
                              M_thr=M, R_rounds=R, band_accept=band_acc, place_mode=kernel_place,
-                             kC_override=kC, fracs=fracs, fuse_collect=fuse)
+                             kC_override=kC, fracs=fracs, fuse_collect=fuse,
+                             smem_row_elems=(n if smem else 0))
     nr, nc, nb = cute.sym_int(), cute.sym_int(), cute.sym_int()
     ia = 32 if use256 else 16
     in_f = cr.make_fake_compact_tensor(_DT[dtype], (nr, nc), stride_order=(1, 0), assumed_align=ia)
@@ -991,7 +1076,8 @@ def _compile(dtype, bs, n, K, cr_val, M, R, band_acc, place_mode, kC, threads, u
 
 
 def gvr_sw(logits, pre_idx, seq_lens, index_topk, compress_ratio=1, out=None,
-           M=4, R=2, band_acc=64, place_mode=3, kC=None, threads=None, fuse=None):
+           M=4, R=2, band_acc=64, place_mode=3, kC=None, threads=None, fuse=None,
+           smem=None):
     bs, n = logits.shape
     if out is None:
         out = torch.empty(bs, index_topk, dtype=torch.int32, device="cuda")
@@ -1000,8 +1086,15 @@ def gvr_sw(logits, pre_idx, seq_lens, index_topk, compress_ratio=1, out=None,
         # the scan (R==1, straddle placement) and 1-CTA/SM residency headroom
         # for the +2*kC*4B slot smem (bs <= NUM_SMS <=> min_bpm == 1).
         fuse = (int(R) == 1 and int(place_mode) == 4 and bs <= NUM_SMS)
+    if smem is None:
+        # op20 iter6: smem-resident row measured as a perf NO-OP at N<=8192
+        # (small-N wall is phase-chain latency, not memory tier) — default
+        # OFF; the explicit 's' cfg suffix can still enable it.
+        smem = False
+    smem = bool(smem) and bool(fuse) and logits.dtype == torch.float32 and n <= 8192
     compiled = _compile(logits.dtype, bs, n, index_topk, compress_ratio, int(M), int(R),
-                        int(band_acc), int(place_mode), kC, threads, fuse=bool(fuse))
+                        int(band_acc), int(place_mode), kC, threads, fuse=bool(fuse),
+                        smem=smem)
     compiled(logits, pre_idx, seq_lens, None, out)
     return out
 
@@ -1068,12 +1161,16 @@ def gvr_sw_auto(logits, pre_idx, seq_lens, index_topk, compress_ratio=1, out=Non
                                     P=int(mf.group(1)), T=int(mf.group(2)))
     # op20 iter4: optional fuse suffix — 'f' forces fused P2+P3, 'nf' forces
     # classic; no suffix = gvr_sw auto-gate (R==1 & p4 & bs<=NUM_SMS).
-    m = _re.match(r"M(\d+)R(\d+)p(\d+)(?:b(\d+))?(f|nf)?$", cfg)
+    # op20 iter6: optional trailing 's' forces the smem-resident row,
+    # 'ns' forces it off; no suffix = auto-gate (fuse & fp32 & N<=8192).
+    m = _re.match(r"M(\d+)R(\d+)p(\d+)(?:b(\d+))?(f|nf)?(s|ns)?$", cfg)
     fuse = {None: None, "f": True, "nf": False}[m.group(5)]
+    smem = {None: None, "s": True, "ns": False}[m.group(6)]
     return gvr_sw(logits, pre_idx, seq_lens, index_topk, compress_ratio,
                   out=out, M=int(m.group(1)), R=int(m.group(2)),
                   place_mode=int(m.group(3)),
-                  band_acc=int(m.group(4)) if m.group(4) else 64, fuse=fuse)
+                  band_acc=int(m.group(4)) if m.group(4) else 64, fuse=fuse,
+                  smem=smem)
 
 
 if __name__ == "__main__":
