@@ -346,6 +346,7 @@ class GvrSandwichKernel(GvrMultiThreshKernel):
             if warp_id == target_warp and lane == cutlass.Int32(0):
                 base_cum = s_iscalars[2]
                 thr_local = bmin_r
+                hi_local = bmax_r
                 set_done = cutlass.Int32(0)
                 for jb2 in cutlass.range_constexpr(bins_per_warp):
                     bidx2 = (cutlass.Int32(kBins - 1)
@@ -354,9 +355,98 @@ class GvrSandwichKernel(GvrMultiThreshKernel):
                     base_cum = base_cum + smem_hist[bidx2]
                     if base_cum >= k_rem and set_done == cutlass.Int32(0):
                         thr_local = bmin_r + cutlass.Float32(bidx2) * range1 / cutlass.Float32(kBins)
+                        hi_local = bmin_r + cutlass.Float32(bidx2 + cutlass.Int32(1)) * range1 / cutlass.Float32(kBins)
                         set_done = cutlass.Int32(1)
                 s_thr[0] = thr_local
+                s_thr[1] = hi_local
             cute.arch.barrier()
+
+            # ---- op20 iter1: level-2 sub-histogram refinement (256x finer).
+            # Level-1 located the k_rem-th value's bin [s_thr[0], s_thr[1]).
+            # One extra band pass re-histograms only that bin, moving thr to a
+            # sub-bin edge (1/65536 of the band range instead of 1/256), so the
+            # exact snap loop below starts ~converged (0-1 iters instead of
+            # 4-15, each of which is a full band scan + fmin/fmax reduces).
+            # Exactness unchanged: the snap loop stays the final authority; a
+            # mis-refined thr only costs snap iterations, never correctness.
+            if band >= cutlass.Int32(512):
+                lo2 = s_thr[0]
+                hi2 = s_thr[1]
+                range2 = hi2 - lo2
+                if range2 > cutlass.Float32(0.0):
+                    i8 = tidx
+                    while i8 < cutlass.Int32(kBins):
+                        smem_hist[i8] = cutlass.Int32(0)
+                        i8 = i8 + cutlass.Int32(num_threads)
+                    cute.arch.barrier()
+                    inv2 = (cutlass.Float32(kBins - 1) + cutlass.Float32(0.99)) / range2
+                    labv = cutlass.Int32(0)
+                    i9 = tidx
+                    while i9 < band:
+                        v9 = smem_keys[i9]
+                        if v9 >= hi2:
+                            labv = labv + cutlass.Int32(1)
+                        if v9 < hi2 and v9 >= lo2:
+                            bin2f = (v9 - lo2) * inv2
+                            bin2 = cutlass.Int32(bin2f)
+                            if bin2 < cutlass.Int32(0):
+                                bin2 = cutlass.Int32(0)
+                            if bin2 > cutlass.Int32(kBins - 1):
+                                bin2 = cutlass.Int32(kBins - 1)
+                            atomicAdd(smem_hist.iterator + bin2, cutlass.Int32(1))
+                        i9 = i9 + cutlass.Int32(num_threads)
+                    labv = self.warp_reduce_sum_i32(labv)
+                    if lane == cutlass.Int32(0):
+                        smem_wcnt[warp_id] = labv
+                    cute.arch.barrier()
+                    if tidx == 0:
+                        nab = cutlass.Int32(0)
+                        for w4 in cutlass.range_constexpr(self.num_warps):
+                            nab = nab + smem_wcnt[w4]
+                        s_iscalars[0] = k_rem - nab
+                    cute.arch.barrier()
+                    k2v = s_iscalars[0]
+                    if k2v > cutlass.Int32(0):
+                        warp_bin_sum2 = cutlass.Int32(0)
+                        for jb3 in cutlass.range_constexpr(bins_per_warp):
+                            bidx3 = (cutlass.Int32(kBins - 1)
+                                     - warp_id * cutlass.Int32(bins_per_warp)
+                                     - cutlass.Int32(jb3))
+                            warp_bin_sum2 = warp_bin_sum2 + smem_hist[bidx3]
+                        if lane == cutlass.Int32(0):
+                            smem_wcnt[warp_id] = warp_bin_sum2
+                        cute.arch.barrier()
+                        if tidx == 0:
+                            cumb = cutlass.Int32(0)
+                            twb = cutlass.Int32(num_warps - 1)
+                            foundb = cutlass.Int32(0)
+                            for w5 in cutlass.range_constexpr(self.num_warps):
+                                cumb = cumb + smem_wcnt[w5]
+                                if cumb >= k2v and foundb == cutlass.Int32(0):
+                                    twb = cutlass.Int32(w5)
+                                    foundb = cutlass.Int32(1)
+                            cumb2 = cutlass.Int32(0)
+                            for w6 in cutlass.range_constexpr(self.num_warps):
+                                if cutlass.Int32(w6) < twb:
+                                    cumb2 = cumb2 + smem_wcnt[w6]
+                            s_iscalars[2] = cumb2
+                            s_iscalars[3] = twb
+                        cute.arch.barrier()
+                        target_warp2 = s_iscalars[3]
+                        if warp_id == target_warp2 and lane == cutlass.Int32(0):
+                            base_cum2 = s_iscalars[2]
+                            thr_l2 = lo2
+                            set_d2 = cutlass.Int32(0)
+                            for jb4 in cutlass.range_constexpr(bins_per_warp):
+                                bidx4 = (cutlass.Int32(kBins - 1)
+                                         - target_warp2 * cutlass.Int32(bins_per_warp)
+                                         - cutlass.Int32(jb4))
+                                base_cum2 = base_cum2 + smem_hist[bidx4]
+                                if base_cum2 >= k2v and set_d2 == cutlass.Int32(0):
+                                    thr_l2 = lo2 + cutlass.Float32(bidx4) * range2 / cutlass.Float32(kBins)
+                                    set_d2 = cutlass.Int32(1)
+                            s_thr[0] = thr_l2
+                        cute.arch.barrier()
 
             # snap convergence: cgt < k_rem <= cge
             si = cutlass.Int32(0)
