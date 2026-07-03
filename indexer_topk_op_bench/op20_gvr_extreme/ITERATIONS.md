@@ -213,3 +213,37 @@ fusP4T4; 2048_262144_16 -> mc.
 0.914/0.920 (x 41->27us), BS16 0.947->1.075 (FLIPPED), 131K BS1/4 ->
 0.979/0.952. Remaining losses: 4x N8192 wall (0.75-0.81) + 16K BS16/64
 (0.90-0.93) + 262K BS1/4 residual (~0.92) + parity noise. TIER2 CLOSED.
+
+## Tier3 iter — 2026-07-03 — 16-bit: port iter4/5 levers into op19-era bf16/fp16 tables; TIER3 + CAMPAIGN CLOSED
+
+**Baseline (tier3_iter0, 240 cells = {bf16,fp16} x K{512,1024,2048} x N x
+BS{1,4,16,64,256,1024})**: 103/240 fastest, rival/x gm 1.022, 240/240 exact.
+The 16-bit dispatch tables were op19-era (no f/nf, no fusP4T4/mc routing) =>
+catastrophic large-N low-BS holes (262K BS1/4: 0.36-0.61, worst bf16-K2048-BS4
+0.362 with x=55.4us vs rival 20.0us) on top of the known walls.
+(Node hand-over note: baseline + 70/121 probe buckets actually completed on
+umbriel-b200-039 before expiry; probe re-run fresh here since tables are only
+written at script end.)
+
+**Probe (scripts/tier3_probe.py, all 121 loss buckets, exactness-gated, >3%
+bar)**: 82 keys beat their current cfg — fusP4T4 x24 (ALL 131K/262K BS1/4
+buckets, both dtypes, gains 1.18-2.31x), mc-auto x9 (large-N BS16; fusion NOT
+probed->NOT routed there per red line), M2R1p4f x27 + M{2,4,6}R1p4nf x22
+(mid/small N re-tune; fused best-M shifts down to 2, same law as fp32 iter4b).
+0 exactness failures (16-bit tie-stepped CCDFs handled by tie-tolerant check).
+Tables updated 44 (bf16) + 38 (fp16) keys, backups .pre_tier3.
+
+**Acceptance (tier3_iter1)**: 240/240 exact; fastest 103->121/240; rival/x gm
+1.022->1.086; x/base gm 1.191. Changed keys: kernel gm 1.205 vs iter0, 80/82
+improved (2 flat at 0.978/0.995 = in-run variance, dedicated probes showed
+both >1.09 — iter5 precedent); untouched 158 keys gm 1.000 (no regression).
+Hole flips: bf16-K2048-262K-BS4 0.362->0.829 (x 55.4->24.5us), K512/1024
+131K BS1/4 flip to outright wins (up to 1.062).
+
+**Residual losses (119) — structural, accepted**: (a) small-N wall N4-8K
+(48 cells, 0.65-0.88) = same phase-chain floor as tier1/2, probe found only
+1.04-1.15x config-level trims (taken); (b) K2048 N8192-16K wall (tier2 law);
+(c) 16-bit large-N residual (44 cells 0.75-1.00): radix streams half the
+bytes at 16-bit while GVR's fixed phase chain does not shrink => parity is
+structurally harder than fp32 — every bucket already carries its
+portfolio-best config per probe. TIER3 CLOSED; campaign CLOSED.
