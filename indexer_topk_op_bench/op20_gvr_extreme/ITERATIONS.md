@@ -73,3 +73,21 @@ win); 262K 0.62-0.63 -> 0.83-0.93. Full tier1: results/iter2_tier1.jsonl.
 
 **Next**: iter3 = chunked-cluster sandwich kernel (extend data-parallel to
 C=8/16 + sandwich band P3/P4) to push 262K past 1.0; iter4 = small-N fixed cost.
+
+## Iter 3 — 2026-07-03 — mcC8 routing at 262K/131K (D5 step 2)
+
+**Change**: cfg "mcC<G>" parsing in gvr_sw_auto; dispatch: 262K BS1-8 + K1024
+131K BS1-8 -> mcC8 (probe: C8 = K512-262K parity 24.4 vs 24.5, C16 regresses
+via DSM merge). **Lesson re-learned**: extended mcC8 to BS16 keys WITHOUT
+probing -> 262K BS16 collapsed 0.62/0.79 (mc-auto picks smaller cluster at
+high BS); reverted those 2 keys to mc-auto, confirmed 1.257/1.135. Never route
+a dispatch key to a config not probed at that BS bucket.
+
+**State after iter3 (composite)**: exact 84/84; ~62/84 fastest; losses:
+16 small-N cells (N4-8K, 0.74-0.88, fixed-cost wall) + K1024 262K BS1/4
+(0.88-0.91) + 3 parity-noise cells (0.983-0.996).
+
+**Next**: iter4 = small-N P2+P3 fusion (ladder thresholds known up-front =>
+collect-at-loosest-column in the SAME N-scan; valid where falsified Opt-L was
+not, because secant needed converged thr first) + P1 gather trim.
+K1024-262K residual -> chunked-sandwich (iter5).
