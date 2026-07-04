@@ -1,0 +1,6 @@
+# nsys artifacts embed the launching process env (GITHUB_TOKEN/HF_TOKEN) in
+# cleartext — never commit (op19 lesson: feedback_nsys_sqlite_env_token_leak).
+results/nsys/
+*.nsys-rep
+*.sqlite
+__pycache__/

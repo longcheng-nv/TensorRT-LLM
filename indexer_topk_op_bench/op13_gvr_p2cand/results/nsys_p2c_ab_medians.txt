@@ -1,0 +1,30 @@
+=== iter-7 FINAL nsys pure-kernel cold-L2 A/B: shipped p2c op vs baseline gvr_cutedsl ===
+=== K=512 fp32 (SHIPPED narrow N<=65536) — ×3 median ===
+# p2c vs base — median over 3 nsys batches (pure-kernel cold-L2 us)
+       N |     base                p2c    verdict
+    4096 |    12.28    10.48 (-1.81) -14.7%    WIN
+    8192 |    12.49    11.09 (-1.40) -11.2%    WIN
+   16384 |    15.01    13.33 (-1.69) -11.2%    WIN
+   32768 |    14.59    14.75 (+0.16)  +1.1%   ~tie
+   65536 |    21.53    20.34 (-1.19)  -5.5%    WIN
+  131072 |    26.03    25.98 (-0.05)  -0.2%   ~tie
+  262144 |    38.49    38.44 (-0.06)  -0.1%   ~tie
+
+=== K=1024 fp32 (narrow params measured; NOT shipped — noisy/regressions) — ×3 median ===
+# p2c vs base — median over 3 nsys batches (pure-kernel cold-L2 us)
+       N |     base                p2c    verdict
+    4096 |    11.25    13.03 (+1.78) +15.8%   loss
+    8192 |    18.15    14.74 (-3.40) -18.8%    WIN
+   16384 |    14.23    13.87 (-0.36)  -2.5%    WIN
+   32768 |    16.33    14.95 (-1.37)  -8.4%    WIN
+   65536 |    20.89    23.47 (+2.58) +12.4%   loss
+  131072 |    38.91    38.86 (-0.06)  -0.1%   ~tie
+  262144 |    41.51    41.47 (-0.04)  -0.1%   ~tie
+
+=== K=2048 fp32 (narrow params; NOT shipped — baseline already lean) — ×3 median (within-op base vs kc2x/kc3x) ===
+# median over 3 nsys batches
+       N |             base             kc2x             kc3x
+    8192 |            14.26   13.94(-0.31WIN)   14.04(-0.21WIN)
+   16384 |            15.76   16.22(+0.46loss)   16.51(+0.75loss)
+   32768 |            18.73    18.56(-0.17~)    18.84(+0.11~)
+   65536 |            24.34   26.11(+1.77loss)   26.03(+1.69loss)
