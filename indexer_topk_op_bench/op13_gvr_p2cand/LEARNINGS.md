@@ -45,6 +45,29 @@
   nsys for absolute A/B.
 - Single-batch nsys has ≥0.5µs run-to-run variance → median of ≥3 batches for a
   ship claim.
+- **Idle ≠ safe (b200-019 incident, 2026-07-04):** a memory-only free check
+  (mem<30GB) misses compute co-tenants and clock/power collapse — iter8c batches
+  measured base 1.5–7× slow WITH within-run drift (base@262K 75.7µs r1 →
+  258.7µs r2; ref 38.5µs). Gate cold-L2 runs on mem<30GB AND util≤5% on ALL
+  GPUs ×3 consecutive samples, AND sanity-check every fresh rep against
+  known-good base bands (K512–K2048 fp32: base@minN<20µs, base@maxN<65µs) with
+  auto-quarantine + redo (driver v2 run_iter8c_batches.sh). A slow or drifting
+  BASELINE always indicts the environment, not the variant — the baseline op
+  contains no changes. Never rewrite a running bash driver in place (bash reads
+  incrementally); stop it first.
+  **Root cause (resolved same day)**: not a co-tenant — **019 GPU 0 has broken
+  cooling**: 70–74 °C at 0 % util / 0 MiB (GPU 1: 31 °C), lifetime
+  `SW Thermal Slowdown` counter 6.82e9 µs ≈ 1.9 h
+  (`nvidia-smi -q -d PERFORMANCE`). Thermal damage is INVISIBLE to any
+  mem/util preflight — before timing on an unknown node, check thermal-slowdown
+  lifetime counters + cross-GPU idle-temp asymmetry, and pin
+  `CUDA_VISIBLE_DEVICES` to a clean GPU (GPU 1: all 9 batches passed the
+  sanity gate first-try, <0.5 % spread).
+- **wait_free awk gotcha:** an uninitialized awk max (`if($1>m)m=$1`) never
+  assigns when every GPU reports exactly `0`, so a PERFECTLY idle node yields
+  empty maxmem → `[ "" -lt 30000 ]` errors → infinite WAIT: the idle gate
+  deadlocks precisely on the idlest node. Seed accumulators (`BEGIN{m=0;u=0}`)
+  and coerce numeric (`$1+0`).
 
 ## SHIP outcome (iter 7) — K512 fp32 ONLY
 - Built `src/gvr_p2c_op.py` (mirrors gvr_cutedsl_op.py; `GvrP2C` subclass override,
@@ -57,6 +80,18 @@
   bar → demoted to baseline. Lesson: single-batch K1024 nsys is too noisy to trust;
   the ×3-median is what exposed the regressions a single batch hid.
 - Final: `_NARROW_TABLE={(fp32,512):(kCC=1536,kFTarget=1280)}`, NARROW_N_MAX=65536.
+
+## iter8 outcome — log-count interp: WHERE it ships (nsys ×3-median)
+- The log formula's kernel-level win lands where the LINEAR baseline has eval
+  SPIKES (K1024 8K/131K: −32.1%/−22.0%; K2048 large N: −12%), NOT where the
+  narrow window itself is the cost (K512: logn loses to the shipped lin-narrow
+  p2c everywhere — same 3 evals, and the (1024,614) window/aim underperforms
+  (1536,1280)). Host replay predicts EVAL COUNTS faithfully but not µs: the
+  262K flip held at K2048 (free −0.75 evals) and failed at K512 (narrow still
+  pays +1 eval; realized P3+P4 saving < prediction).
+- Ship = `dispatch_p2c_v2`: K512 iter7 unchanged; K1024 logn(2048,1024) at
+  N≤32K ∪ 131K (65K/262K = real regressions, stay baseline); K2048
+  logn(4096,2048) all N. fp32-only. K1024 (V4 Pro) ships for the FIRST time.
 
 ## Win is dtype/K-specific (physics)
 - Win = (P4 fraction × cand-cut) − (P2-eval tax). Maximized for **fp32** (P4

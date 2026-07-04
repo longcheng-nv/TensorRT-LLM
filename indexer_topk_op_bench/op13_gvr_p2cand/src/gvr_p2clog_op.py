@@ -240,6 +240,54 @@ def gvr_cutedsl_p2clog(logits, pre_idx, seq_lens, index_topk, compress_ratio=1,
     return out
 
 
+# ---------------------------------------------------------------------------
+# SHIP dispatch (iter8c, nsys ×3-median 2026-07-04, results/nsys_p2clog_ab_medians.txt)
+#
+#   K512  fp32: log variants LOSE to the iter7 shipped p2c everywhere (logn
+#               4K −8.7% vs p2c −16.6%; large N +7.4/+13.4%) — keep iter7
+#               lin-narrow (kCC=1536,kFT=1280) at N<=65536, baseline above.
+#   K1024 fp32: logn(2048,1024) ships N-DISPATCHED — wins 8K −32.1%,
+#               32K −8.8%, 131K −22.0% (base has reproducible slow spots at
+#               8K/131K = the host-replay eval spikes); REAL regressions at
+#               65K +13.4% / 262K +9.8% => those N stay baseline. First time
+#               K1024 ships (iter7 blanket-narrow was rejected on regressions).
+#   K2048 fp32: logn(4096,2048) ships at ALL N>=8192 — worst cell +0.6%
+#               (tie band), wins to −12.2% @262K (the −0.75-eval free win).
+#   bf16/fp16: host params identical to fp32 but no nsys evidence yet ->
+#               baseline (production indexer logits are fp32 anyway).
+# ---------------------------------------------------------------------------
+def dispatch_p2c_v2(dtype, K, n):
+    """-> (use_log, kcc, kft); (False, None, None) = plain baseline."""
+    if dtype != torch.float32:
+        return False, None, None
+    if K == 512:
+        if n <= 65536:
+            return False, 1536, 1280          # iter7 lin-narrow (GvrP2C)
+        return False, None, None
+    if K == 1024:
+        if n <= 32768 or n == 131072:
+            return True, 2048, 1024           # log-narrow
+        return False, None, None
+    if K == 2048:
+        if n >= 8192:
+            return True, 4096, 2048           # log-narrow, all measured N
+        return False, None, None
+    return False, None, None
+
+
+def gvr_cutedsl_p2c_v2(logits, pre_idx, seq_lens, index_topk, compress_ratio=1, out=None):
+    """Final iter8 op: routes per (dtype, K, N) to lin-narrow / log-narrow / baseline."""
+    from gvr_p2c_op import gvr_cutedsl_p2c  # lin path (handles K512 narrow + baseline)
+    bs, n = logits.shape
+    use_log, kcc, kft = dispatch_p2c_v2(logits.dtype, index_topk, n)
+    if use_log:
+        return gvr_cutedsl_p2clog(logits, pre_idx, seq_lens, index_topk,
+                                  compress_ratio, kcc=kcc, kft=kft, out=out)
+    # lin path: gvr_p2c_op's own dispatch_params reproduces the K512 table;
+    # for all other (dtype,K) it compiles baseline params.
+    return gvr_cutedsl_p2c(logits, pre_idx, seq_lens, index_topk, compress_ratio, out=out)
+
+
 if __name__ == "__main__":
     torch.manual_seed(0)
     for dt in (torch.float32,):

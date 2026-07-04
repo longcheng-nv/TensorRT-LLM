@@ -309,6 +309,73 @@ variants at ALL N — large-N narrow flip is the decisive question). BLOCKED on
 GPU co-tenancy (all 8 GPUs ~157GB/25-94% util from another namespace);
 idle-watcher armed.
 
+## Iter 8c INCIDENT — 2026-07-04 — b200-019 first run CONTAMINATED, all reps quarantined
+
+**Symptom**: r1/r2 single-batch parses showed base 1.5–7× slower than iter7
+references (K512 base@4K 14.7–15.1 vs 12.3µs; @262K 75.7 (r1) → **258.7 (r2)**
+vs 38.5µs) with within-run drift and non-monotonic N — temporal contamination
+(co-tenant arrival or clock/power-state collapse on 019), NOT a code or HW-SKU
+effect (base contains none of our changes). All 5 landed reps →
+`results/nsys/contaminated_20260704_019/`; none parsed into conclusions.
+
+**Driver hardened to v2** (`run_iter8c_batches.sh`): wait_free now needs
+mem<30GB AND util≤5% on ALL GPUs ×3 consecutive samples; post-batch sanity gate
+parses the fresh rep and requires base@minN<20µs AND base@maxN<65µs (known-good
+B200 bands) else auto-quarantine + redo (≤3 tries). Old driver on 019 must be
+STOPPED before relaunch (file was rewritten in place — running bash reads
+incrementally).
+
+**Incident root cause (resolved same day)**: NOT a co-tenant — **b200-019
+GPU 0 has broken cooling**: constant 70–74 °C / 227 W at 0 % util & 0 MiB
+(GPU 1: 31 °C), lifetime `SW Thermal Slowdown` counter 6.82e9 µs (~1.9 h)
+in `nvidia-smi -q -d PERFORMANCE`. Under load it throttles progressively —
+exactly the observed within-run drift. mem/util preflight cannot catch it.
+Fix: rerun pinned `CUDA_VISIBLE_DEVICES=1` (GPU 1 counters clean). Also fixed
+a v2-driver deadlock: wait_free's awk max-accumulator was uninitialized, so a
+PERFECTLY idle node (`0, 0` on all GPUs) yielded empty maxmem → `[ "" -lt ]`
+error → infinite WAIT; fixed with `BEGIN{m=0;u=0}` + `+0` coercion.
+
+## Iter 8c — 2026-07-04 — nsys ×3-median A/B (GPU1 b200-019) + SHIP  ⭐✅
+
+9/9 batches passed the v2 sanity gate first-try; repeatability <0.5 %
+(K512 base@262K: 37.42/37.33/37.27 µs). Full tables:
+`results/nsys_p2clog_ab_medians.txt`. Deltas vs base, fp32 pure-kernel cold-L2:
+
+| N | K512 p2c | K512 logn | K1024 logn | K1024 logb | K2048 logb | K2048 logn |
+|---|---|---|---|---|---|---|
+| 4096  | **−16.6%** | −8.7% | **−3.5%** | +1.2% | — | — |
+| 8192  | **−12.4%** | −8.1% | **−32.1%** | +5.5% | +21.8% | **−3.7%** |
+| 16384 | **−11.9%** | −10.3% | −0.9% | +22.1% | −6.7% | **−8.3%** |
+| 32768 | +0.2% | +2.4% | **−8.8%** | −7.7% | +0.6% | −1.0% |
+| 65536 | **−5.7%** | −0.8% | +13.4% | +12.6% | +0.5% | +0.6% |
+| 131072 | +0.0% | +7.4% | **−22.0%** | −23.1% | −11.2% | **−11.0%** |
+| 262144 | +0.2% | +13.4% | +9.8% | +9.4% | −12.1% | **−12.2%** |
+
+**Ship verdicts** (±0.2 µs = tie; any real regression band stays baseline):
+- **K512: log NOT shipped.** logn loses to the iter7 p2c everywhere it wins
+  and REGRESSES +7.4 %/+13.4 % at 131K/262K — the host prediction that the
+  +1 eval tax (~+8.4 µs) would be repaid by P3+P4 savings at 262K is
+  **falsified by nsys** (net +5.0 µs loss). iter7 ship stands unchanged.
+- **K1024: ships for the FIRST time, N-dispatched.** logn(2048,1024) at
+  N≤32768 and N==131072 (−32.1 % @8K, −8.8 % @32K, −22.0 % @131K — the 8K/131K
+  base slow spots are the host-replay eval spikes, reproducible ×3); 65536 and
+  262144 stay baseline (real +13.4 %/+9.8 % regressions, same shape that
+  killed iter7's blanket narrow).
+- **K2048: ships at ALL N≥8192** with logn(4096,2048) — worst cell +0.6 %
+  (tie band 32K–65K), wins to −12.2 % @262K (the free −0.58/−0.75-eval
+  large-N win; host prediction −10~15 % @131K/262K CONFIRMED). logb rejected
+  at 8K (+21.8 %: cand 2.74×K hurts P4, as predicted).
+- **16-bit: baseline** (host winners identical to fp32 but zero nsys
+  evidence, op20 precedent says 16-bit band boundaries shift, and production
+  indexer logits are fp32).
+
+**Landed**: `dispatch_p2c_v2()` + `gvr_cutedsl_p2c_v2()` ship-routing in
+`src/gvr_p2clog_op.py` (log path → GvrP2CLog; lin/baseline path → iter7
+`gvr_p2c_op`). Routing exactness re-validated on GPU1: 9/9 branches
+(every band × both Ks + K512 both routes + bf16 fallback) value-exact
+uniq=K valdiff=0. **CAMPAIGN: iter8 CLOSED — cheaper-P2 log-interp shipped
+for K1024/K2048; K512 keeps iter7 lin-narrow.**
+
 ## (superseded) iter-7 plan — build the N-dispatched kernel + full validation
 1. Copy `gvr_topk_decode.py` → `src/gvr_topk_decode_p2c.py`. Make kCC + kFTarget
    N-dispatched (the kernel already has N at compile via the seq dispatch; simplest
