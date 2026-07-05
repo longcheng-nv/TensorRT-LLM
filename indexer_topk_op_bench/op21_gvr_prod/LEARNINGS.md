@@ -24,3 +24,18 @@
   highest counts.
 - (iter0.5) speculative collect column is a per-K constant, not per-N: pro
   f=0.75 fits kC 30/30; flash needs lower f (h and K both smaller).
+- (iter1) NEVER leave a per-bin serial tid0 loop in a phase: 256-bin cum-scan
+  on tid0 = ~1800 dependent smem ops = +30µs fixed (2x the whole op at small
+  N). In-place Hillis-Steele suffix-scan (8 double-barrier steps) + stateless
+  parallel crossing check costs <1µs. Same trap as the red-lined P1 self-loop.
+- (iter1) same-file p3-vs-p5 A/B isolates a regression to the new phase in
+  one probe — cheaper than nsys/ncu when the suspect list is short.
+- (iter1) phase1 stash: smem_keys (P3 slot buffer) is dead until the ladder
+  pass — stashing the K gathered values there kills P1b's L2 re-gather for
+  free (no extra smem). Sentinel = NEG_FLT_MAX (< v_lo == min of valid).
+- (iter1) fused collect needs kC >= ~4K headroom: at K2048 (kC/K=2.5) slot
+  overflow makes fuse a 13% LOSS at largeN; bigger kC is smem-capped (232KB).
+  Production gate: `bs <= NUM_SMS and 4*K <= kC`.
+- (iter1) event-vs-nsys axis gap is large at small cells (radix_cutedsl
+  4096/64: 12.1µs event-graph vs 6.98µs nsys) — ratios vs rivals MUST come
+  from the nsys axis (op20 red-card lesson re-confirmed).
