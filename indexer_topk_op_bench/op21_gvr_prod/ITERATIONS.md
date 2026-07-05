@@ -153,3 +153,28 @@ Levers: C=8 gains ~5% at exactly the losing BS1 cells (needs a
 BS1-only tier or launch-geometry fix for the BS16 collapse), P1b per-row
 cost, K2048 collect column.
 
+## Iter 3 — 2026-07-05 — dist-P1 falsified; C8 tier lands K2048-only
+**Hypothesis tested**: the iter2 fixed-cost analysis blamed the REPLICATED
+per-CTA K-gather (P1). Implemented distributed P1 (each CTA gathers K/C
+preIdx + DSMEM stats & histogram merges rebuilding identical global
+seeds; src flag dist_p1, kept as A/B reference).
+**FALSIFIED (event A/B, 8 cells)**: C4-dist is +0.6-1.7us WORSE at every
+K512/K1024 cell (28.3 vs 26.6 @ 1024/262K/BS1) and a wash at K2048.
+Mechanism: at BS<=16 all C CTAs gather the SAME addresses — after the
+first CTA misses, the rest hit L2, so replication is nearly free; the 3
+extra cluster barriers + merges cost more than the saved loads. Exactness
+held (180/180 real, C 2/4/8) but the lever is dead on B200.
+**C8 tier**: consistent win ONLY at K2048 hugeN BS<=4 (28.7/29.2 vs C4
+30.3/30.7us across two runs); K1024 noise-level; BS16 collapse (47us).
+gvr_ms_auto rule now: C=8 iff K>=2048 AND N>=196608 AND BS<=4 (K is a
+compile-time dispatch key — production-legal), else C=4 rule unchanged.
+**nsys delta (canonical)**: K2048 262K BS1 24.83 -> 23.90us (rival ratio
+0.798 -> 0.829); K2048 131K BS1 unchanged (stays C4). P0 gm rival/ms
+1.051 -> **1.054**, still 12/17 wins.
+**Where the remaining fixed cost actually lives (revised)**: NOT P1
+replication. Candidates for iter4: leader-only P4 band snap + K output
+writes (~3-5us serial-ish at BS1), band ~900-1800 >> band_accept, P1
+cold-gather latency itself (~1024 DRAM lines, irreducible without
+prefetch overlap), ladder tail. Also the P1-grid highBS SGLang gap
+(P1b per-row cost) remains untouched this iter.
+

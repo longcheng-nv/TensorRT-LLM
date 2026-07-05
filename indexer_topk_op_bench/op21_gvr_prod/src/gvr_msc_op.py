@@ -39,6 +39,9 @@ sys.path.insert(0, str(_BENCH / "ops"))
 sys.path.insert(0, str(_BENCH / "harness"))
 sys.path.insert(0, str(_HERE))
 from gvr_ms_op import GvrSandwichKernel, gvr_ms, NUM_SMS, _DT, _INT_MAX  # noqa: E402
+from cute_vendored.blackwell.top_k.gvr_topk_decode import (  # noqa: E402
+    _fmin_f32_inline, atomicAdd,
+)
 from cute_vendored.blackwell.top_k.gvr_topk_decode_cluster import (  # noqa: E402
     ld_shared_cluster_f32, ld_shared_cluster_i32, mapa_shared_cluster,
 )
@@ -52,11 +55,221 @@ class GvrMsClusterKernel(GvrSandwichKernel):
     """C-CTA row-chunked cluster around the mode-5 sandwich. Requires
     place_mode=5, R=1, fuse_collect=True (thresholds known pre-scan)."""
 
-    def __init__(self, *a, C_cta=4, **kw):
+    def __init__(self, *a, C_cta=4, dist_p1=False, **kw):
         super().__init__(*a, **kw)
         self.C_cta = int(C_cta)
+        # iter3 FALSIFIED lever (kept as A/B reference, default OFF):
+        # distributing P1 across the cluster (each CTA gathers K/C preIdx +
+        # two DSMEM merges) measured +0.6-1.7us at every P0 cell vs the
+        # replicated gather. At BS1-16 all C CTAs gather the SAME addresses
+        # — after the first CTA misses, the rest hit L2, so replication is
+        # nearly free; the 3 extra cluster barriers cost more than the
+        # saved loads. (event A/B 2026-07-05, 8 cells)
+        self.dist_p1 = bool(dist_p1)
         assert self.place_mode == 5 and self.R_rounds == 1 and self.fuse_collect
         assert self.C_cta >= 2
+        assert self.top_k % self.C_cta == 0, "dist P1 needs C | K"
+
+    # ------------------------------------------------------------------
+    # iter3 distributed P1 (stats half): CTA r gathers preIdx slice
+    # [r*Kc, (r+1)*Kc), stashes values (sentinel NEG_FLT_MAX), reduces its
+    # LOCAL min/max/sum/cnt, then one DSMEM merge rebuilds the GLOBAL stats
+    # identically on every CTA. Publishes local stats via s_p1f (floats) and
+    # s_cluster[M+5] (cnt — free until pair-pick writes m1g there).
+    # ------------------------------------------------------------------
+    @cute.jit
+    def phase1_dist_stats(
+        self, input_row, N, pre_idx_row, pre_idx_count, pre_idx_offset,
+        rank, smem_stash, smem_wmin_f32, smem_wmax_f32, smem_wsum_f32,
+        smem_wcnt_i32, s_p1f, s_cluster, s_thr, s_iscalars, tidx, warp_id,
+        lane,
+    ):
+        C = cutlass.const_expr(self.C_cta)
+        M = cutlass.const_expr(self.M_thr)
+        Kc = cutlass.const_expr(self.top_k // self.C_cta)
+        num_threads = cutlass.const_expr(self.num_threads)
+        j0 = rank * cutlass.Int32(Kc)
+        local_min = cutlass.Float32(self.FLT_MAX)
+        local_max = cutlass.Float32(self.NEG_FLT_MAX)
+        local_sum = cutlass.Float32(0.0)
+        local_cnt = cutlass.Int32(0)
+        if cutlass.const_expr(Kc >= self.num_threads):
+            n_iters = cutlass.const_expr(Kc // self.num_threads)
+            for u in cutlass.range_constexpr(n_iters):
+                i = tidx + cutlass.Int32(u * self.num_threads)
+                idx = pre_idx_row[j0 + i] + pre_idx_offset
+                v = cutlass.Float32(self.NEG_FLT_MAX)
+                if idx >= 0 and idx < N:
+                    v = self._load_fp32(input_row, idx)
+                    local_max = cute.arch.fmax(local_max, v)
+                    local_min = _fmin_f32_inline(local_min, v)
+                    local_sum = local_sum + v
+                    local_cnt = local_cnt + 1
+                smem_stash[i] = v
+        else:
+            idx = cutlass.Int32(-1)
+            if tidx < cutlass.Int32(Kc):
+                idx = pre_idx_row[j0 + tidx] + pre_idx_offset
+            v = cutlass.Float32(self.NEG_FLT_MAX)
+            if idx >= 0 and idx < N:
+                v = self._load_fp32(input_row, idx)
+                local_max = cute.arch.fmax(local_max, v)
+                local_min = _fmin_f32_inline(local_min, v)
+                local_sum = local_sum + v
+                local_cnt = local_cnt + 1
+            if tidx < cutlass.Int32(Kc):
+                smem_stash[tidx] = v
+        active_warps = cutlass.const_expr(
+            max(1, min(Kc // self.WARP_SIZE, self.num_warps)))
+        if warp_id < cutlass.Int32(active_warps):
+            wmin = self.warp_reduce_min_f32(local_min)
+            wmax = self.warp_reduce_max_f32(local_max)
+            wsum = self.warp_reduce_sum_f32(local_sum)
+            wcnt = self.warp_reduce_sum_i32(local_cnt)
+            if lane == 0:
+                smem_wmin_f32[warp_id] = wmin
+                smem_wmax_f32[warp_id] = wmax
+                smem_wsum_f32[warp_id] = wsum
+                smem_wcnt_i32[warp_id] = wcnt
+        cute.arch.barrier()
+        if tidx == 0:
+            pmin = cutlass.Float32(self.FLT_MAX)
+            pmax = cutlass.Float32(self.NEG_FLT_MAX)
+            psum = cutlass.Float32(0.0)
+            pcnt = cutlass.Int32(0)
+            for w in cutlass.range_constexpr(active_warps):
+                pmax = cute.arch.fmax(pmax, smem_wmax_f32[w])
+                pmin = _fmin_f32_inline(pmin, smem_wmin_f32[w])
+                psum = psum + smem_wsum_f32[w]
+                pcnt = pcnt + smem_wcnt_i32[w]
+            s_p1f[0] = pmin
+            s_p1f[1] = pmax
+            s_p1f[2] = psum
+            s_cluster[M + 5] = pcnt
+        cute.arch.cluster_arrive()
+        cute.arch.cluster_wait()
+        if tidx == 0:
+            gmin = cutlass.Float32(self.FLT_MAX)
+            gmax = cutlass.Float32(self.NEG_FLT_MAX)
+            gsum = cutlass.Float32(0.0)
+            gcnt = cutlass.Int32(0)
+            for peer in cutlass.range_constexpr(C):
+                pf0 = mapa_shared_cluster(s_p1f.iterator + cutlass.Int32(0), cutlass.Int32(peer))
+                pf1 = mapa_shared_cluster(s_p1f.iterator + cutlass.Int32(1), cutlass.Int32(peer))
+                pf2 = mapa_shared_cluster(s_p1f.iterator + cutlass.Int32(2), cutlass.Int32(peer))
+                pi0 = mapa_shared_cluster(s_cluster.iterator + cutlass.Int32(M + 5), cutlass.Int32(peer))
+                gmin = _fmin_f32_inline(gmin, ld_shared_cluster_f32(pf0))
+                gmax = cute.arch.fmax(gmax, ld_shared_cluster_f32(pf1))
+                gsum = gsum + ld_shared_cluster_f32(pf2)
+                gcnt = gcnt + ld_shared_cluster_i32(pi0)
+            gmean = cutlass.Float32(0.0)
+            if gcnt > 0:
+                gmean = gsum / cutlass.Float32(gcnt)
+            else:
+                gmean = (gmin + gmax) * cutlass.Float32(0.5)
+            s_thr[0] = gmean
+            s_thr[1] = gmin
+            s_thr[2] = gmax
+            s_iscalars[0] = cutlass.Int32(0)
+            s_iscalars[1] = cutlass.Int32(0)
+            s_iscalars[2] = pre_idx_count + (pre_idx_count >> 2)
+            s_iscalars[3] = cutlass.Int32(1)
+            s_iscalars[4] = cutlass.Int32(0)
+        cute.arch.barrier()
+
+    # ------------------------------------------------------------------
+    # iter3 distributed P1b: local QBINS histogram of the Kc stashed values
+    # (global [lo,hi] range), DSMEM histogram merge (1 register/thread, two
+    # cluster barriers), then the parent's parallel suffix-scan + crossing
+    # on the MERGED histogram — every CTA lands identical seed thresholds.
+    # ------------------------------------------------------------------
+    @cute.jit
+    def phase1b_dist(
+        self, smem_stash, smem_hist, s_thr, s_mt_thr, tidx,
+    ):
+        QBINS = cutlass.const_expr(self.QBINS)
+        M = cutlass.const_expr(self.M_thr)
+        C = cutlass.const_expr(self.C_cta)
+        Kc = cutlass.const_expr(self.top_k // self.C_cta)
+        num_threads = cutlass.const_expr(self.num_threads)
+        lo = s_thr[1]
+        hi = s_thr[2]
+        iz = cutlass.Int32(tidx)
+        while iz < cutlass.Int32(QBINS):
+            smem_hist[iz] = cutlass.Int32(0)
+            iz = iz + cutlass.Int32(num_threads)
+        cute.arch.barrier()
+        rng = hi - lo
+        inv = (cutlass.Float32(QBINS - 1) + cutlass.Float32(0.99)) / rng
+        if cutlass.const_expr(Kc >= self.num_threads):
+            n_iters = cutlass.const_expr(Kc // self.num_threads)
+            for u in cutlass.range_constexpr(n_iters):
+                i = tidx + cutlass.Int32(u * self.num_threads)
+                v = smem_stash[i]
+                if v >= lo:
+                    b = cutlass.Int32((v - lo) * inv)
+                    if b > cutlass.Int32(QBINS - 1):
+                        b = cutlass.Int32(QBINS - 1)
+                    atomicAdd(smem_hist.iterator + b, cutlass.Int32(1))
+        else:
+            v = cutlass.Float32(self.NEG_FLT_MAX)
+            if tidx < cutlass.Int32(Kc):
+                v = smem_stash[tidx]
+            if v >= lo:
+                b = cutlass.Int32((v - lo) * inv)
+                if b > cutlass.Int32(QBINS - 1):
+                    b = cutlass.Int32(QBINS - 1)
+                atomicAdd(smem_hist.iterator + b, cutlass.Int32(1))
+        # DSMEM histogram merge: hist ready -> read C peers -> write merged
+        cute.arch.cluster_arrive()
+        cute.arch.cluster_wait()
+        mg = cutlass.Int32(0)
+        if tidx < cutlass.Int32(QBINS):
+            for peer in cutlass.range_constexpr(C):
+                ha = mapa_shared_cluster(smem_hist.iterator + tidx, cutlass.Int32(peer))
+                mg = mg + ld_shared_cluster_i32(ha)
+        cute.arch.cluster_arrive()
+        cute.arch.cluster_wait()
+        if tidx < cutlass.Int32(QBINS):
+            smem_hist[tidx] = mg
+        cute.arch.barrier()
+        # ---- identical to parent phase1b from here: defaults, suffix scan,
+        # crossing, non-descend fixup ----
+        binw = rng / cutlass.Float32(QBINS)
+        if tidx == 0:
+            s_mt_thr[0] = lo
+            for md in cutlass.range_constexpr(M - 1):
+                s_mt_thr[md + 1] = lo + rng * (cutlass.Float32(md + 1) / cutlass.Float32(M))
+        for e in cutlass.range_constexpr(self.QBINS.bit_length() - 1):
+            step = cutlass.const_expr(1 << e)
+            v2 = cutlass.Int32(0)
+            if tidx < cutlass.Int32(QBINS):
+                v2 = smem_hist[tidx]
+                if tidx + cutlass.Int32(step) < cutlass.Int32(QBINS):
+                    v2 = v2 + smem_hist[tidx + cutlass.Int32(step)]
+            cute.arch.barrier()
+            if tidx < cutlass.Int32(QBINS):
+                smem_hist[tidx] = v2
+            cute.arch.barrier()
+        if tidx < cutlass.Int32(QBINS):
+            sfx = smem_hist[tidx]
+            nxt = cutlass.Int32(0)
+            if tidx < cutlass.Int32(QBINS - 1):
+                nxt = smem_hist[tidx + 1]
+            total = smem_hist[0]
+            for m in cutlass.range_constexpr(M - 1):
+                tgt = cutlass.Int32(cutlass.Float32(total) * cutlass.Float32(self.qfracs[m]))
+                if tgt < cutlass.Int32(1):
+                    tgt = cutlass.Int32(1)
+                if sfx >= tgt and (tidx == cutlass.Int32(QBINS - 1) or nxt < tgt):
+                    s_mt_thr[m + 1] = lo + cutlass.Float32(tidx) * binw
+        cute.arch.barrier()
+        if tidx == 0:
+            for mm in cutlass.range_constexpr(M - 1):
+                pv = s_mt_thr[mm]
+                if s_mt_thr[mm + 1] < pv:
+                    s_mt_thr[mm + 1] = pv
+        # callers ladder-init barrier publishes before any read
 
     # ------------------------------------------------------------------
     # slice-aware fused M-count + slot-collect: identical to the parent's
@@ -301,6 +514,8 @@ class GvrMsClusterKernel(GvrSandwichKernel):
         # [M+5] merged m1g. (M+3.. are CTA-local scratch — NEVER stash these
         # in s_iscalars: the vendored P3/P4 own its done/cnt_lo/cnt_hi slots.)
         s_cluster = smem.allocate_tensor(element_type=cutlass.Int32, layout=cute.make_ordered_layout((M + 6,), order=(0,)), byte_alignment=16)
+        # iter3 dist-P1 local stats publish (min/max/sum) for the DSMEM merge
+        s_p1f = smem.allocate_tensor(element_type=cutlass.Float32, layout=cute.make_ordered_layout((3,), order=(0,)), byte_alignment=16)
 
         if N <= cutlass.Int32(top_k):
             if rank == cutlass.Int32(0):
@@ -315,9 +530,15 @@ class GvrMsClusterKernel(GvrSandwichKernel):
             cute.arch.cluster_arrive_relaxed()
             cute.arch.cluster_wait()
         else:
-            # ---- replicated P1 (stash) + P1b (rank-quantile seeds) ----
-            self.phase1_stats_stash(input_row, N, pre_idx_row, pre_idx_count, pre_idx_offset,
-                                    smem_keys, smem_wmin, smem_wmax, smem_wsum, smem_wcnt_p1, s_thr, s_iscalars, tidx, warp_id, lane)
+            # ---- P1: distributed (K/C gather + DSMEM stats merge) or the
+            # iter2 replicated reference ----
+            if cutlass.const_expr(self.dist_p1):
+                self.phase1_dist_stats(input_row, N, pre_idx_row, pre_idx_count, pre_idx_offset,
+                                       rank, smem_keys, smem_wmin, smem_wmax, smem_wsum, smem_wcnt_p1,
+                                       s_p1f, s_cluster, s_thr, s_iscalars, tidx, warp_id, lane)
+            else:
+                self.phase1_stats_stash(input_row, N, pre_idx_row, pre_idx_count, pre_idx_offset,
+                                        smem_keys, smem_wmin, smem_wmax, smem_wsum, smem_wcnt_p1, s_thr, s_iscalars, tidx, warp_id, lane)
             v_lo = s_thr[1]
             v_hi = s_thr[2]
             if v_hi <= cutlass.Float32(self.NEG_FLT_MAX) or v_lo >= v_hi:
@@ -330,9 +551,13 @@ class GvrMsClusterKernel(GvrSandwichKernel):
                 cute.arch.cluster_arrive_relaxed()
                 cute.arch.cluster_wait()
             else:
-                self.phase1b_rank_quantile(smem_keys, pre_idx_count,
-                                           smem_hist, s_thr, s_mt_thr,
-                                           s_mt_cnt, tidx)
+                if cutlass.const_expr(self.dist_p1):
+                    self.phase1b_dist(smem_keys, smem_hist, s_thr, s_mt_thr,
+                                      tidx)
+                else:
+                    self.phase1b_rank_quantile(smem_keys, pre_idx_count,
+                                               smem_hist, s_thr, s_mt_thr,
+                                               s_mt_cnt, tidx)
                 cute.arch.barrier()
 
                 # ---- fused ladder over my 64-elt-aligned slice ----
@@ -545,8 +770,8 @@ class GvrMsClusterKernel(GvrSandwichKernel):
 _compiled = {}
 
 
-def _compile(dtype, n, K, cr_val, C, threads):
-    key = (dtype, n, K, cr_val, C, threads)
+def _compile(dtype, n, K, cr_val, C, threads, dist_p1=True):
+    key = (dtype, n, K, cr_val, C, threads, dist_p1)
     if key in _compiled:
         return _compiled[key]
     use256 = (n >= 16384)
@@ -555,7 +780,7 @@ def _compile(dtype, n, K, cr_val, C, threads):
                               enable_unroll_4=True, enable_phase3_unroll=True,
                               min_blocks_per_mp=1, return_output_values=False,
                               M_thr=4, R_rounds=1, band_accept=64, place_mode=5,
-                              fuse_collect=True, C_cta=C)
+                              fuse_collect=True, C_cta=C, dist_p1=dist_p1)
     nr, nc, nb = cute.sym_int(), cute.sym_int(), cute.sym_int()
     ia = 32 if use256 else 16
     in_f = cr.make_fake_compact_tensor(_DT[dtype], (nr, nc), stride_order=(1, 0), assumed_align=ia)
@@ -569,24 +794,29 @@ def _compile(dtype, n, K, cr_val, C, threads):
 
 
 def gvr_msc(logits, pre_idx, seq_lens, index_topk, compress_ratio=1, out=None,
-            C=4, threads=1024):
+            C=4, threads=1024, dist_p1=False):
     """Row-chunked C-CTA cluster mode-5 sandwich. C must be >= 2; use gvr_ms
     for C == 1."""
     bs, n = logits.shape
     if out is None:
         out = torch.empty(bs, index_topk, dtype=torch.int32, device="cuda")
-    compiled = _compile(logits.dtype, n, index_topk, compress_ratio, int(C), int(threads))
+    compiled = _compile(logits.dtype, n, index_topk, compress_ratio, int(C),
+                        int(threads), bool(dist_p1))
     compiled(logits, pre_idx, seq_lens, None, out)
     return out
 
 
-# production entry: ONE extra dispatch rule on (BS, max-N buffer) only.
-# C=4 measured best or tied-best on 15/17 P0 cells (event screen 2026-07-05);
-# C=8 gains <=5% at N262K BS1 but collapses at BS16 (43.8 vs 28.5us) — not
-# worth a second tier.
+# production entry: TWO extra dispatch rules on (K, BS, max-N buffer) only.
+# C=4 measured best or tied-best on 15/17 P0 cells (event screen 2026-07-05).
+# C=8 is a consistent ~5% win ONLY at K2048 huge-N BS<=4 (two independent
+# runs: 28.7/29.2 vs C4 30.3/30.7us); at K1024 it is noise-level and it
+# collapses at BS16 (47us) — hence the tight gate.
 def gvr_ms_auto(logits, pre_idx, seq_lens, index_topk, compress_ratio=1,
                 out=None):
     bs, n = logits.shape
+    if index_topk >= 2048 and n >= 196608 and bs <= 4:
+        return gvr_msc(logits, pre_idx, seq_lens, index_topk, compress_ratio,
+                       out=out, C=8)
     if n >= 65536 and bs * 4 <= NUM_SMS:
         return gvr_msc(logits, pre_idx, seq_lens, index_topk, compress_ratio,
                        out=out, C=4)

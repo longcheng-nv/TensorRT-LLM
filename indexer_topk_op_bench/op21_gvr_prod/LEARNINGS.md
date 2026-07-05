@@ -55,3 +55,12 @@
 - (iter2) real-capture gate catches what synth misses: pair=(0,1) fallback
   (h<0.5 at midsize N) never fired on synth h=0.6 65K+ cells but fires on
   pro L4 N=14.5K. Keep real captures in EVERY iteration's gate.
+- (iter3) REPLICATED work across cluster CTAs on the SAME addresses is
+  nearly free (first CTA misses, rest hit L2) — do NOT "optimize" it into
+  a distributed version paying cluster barriers. Dist-P1 measured +0.6-1.7us
+  worse everywhere. Cluster barriers are the expensive resource, not
+  redundant L2 reads. (Same family as op14's "pass-count reduction saves
+  zero DRAM" — L2 makes redundancy cheap.)
+- (iter3) C8-vs-C4 is K-dependent, not just N/BS-dependent: only K2048's
+  bigger K-proportional tail amortizes 8-way chunking. K is a compile-time
+  dispatch key, so per-K C rules are production-legal.
