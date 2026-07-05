@@ -39,3 +39,19 @@
 - (iter1) event-vs-nsys axis gap is large at small cells (radix_cutedsl
   4096/64: 12.1µs event-graph vs 6.98µs nsys) — ratios vs rivals MUST come
   from the nsys axis (op20 red-card lesson re-confirmed).
+- (iter2) vendored phase3_collect_candidates does NOT recount: it prefixes
+  over smem_ptcnt (per-thread ge-counts at s_thr[0], same [0,N) striding).
+  Any caller that changed threshold or scan domain MUST re-run
+  block_count_ge first, or outputs get silent holes.
+- (iter2) s_iscalars[1..3] belong to the vendored P3/P4 (done/cnt_lo/
+  cnt_hi) — never borrow them as scratch across phase calls.
+- (iter2) replicated seeding is the cheap multi-CTA trick: P1 gather + P1b
+  are per-CTA deterministic on identical inputs, so C CTAs compute
+  bit-identical thresholds with ZERO cross-CTA traffic; only the M counts
+  need one DSMEM merge.
+- (iter2) C=8 collapses at BS16 (128 CTAs oversubscribe: 43.8 vs C4 28.5µs)
+  while gaining <=5% at BS1 — C=4 single-rule dispatch beats a two-tier
+  rule.
+- (iter2) real-capture gate catches what synth misses: pair=(0,1) fallback
+  (h<0.5 at midsize N) never fired on synth h=0.6 65K+ cells but fires on
+  pro L4 N=14.5K. Keep real captures in EVERY iteration's gate.

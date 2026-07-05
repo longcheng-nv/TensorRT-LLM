@@ -20,9 +20,16 @@ RIVALS = ["radix_single_cuda", "radix_multi_cuda", "radix_cutedsl",
 GVR_BEST = ["gvr_cuda", "gvr_cutedsl", "gvr_cutedsl_rs", "gvr_multicta_cutedsl",
             "gvr_op8", "gvr_port", "gvr_mt", "gvr_sandwich"]
 
+PREFIX = sys.argv[1] if len(sys.argv) > 1 else "ms"
+
 P0 = [(1024, N, BS) for N in (65536, 131072, 262144) for BS in (1, 4, 8, 16)]
-P1 = [(K, N, BS) for K in (1024, 512, 2048) for N in (4096, 8192, 16384)
-      for BS in (64, 256, 1024) if N > 2 * K]
+if PREFIX == "msa":  # iter2 grid adds the cross-K largeN BS1 cells, no P1
+    P0 = P0 + [(512, 131072, 1), (512, 262144, 1), (2048, 131072, 1),
+               (2048, 262144, 1), (2048, 262144, 16)]
+    P1 = []
+else:
+    P1 = [(K, N, BS) for K in (1024, 512, 2048) for N in (4096, 8192, 16384)
+          for BS in (64, 256, 1024) if N > 2 * K]
 
 
 def load_rivals():
@@ -51,7 +58,7 @@ def load_rivals():
 
 
 def ms_med_us(K, N, BS):
-    rep = _ROOT / "results" / "nsys" / f"ms_k{K}_fp32_n{N}_bs{BS}.nsys-rep"
+    rep = _ROOT / "results" / "nsys" / f"{PREFIX}_k{K}_fp32_n{N}_bs{BS}.nsys-rep"
     if not rep.exists():
         return None
     out = subprocess.run(

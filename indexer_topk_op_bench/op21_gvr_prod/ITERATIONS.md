@@ -91,3 +91,65 @@ redesign or per-K collect column (iter0.5 finding), (d) 16-bit ports
 untouched, (e) band ~900 >> band_accept 64 at K1024 -> P4 always runs the
 256-bin rank-scatter; a tighter qfrac pair around 1.0*K could shrink band
 (M=6 tightens p50 to ~0.5K per iter0.5) at the cost of M=6 scan tax.
+
+## Iter 2 — 2026-07-05 — row-chunked C-CTA cluster (gvr_msc / gvr_ms_auto)
+**What shipped in src/gvr_msc_op.py**: C CTAs per row (cluster launch),
+REPLICATED P1 stash + P1b seeding (identical thresholds per CTA, zero
+comm), slice-aware fused M=4 ladder (64-elt-aligned chunks, global slot
+indices), DSMEM merge of M counts (one cluster barrier), distributed P3
+direct-write straight to the output row at rank-prefix offsets, leader
+DSMEM band gather (op8 Shift-D pattern) + unchanged exact P4 band snap.
+Fallback (pair=(0,1)/no-pair/band>kC/overflow) = leader-only classic
+collect+snap over the full row. `gvr_ms_auto` = gvr_ms + ONE extra rule:
+C=4 iff N >= 65536 AND 4*BS <= NUM_SMS.
+
+**Bugs found & fixed**:
+1. Leader fallback fed phase3_collect_candidates SLICE-local smem_ptcnt —
+   the vendored P3 prefixes over per-thread counts at s_thr[0] over the
+   SAME [0,N) striding, it does NOT recount (646/1024 output holes on pro
+   L4, pair=(0,1) case h<0.5 at midsize N). Fix: leader block_count_ge
+   full-row recount before collect.
+2. My d_off/b_off/m1g scratch initially sat in s_iscalars[1..3] — those are
+   the vendored done/cnt_lo/cnt_hi slots; moved to dedicated s_cluster
+   slots and re-seeded s_iscalars before the fallback phases.
+
+**Exactness**: built-in smoke 27/27 (C in {2,4,8} x 3K x 3N); real captures
+180/180 (pro30+flash21+v32-9, C in {2,4,8}); adversarial preIdx: random +
+half-invalid exact 16/16; all-invalid emits identity = inherited vendored
+degenerate contract (single-CTA gvr_ms bit-identical, never occurs on real
+rows post-warmup-drop).
+
+**Event screen (P0 17 cells, vs per-cell best C)**: gm rvl/best **1.041**
+(single-CTA was 0.84), x20/best 0.968, ms1/best 1.320 (cluster speedup).
+C4 best-or-tied 15/17; C8 gains <=5% at N262K BS1 only and collapses at
+BS16 (43.8 vs 28.5us) -> dropped, ONE dispatch rule.
+Remaining event-screen losses: K1024 131K BS1/4 vs x20 (0.88-0.90, radix
+~tie), K2048 262K BS1 vs radix 0.85.
+
+**nsys pure-kernel cold-L2 P0 VERDICT (canonical; drive_nsys_iter2.sh +
+nsys_verdict.py msa; rival = per-cell best of report CSVs B200 fp32)**:
+gm rival/ms **1.051**, win 12/17 — P0 flips to a WIN (iter1: 0.830, 4/12).
+vs best existing GVR-family op gm 0.958 (op8 per-cell), incl. wins at
+K2048 262K BS1/16 (1.05/1.07) and 512 262K (1.00).
+
+| K | N | BS | ms_us | rival | r/ms | | K | N | BS | ms_us | rival | r/ms |
+|---|---|----|-------|-------|------|-|---|---|----|-------|-------|------|
+|1024|65536|1|17.66|19.96|1.130| |1024|262144|8|23.01|24.16|1.050|
+|1024|65536|4|18.34|20.10|1.096| |1024|262144|16|23.55|31.36|**1.331**|
+|1024|65536|8|18.69|20.54|1.099| |512|131072|1|16.90|19.12|1.132|
+|1024|65536|16|19.26|21.16|1.098| |512|262144|1|19.87|19.13|0.963|
+|1024|131072|1|18.85|19.91|1.056| |2048|131072|1|21.18|20.09|0.948|
+|1024|131072|4|19.61|20.11|1.025| |2048|262144|1|24.83|19.81|**0.798**|
+|1024|131072|8|20.06|20.71|1.032| |2048|262144|16|26.50|31.97|1.207|
+|1024|131072|16|20.67|24.68|1.194| | | | | | | |
+|1024|262144|1|21.76|20.06|0.922| | | | | | | |
+|1024|262144|4|22.43|20.43|0.911| | | | | | | |
+
+**Remaining holes (iter3 targets)**: K1024 262K BS1/4 (0.91-0.92 vs
+radix_cutedsl ~20.1-20.4us — PLAN's named target needs another ~10%);
+K2048 262K BS1 (0.80 vs radix_cutedsl_multi — worst; cr=1 K-proportional
+costs + C4-only); P1 highBS gap unchanged from iter1 (SGLang 0.77-0.94).
+Levers: C=8 gains ~5% at exactly the losing BS1 cells (needs a
+BS1-only tier or launch-geometry fix for the BS16 collapse), P1b per-row
+cost, K2048 collect column.
+
