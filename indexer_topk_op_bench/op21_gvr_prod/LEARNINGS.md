@@ -64,3 +64,16 @@
 - (iter3) C8-vs-C4 is K-dependent, not just N/BS-dependent: only K2048's
   bigger K-proportional tail amortizes 8-way chunking. K is a compile-time
   dispatch key, so per-K C rules are production-legal.
+- (iter4) no-op subclass overrides (@cute.jit methods overridden to pass)
+  are a 20-minute phase-ablation harness — use BEFORE designing any
+  fixed-cost optimization. They pinned P4 = 3.9-7us in one probe.
+- (iter4) GENERALIZED red line from iter3+iter4: on this kernel family,
+  "distribute the serial fixed part across the cluster" LOSES — the
+  distributed version pays cluster barriers + replicated 256-bin scans
+  that cost as much as the serial work saved, and the serial phase's own
+  fixed machinery (snap setup) survives on the boundary anyway. The
+  productive direction is making the serial phase CHEAPER (op8's
+  rank-scatter-exact P4), not spreading it.
+- (iter4) phase-cost breakdown at P0 BS1 (ablation): P4 3.9-7us >> P3 2-3us
+  >> everything else is the scan+P1 floor (~20us incl. ~11us N-term at
+  262K/C4). Rival floor is ~19-20us — the winnable margin is ALL in P4/P3.

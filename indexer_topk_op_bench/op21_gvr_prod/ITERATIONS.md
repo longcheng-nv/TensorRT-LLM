@@ -178,3 +178,33 @@ cold-gather latency itself (~1024 DRAM lines, irreducible without
 prefetch overlap), ladder tail. Also the P1-grid highBS SGLang gap
 (P1b per-row cost) remains untouched this iter.
 
+## Iter 4 — 2026-07-05 — ablation pins P4; distributed P4 falsified too
+**Ablation (no-op subclass overrides, /tmp probe, event BS1)**:
+| component | K1024 262K C4 | K2048 262K C8 |
+|---|---|---|
+| P4 band snap (leader-only) | **3.9us** | **7.0us** |
+| P3 slots + leader band gather | 2.1us | 3.1us |
+| rest (P1+P1b+ladder+merge) | 20.7us | 19.8us |
+P4 == exactly the remaining rival gap at both named holes.
+
+**Hypothesis tested**: distribute P4 — per-CTA 256-bin histogram of the
+LOCAL band, DSMEM merge, replicated cut-bin pick, bulk (bins > c*)
+emitted distributed at prefix offsets, ONLY the boundary bin gathered to
+the leader for the existing exact snap (provably exact; src flag
+dist_p4, ~200 lines, kept as reference).
+**FALSIFIED (event A/B, 10 cells)**: +0.1..+1.7us everywhere that
+matters (K1024 262K BS1: 28.2 vs 26.6; only 512/262K a -0.2 wash).
+Exactness held everywhere (smoke 27/27, real 180/180).
+**Mechanism**: P4's 3.9-7us is dominated by the snap's OWN fixed
+machinery, which the leader still runs on the boundary bin — the
+pre-filter only ADDED 4 cluster barriers + a replicated 256-bin suffix
+scan on every CTA. Combined with iter3: on this kernel, EVERY
+"distribute the fixed part" move has lost to cluster-barrier cost.
+**Standing**: defaults unchanged (dist_p1=False, dist_p4=False), nsys
+verdict stays iter3's (P0 gm 1.054, 12/17).
+**iter5 leads (re-ranked)**: (a) make the SNAP itself cheaper — op8's P4
+is rank-scatter-exact, not histogram-snap, and op8 posts 20.3us at the
+very cells where our snap costs 3.9-7us: port rank-scatter-exact as the
+band refine (single-CTA benefit too); (b) P1-grid highBS SGLang gap
+(P1b per-row cost, QBINS-vs-BS rule); (c) 16-bit ports (roadmap).
+
