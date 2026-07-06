@@ -6,6 +6,7 @@
 # GVR-family columns are shown for context (no-regression guard).
 import csv
 import math
+import os
 import re
 import subprocess
 import sys
@@ -14,6 +15,10 @@ from pathlib import Path
 _HERE = Path(__file__).resolve().parent
 _ROOT = _HERE.parent
 _REPORT = _HERE.parents[1] / "report"
+# OP21_NSYS_DIR: read reps from an archive dir (e.g. results/nsys/
+# iter9_16bit_b200) instead of the live results/nsys — lets ship-review
+# tables be regenerated without touching an in-flight sweep's dir.
+_NSYS_DIR = Path(os.environ.get("OP21_NSYS_DIR", _ROOT / "results" / "nsys"))
 
 RIVALS = ["radix_single_cuda", "radix_multi_cuda", "radix_cutedsl",
           "radix_cutedsl_single", "radix_cutedsl_multi", "sglang_streaming"]
@@ -60,7 +65,7 @@ def load_rivals():
 
 
 def ms_med_us(K, N, BS):
-    rep = _ROOT / "results" / "nsys" / f"{PREFIX}_k{K}_{DTYPE}_n{N}_bs{BS}.nsys-rep"
+    rep = _NSYS_DIR / f"{PREFIX}_k{K}_{DTYPE}_n{N}_bs{BS}.nsys-rep"
     if not rep.exists():
         return None
     out = subprocess.run(

@@ -532,3 +532,38 @@ applied — needs a K2048-specific P3/P4 look or acceptance),
 (b) fp16 262K BS1/4 residual (~3%), (c) no-regress ship review + B300
 (B300_PROMPT.md ready).
 
+## Iter 10 — 2026-07-06 — ship review + upstream assessment; B300 fp32 verdict
+
+**Session context**: B200 host umbriel-b200-019 (GPU0 cooling broken 75C
+idle — never used; docs-only iteration, no kernel edits). The parallel B300
+session (umb-b300-dp-185) died mid-16-bit-sweep but its background driver
+had already completed the fp32 grid on NFS.
+
+**B300 fp32 cross-check verdict (nsys cold-L2, dp-185 GPU0, rival = B300
+CSV rows)**: gm rival/ms **1.268, win 17/17** (B200 axis: 1.249, 17/17) —
+fp32 is HW-invariant; same pattern shape (weakest cell K1024 262K BS1:
+1.044 B300 vs 1.064 B200; strongest 262K BS16 1.57/1.51). bf16 partial
+(11/17, K1024 column only) 11/11 wins gm 1.097 — matches the B200 pattern;
+the 6 missing cells are exactly where B200's losses live (K2048/K512
+tails). 16-bit completion recipe = B300_RELAUNCH_PROMPT.md (any B300 host;
+archive dp-185 partials first, re-run all 51 cells on one axis).
+
+**Deliverable a — SHIP_REVIEW.md**: consolidated no-regress table (17 P0
+cells × 3 dtypes + 24 P1 fp32 canaries), dispatch distillation (3 C-rules +
+fuse gate, all compile-time keys, CUDA-graph compatible), A/B env-knob
+table with per-knob measured gains, exactness standing, ship risks.
+nsys_verdict.py gained OP21_NSYS_DIR (regenerate tables from archives
+without touching a live sweep dir); iter9 16-bit tables + iter8 P1 table
+reproduced exactly from archives.
+
+**Deliverable b — UPSTREAM_ASSESSMENT.md**: production surface = origin/
+main #14602/#15198/#15304 (kernel + CuteDSLGvrTopKDecodeRunner +
+enable_heuristic_topk in dsa.py); rank-scatter P4 opt-in on
+fork/feat/gvr-rank-scatter-p4 after the ec04147502 exactness revert.
+Lever-by-lever port table; **P0 blocker found: op21 P4 path C carries the
+same fixed-depth inexactness upstream already reverted — must become an
+exact fallback (snap-on-residual-bin) before any default-ON port** (see
+LEARNINGS). Recommended route = Strategy B (kernel-variant PR chain,
+opt-in → tests → dispatch flip), with the e2e plan staged as unit →
+kernel nsys (B200+B300) → dsv4-pareto-bench 3-arm A/B (OFF/ON-old/ON-new)
+→ gsm8k accuracy canary → soak + default flip.

@@ -185,3 +185,31 @@
   site) — but smem_hist[2]/[3] as post-fine-search scratch must respect
   the op8 comment: NOT [0]/[1], the last fine warp's reverse scan reads
   bins down to 0.
+
+## Iter 10 (ship review + upstream assessment) findings
+
+- **P4 path-C fixed-depth rank-scatter is NOT unconditionally exact** —
+  found by cross-reading upstream `ec04147502` (2026-07-01, reverts
+  rank-scatter-P4-default on the PR #15709 branch after 30 adversarial
+  test failures): a fixed-depth histogram cannot separate two distinct
+  values in the same (sub-)bin, so the straddling bin can emit a value
+  below the true K-th rank. op21's `_p4_band_fine_scatter` (path C,
+  1024×256 fixed depth, stash-order emit of the deepest straddling bin)
+  carries the SAME latent mode. Paths A/B are exact; C never fires on
+  real/synth probes (cnt(b*) max=4) and op21's gates never tripped it
+  because they adversarialize preIdx, not logits collision structure
+  (>32 distinct fp32 values inside one fine bin straddling the cut).
+  16-bit duplicates are ties → tie-order emit stays exact.
+  **Port rule: any upstream default-ON needs path C replaced by an exact
+  fallback (snap on the residual bin, or recurse-until-≤32 + register
+  ranking), then the upstream 30-case adversarial suite re-run.** Also:
+  adopt upstream's adversarial multi-bucket logits cases into op21's own
+  smoke suite — current gates have a blind spot there.
+- Upstream production surface for the port: kernel+runner+dsa.py wiring
+  all in origin/main (#14602/#15198/#15304); `enable_heuristic_topk` is
+  the e2e GVR toggle; rank-scatter P4 sits opt-in on
+  `fork/feat/gvr-rank-scatter-p4`. op21's top-3 levers (push, P4 fast
+  paths, fused ladder) form a dependency chain rooted in the P1b/ladder
+  redesign ⇒ incremental patching captures only dispatch+16-bit; the
+  1.14-1.29× vs production needs the kernel-variant route
+  (UPSTREAM_ASSESSMENT.md Strategy B).
