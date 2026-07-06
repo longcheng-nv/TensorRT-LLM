@@ -25,12 +25,13 @@ Continue the op21 GVR production-kernel campaign in
   in ec04147502; must become an exact fallback before any default-ON port
   (LEARNINGS iter10). op21's own gates have a logits-collision blind spot;
   adopt upstream's adversarial multi-bucket cases.
-- **B300 cross-check**: fp32 DONE on umb-b300-dp-185 — gm 1.268, 17/17
-  (HW-invariant vs B200 1.249). 16-bit sweep died 11/34 (driver outlived
-  its session; bf16 K1024 partial 11/11 wins gm 1.097). Completion recipe
-  for ANY B300 host = **B300_RELAUNCH_PROMPT.md** (archive dp-185 partials
-  to results/nsys/iter10_b300_dp185_partial/ first, then re-run all 51
-  cells on one axis). B300_RESULTS.md still pending the 16-bit grids.
+- **B300 cross-check COMPLETE (B300_RESULTS.md)**: 51-cell single-axis
+  grid on umb-b300-dp-192 — **fp32 gm 1.268 (17/17) / bf16 1.089 (15/17)
+  / fp16 1.053 (13/17), HW-INVARIANT vs B200** (gm deltas ≤0.02, zero
+  win→loss flips); K2048 16-bit tail reproduces (structural confirmed);
+  NUM_SMS=148 both parts ⇒ dispatch bit-identical. dp-185 partials
+  archived iter10_b300_dp185_partial/ (dp-192 fp32 reproduces them ±1%).
+  Campaign measurement phase CLOSED.
 - K2048 16-bit BS1 tail: ABLATED and ACCEPTED as structural (ITERATIONS
   iter10 addendum, scripts/ablate_16bit_tail.py): P4 is normal (+0.5us vs
   green K1024 ref); the penalty is floor-resident K-proportional P1
@@ -165,14 +166,12 @@ Continue the op21 GVR production-kernel campaign in
   Update THIS FILE + ITERATIONS.md + LEARNINGS.md in the same commit.
 
 ## Next (post-iter10, ranked)
-(a) Finish B300 16-bit cross-check: run B300_RELAUNCH_PROMPT.md Option A
-    on any B300 host (archive dp-185 partials first); then verdicts
-    (nsys_verdict.py msa bf16/fp16 B300) + B300_RESULTS.md +
-    `[op21 B300]` commit. fp32 verdict already DONE (gm 1.268, 17/17).
-(b) Upstream port PR-1 per UPSTREAM_ASSESSMENT.md Strategy B — FIRST
+(a) Upstream port PR-1 per UPSTREAM_ASSESSMENT.md Strategy B — FIRST
     code change = P4 path-C exact fallback (LEARNINGS iter10 P0
-    blocker), then kernel-variant port + runner extension + tests.
-(c) Deferred: fp16 262K BS1/4 residual (~3%); P1 highBS structural wall.
+    blocker), then kernel-variant port + runner extension + tests;
+    e2e = dsv4-pareto-bench 3-arm A/B + gsm8k canary (Stage 2/3).
+(b) Deferred: fp16 262K BS1/4 residual (~3%, B300 shows 262K BS1 already
+    par-to-win there); P1 highBS structural wall.
 DONE/FALSIFIED (do not retry): C=8 at fp32 262K holes (noise; WINS at
 16-bit — dtype-conditional); P1b QBINS=64 highBS; dist-P1/dist-P4;
 small-bin P4 SHIPPED iter6; P3 push SHIPPED iter7 (OP21_P3_PUSH=0);

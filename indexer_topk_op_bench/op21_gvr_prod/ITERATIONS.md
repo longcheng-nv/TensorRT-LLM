@@ -589,3 +589,17 @@ confirms it is not a ladder/dtype effect. ACCEPTED: the 0.88-0.96 K2048
 DSv4 Flash/Pro are K512/K1024, unaffected). noWG runs P4's degenerate
 band=0 machinery, so noP4-noWG is negative by construction (the two
 ablations are not nested).
+
+**Iter 10 addendum 2 — B300 cross-check COMPLETE (B300_RESULTS.md)**:
+full 51-cell single-axis re-run on umb-b300-dp-192 (Option A relaunch;
+dp-185 partials archived iter10_b300_dp185_partial/). **fp32 gm 1.268
+(17/17) / bf16 1.089 (15/17) / fp16 1.053 (13/17) — HW-INVARIANT** (B200:
+1.249 17/17 / 1.091 15/17 / 1.055 12/17; all gm deltas <=0.02, zero
+win->loss flips; sole loss->win flip = fp16 K1024 262K BS1 +4.2%, below
+the 5% callout bar). K2048 16-bit BS1 tail reproduces on B300 (bf16
+0.958/0.876) — independent confirmation of the ablation's structural-wall
+verdict. NUM_SMS=148 on both parts => dispatch thresholds bit-identical,
+no boundary pathology. Cross-B300-node bonus: dp-192 fp32 reproduces
+dp-185 per-cell within ~±1% (same gm to 3 decimals). Campaign
+measurement phase CLOSED; UPSTREAM_ASSESSMENT Stage-1 pre-port baseline
+done on both architectures.
