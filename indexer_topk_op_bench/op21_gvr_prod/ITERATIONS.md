@@ -350,3 +350,77 @@ warp ranking; fine never fires). **iter7 leads**: (a) P3 leader tail
 (slot walk vs DSMEM band gather ablation split first), (b) 16-bit ports
 (roadmap), (c) then dispatch distillation / no-regress full grid / B300.
 
+## Iter 7 — 2026-07-06 — P3 band remote-store push; P0 gm 1.249, 17/17
+
+**Node move + re-anchor (protocol worked)**: new host umbriel-b200-047
+(both GPUs 31C idle). Anchor cell K512 fp32 262K BS1 on iter6 code:
+20.13us vs iter6-axis 19.94us (+0.95%, inside the 3% band) => same
+measurement axis, iter5/6 tables transfer, no re-baseline. (Note: axis is
+~1% SLOWER than 035-GPU1, so this iter's gains are slightly understated.)
+
+**Split ablation first (scripts/ablate_p3_split.py)**: iter6's "P3" number
+was the slot walk ONLY — the leader DSMEM band gather was INLINE in the
+kernel body, invisible to the no-op-subclass harness, hiding inside the
+"scan floor". Extracted it to `_p3_leader_band_gather` (behavior-identical
+refactor, smoke-gated), then split (event BS1; gat excludes the 2 cluster
+barrier pairs, which the push ALSO removes one of):
+| cell | gather | slot walk | P4 |
+|---|---|---|---|
+| K1024 262K C4 | **1.66** | 0.51 | 3.39 |
+| K512 262K C4 | 0.54 | 1.44 | 2.11 |
+| K2048 262K C8 | **2.40** | 2.21 | 3.01 |
+Gather = the bigger half at exactly the K1024/K2048 hole cells.
+(NoWalk ablation gotcha: the walk publishes s_iscalars[0]=band; a bare
+no-op feeds garbage p_cnt to the gather — the no-op MUST zero the
+published counts. iter6's NoP34 had this hazard; decomposition used
+noGat/noWG increments instead.)
+
+**Shipped — P3 band remote-store push (src/gvr_msc_op.py, default ON,
+OP21_P3_PUSH=0 = gather A/B)**: each CTA's global band prefix b_off is
+already known BEFORE the walk (ladder-count publish), so the slot walk
+writes band entries straight into the LEADER's smem at [b_off + wcb] via
+new `st.shared::cluster` primitives (leader stores locally; peers fire
+remote stores, visibility via the existing release/acquire cluster
+barrier). Deletes the whole gather pass AND one cluster barrier pair +
+the band-count publish. This is the sanctioned "make the serial phase
+cheaper" direction — no new barriers, one fewer (iter3/4 red line
+respected). dist_p4 (falsified reference) needs the local band copy =>
+push forced off there.
+
+**Exactness (all green, push ON)**: synth 54/54 + real single-CTA 60/60 +
+built-in C {2,4,8} smoke + real x C 180/180 + adversarial 36/36; push-OFF
+legacy path re-smoked (extraction lossless) + per-cell exact checks in
+the paired A/B both modes.
+
+**Event screen (paired same-process, 14 cells)**: gm gather/push 1.077,
+win 14/14; biggest K2048 262K BS1 (1.195); P1 single-CTA canaries flat
+(1.002) as expected.
+
+**nsys pure-kernel cold-L2 P0 VERDICT (canonical, 047 GPU=0;
+drive_nsys_iter2.sh + nsys_verdict.py msa; iter6 grid archived to
+results/nsys/iter6_msa/)**: gm rival/ms **1.249** (iter6 1.125), win
+**17/17** — first clean sweep of the P0 grid; vs best GVR-family
+**1.139** (iter6 1.026). ALL four 262K smallBS holes closed:
+K1024 BS1/4 0.967/0.950 -> **1.064/1.038**, K512 BS1 0.960 -> **1.064**,
+K2048 BS1 0.923 -> **1.115**. Per-cell deltas match the event A/B
+(−1.6..−3.7us); no run-order thermal signature.
+
+| K | N | BS | ms_us | rival | r/ms | | K | N | BS | ms_us | rival | r/ms |
+|---|---|----|-------|-------|------|-|---|---|----|-------|-------|------|
+|1024|65536|1|14.11|19.96|1.414| |1024|262144|8|20.19|24.16|1.197|
+|1024|65536|4|14.94|20.10|1.345| |1024|262144|16|20.77|31.36|**1.510**|
+|1024|65536|8|15.20|20.54|1.352| |512|131072|1|15.10|19.12|1.266|
+|1024|65536|16|15.68|21.16|1.349| |512|262144|1|17.98|19.13|1.064|
+|1024|131072|1|15.87|19.91|1.255| |2048|131072|1|17.34|20.09|1.158|
+|1024|131072|4|16.61|20.11|1.211| |2048|262144|1|17.76|19.81|1.115|
+|1024|131072|8|17.02|20.71|1.217| |2048|262144|16|22.43|31.97|1.425|
+|1024|131072|16|17.79|24.68|1.387| | | | | | | |
+|1024|262144|1|18.85|20.06|1.064| | | | | | | |
+|1024|262144|4|19.68|20.43|1.038| | | | | | | |
+
+**Standing**: P0 goal MET (beats all report.html rivals on every P0 cell,
+nsys axis). P1 highBS grid unchanged (single-CTA, SGLang 0.77-0.94
+structural; deprioritized). **iter8 leads**: (a) 16-bit ports (roadmap),
+(b) dispatch distillation (rules already <=3) + no-regress full grid
+(largeN midBS/highBS + P1 canaries), (c) B300 cross-check.
+

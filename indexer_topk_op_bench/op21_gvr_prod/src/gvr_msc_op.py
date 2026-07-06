@@ -49,16 +49,74 @@ from cute_vendored.blackwell.top_k.gvr_topk_decode_cluster import (  # noqa: E40
 from cute_vendored.blackwell.utils import (  # noqa: E402
     TRTLLM_ENABLE_PDL, griddepcontrol_launch_dependents, griddepcontrol_wait,
 )
+from cutlass._mlir.dialects import llvm  # noqa: E402
+from cutlass.cutlass_dsl import T, dsl_user_op  # noqa: E402
 from cutlass.utils.smem_allocator import SmemAllocator  # noqa: E402
+
+
+# ---------------------------------------------------------------------------
+# iter7 DSMEM remote-store primitives (st.shared::cluster counterparts of the
+# vendored ld_shared_cluster_*; same mapa'd-address contract). Visibility to
+# the peer's plain ld.shared is ordered by the release/acquire cluster
+# barrier pair (cluster_arrive/cluster_wait), exactly as for the remote-load
+# direction the gather used.
+# ---------------------------------------------------------------------------
+@dsl_user_op
+def _st_shared_cluster_f32(mapped_addr, val, *, loc=None, ip=None):
+    llvm.inline_asm(
+        None,
+        [mapped_addr.ir_value(loc=loc, ip=ip), val.ir_value(loc=loc, ip=ip)],
+        "st.shared::cluster.f32 [$0], $1;",
+        "r,f",
+        has_side_effects=True,
+        is_align_stack=False,
+        asm_dialect=llvm.AsmDialect.AD_ATT,
+        loc=loc,
+        ip=ip,
+    )
+
+
+@cute.jit
+def st_shared_cluster_f32(mapped_addr, val):
+    _st_shared_cluster_f32(mapped_addr, val)
+
+
+@dsl_user_op
+def _st_shared_cluster_i32(mapped_addr, val, *, loc=None, ip=None):
+    llvm.inline_asm(
+        None,
+        [mapped_addr.ir_value(loc=loc, ip=ip), val.ir_value(loc=loc, ip=ip)],
+        "st.shared::cluster.u32 [$0], $1;",
+        "r,r",
+        has_side_effects=True,
+        is_align_stack=False,
+        asm_dialect=llvm.AsmDialect.AD_ATT,
+        loc=loc,
+        ip=ip,
+    )
+
+
+@cute.jit
+def st_shared_cluster_i32(mapped_addr, val):
+    _st_shared_cluster_i32(mapped_addr, val)
 
 
 class GvrMsClusterKernel(GvrSandwichKernel):
     """C-CTA row-chunked cluster around the mode-5 sandwich. Requires
     place_mode=5, R=1, fuse_collect=True (thresholds known pre-scan)."""
 
-    def __init__(self, *a, C_cta=4, dist_p1=False, dist_p4=False, **kw):
+    def __init__(self, *a, C_cta=4, dist_p1=False, dist_p4=False,
+                 p3_push=True, **kw):
         super().__init__(*a, **kw)
         self.C_cta = int(C_cta)
+        # iter7: P3 band remote-store push — during the slot walk each CTA
+        # writes its band entries straight into the LEADER's smem at its
+        # global band prefix (b_off known pre-walk from the ladder counts),
+        # via st.shared::cluster. Replaces the leader DSMEM gather pass AND
+        # one cluster barrier pair (ablation pinned the gather at 1.7/2.4us
+        # on the K1024/K2048 262K hole cells). dist_p4 needs the LOCAL band
+        # copy, so push is forced off there.
+        self.p3_push = bool(p3_push) and not bool(dist_p4)
         # iter4: distributed P4 — the leader-only band snap measured as THE
         # dominant fixed cost (ablation 2026-07-05: 3.9us @K1024, 7.0us
         # @K2048 C8). Bulk (bins > cut) emitted by every CTA; only the
@@ -401,7 +459,8 @@ class GvrMsClusterKernel(GvrSandwichKernel):
     def phase3_from_slots_mc(
         self, smem_slotk, smem_slotv, smem_keys, smem_vals, smem_ptcnt,
         smem_ptcnt_up, smem_ptcnt_multi, smem_wcnt, s_thr, s_swf,
-        s_iscalars, output_indices_row, d_off, tidx, warp_id, lane,
+        s_iscalars, output_indices_row, d_off, b_off, rank, tidx, warp_id,
+        lane,
     ):
         kCC = cutlass.const_expr(self.kC)
         PC = cutlass.const_expr(self.pred_col)
@@ -441,19 +500,46 @@ class GvrMsClusterKernel(GvrSandwichKernel):
         if my_lc > cutlass.Int32(S):
             my_lc = cutlass.Int32(S)
         slot_base = tidx * cutlass.Int32(S)
-        sw = cutlass.Int32(0)
-        while sw < my_lc:
-            v = smem_slotk[slot_base + sw]
-            if v >= thr1:
-                if v >= thr0:
-                    if wc0 < cutlass.Int32(self.top_k):
-                        output_indices_row[wc0] = smem_slotv[slot_base + sw]
-                        wc0 = wc0 + cutlass.Int32(1)
-                elif wcb < cutlass.Int32(kCC):
-                    smem_keys[wcb] = v
-                    smem_vals[wcb] = smem_slotv[slot_base + sw]
-                    wcb = wcb + cutlass.Int32(1)
-            sw = sw + cutlass.Int32(1)
+        if cutlass.const_expr(self.p3_push):
+            # iter7 push: band entries land at the GLOBAL prefix position in
+            # the LEADER's smem (b_off local-CTA global band offset + wcb
+            # local prefix). Leader stores locally (b_off == 0 for rank 0);
+            # peers fire st.shared::cluster. Visibility to the leader's P4 is
+            # ordered by the caller's cluster_arrive/wait.
+            wcg = b_off + wcb
+            sw = cutlass.Int32(0)
+            while sw < my_lc:
+                v = smem_slotk[slot_base + sw]
+                if v >= thr1:
+                    if v >= thr0:
+                        if wc0 < cutlass.Int32(self.top_k):
+                            output_indices_row[wc0] = smem_slotv[slot_base + sw]
+                            wc0 = wc0 + cutlass.Int32(1)
+                    elif wcg < cutlass.Int32(kCC):
+                        if rank == cutlass.Int32(0):
+                            smem_keys[wcg] = v
+                            smem_vals[wcg] = smem_slotv[slot_base + sw]
+                        else:
+                            ka = mapa_shared_cluster(smem_keys.iterator + wcg, cutlass.Int32(0))
+                            va = mapa_shared_cluster(smem_vals.iterator + wcg, cutlass.Int32(0))
+                            st_shared_cluster_f32(ka, v)
+                            st_shared_cluster_i32(va, smem_slotv[slot_base + sw])
+                        wcg = wcg + cutlass.Int32(1)
+                sw = sw + cutlass.Int32(1)
+        else:
+            sw = cutlass.Int32(0)
+            while sw < my_lc:
+                v = smem_slotk[slot_base + sw]
+                if v >= thr1:
+                    if v >= thr0:
+                        if wc0 < cutlass.Int32(self.top_k):
+                            output_indices_row[wc0] = smem_slotv[slot_base + sw]
+                            wc0 = wc0 + cutlass.Int32(1)
+                    elif wcb < cutlass.Int32(kCC):
+                        smem_keys[wcb] = v
+                        smem_vals[wcb] = smem_slotv[slot_base + sw]
+                        wcb = wcb + cutlass.Int32(1)
+                sw = sw + cutlass.Int32(1)
         cute.arch.barrier()
 
     # ------------------------------------------------------------------
@@ -654,6 +740,35 @@ class GvrMsClusterKernel(GvrSandwichKernel):
                                   None, output_indices_row,
                                   cutbin_total, r_rem, m0g + above_g,
                                   tidx, warp_id, lane)
+
+    # ------------------------------------------------------------------
+    # iter7: leader DSMEM band gather (op8 Shift-D pattern), extracted from
+    # the kernel body so phase ablation can no-op it independently of the
+    # P3 slot walk. Copies each peer's compacted band entries
+    # (smem_keys/vals[0..p_cnt)) into the leader's smem at the peer's global
+    # band prefix p_off (both packed in s_cluster[M] as off<<16|cnt).
+    # Caller owns the surrounding cluster barriers.
+    # ------------------------------------------------------------------
+    @cute.jit
+    def _p3_leader_band_gather(self, rank, smem_keys, smem_vals, s_cluster,
+                               tidx):
+        M = cutlass.const_expr(self.M_thr)
+        C = cutlass.const_expr(self.C_cta)
+        num_threads = cutlass.const_expr(self.num_threads)
+        if rank == cutlass.Int32(0):
+            for peer in cutlass.range_constexpr(C):
+                if cutlass.const_expr(peer > 0):
+                    pa = mapa_shared_cluster(s_cluster.iterator + cutlass.Int32(M), cutlass.Int32(peer))
+                    pk = ld_shared_cluster_i32(pa)
+                    p_off = pk >> cutlass.Int32(16)
+                    p_cnt = pk & cutlass.Int32(0xFFFF)
+                    ig = tidx
+                    while ig < p_cnt:
+                        ka = mapa_shared_cluster(smem_keys.iterator + ig, cutlass.Int32(peer))
+                        va = mapa_shared_cluster(smem_vals.iterator + ig, cutlass.Int32(peer))
+                        smem_keys[p_off + ig] = ld_shared_cluster_f32(ka)
+                        smem_vals[p_off + ig] = ld_shared_cluster_i32(va)
+                        ig = ig + cutlass.Int32(num_threads)
 
     @cute.kernel
     def gvr_topk_kernel(self, input_data, pre_idx, seq_lens, output_values, output_indices):
@@ -873,11 +988,13 @@ class GvrMsClusterKernel(GvrSandwichKernel):
                         s_cluster[M + 4] = b_off
                     cute.arch.barrier()
                     d_off = s_cluster[M + 3]
+                    b_off2 = s_cluster[M + 4]
                     self.phase3_from_slots_mc(
                         smem_slotk, smem_slotv, smem_keys, smem_vals,
                         smem_ptcnt, smem_ptcnt_up, smem_ptcnt_multi,
                         smem_wcnt, s_thr, s_swf, s_iscalars,
-                        output_indices_row, d_off, tidx, warp_id, lane)
+                        output_indices_row, d_off, b_off2, rank, tidx,
+                        warp_id, lane)
                     if cutlass.const_expr(self.dist_p4):
                         # ---- iter4: distributed P4 (bulk emitted by every
                         # CTA; only the boundary bin goes to the leader) ----
@@ -889,29 +1006,26 @@ class GvrMsClusterKernel(GvrSandwichKernel):
                                          output_indices_row, tidx, warp_id,
                                          lane)
                     else:
-                        # publish local band count for the leader gather
-                        if tidx == 0:
-                            s_cluster[M] = (s_cluster[M + 4] << cutlass.Int32(16)) | s_iscalars[0]
-                        cute.arch.cluster_arrive()
-                        cute.arch.cluster_wait()
+                        if cutlass.const_expr(self.p3_push):
+                            # iter7: band already pushed into the leader's
+                            # smem during the walk — ONE release/acquire
+                            # cluster barrier makes the remote stores
+                            # visible; no publish, no gather pass.
+                            cute.arch.cluster_arrive()
+                            cute.arch.cluster_wait()
+                        else:
+                            # publish local band count for the leader gather
+                            if tidx == 0:
+                                s_cluster[M] = (s_cluster[M + 4] << cutlass.Int32(16)) | s_iscalars[0]
+                            cute.arch.cluster_arrive()
+                            cute.arch.cluster_wait()
 
-                        # ---- leader: gather peers' band entries via DSMEM ----
-                        if rank == cutlass.Int32(0):
-                            for peer in cutlass.range_constexpr(C):
-                                if cutlass.const_expr(peer > 0):
-                                    pa = mapa_shared_cluster(s_cluster.iterator + cutlass.Int32(M), cutlass.Int32(peer))
-                                    pk = ld_shared_cluster_i32(pa)
-                                    p_off = pk >> cutlass.Int32(16)
-                                    p_cnt = pk & cutlass.Int32(0xFFFF)
-                                    ig = tidx
-                                    while ig < p_cnt:
-                                        ka = mapa_shared_cluster(smem_keys.iterator + ig, cutlass.Int32(peer))
-                                        va = mapa_shared_cluster(smem_vals.iterator + ig, cutlass.Int32(peer))
-                                        smem_keys[p_off + ig] = ld_shared_cluster_f32(ka)
-                                        smem_vals[p_off + ig] = ld_shared_cluster_i32(va)
-                                        ig = ig + cutlass.Int32(num_threads)
-                        cute.arch.cluster_arrive()
-                        cute.arch.cluster_wait()
+                            # ---- leader: gather peers' band entries via DSMEM ----
+                            self._p3_leader_band_gather(rank, smem_keys,
+                                                        smem_vals, s_cluster,
+                                                        tidx)
+                            cute.arch.cluster_arrive()
+                            cute.arch.cluster_wait()
                         if rank == cutlass.Int32(0):
                             band_g = m1g - m0g
                             if band_g > cutlass.Int32(kC):
@@ -991,7 +1105,10 @@ def _compile(dtype, n, K, cr_val, C, threads, dist_p1=False, dist_p4=False):
     p4_rs = os.environ.get("OP21_P4_RS", "1") == "1"
     # iter6 A/B: OP21_P4_FAST=0 forces the fine-recursion path (no fast paths)
     p4_fast = os.environ.get("OP21_P4_FAST", "1") == "1"
-    key = (dtype, n, K, cr_val, C, threads, dist_p1, dist_p4, p4_rs, p4_fast)
+    # iter7 A/B: OP21_P3_PUSH=0 restores the leader DSMEM gather (2 barriers)
+    p3_push = os.environ.get("OP21_P3_PUSH", "1") == "1"
+    key = (dtype, n, K, cr_val, C, threads, dist_p1, dist_p4, p4_rs, p4_fast,
+           p3_push)
     if key in _compiled:
         return _compiled[key]
     use256 = (n >= 16384)
@@ -1002,7 +1119,7 @@ def _compile(dtype, n, K, cr_val, C, threads, dist_p1=False, dist_p4=False):
                               M_thr=4, R_rounds=1, band_accept=64, place_mode=5,
                               fuse_collect=True, C_cta=C, dist_p1=dist_p1,
                               dist_p4=dist_p4, p4_rank_scatter=p4_rs,
-                              p4_smallbin=p4_fast)
+                              p4_smallbin=p4_fast, p3_push=p3_push)
     nr, nc, nb = cute.sym_int(), cute.sym_int(), cute.sym_int()
     ia = 32 if use256 else 16
     in_f = cr.make_fake_compact_tensor(_DT[dtype], (nr, nc), stride_order=(1, 0), assumed_align=ia)

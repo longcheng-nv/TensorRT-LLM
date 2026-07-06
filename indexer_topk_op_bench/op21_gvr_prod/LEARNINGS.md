@@ -115,6 +115,28 @@
   search, smem_hist is dead EXCEPT via cnt(b*) — read it into a register
   BEFORE stashing into smem_hist[8..39], then the alias with b_star in
   [8,40) is harmless because no pass re-reads the coarse hist.
+- (iter7) INLINE phases are ablation blind spots: iter6's "P3" cost was
+  the slot walk only — the leader DSMEM band gather sat inline in the
+  kernel body, so the no-op-subclass harness never saw its 1.7-2.4us and
+  it masqueraded as "scan floor". Keep every phase in an overridable
+  method; if an ablation table says the floor is at the rival bar, first
+  ask what code is NOT behind a method.
+- (iter7) no-op'ing a phase that PUBLISHES counts must still publish
+  deterministic zeros: a bare `pass` walk fed garbage p_cnt (bounded
+  0xFFFF) to the downstream gather and distorts the probe. Decompose with
+  increments where the consumer is already no-op'd (noGat -> noWG).
+- (iter7) remote-STORE push beats remote-LOAD gather for cluster band
+  collection: st.shared::cluster is fire-and-forget (no round-trip stall)
+  and the destination offset (global band prefix b_off) is already known
+  BEFORE the walk from the ladder-count publish — so pushing during the
+  walk is placement-free and deletes the whole gather pass + one cluster
+  barrier pair + the count publish. Event gm 1.077 (14/14), nsys P0 gm
+  1.125 -> 1.249. Distinct from the red-lined "distribute the serial
+  part": no new barriers — one FEWER.
+- (iter7) the campaign's biggest single-iter gain (+11% gm) came from a
+  phase that had never appeared in any ablation table (see blind-spot
+  note above) — re-run the ablation split after every structural change;
+  the ranking moves.
 - (iter5) op8's exact rank-scatter P4 ports cleanly onto the band refine:
   band range [thr1, thr0) is already known (op8's min/max pass drops out),
   rank target k_rem is runtime (vs op8's const K), all positions shift by

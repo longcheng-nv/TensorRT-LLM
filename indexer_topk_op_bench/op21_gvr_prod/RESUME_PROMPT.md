@@ -14,14 +14,27 @@ Continue the op21 GVR production-kernel campaign in
    tables (canonical numbers live here).
 3. `op21_gvr_prod/LEARNINGS.md` — falsified levers + mechanisms.
 
-## State after iter6 (2026-07-06, commits 2f35c0d192..HEAD)
+## State after iter7 (2026-07-06, commits 2f35c0d192..HEAD)
+- iter7 SHIPPED P3 band remote-store push (src/gvr_msc_op.py): the slot
+  walk writes band entries straight into the LEADER's smem at the
+  pre-known global band prefix via new st.shared::cluster primitives —
+  deletes the leader DSMEM gather pass + one cluster barrier pair +
+  the count publish. OP21_P3_PUSH=0 restores the gather (A/B).
+  **P0 nsys gm 1.249, win 17/17 — first clean P0 sweep; vs op8 gm
+  1.139. ALL four 262K smallBS holes closed** (K1024 BS1/4 1.064/1.038,
+  K512 BS1 1.064, K2048 BS1 1.115). Verdict grid measured on
+  umbriel-b200-047 GPU0 (anchor 20.13us = iter6 axis +0.95%, transfers;
+  iter6 grid archived results/nsys/iter6_msa/).
+  KEY LESSON: the gather was INLINE in the kernel body => invisible to
+  every prior no-op ablation ("scan floor" lied by 1.7-2.4us). All
+  phases now behind overridable methods; split probe =
+  scripts/ablate_p3_split.py (walk no-op must publish zero counts).
 - iter6 SHIPPED small-bin P4 fast paths in phase4_band_rank_scatter
   (host probe: cnt(b*) p50=2 max=4 => path B = warp0 exact register
   ranking of <=32 b* members covers ~100%; path A = big-bin equality
   whole-bin emit; path C = fine recursion extracted to
   _p4_band_fine_scatter, fallback-only). OP21_P4_FAST=0 forces fine.
-  **P0 nsys gm 1.125, win 13/17; vs op8 gm 1.026.** Both-mode exactness
-  green (FAST=0 validates the extracted fine path). GOTCHA: event A/B
+  P0 nsys gm 1.125, win 13/17; vs op8 gm 1.026. GOTCHA: event A/B
   showed a reproducible-but-FALSE 0.957 at K512 131K BS1 — nsys refuted
   it (codegen jitter); nsys arbitrates single-cell event verdicts.
 - iter1 `src/gvr_ms_op.py`: single-CTA `gvr_ms`, mode-5 rank-quantile
@@ -60,12 +73,14 @@ Continue the op21 GVR production-kernel campaign in
   4. **RE-ANCHOR THE MEASUREMENT AXIS** before comparing to any table in
      ITERATIONS.md: run the anchor cell (K512 fp32 262144 BS1, e.g.
      `GPU=<healthy> nsys ... scripts/nsys_run_auto.py 512 fp32 262144 1
-     60`) — expected ~19.9±0.3us on the iter5/6 axis. Off by >3% =>
-     different-silicon axis: re-run the FULL 17-cell grid once
-     (drive_nsys_iter2.sh) to establish the new baseline before judging
-     any new lever; rival CSV bars (report/{bs,seqlen}_data.csv) were
-     measured on yet another B200 — per-cell rival ratios remain the
-     canonical metric, absolute us do not transfer across nodes.
+     60`) — expected ~18.0±0.3us on the iter7 axis (post-push HEAD;
+     ~19.9us if OP21_P3_PUSH=0). Off by >3% => different-silicon axis:
+     re-run the FULL 17-cell grid once (drive_nsys_iter2.sh) to
+     establish the new baseline before judging any new lever; rival CSV
+     bars (report/{bs,seqlen}_data.csv) were measured on yet another
+     B200 — per-cell rival ratios remain the canonical metric, absolute
+     us do not transfer across nodes. (Axis history: 035-GPU1 = iter5/6;
+     047-GPU0 = iter7, +0.95% vs 035-GPU1 on the anchor.)
 - Old host umbriel-b200-035: GPU0 cooling BROKEN as of 2026-07-06 (79C
   idle, +13% mid-sweep drift poisoned the first iter5 grid) — if back on
   035, canonical nsys goes GPU=1. Paired same-process event A/B is
@@ -92,27 +107,23 @@ Continue the op21 GVR production-kernel campaign in
   `Made-with: Claude Code` + `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`.
   Update THIS FILE + ITERATIONS.md + LEARNINGS.md in the same commit.
 
-## Next (iter7 leads, ranked)
-(a) P3 leader tail (~2.0-3.4us ablation): split it first — no-op ablate
-    slot walk vs DSMEM leader band gather separately (iter4 no-op
-    subclass pattern) — then attack the bigger half. Red line: no new
-    cluster barrier unless it buys >0.5us. P4 is essentially drained
-    (fast path = 1 band pass + 2 barriers + warp ranking).
-(b) 16-bit ports (roadmap item, untouched; kNumBins differs — 512/2048 —
-    and the small-bin CAP/fine semantics need real-capture re-validation).
-(c) Then iter5-roadmap tail: dispatch distillation (rules already <=3),
-    no-regress full grid, B300 cross-check.
+## Next (iter8 leads, ranked) — P0 goal is MET; remaining = roadmap tail
+(a) 16-bit ports (roadmap item, untouched; kNumBins differs — 512/2048 —
+    and the small-bin CAP/fine semantics need real-capture re-validation;
+    push port should be mechanical but needs the exactness gates).
+(b) Dispatch distillation (rules already <=3) + no-regress FULL grid
+    (largeN midBS/highBS + P1 canaries must not regress).
+(c) B300 cross-check.
+(d) Optional stretch: P1 highBS grid (SGLang 0.77-0.94, single-CTA
+    scan/ladder structural — the known deprioritized wall).
 DONE/FALSIFIED (do not retry): C=8 tier at 262K holes (+0.6-1.3% noise);
 P1b QBINS=64 at highBS (gm 1.004); dist-P1/dist-P4; small-bin P4 fast
-paths SHIPPED in iter6.
-Then: iter5-roadmap tail = dispatch distillation (rules already <=3),
-no-regress full grid (largeN midBS/highBS must not regress), B300
-cross-check.
+paths SHIPPED iter6; P3 push SHIPPED iter7 (gather A/B via
+OP21_P3_PUSH=0).
 
-## Open holes (nsys, after iter6)
-- Only the four 262K smallBS cells: K1024 BS1/4 0.967/0.950 (0.7-1.1us
-  over the ~20.1-20.4us bar), K512 BS1 0.960, K2048 BS1 0.923 [C8 tier].
-- P1 grid (N 4-16K, BS 64-1024): gm 0.816 (iter1 measurement; iter5/6
-  event screens suggest ~5-10% total improvement since), SGLang-dominated;
-  BS64 smallN vs radix 0.60-0.79 is the known deprioritized structural
-  wall. P1b (QBINS) ruled out as the cause.
+## Open holes (nsys, after iter7)
+- P0 grid: NONE — 17/17 wins, gm 1.249 (rival) / 1.139 (op8).
+- P1 grid (N 4-16K, BS 64-1024): gm 0.816 (iter1 measurement; event
+  screens suggest ~5-10% total improvement since; push is a no-op there
+  — single-CTA), SGLang-dominated; BS64 smallN vs radix 0.60-0.79 is the
+  known deprioritized structural wall. P1b (QBINS) ruled out as cause.
