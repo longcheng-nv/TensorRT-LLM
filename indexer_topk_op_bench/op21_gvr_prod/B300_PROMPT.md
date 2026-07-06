@@ -1,20 +1,21 @@
 # op21 B300 cross-check — paste this into a fresh Claude Code session ON A B300 HOST
 
 Goal: HW-invariance cross-check of the op21 production GVR kernel
-(`gvr_ms_auto`) after iter8 — fp32 P0 grid + bf16/fp16 P0 grids, nsys
+(`gvr_ms_auto`) after iter9 — fp32 P0 grid + bf16/fp16 P0 grids, nsys
 pure-kernel cold-L2, verdict vs the per-cell best rival from the report
 CSVs **B300** rows. This is a MEASUREMENT-ONLY session: no kernel edits,
 no dispatch-rule edits (verdicts feed the next B200 session's decisions).
 
 Read first (same NFS checkout, branch `omni/op21-gvr-prod`):
 1. `indexer_topk_op_bench/op21_gvr_prod/RESUME_PROMPT.md` — campaign
-   state (fp32 B200 gm 1.249 17/17; bf16 1.028 / fp16 1.043 both 11/17).
+   state (B200 standings: fp32 gm 1.249 17/17; bf16 1.091 15/17;
+   fp16 1.055 12/17 — the 16-bit grids are the iter9 NATIVE-ladder ones).
 2. `op21_gvr_prod/PLAN.md` §Gates — measurement protocol; nsys is the
    only verdict axis.
 
 ## Steps
-1. `cd` this checkout; `git log --oneline -1` must show `[op21 iter8]`
-   (b1e50149b5) or later. Env: `python3 -c "import torch, cutlass"`.
+1. `cd` this checkout; `git log --oneline -1` must show `[op21 iter9]`
+   (ccb22734b0) or later. Env: `python3 -c "import torch, cutlass"`.
 2. GPU preflight: `nvidia-smi --query-gpu=index,temperature.gpu
    --format=csv` — idle >50C ⇒ do not use that GPU (see
    env_b200_035 thermal lesson; applies to B300 nodes too).
@@ -28,7 +29,7 @@ Read first (same NFS checkout, branch `omni/op21-gvr-prod`):
      do NOT overwrite; the driver skips existing files).
    - `GPU=<g> bash scripts/drive_nsys_16bit.sh` (bf16+fp16, 34 cells) —
      same: first archive `msa_k*_{bf16,fp16}_*` to
-     `results/nsys/iter8_16bit_b200/`.
+     `results/nsys/iter9_16bit_b200/` (iter9 native-ladder grid).
 5. Verdicts (rival = B300 rows of report CSVs):
    - `python3 scripts/nsys_verdict.py msa fp32 B300`
    - `python3 scripts/nsys_verdict.py msa bf16 B300`
