@@ -154,6 +154,30 @@
   write: dtype-truncated captures + tie-robust value_metrics — 360 checks
   caught zero issues, confirming the fp32-validated band/P4 semantics are
   dtype-independent (kNumBins differences included).
+- (iter9) threshold-quantization is the key that unlocks native 16-bit
+  compares EXACTLY: quantize every P1b column to the dtype grid ONCE at
+  emit (thr_q = f32(dtype(thr))) and the 16-bit-domain ladder compares
+  become bit-equivalent to the fp32 compares all other phases perform on
+  the exactly-embedded values — no per-phase changes, no tie-semantics
+  change (band inclusion of the tie group at thr is identical either
+  side of quantization). Microbench counts matched on every config;
+  real gate 360/360.
+- (iter9) packed-16x2 count accumulate (set.ge + add.rn) needs a flush
+  cadence bound, not luck: per-half growth <= pairs/iter (8 at 256-bit),
+  bf16 integers exact to 256 => flush every 16 iters costs ~nothing and
+  is provably exact at any N. The collect column CANNOT use the packed
+  accumulator (slot cursor must be exact per element) — use the
+  set.ge.u32 mask + rare half-extract; keeping PC out of the packed loop
+  also avoids double-booking its count.
+- (iter9) microbench-first paid again: 3 candidate compare schemes
+  ranked in 20 minutes of .cu work (p2 1.73x, p1 1.31x, both ~1.0 at
+  full occupancy) BEFORE touching the DSL — and the occupancy result
+  predicted exactly where the production win would and wouldn't show
+  (largeN smallBS yes, highBS canaries no).
+- (iter9) fp16 event-axis showed reproducible ~5% single-cell
+  regressions that nsys refuted at ~1% — third instance of the
+  codegen-jitter lie (iter6, iter8 boundary probes, now iter9);
+  single-cell event verdicts never gate a multi-cell winner.
 - (iter5) op8's exact rank-scatter P4 ports cleanly onto the band refine:
   band range [thr1, thr0) is already known (op8's min/max pass drops out),
   rank target k_rem is runtime (vs op8's const K), all positions shift by

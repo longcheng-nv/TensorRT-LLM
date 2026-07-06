@@ -39,7 +39,10 @@ _BENCH = _HERE.parents[1]
 sys.path.insert(0, str(_BENCH / "ops"))
 sys.path.insert(0, str(_BENCH / "harness"))
 sys.path.insert(0, str(_HERE))
-from gvr_ms_op import GvrSandwichKernel, gvr_ms, NUM_SMS, _DT, _INT_MAX  # noqa: E402
+from gvr_ms_op import (  # noqa: E402
+    GvrSandwichKernel, gvr_ms, NUM_SMS, _DT, _INT_MAX, pack2_16_from_f32,
+    setge_add2_16, setge_mask2_16, pair_half_f32_16, pair_sum_i32_16,
+)
 from cute_vendored.blackwell.top_k.gvr_topk_decode import (  # noqa: E402
     _fmin_f32_inline, atomicAdd,
 )
@@ -130,6 +133,11 @@ class GvrMsClusterKernel(GvrSandwichKernel):
         # nearly free; the 3 extra cluster barriers cost more than the
         # saved loads. (event A/B 2026-07-05, 8 cells)
         self.dist_p1 = bool(dist_p1)
+        # iter9: phase1b_dist (the dist_p1 reference) does not quantize its
+        # thresholds to the dtype grid — the native-compare ladder would be
+        # inconsistent with the fp32 phases there, so force it off.
+        if self.dist_p1:
+            self.p2_native = False
         assert self.place_mode == 5 and self.R_rounds == 1 and self.fuse_collect
         assert self.C_cta >= 2
         assert self.top_k % self.C_cta == 0, "dist P1 needs C | K"
@@ -371,29 +379,75 @@ class GvrMsClusterKernel(GvrSandwichKernel):
         step = cutlass.Int32(step_elem)
 
         if self.enable_unroll_4:
-            rng_frag = cute.make_fragment((vec_w,), self.dtype)
             big_iters = cutlass.Int32(0)
             if Ns > i + cutlass.Int32(vec_w - 1):
                 big_iters = (Ns - i - cutlass.Int32(vec_w)) // cutlass.Int32(step_elem) + cutlass.Int32(1)
-            for k in cutlass.range(big_iters, unroll=self.mt_unroll):
-                i_local = i + k * cutlass.Int32(step_elem)
-                src_ptr_k = cute.make_ptr(
-                    self.dtype, row_addr + cutlass.Int64(i_local) * cutlass.Int64(elem_bytes),
-                    cute.AddressSpace.gmem, assumed_align=vec_align)
-                src_k = cute.make_tensor(src_ptr_k, cute.make_layout((vec_w,)))
-                cute.copy(copy_atom, src_k, rng_frag)
-                for j in cutlass.range_constexpr(vec_w):
-                    if cutlass.const_expr(self.dtype == cutlass.Float32):
-                        vj = rng_frag[j]
-                    else:
-                        vj = cutlass.Float32(rng_frag[j])
-                    if vj >= thr_frag[PC]:
-                        cpos = cnt_frag[PC]
-                        if cpos < cutlass.Int32(S):
-                            smem_slotk[slot_base + cpos] = vj
-                            smem_slotv[slot_base + cpos] = base + i_local + cutlass.Int32(j)
-                    for m in cutlass.range_constexpr(M):
-                        cnt_frag[m] = cnt_frag[m] + cutlass.Int32(vj >= thr_frag[m])
+            if cutlass.const_expr(self._p2n()):
+                # iter9 native 16-bit paired path (see gvr_ms_op ladder)
+                kind = self._kind16()
+                vec_w2 = cutlass.const_expr(vec_w // 2)
+                copy_atom_u32 = self._make_load_copy_atom_u32()
+                rng2_frag = cute.make_fragment((vec_w2,), cutlass.Int32)
+                thr2_frag = cute.make_fragment((M,), cutlass.Int32)
+                acc2_frag = cute.make_fragment((M,), cutlass.Int32)
+                for m in cutlass.range_constexpr(M):
+                    thr2_frag[m] = pack2_16_from_f32(thr_frag[m], kind)
+                    acc2_frag[m] = cutlass.Int32(0)
+                ccol = cutlass.Int32(0)
+                for k in cutlass.range(big_iters, unroll=self.mt_unroll):
+                    i_local = i + k * cutlass.Int32(step_elem)
+                    src_ptr_k = cute.make_ptr(
+                        cutlass.Int32, row_addr + cutlass.Int64(i_local) * cutlass.Int64(elem_bytes),
+                        cute.AddressSpace.gmem, assumed_align=vec_align)
+                    src_k = cute.make_tensor(src_ptr_k, cute.make_layout((vec_w2,)))
+                    cute.copy(copy_atom_u32, src_k, rng2_frag)
+                    for p in cutlass.range_constexpr(vec_w2):
+                        v2 = rng2_frag[p]
+                        mpc = setge_mask2_16(v2, thr2_frag[PC], kind)
+                        if mpc != cutlass.Int32(0):
+                            if (mpc & cutlass.Int32(0xFFFF)) != cutlass.Int32(0):
+                                if ccol < cutlass.Int32(S):
+                                    smem_slotk[slot_base + ccol] = pair_half_f32_16(v2, 0, kind)
+                                    smem_slotv[slot_base + ccol] = base + i_local + cutlass.Int32(2 * p)
+                                ccol = ccol + cutlass.Int32(1)
+                            if (mpc >> cutlass.Int32(16)) != cutlass.Int32(0):
+                                if ccol < cutlass.Int32(S):
+                                    smem_slotk[slot_base + ccol] = pair_half_f32_16(v2, 1, kind)
+                                    smem_slotv[slot_base + ccol] = base + i_local + cutlass.Int32(2 * p + 1)
+                                ccol = ccol + cutlass.Int32(1)
+                        for m in cutlass.range_constexpr(M):
+                            if cutlass.const_expr(m != self.pred_col):
+                                acc2_frag[m] = setge_add2_16(acc2_frag[m], v2, thr2_frag[m], kind)
+                    if (k & cutlass.Int32(15)) == cutlass.Int32(15):
+                        for m in cutlass.range_constexpr(M):
+                            if cutlass.const_expr(m != self.pred_col):
+                                cnt_frag[m] = cnt_frag[m] + pair_sum_i32_16(acc2_frag[m], kind)
+                                acc2_frag[m] = cutlass.Int32(0)
+                for m in cutlass.range_constexpr(M):
+                    if cutlass.const_expr(m != self.pred_col):
+                        cnt_frag[m] = cnt_frag[m] + pair_sum_i32_16(acc2_frag[m], kind)
+                cnt_frag[PC] = ccol
+            else:
+                rng_frag = cute.make_fragment((vec_w,), self.dtype)
+                for k in cutlass.range(big_iters, unroll=self.mt_unroll):
+                    i_local = i + k * cutlass.Int32(step_elem)
+                    src_ptr_k = cute.make_ptr(
+                        self.dtype, row_addr + cutlass.Int64(i_local) * cutlass.Int64(elem_bytes),
+                        cute.AddressSpace.gmem, assumed_align=vec_align)
+                    src_k = cute.make_tensor(src_ptr_k, cute.make_layout((vec_w,)))
+                    cute.copy(copy_atom, src_k, rng_frag)
+                    for j in cutlass.range_constexpr(vec_w):
+                        if cutlass.const_expr(self.dtype == cutlass.Float32):
+                            vj = rng_frag[j]
+                        else:
+                            vj = cutlass.Float32(rng_frag[j])
+                        if vj >= thr_frag[PC]:
+                            cpos = cnt_frag[PC]
+                            if cpos < cutlass.Int32(S):
+                                smem_slotk[slot_base + cpos] = vj
+                                smem_slotv[slot_base + cpos] = base + i_local + cutlass.Int32(j)
+                        for m in cutlass.range_constexpr(M):
+                            cnt_frag[m] = cnt_frag[m] + cutlass.Int32(vj >= thr_frag[m])
             i = i + big_iters * cutlass.Int32(step_elem)
 
         tail_frag = cute.make_fragment((vec_w,), self.dtype)
@@ -1107,8 +1161,10 @@ def _compile(dtype, n, K, cr_val, C, threads, dist_p1=False, dist_p4=False):
     p4_fast = os.environ.get("OP21_P4_FAST", "1") == "1"
     # iter7 A/B: OP21_P3_PUSH=0 restores the leader DSMEM gather (2 barriers)
     p3_push = os.environ.get("OP21_P3_PUSH", "1") == "1"
+    # iter9 A/B: OP21_P2_NATIVE=0 restores the cvt->fp32 ladder (16-bit only)
+    p2_nat = os.environ.get("OP21_P2_NATIVE", "1") == "1"
     key = (dtype, n, K, cr_val, C, threads, dist_p1, dist_p4, p4_rs, p4_fast,
-           p3_push)
+           p3_push, p2_nat)
     if key in _compiled:
         return _compiled[key]
     use256 = (n >= 16384)
@@ -1119,7 +1175,8 @@ def _compile(dtype, n, K, cr_val, C, threads, dist_p1=False, dist_p4=False):
                               M_thr=4, R_rounds=1, band_accept=64, place_mode=5,
                               fuse_collect=True, C_cta=C, dist_p1=dist_p1,
                               dist_p4=dist_p4, p4_rank_scatter=p4_rs,
-                              p4_smallbin=p4_fast, p3_push=p3_push)
+                              p4_smallbin=p4_fast, p3_push=p3_push,
+                              p2_native=p2_nat)
     nr, nc, nb = cute.sym_int(), cute.sym_int(), cute.sym_int()
     ia = 32 if use256 else 16
     in_f = cr.make_fake_compact_tensor(_DT[dtype], (nr, nc), stride_order=(1, 0), assumed_align=ia)

@@ -56,6 +56,7 @@ from cute_vendored.blackwell.utils import (  # noqa: E402
     TRTLLM_ENABLE_PDL, griddepcontrol_launch_dependents, griddepcontrol_wait,
 )
 from cutlass._mlir.dialects import llvm  # noqa: E402
+from cutlass.cutlass_dsl import T, dsl_user_op  # noqa: E402
 from cutlass.utils.smem_allocator import SmemAllocator  # noqa: E402
 
 NUM_SMS = torch.cuda.get_device_properties(0).multi_processor_count
@@ -64,15 +65,132 @@ _DT = {torch.float32: cutlass.Float32, torch.bfloat16: cutlass.BFloat16,
 _INT_MAX = 0x7FFFFFFF
 
 
+# ---------------------------------------------------------------------------
+# iter9 native 16-bit compare primitives (inline PTX; `kind` is a trace-time
+# python str "bf16"|"f16"). Microbench (probe/count16_native.cu, B200):
+# set.ge.{bf16x2,f16x2} + add.rn 16x2 accumulate = 1.73x over cvt->fp32 at
+# N262K single-CTA, 1.21x at the C8 slice; counts bit-match the fp32 path
+# when thresholds are pre-quantized to the dtype grid.
+# ---------------------------------------------------------------------------
+def _k16(kind):
+    return "bf16" if kind == "bf16" else "f16"
+
+
+@dsl_user_op
+def _quant_f32_16(f, kind, *, loc=None, ip=None):
+    k = _k16(kind)
+    asm = ("{.reg .b16 h; cvt.rn." + k + ".f32 h, $1; cvt.f32." + k
+           + " $0, h;}")
+    return cutlass.Float32(llvm.inline_asm(
+        T.f32(), [f.ir_value(loc=loc, ip=ip)], asm, "=f,f",
+        has_side_effects=False, is_align_stack=False,
+        asm_dialect=llvm.AsmDialect.AD_ATT, loc=loc, ip=ip))
+
+
+@cute.jit
+def quant_f32_16(f, kind):
+    return _quant_f32_16(f, kind)
+
+
+@dsl_user_op
+def _pack2_16_from_f32(f, kind, *, loc=None, ip=None):
+    k = _k16(kind)
+    asm = "{.reg .b16 h; cvt.rn." + k + ".f32 h, $1; mov.b32 $0, {h, h};}"
+    return cutlass.Int32(llvm.inline_asm(
+        T.i32(), [f.ir_value(loc=loc, ip=ip)], asm, "=r,f",
+        has_side_effects=False, is_align_stack=False,
+        asm_dialect=llvm.AsmDialect.AD_ATT, loc=loc, ip=ip))
+
+
+@cute.jit
+def pack2_16_from_f32(f, kind):
+    return _pack2_16_from_f32(f, kind)
+
+
+@dsl_user_op
+def _setge_add2_16(acc, v2, t2, kind, *, loc=None, ip=None):
+    k = _k16(kind) + "x2"
+    asm = ("{.reg .b32 o; set.ge." + k + "." + k + " o, $2, $3; add.rn."
+           + k + " $0, $1, o;}")
+    return cutlass.Int32(llvm.inline_asm(
+        T.i32(), [acc.ir_value(loc=loc, ip=ip), v2.ir_value(loc=loc, ip=ip),
+                  t2.ir_value(loc=loc, ip=ip)], asm, "=r,r,r,r",
+        has_side_effects=False, is_align_stack=False,
+        asm_dialect=llvm.AsmDialect.AD_ATT, loc=loc, ip=ip))
+
+
+@cute.jit
+def setge_add2_16(acc, v2, t2, kind):
+    return _setge_add2_16(acc, v2, t2, kind)
+
+
+@dsl_user_op
+def _setge_mask2_16(v2, t2, kind, *, loc=None, ip=None):
+    asm = "set.ge.u32." + _k16(kind) + "x2 $0, $1, $2;"
+    return cutlass.Int32(llvm.inline_asm(
+        T.i32(), [v2.ir_value(loc=loc, ip=ip), t2.ir_value(loc=loc, ip=ip)],
+        asm, "=r,r,r", has_side_effects=False, is_align_stack=False,
+        asm_dialect=llvm.AsmDialect.AD_ATT, loc=loc, ip=ip))
+
+
+@cute.jit
+def setge_mask2_16(v2, t2, kind):
+    return _setge_mask2_16(v2, t2, kind)
+
+
+@dsl_user_op
+def _pair_half_f32_16(v2, hi, kind, *, loc=None, ip=None):
+    k = _k16(kind)
+    which = "hi" if hi else "lo"
+    asm = ("{.reg .b16 lo, hi; mov.b32 {lo, hi}, $1; cvt.f32." + k
+           + " $0, " + which + ";}")
+    return cutlass.Float32(llvm.inline_asm(
+        T.f32(), [v2.ir_value(loc=loc, ip=ip)], asm, "=f,r",
+        has_side_effects=False, is_align_stack=False,
+        asm_dialect=llvm.AsmDialect.AD_ATT, loc=loc, ip=ip))
+
+
+@cute.jit
+def pair_half_f32_16(v2, hi, kind):
+    return _pair_half_f32_16(v2, hi, kind)
+
+
+@dsl_user_op
+def _pair_sum_i32_16(acc2, kind, *, loc=None, ip=None):
+    k = _k16(kind)
+    asm = ("{.reg .b16 lo, hi; .reg .f32 a, b; mov.b32 {lo, hi}, $1; "
+           "cvt.f32." + k + " a, lo; cvt.f32." + k + " b, hi; "
+           "add.f32 a, a, b; cvt.rzi.s32.f32 $0, a;}")
+    return cutlass.Int32(llvm.inline_asm(
+        T.i32(), [acc2.ir_value(loc=loc, ip=ip)], asm, "=r,r",
+        has_side_effects=False, is_align_stack=False,
+        asm_dialect=llvm.AsmDialect.AD_ATT, loc=loc, ip=ip))
+
+
+@cute.jit
+def pair_sum_i32_16(acc2, kind):
+    return _pair_sum_i32_16(acc2, kind)
+
+
 class GvrSandwichKernel(GvrMultiThreshKernel):
     """Sandwich two-threshold single-CTA kernel. New tunable: band_accept
     (stop refining once band <= band_accept; replaces op18 c_accept)."""
 
     def __init__(self, *a, band_accept=64, fuse_collect=False, smem_row_elems=0,
                  qfracs=(0.75, 0.5, 0.25), p4_rank_scatter=True, qbins=256,
-                 p4_smallbin=True, **kw):
+                 p4_smallbin=True, p2_native=True, **kw):
         super().__init__(*a, **kw)
         self.band_accept = int(band_accept)
+        # iter9: native 16-bit ladder compares. Thresholds are quantized to
+        # the dtype grid at P1b emit (thr_q = f32(dtype(thr))), which makes
+        # 16-bit-domain compares bit-equivalent to the fp32 compares every
+        # other phase performs on the exactly-embedded values (microbench
+        # counts matched on all configs). The M-column counts accumulate in
+        # packed 16x2 lanes (set.ge + add.rn), flushed to int32 every 16 vec
+        # iters (per-half growth <= 8/iter => <= 128 << the 256 bf16 integer
+        # grid). The collect column uses a packed mask (set.ge.u32) so the
+        # slot cursor stays exact per element. fp32 path untouched.
+        self.p2_native = bool(p2_native)
         # op21 iter5 (b): P1b quantile-histogram bin count. 256 default; 64 at
         # bs > NUM_SMS (production-legal BS rule) cuts the per-row fixed cost
         # (suffix-scan 8 -> 6 double-barrier steps, 4x less zero/crossing
@@ -133,6 +251,24 @@ class GvrSandwichKernel(GvrMultiThreshKernel):
         # deferred direct-write stores values nowhere; indices-only op
         assert not self.return_output_values, "sandwich is indices-only"
 
+    # trace-time helpers for the iter9 native 16-bit ladder path
+    def _p2n(self):
+        return self.p2_native and self.dtype != cutlass.Float32
+
+    def _kind16(self):
+        return "bf16" if self.dtype == cutlass.BFloat16 else "f16"
+
+    def _make_load_copy_atom_u32(self):
+        # same vec width/caching as _make_load_copy_atom, u32-typed view
+        # (16-bit pairs land packed in 32-bit registers, no repack cost)
+        if self.use_constant_hint:
+            return cute.make_copy_atom(
+                cute.nvgpu.CopyG2ROp(), cutlass.Int32,
+                num_bits_per_copy=self.vec_bits, invariant=True)
+        return cute.make_copy_atom(
+            cute.nvgpu.CopyUniversalOp(), cutlass.Int32,
+            num_bits_per_copy=self.vec_bits)
+
     # ------------------------------------------------------------------
     # op20 iter4: fused ladder pass — block_count_ge_multi + slot-append of
     # every v >= thr[pred_col] into per-thread smem slot regions. Slot cursor
@@ -168,29 +304,77 @@ class GvrSandwichKernel(GvrMultiThreshKernel):
         step = cutlass.Int32(step_elem)
 
         if self.enable_unroll_4:
-            rng_frag = cute.make_fragment((vec_w,), self.dtype)
             big_iters = cutlass.Int32(0)
             if N > i + cutlass.Int32(vec_w - 1):
                 big_iters = (N - i - cutlass.Int32(vec_w)) // cutlass.Int32(step_elem) + cutlass.Int32(1)
-            for k in cutlass.range(big_iters, unroll=self.mt_unroll):
-                i_local = i + k * cutlass.Int32(step_elem)
-                src_ptr_k = cute.make_ptr(
-                    self.dtype, row_addr + cutlass.Int64(i_local) * cutlass.Int64(elem_bytes),
-                    cute.AddressSpace.gmem, assumed_align=vec_align)
-                src_k = cute.make_tensor(src_ptr_k, cute.make_layout((vec_w,)))
-                cute.copy(copy_atom, src_k, rng_frag)
-                for j in cutlass.range_constexpr(vec_w):
-                    if cutlass.const_expr(self.dtype == cutlass.Float32):
-                        vj = rng_frag[j]
-                    else:
-                        vj = cutlass.Float32(rng_frag[j])
-                    if vj >= thr_frag[PC]:
-                        cpos = cnt_frag[PC]
-                        if cpos < cutlass.Int32(S):
-                            smem_slotk[slot_base + cpos] = vj
-                            smem_slotv[slot_base + cpos] = i_local + cutlass.Int32(j)
-                    for m in cutlass.range_constexpr(M):
-                        cnt_frag[m] = cnt_frag[m] + cutlass.Int32(vj >= thr_frag[m])
+            if cutlass.const_expr(self._p2n()):
+                # iter9: native 16-bit paired path — u32-typed loads (pairs
+                # already packed), set.ge/add.rn 16x2 counts for m != PC,
+                # packed mask for the collect column (exact slot cursor).
+                kind = self._kind16()
+                vec_w2 = cutlass.const_expr(vec_w // 2)
+                copy_atom_u32 = self._make_load_copy_atom_u32()
+                rng2_frag = cute.make_fragment((vec_w2,), cutlass.Int32)
+                thr2_frag = cute.make_fragment((M,), cutlass.Int32)
+                acc2_frag = cute.make_fragment((M,), cutlass.Int32)
+                for m in cutlass.range_constexpr(M):
+                    thr2_frag[m] = pack2_16_from_f32(thr_frag[m], kind)
+                    acc2_frag[m] = cutlass.Int32(0)
+                ccol = cutlass.Int32(0)
+                for k in cutlass.range(big_iters, unroll=self.mt_unroll):
+                    i_local = i + k * cutlass.Int32(step_elem)
+                    src_ptr_k = cute.make_ptr(
+                        cutlass.Int32, row_addr + cutlass.Int64(i_local) * cutlass.Int64(elem_bytes),
+                        cute.AddressSpace.gmem, assumed_align=vec_align)
+                    src_k = cute.make_tensor(src_ptr_k, cute.make_layout((vec_w2,)))
+                    cute.copy(copy_atom_u32, src_k, rng2_frag)
+                    for p in cutlass.range_constexpr(vec_w2):
+                        v2 = rng2_frag[p]
+                        mpc = setge_mask2_16(v2, thr2_frag[PC], kind)
+                        if mpc != cutlass.Int32(0):
+                            if (mpc & cutlass.Int32(0xFFFF)) != cutlass.Int32(0):
+                                if ccol < cutlass.Int32(S):
+                                    smem_slotk[slot_base + ccol] = pair_half_f32_16(v2, 0, kind)
+                                    smem_slotv[slot_base + ccol] = i_local + cutlass.Int32(2 * p)
+                                ccol = ccol + cutlass.Int32(1)
+                            if (mpc >> cutlass.Int32(16)) != cutlass.Int32(0):
+                                if ccol < cutlass.Int32(S):
+                                    smem_slotk[slot_base + ccol] = pair_half_f32_16(v2, 1, kind)
+                                    smem_slotv[slot_base + ccol] = i_local + cutlass.Int32(2 * p + 1)
+                                ccol = ccol + cutlass.Int32(1)
+                        for m in cutlass.range_constexpr(M):
+                            if cutlass.const_expr(m != self.pred_col):
+                                acc2_frag[m] = setge_add2_16(acc2_frag[m], v2, thr2_frag[m], kind)
+                    if (k & cutlass.Int32(15)) == cutlass.Int32(15):
+                        for m in cutlass.range_constexpr(M):
+                            if cutlass.const_expr(m != self.pred_col):
+                                cnt_frag[m] = cnt_frag[m] + pair_sum_i32_16(acc2_frag[m], kind)
+                                acc2_frag[m] = cutlass.Int32(0)
+                for m in cutlass.range_constexpr(M):
+                    if cutlass.const_expr(m != self.pred_col):
+                        cnt_frag[m] = cnt_frag[m] + pair_sum_i32_16(acc2_frag[m], kind)
+                cnt_frag[PC] = ccol
+            else:
+                rng_frag = cute.make_fragment((vec_w,), self.dtype)
+                for k in cutlass.range(big_iters, unroll=self.mt_unroll):
+                    i_local = i + k * cutlass.Int32(step_elem)
+                    src_ptr_k = cute.make_ptr(
+                        self.dtype, row_addr + cutlass.Int64(i_local) * cutlass.Int64(elem_bytes),
+                        cute.AddressSpace.gmem, assumed_align=vec_align)
+                    src_k = cute.make_tensor(src_ptr_k, cute.make_layout((vec_w,)))
+                    cute.copy(copy_atom, src_k, rng_frag)
+                    for j in cutlass.range_constexpr(vec_w):
+                        if cutlass.const_expr(self.dtype == cutlass.Float32):
+                            vj = rng_frag[j]
+                        else:
+                            vj = cutlass.Float32(rng_frag[j])
+                        if vj >= thr_frag[PC]:
+                            cpos = cnt_frag[PC]
+                            if cpos < cutlass.Int32(S):
+                                smem_slotk[slot_base + cpos] = vj
+                                smem_slotv[slot_base + cpos] = i_local + cutlass.Int32(j)
+                        for m in cutlass.range_constexpr(M):
+                            cnt_frag[m] = cnt_frag[m] + cutlass.Int32(vj >= thr_frag[m])
             i = i + big_iters * cutlass.Int32(step_elem)
 
         tail_frag = cute.make_fragment((vec_w,), self.dtype)
@@ -1432,6 +1616,15 @@ class GvrSandwichKernel(GvrMultiThreshKernel):
                 pv = s_mt_thr[mm]
                 if s_mt_thr[mm + 1] < pv:
                     s_mt_thr[mm + 1] = pv
+            if cutlass.const_expr(self._p2n()):
+                # iter9: quantize every column to the dtype grid so the
+                # native 16-bit ladder compares agree bit-for-bit with the
+                # fp32 compares in P3/P4/fallback (cvt.rn is monotonic =>
+                # the non-descending property survives; column 0 = g_min is
+                # a data value, already on the grid).
+                for mq in cutlass.range_constexpr(M):
+                    s_mt_thr[mq] = quant_f32_16(s_mt_thr[mq],
+                                                self._kind16())
         # visibility: callers ladder-init barrier follows before any read
 
     @cute.kernel
@@ -1807,9 +2000,11 @@ def _compile(dtype, bs, n, K, cr_val, M, R, band_acc, place_mode, kC, threads, u
     p4_rs = os.environ.get("OP21_P4_RS", "1") == "1"
     # iter6 A/B: OP21_P4_FAST=0 forces the fine-recursion path (no fast paths)
     p4_fast = os.environ.get("OP21_P4_FAST", "1") == "1"
+    # iter9 A/B: OP21_P2_NATIVE=0 restores the cvt->fp32 ladder (16-bit only)
+    p2_nat = os.environ.get("OP21_P2_NATIVE", "1") == "1"
     # key on DERIVED compile inputs (t/use256/min_bpm), not raw bs — one
     # binary serves every BS in the same bucket (n stays: per-N fracs)
-    key = (dtype, t, use256, min_bpm, n, K, cr_val, M, R, band_acc, place_mode, kC, unroll, fuse, smem, p4_rs, qbins, p4_fast)
+    key = (dtype, t, use256, min_bpm, n, K, cr_val, M, R, band_acc, place_mode, kC, unroll, fuse, smem, p4_rs, qbins, p4_fast, p2_nat)
     if key in _compiled:
         return _compiled[key]
     _dtn = {torch.float32: "fp32", torch.bfloat16: "bf16",
@@ -1830,7 +2025,7 @@ def _compile(dtype, bs, n, K, cr_val, M, R, band_acc, place_mode, kC, threads, u
                              kC_override=kC, fracs=fracs, fuse_collect=fuse,
                              smem_row_elems=(n if smem else 0),
                              p4_rank_scatter=p4_rs, qbins=qbins,
-                             p4_smallbin=p4_fast)
+                             p4_smallbin=p4_fast, p2_native=p2_nat)
     nr, nc, nb = cute.sym_int(), cute.sym_int(), cute.sym_int()
     ia = 32 if use256 else 16
     in_f = cr.make_fake_compact_tensor(_DT[dtype], (nr, nc), stride_order=(1, 0), assumed_align=ia)

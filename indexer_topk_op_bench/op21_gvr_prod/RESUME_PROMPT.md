@@ -14,7 +14,22 @@ Continue the op21 GVR production-kernel campaign in
    tables (canonical numbers live here).
 3. `op21_gvr_prod/LEARNINGS.md` — falsified levers + mechanisms.
 
-## State after iter8 (2026-07-06, commits 2f35c0d192..HEAD)
+## State after iter9 (2026-07-06, commits 2f35c0d192..HEAD)
+- iter9 SHIPPED the native 16-bit ladder (OP21_P2_NATIVE=0 = cvt A/B):
+  P1b quantizes all threshold columns to the dtype grid at emit (the
+  one-point consistency trick — 16-bit-domain compares become
+  bit-equivalent to every fp32 phase), both fused ladders get
+  set.ge.{bf16x2,f16x2}+add.rn packed counts (int32 flush every 16
+  iters) + set.ge.u32 mask collect. Microbench probe/count16_native.cu
+  (1.73x N262K single-CTA, 1.21x C8 slice) GO'd the design; real gate
+  360/360 with native ON; fp32 binaries untouched (const_expr).
+  **16-bit nsys: bf16 gm 1.091 win 15/17 (K1024 column fully green);
+  fp16 gm 1.055 win 12/17.** Remaining 16-bit holes: K2048 131K/262K
+  BS1 (0.95/0.88, K-proportional P3/P4 tail at cr=1, NOT the ladder)
+  + fp16 262K BS1/4 near-par (0.97-0.98). nsys archives:
+  iter8_16bit_c8rule/ = pre-native grid.
+
+## State after iter8 (2026-07-06)
 - iter8 landed the 16-bit tier + P1 refresh (all on 047 GPU0):
   * 16-bit exactness: real 360/360 (60L x ms/C4/C8 x bf16/fp16, NEW
     scripts/smoke_real_16bit.py) + synth spot checks — the kernels were
@@ -126,31 +141,28 @@ Continue the op21 GVR production-kernel campaign in
   `Made-with: Claude Code` + `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`.
   Update THIS FILE + ITERATIONS.md + LEARNINGS.md in the same commit.
 
-## Next (iter9 leads, ranked)
-(a) 16-bit native compares in the streaming ladder (skip 16->32 cvt;
-    PLAN fine-grain #6, untested): the remaining 16-bit largeN-smallBS
-    gap (0.86-0.92) is per-element-cost-bound with C8 already applied.
-    Careful: bf16 native compare needs an order-preserving trick
-    (bf16 as int16 compare works for same-sign; NaN/inf handling) —
-    validate exactness on real captures FIRST (op18/20 16-bit lineage
-    may have prior art).
-(b) Dispatch distillation writeup + no-regress FULL grid (fp32 P0 msa
-    grid + 16-bit grids + P1 canaries in one table for the ship review).
-(c) B300 cross-check (needs a B300 host; write a launch prompt like
-    op17's B300_FULLGRID_V2_PROMPT.md pattern).
-(d) Optional stretch: P1 highBS grid (SGLang 0.86-0.96 after refresh,
-    single-CTA scan/ladder structural — the known deprioritized wall).
-DONE/FALSIFIED (do not retry): C=8 at fp32 262K holes (+0.6-1.3% noise —
-but it WINS at 16-bit, rule shipped iter8; dtype-conditional!); P1b
-QBINS=64 at highBS (gm 1.004); dist-P1/dist-P4; small-bin P4 fast paths
-SHIPPED iter6; P3 push SHIPPED iter7 (gather A/B via OP21_P3_PUSH=0).
+## Next (iter10 leads, ranked)
+(a) K2048 16-bit BS1 tail (last structural hole family, 0.88-0.96 both
+    dtypes): C8 + native ladder already applied — remaining gap is the
+    K-proportional P3/P4 tail at cr=1. Ablate first (iter4 no-op
+    pattern at bf16 K2048); acceptance is a legitimate outcome.
+(b) fp16 262K BS1/4 residual (~3%; bf16 equivalent cells are green —
+    diff the SASS or accept as fp16-specific).
+(c) No-regress ship review: one table = fp32 P0 msa + 16-bit grids +
+    P1 canaries; dispatch distillation writeup (C rules now 3:
+    16bit/N>=32768BS -> C8, K2048-fp32-hugeN -> C8, N>=65536 -> C4).
+(d) B300 cross-check (B300_PROMPT.md is paste-ready).
+(e) Optional stretch: P1 highBS grid (SGLang 0.86-0.96, structural).
+DONE/FALSIFIED (do not retry): C=8 at fp32 262K holes (noise; WINS at
+16-bit — dtype-conditional); P1b QBINS=64 highBS; dist-P1/dist-P4;
+small-bin P4 SHIPPED iter6; P3 push SHIPPED iter7 (OP21_P3_PUSH=0);
+native 16-bit ladder SHIPPED iter9 (OP21_P2_NATIVE=0).
 
-## Open holes (nsys, after iter8)
+## Open holes (nsys, after iter9)
 - fp32 P0 grid: NONE — 17/17 wins, gm 1.249 (rival) / 1.139 (op8).
-- 16-bit P0: bf16 gm 1.028 / fp16 1.043, 11/17 each; holes = largeN
-  smallBS diagonal (K1024 262K BS1/4 ~0.92, K512 262K BS1 ~0.97, K2048
-  131K/262K BS1 0.95-0.86, 131K BS8 0.96-0.98) — per-element scan cost;
-  see iter9 lead (a).
-- P1 grid (N 4-16K, BS 64-1024, fp32): gm 0.901 (refreshed on iter7
-  HEAD), win 5/24; SGLang midN-highBS 0.86-0.96 + radix N4-8K BS64
-  0.68-0.86 walls unchanged. Deprioritized.
+- 16-bit P0: bf16 gm 1.091 (15/17), fp16 gm 1.055 (12/17); holes =
+  K2048 131K/262K BS1 (0.95-0.96 / 0.88 both dtypes; K-tail) + fp16
+  K1024 262K BS1/4 (0.977/0.968) + fp16 131K BS8 (0.996 par).
+- P1 grid (N 4-16K, BS 64-1024, fp32): gm 0.901, win 5/24; SGLang
+  midN-highBS 0.86-0.96 + radix N4-8K BS64 0.68-0.86 walls unchanged.
+  Deprioritized.

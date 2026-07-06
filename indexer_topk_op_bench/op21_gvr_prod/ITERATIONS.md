@@ -475,3 +475,60 @@ untested). **iter9 leads**: (a) 16-bit native-compare ladder,
 (b) dispatch distillation writeup + no-regress full grid, (c) B300
 cross-check (needs a B300 host; write launch prompt).
 
+## Iter 9 — 2026-07-06 — native 16-bit ladder; bf16 gm 1.091 (15/17)
+
+**Microbench first (probe/count16_native.cu, B200, cold-L2 events)**:
+standalone M=4 count ladder, 16-bit: cvt->fp32 (current) vs p1
+(set.ge.u32 mask + packed u32 add) vs p2 (set.ge.16x2 1.0/0.0 +
+add.rn.16x2 accumulate). p2 = **1.73x** at N262K single-CTA, **1.21x**
+at the C8 slice (N32K BS8), ~1.00 at full occupancy (BS148,
+L2-BW-bound). Counts bit-match the fp32 path on every config once
+thresholds are pre-quantized to the dtype grid => GO, and the
+quantization-equivalence story is validated.
+
+**Shipped (src/gvr_ms_op.py + gvr_msc_op.py, default ON,
+OP21_P2_NATIVE=0 = cvt A/B)**:
+- P1b quantizes all M threshold columns to the dtype grid at emit
+  (`quant_f32_16`; cvt.rn is monotonic so non-descending survives;
+  column 0 = g_min is a data value, already on-grid). This makes the
+  16-bit-domain ladder compares bit-equivalent to the fp32 compares in
+  P3/P4/fallback — one quantize point, every consumer consistent.
+- Both fused ladders (single-CTA + msc slice) get a paired path:
+  u32-typed 256-bit loads (pairs land packed, no repack),
+  `set.ge.{bf16x2,f16x2} + add.rn` packed accumulate for the count
+  columns (flushed to int32 every 16 vec iters; per-half growth <=
+  8/iter => <=128 << the 256 bf16 integer grid), `set.ge.u32` packed
+  mask for the collect column (exact per-element slot cursor + rare
+  half-extract cvt on candidates only). Tails stay fp32 (equivalent
+  under quantized thresholds). fp32 binaries unchanged (const_expr
+  pruned). dist_p1 forces the flag off (its P1b does not quantize).
+
+**Exactness (all green)**: synth 18-cell 16-bit C4/C8/ms probe + fp32
+built-in smoke (no-regress) + real 16-bit gate **360/360** with the
+native ladder ON.
+
+**Event screen (28 cells paired)**: gm cvt/native 1.024, win 20/28 —
+bf16 all holes improve (+3-11%); fp16 showed two ~5% single-cell
+apparent regressions (131K BS1 0.943) that nsys REFUTED (13.54 vs
+13.38us = ~1%): the iter6 codegen-jitter lesson again.
+
+**nsys pure-kernel cold-L2 16-bit P0 VERDICT (canonical, 047 GPU0;
+iter8 grid archived results/nsys/iter8_16bit_c8rule/)**:
+- **bf16 gm rival/ms 1.091 (iter8 1.028), win 15/17** (was 11/17); vs
+  best GVR-family 1.285. The whole K1024 column now wins incl. 262K
+  BS1 0.918->1.035 and BS4 0.917->1.002; K512 262K 0.965->1.078;
+  131K BS8 flips 0.960->1.025.
+- **fp16 gm 1.055 (iter8 1.043), win 12/17**; gvrbest 1.267. 262K
+  BS1/4 narrow to 0.977/0.968; 131K BS8 0.996 (par).
+- Remaining 16-bit holes: K2048 131K/262K BS1 (0.95-0.96 / 0.88 both
+  dtypes) — the K-proportional P3/P4 tail at cr=1, not the ladder —
+  plus the three fp16 near-par cells above.
+
+**Standing after iter9**: fp32 P0 17/17 gm 1.249; bf16 15/17 gm 1.091;
+fp16 12/17 gm 1.055; every dtype's gm > 1 vs per-cell best rival, and
+1.27-1.29 vs the best existing GVR-family op. **iter10 leads**:
+(a) K2048 16-bit BS1 tail (the last structural hole family; C8 already
+applied — needs a K2048-specific P3/P4 look or acceptance),
+(b) fp16 262K BS1/4 residual (~3%), (c) no-regress ship review + B300
+(B300_PROMPT.md ready).
+
