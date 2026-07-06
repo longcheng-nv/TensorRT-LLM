@@ -46,16 +46,36 @@ Continue the op21 GVR production-kernel campaign in
   adversarial). all-invalid preIdx -> identity emit is the inherited
   vendored contract (matches single-CTA), NOT a bug.
 
-## Environment
-- Host: umbriel-b200-035 (2x B200, usually idle; check co-tenancy by
-  output-file growth, not nvidia-smi — sandbox is namespace-blind).
-- **GPU0 cooling is BROKEN as of 2026-07-06 (79C idle, +13% mid-sweep
-  drift poisoned the first iter5 grid): run ALL canonical nsys with
-  GPU=1; paired same-process event A/B is throttle-immune.** GPU1 verified
-  to reproduce the iter1-4 GPU0 baseline axis within 1.5%.
-- Plain `python3` has torch+cutlass. Run bench/smoke from the bucket dirs.
+## Environment / cross-machine recovery
+- Everything lives on shared NFS (`/home/scratch.loncheng_gpu/...`):
+  repo, branch, bucket, real captures, nsys archives. A node timeout
+  loses NOTHING except /tmp. On a NEW B200 node:
+  1. `cd` this checkout; `git log --oneline -1` should show the latest
+     `[op21 iter N]` commit on `omni/op21-gvr-prod`.
+  2. Env check: `python3 -c "import torch, cutlass"` (plain python3 has
+     both on umbriel B200 nodes; if not, see trtllm-machine-local-install
+     skill — but op21 bench needs only torch+cutlass, NOT trtllm).
+  3. GPU preflight: `nvidia-smi --query-gpu=index,temperature.gpu
+     --format=csv` — idle >50C => do not trust that GPU for timing.
+  4. **RE-ANCHOR THE MEASUREMENT AXIS** before comparing to any table in
+     ITERATIONS.md: run the anchor cell (K512 fp32 262144 BS1, e.g.
+     `GPU=<healthy> nsys ... scripts/nsys_run_auto.py 512 fp32 262144 1
+     60`) — expected ~19.9±0.3us on the iter5/6 axis. Off by >3% =>
+     different-silicon axis: re-run the FULL 17-cell grid once
+     (drive_nsys_iter2.sh) to establish the new baseline before judging
+     any new lever; rival CSV bars (report/{bs,seqlen}_data.csv) were
+     measured on yet another B200 — per-cell rival ratios remain the
+     canonical metric, absolute us do not transfer across nodes.
+- Old host umbriel-b200-035: GPU0 cooling BROKEN as of 2026-07-06 (79C
+  idle, +13% mid-sweep drift poisoned the first iter5 grid) — if back on
+  035, canonical nsys goes GPU=1. Paired same-process event A/B is
+  throttle-immune anywhere.
+- Check co-tenancy by output-file growth, not nvidia-smi (sandbox is
+  namespace-blind). Run bench/smoke from the bucket dirs.
 - nsys MUST run `env -u GITHUB_TOKEN -u HF_TOKEN`; *.nsys-rep/*.sqlite are
-  gitignored — NEVER commit them.
+  gitignored — NEVER commit them. nsys result archives (NFS, gitignored):
+  results/nsys/{iter3_msa, iter5_msa, iter5_gpu0_thermal_poisoned}/ +
+  current msa_* = iter6 verdict grid; probe/ = anchor cells.
 
 ## Canonical measurement protocol (do not deviate)
 - Event screens (CUDA-graph cold-L2 medians) are SCREENING ONLY.
