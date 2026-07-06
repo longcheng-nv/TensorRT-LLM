@@ -210,8 +210,10 @@ class GvrSandwichKernel(GvrMultiThreshKernel):
         # bins, so (B) cnt(b*)<=32 -> warp0 register ranking (31-step
         # shuffle ring, exact positions, no fine hist) covers 100%; (A)
         # rank_above+cnt(b*)==k_rem -> whole-bin emit covers big-bin
-        # equality; (C) fine recursion stays as the distribution-shift
-        # fallback. False = always fine recursion (A/B reference).
+        # equality; (C) distribution-shift fallback = the EXACT value-edge
+        # band snap (iter11: the fixed-depth fine recursion was falsified
+        # inexact — smoke_adversarial_band.py). False = fast paths off,
+        # always snap.
         self.p4_smallbin = bool(p4_smallbin)
         # op21: rank fractions for place_mode=5 quantile placement, mapped to
         # ladder columns 1..M-1 (descending rank => ascending value). Column 1
@@ -775,19 +777,22 @@ class GvrSandwichKernel(GvrMultiThreshKernel):
                 k_rem, m0, tidx, warp_id, lane)
 
     # ------------------------------------------------------------------
-    # op21 iter5: exact rank-scatter band refine (op8 phase4_rank_scatter
-    # port, enable_p4_rank_scatter_exact variant — the validated exact
-    # primitive shipped in PR #15709). Differences vs op8: histogram range
-    # is the KNOWN [thr1, thr0) band bracket (no min/max pass), rank target
-    # is the runtime k_rem (not const K), all output positions offset by m0.
-    # Chain: coarse kBins hist -> straddling bin b* + rank_above -> ONE fine
-    # 256-bin recursion on b* (kNumBins x 256 effective resolution) -> single
-    # scatter pass at rank offsets. No data-dependent snap iterations. The
-    # sb==sb* tie group is cut at kK arbitrarily = the same tie-tolerant
-    # contract as the snap's ==sel_thr second pass.
+    # op21 iter5/6/11: rank-scatter band refine (op8 phase4_rank_scatter
+    # lineage). Differences vs op8: histogram range is the KNOWN
+    # [thr1, thr0) band bracket (no min/max pass), rank target is the
+    # runtime k_rem (not const K), all output positions offset by m0.
+    # Chain: coarse kBins hist -> straddling bin b* + rank_above -> iter6
+    # fast paths on b*: (A) whole-bin equality emit, (B) <=32 members ->
+    # warp0 exact register ranking; (C) fallback = the EXACT value-edge
+    # band snap (iter11). NOTE (iter11 falsification): a fixed-depth
+    # sub-histogram of b* is NOT a valid path C — a fine bin is a value
+    # INTERVAL, not a tie group, so cutting it at k_rem in stash order can
+    # emit below the true K-th rank (upstream revert ec04147502; local
+    # proof smoke_adversarial_band.py 72/72). Only paths that terminate on
+    # a DATA value (register ranking, value-edge snap) are exact.
     # Scratch: s_iscalars[0..4] (all dead at P4 entry — P4 is terminal at
-    # every call site), smem_hist[2]/[3] post-fine-search (op8 pattern; NOT
-    # [0]/[1], the last fine warp's reverse scan reads bins down to 0).
+    # every call site); path B stashes b* members in smem_hist[8..39]
+    # (coarse hist dead there).
     # ------------------------------------------------------------------
     @cute.jit
     def phase4_band_rank_scatter(
@@ -887,8 +892,8 @@ class GvrSandwichKernel(GvrMultiThreshKernel):
             rank_above = s_iscalars[2]
 
             # ---- iter6 small-bin fast paths (host probe: cnt(b*) p50=2
-            # p90=3 max=4 on 68 synth+real rows — the fine recursion is
-            # fallback-only in practice) ----
+            # p90=3 max=4 on 68 synth+real rows — the snap fallback is
+            # cold in practice) ----
             if cutlass.const_expr(self.p4_smallbin):
                 cnt_bstar = smem_hist[b_star]
                 r_need = k_rem - rank_above
@@ -950,7 +955,7 @@ class GvrSandwichKernel(GvrMultiThreshKernel):
                     cute.arch.barrier()
                 elif cnt_bstar == r_need:
                     # path A: every b* member is a winner — whole-bin emit,
-                    # skip the fine recursion entirely
+                    # skip the fallback entirely
                     if tidx == 0:
                         s_iscalars[4] = cutlass.Int32(0)  # cnt_above cursor
                         s_iscalars[1] = cutlass.Int32(0)  # b* cursor
@@ -982,166 +987,33 @@ class GvrSandwichKernel(GvrMultiThreshKernel):
                         isc = isc + cutlass.Int32(num_threads)
                     cute.arch.barrier()
                 else:
-                    # path C: fine-recursion fallback (distribution shift)
-                    self._p4_band_fine_scatter(
-                        smem_keys, smem_vals, smem_hist, smem_wcnt,
-                        s_iscalars, output_values_row, output_indices_row,
-                        band, k_rem, m0, b_star, rank_above, bmin_r, inv1,
-                        tidx, warp_id, lane)
+                    # path C (distribution shift, never fires on real/synth
+                    # probes): fall back to the EXACT value-edge snap on the
+                    # whole band. iter11: the previous fixed-depth fine
+                    # scatter here was NOT exact on arbitrary continuous
+                    # logits (same failure mode upstream reverted in
+                    # ec04147502; falsified by smoke_adversarial_band.py,
+                    # 72/72) — a fixed-depth histogram cannot separate two
+                    # distinct values in one (sub-)bin, so the straddling
+                    # bin's stash-order emit can pick a value below the true
+                    # K-th rank. The snap converges sel_thr onto an actual
+                    # DATA value (block_band_snap_iter steps to value
+                    # edges), so its ==sel_thr group is a true tie group and
+                    # any k_rem-cut of it is exact.
+                    self.phase4_band_snap_hist(
+                        smem_keys, smem_vals, smem_hist, smem_wcnt, s_thr,
+                        s_swf, s_iscalars, output_values_row,
+                        output_indices_row, band, k_rem, m0, tidx, warp_id,
+                        lane)
             else:
-                self._p4_band_fine_scatter(
-                    smem_keys, smem_vals, smem_hist, smem_wcnt,
-                    s_iscalars, output_values_row, output_indices_row,
-                    band, k_rem, m0, b_star, rank_above, bmin_r, inv1,
-                    tidx, warp_id, lane)
-
-    # ------------------------------------------------------------------
-    # Fine 256-bin recursion + scatter (iter5 op8 port body, extracted in
-    # iter6 as the path-C fallback of phase4_band_rank_scatter).
-    # ------------------------------------------------------------------
-    @cute.jit
-    def _p4_band_fine_scatter(
-        self, smem_keys, smem_vals, smem_hist, smem_wcnt, s_iscalars,
-        output_values_row, output_indices_row, band, k_rem, m0, b_star,
-        rank_above, bmin_r, inv1, tidx, warp_id, lane,
-    ):
-        kK = cutlass.const_expr(self.top_k)
-        kBins = cutlass.const_expr(self.kNumBins)
-        num_threads = cutlass.const_expr(self.num_threads)
-        num_warps = cutlass.const_expr(self.num_warps)
-        if cutlass.const_expr(True):
-            # ---- fine 256-bin recursion on the straddling bin b* ----
-            fbins = cutlass.const_expr(256)
-            fbpw = cutlass.const_expr(256 // self.num_warps)
-            # bin b* value range under the inv1 binning: [f_lo, f_lo + 1/inv1)
-            f_lo = bmin_r + cutlass.Float32(b_star) / inv1
-            finv = (cutlass.Float32(fbins - 1) + cutlass.Float32(0.99)) * inv1
-            iz = tidx
-            while iz < cutlass.Int32(fbins):
-                smem_hist[iz] = cutlass.Int32(0)
-                iz = iz + cutlass.Int32(num_threads)
-            cute.arch.barrier()
-            ifb = tidx
-            while ifb < band:
-                vf = smem_keys[ifb]
-                cb = cutlass.Int32((vf - bmin_r) * inv1)
-                if cb < cutlass.Int32(0):
-                    cb = cutlass.Int32(0)
-                if cb > cutlass.Int32(kBins - 1):
-                    cb = cutlass.Int32(kBins - 1)
-                if cb == b_star:
-                    sb = cutlass.Int32((vf - f_lo) * finv)
-                    if sb < cutlass.Int32(0):
-                        sb = cutlass.Int32(0)
-                    if sb > cutlass.Int32(fbins - 1):
-                        sb = cutlass.Int32(fbins - 1)
-                    atomicAdd(smem_hist.iterator + sb, cutlass.Int32(1))
-                ifb = ifb + cutlass.Int32(num_threads)
-            cute.arch.barrier()
-
-            # fine 3-step search seeded at rank_above
-            fws = cutlass.Int32(0)
-            for jbf in cutlass.range_constexpr(fbpw):
-                bif = (cutlass.Int32(fbins - 1) - warp_id * cutlass.Int32(fbpw)
-                       - cutlass.Int32(jbf))
-                fws = fws + smem_hist[bif]
-            if lane == cutlass.Int32(0):
-                smem_wcnt[warp_id] = fws
-            cute.arch.barrier()
-            if tidx == cutlass.Int32(0):
-                cumf = rank_above
-                twf = cutlass.Int32(num_warps - 1)
-                fnd = cutlass.Int32(0)
-                for w2 in cutlass.range_constexpr(self.num_warps):
-                    cumf = cumf + smem_wcnt[w2]
-                    if cumf >= k_rem and fnd == cutlass.Int32(0):
-                        twf = cutlass.Int32(w2)
-                        fnd = cutlass.Int32(1)
-                pre = rank_above
-                for w3 in cutlass.range_constexpr(self.num_warps):
-                    if cutlass.Int32(w3) < twf:
-                        pre = pre + smem_wcnt[w3]
-                s_iscalars[4] = pre   # prefix into target fine warp
-                s_iscalars[1] = twf   # target fine warp
-            cute.arch.barrier()
-            pre_f = s_iscalars[4]
-            twf2 = s_iscalars[1]
-            if warp_id == twf2 and lane == cutlass.Int32(0):
-                base_f = pre_f
-                sb_star_l = cutlass.Int32(fbins - 1)
-                ra_fine_l = base_f
-                sd = cutlass.Int32(0)
-                for jb3 in cutlass.range_constexpr(fbpw):
-                    sbi = (cutlass.Int32(fbins - 1) - twf2 * cutlass.Int32(fbpw)
-                           - cutlass.Int32(jb3))
-                    ra_b2 = base_f
-                    base_f = base_f + smem_hist[sbi]
-                    if base_f >= k_rem and sd == cutlass.Int32(0):
-                        sb_star_l = sbi
-                        ra_fine_l = ra_b2
-                        sd = cutlass.Int32(1)
-                smem_hist[2] = sb_star_l
-                smem_hist[3] = ra_fine_l
-            cute.arch.barrier()
-            if tidx == cutlass.Int32(0):
-                s_iscalars[4] = cutlass.Int32(0)  # cnt_above
-                s_iscalars[0] = cutlass.Int32(0)  # cnt_mid (b*, sub>sb*)
-                s_iscalars[1] = cutlass.Int32(0)  # cnt_strad (b*, sub==sb*)
-            cute.arch.barrier()
-            sb_star = smem_hist[2]
-            rank_above_fine = smem_hist[3]
-
-            # ---- single scatter pass at rank offsets (all shifted by m0) ----
-            isc = tidx
-            while isc < band:
-                v = smem_keys[isc]
-                bin_i = cutlass.Int32((v - bmin_r) * inv1)
-                if bin_i < cutlass.Int32(0):
-                    bin_i = cutlass.Int32(0)
-                if bin_i > cutlass.Int32(kBins - 1):
-                    bin_i = cutlass.Int32(kBins - 1)
-                if bin_i > b_star:
-                    o_a = atomicAdd(s_iscalars.iterator + cutlass.Int32(4),
-                                    cutlass.Int32(1))
-                    pos = m0 + o_a
-                    if pos < cutlass.Int32(kK):
-                        if cutlass.const_expr(self.return_output_values):
-                            output_values_row[pos] = self.dtype(v)
-                        output_indices_row[pos] = smem_vals[isc]
-                elif bin_i == b_star:
-                    sb = cutlass.Int32((v - f_lo) * finv)
-                    if sb < cutlass.Int32(0):
-                        sb = cutlass.Int32(0)
-                    if sb > cutlass.Int32(fbins - 1):
-                        sb = cutlass.Int32(fbins - 1)
-                    if sb > sb_star:
-                        o_m = atomicAdd(s_iscalars.iterator + cutlass.Int32(0),
-                                        cutlass.Int32(1))
-                        pos = m0 + rank_above + o_m
-                        if pos < cutlass.Int32(kK):
-                            if cutlass.const_expr(self.return_output_values):
-                                output_values_row[pos] = self.dtype(v)
-                            output_indices_row[pos] = smem_vals[isc]
-                    elif sb == sb_star:
-                        o_s = atomicAdd(s_iscalars.iterator + cutlass.Int32(1),
-                                        cutlass.Int32(1))
-                        pos = m0 + rank_above_fine + o_s
-                        if pos < cutlass.Int32(kK):
-                            if cutlass.const_expr(self.return_output_values):
-                                output_values_row[pos] = self.dtype(v)
-                            output_indices_row[pos] = smem_vals[isc]
-                isc = isc + cutlass.Int32(num_threads)
-            cute.arch.barrier()
-            cnt_strad = s_iscalars[1]
-            filled = m0 + rank_above_fine + cnt_strad
-            if filled > cutlass.Int32(kK):
-                filled = cutlass.Int32(kK)
-            ipad = filled + tidx
-            while ipad < cutlass.Int32(kK):
-                if cutlass.const_expr(self.return_output_values):
-                    output_values_row[ipad] = self.dtype(self.NEG_FLT_MAX)
-                output_indices_row[ipad] = cutlass.Int32(-1)
-                ipad = ipad + cutlass.Int32(num_threads)
+                # p4_smallbin=False (OP21_P4_FAST=0): fast paths disabled —
+                # everything falls to the exact snap (iter11; the old
+                # always-fine reference was retired with the inexact fine
+                # scatter).
+                self.phase4_band_snap_hist(
+                    smem_keys, smem_vals, smem_hist, smem_wcnt, s_thr, s_swf,
+                    s_iscalars, output_values_row, output_indices_row, band,
+                    k_rem, m0, tidx, warp_id, lane)
 
     # ------------------------------------------------------------------
     # Legacy phase-4 band snap (A/B reference): runtime-k histogram snap.
@@ -1998,7 +1870,7 @@ def _compile(dtype, bs, n, K, cr_val, M, R, band_acc, place_mode, kC, threads, u
     qbins = min(qbins, t)
     # iter5 A/B: OP21_P4_RS=0 falls back to the legacy runtime-k band snap
     p4_rs = os.environ.get("OP21_P4_RS", "1") == "1"
-    # iter6 A/B: OP21_P4_FAST=0 forces the fine-recursion path (no fast paths)
+    # iter6/11 A/B: OP21_P4_FAST=0 disables the fast paths (P4 -> exact snap)
     p4_fast = os.environ.get("OP21_P4_FAST", "1") == "1"
     # iter9 A/B: OP21_P2_NATIVE=0 restores the cvt->fp32 ladder (16-bit only)
     p2_nat = os.environ.get("OP21_P2_NATIVE", "1") == "1"

@@ -603,3 +603,45 @@ no boundary pathology. Cross-B300-node bonus: dp-192 fp32 reproduces
 dp-185 per-cell within ~±1% (same gm to 3 decimals). Campaign
 measurement phase CLOSED; UPSTREAM_ASSESSMENT Stage-1 pre-port baseline
 done on both architectures.
+
+## Iter 11 — 2026-07-06 — P4 path-C exact fallback (upstream-port PR-1 step 1)
+
+**Falsify first (NEW gate scripts/smoke_adversarial_band.py)**: planted
+near-tie clusters (300 DISTINCT fp32 values spaced 2 ULP straddling the
+K-th rank) inside a wide sparse band, production preIdx conventions
+(K512/K1024 cr=4 offset-0; K2048 cr=1 caller prev-1/kernel +1).
+**HEAD result: 0 ok / 72 FAIL** (ms/C4/C8 x all K/N/seed), vdiff
+2.4e-7..2.1e-6 = the deepest-fine-bin stash-order truncation predicted by
+the iter10 assessment (upstream ec04147502's exact failure mode).
+Gate-authoring gotcha that cost one round: with cr=1 + raw preIdx the
+kernel's +1 diagonal offset shifts every pointer into the bulk => no
+straddle => the run silently exercises the fail-soft BASELINE path (which
+is exact) — adversarial harnesses MUST follow the production preIdx
+conventions or they test the wrong path. (Path attribution via a no-op
+probe subclass dumping into output_indices_row; also proved off-pointer
+preIdx fail-soft = exact baseline, a bonus robustness result.)
+
+**Fix (src/gvr_ms_op.py)**: phase4_band_rank_scatter path C (and the
+p4_smallbin=False branch) now falls back to phase4_band_snap_hist — the
+value-EDGE snap (block_band_snap_iter steps thr onto actual data values,
+so ==sel_thr is a true tie group; any k_rem-cut of it is exact).
+_p4_band_fine_scatter (fixed-depth 1024x256 sub-histogram) DELETED: a
+fine bin is a value INTERVAL, not a tie group — cutting it in stash order
+is unfixably inexact at fixed depth. OP21_P4_FAST=0 semantics change:
+"always fine" -> "fast paths off, always snap". Paths A/B and all entry
+conditions byte-identical.
+
+**Gates (all green, 019 GPU1)**: adversarial-band 72/72 (was 0/72) +
+FAST=0 variant 72/72; synth 54/54; real 60/60; C {2,4,8} smokes; real x C
+180/180 + adversarial preIdx 36/36; real 16-bit 360/360.
+
+**Perf (nsys cold-L2 old-vs-new A/B, same GPU, 5 cells)**: gm new/old
+0.996 — flat within the +-2.2% jitter band (K1024 262K/65K BS1 +0.7%,
+K512 262K -0.5%, K2048 262K -2.2%, bf16 262K -0.4%); path C never fires
+on real/synth data so the verdict tables in SHIP_REVIEW/B300_RESULTS
+stand unchanged. (Method gotcha: `nsys profile -c cudaProfilerApi` exits
+143 on success — a `set -e` A/B driver dies silently at the first cell.)
+
+**Standing**: the UPSTREAM_ASSESSMENT P0 port blocker is RESOLVED in
+op21; PR-1 can now port the kernel with exactness unconditional. The
+adversarial-band gate joins the per-iteration gate suite.

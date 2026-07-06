@@ -126,7 +126,7 @@ K1024 262K holes (noise), QBINS=64 at highBS (wash), per-cell C tables
 | knob | =0 restores | shipped in | measured gain (nsys gm, where it applies) |
 |---|---|---|---|
 | `OP21_P4_RS` | legacy histogram-snap P4 | iter5 | P0 1.054 -> 1.104 (event gm snap/rs 1.058) |
-| `OP21_P4_FAST` | always-fine 256-bin P4 recursion | iter6 | P0 1.104 -> 1.125 (fast path covers ~100% of real bands) |
+| `OP21_P4_FAST` | fast paths off -> exact snap (iter11 semantics) | iter6/11 | P0 1.104 -> 1.125 (fast path covers ~100% of real bands) |
 | `OP21_P3_PUSH` | leader DSMEM band gather | iter7 | P0 1.125 -> 1.249 (event gm gather/push 1.077, 14/14) |
 | `OP21_P2_NATIVE` | cvt->fp32 16-bit ladder | iter9 | bf16 1.028 -> 1.091, fp16 1.043 -> 1.055 |
 | `OP21_QBINS` | (int) P1b histogram bins, default 256 | iter5 | falsified lever, knob kept for probes |
@@ -147,6 +147,10 @@ Each knob is a pure fallback path kept compiled-in behind `const_expr`
 - All-invalid preIdx ⇒ identity emit = inherited vendored contract
   (bit-identical to single-CTA; unreachable on real rows post-warmup-drop,
   count>kCC guards unreachable on real DSv4 data — see memory note).
+- adversarial logits `scripts/smoke_adversarial_band.py` (iter11):
+  72/72 — planted 2-ULP near-tie clusters straddling the K-th rank;
+  covers the upstream ec04147502 failure mode (path C = exact snap
+  fallback since iter11; the fixed-depth fine scatter is deleted).
 - B300 exactness spot: `gvr_msc_op.py 4` 9/9 OK (2026-07-06, dp-185).
 
 ## 7. Ship risks / open items

@@ -213,3 +213,26 @@
   redesign ⇒ incremental patching captures only dispatch+16-bit; the
   1.14-1.29× vs production needs the kernel-variant route
   (UPSTREAM_ASSESSMENT.md Strategy B).
+
+## Iter 11 findings
+
+- **Falsification confirmed at HEAD scale**: the iter10-predicted path-C
+  inexactness is real and total — 72/72 adversarial cases FAIL pre-fix
+  (vdiff always ULP-scale: the wrong subset differs only inside one fine
+  bin). Fixed-depth sub-histograms are unfixably inexact as a P4
+  terminal: a bin is a value interval, not a tie group. Only DATA-value
+  terminals are exact: warp register ranking (path B) or the value-edge
+  snap (block_band_snap_iter steps onto actual values). RED LINE: never
+  reintroduce a fixed-depth scatter emit as a P4 terminal.
+- **Adversarial harnesses must speak the production preIdx dialect**:
+  cr=1 raw pointers get the kernel's +1 diagonal offset => every gathered
+  value lands in the bulk => no straddle => the fail-soft baseline path
+  (exact) silently absorbs the attack and the gate false-passes. First
+  test version did exactly this (54/54 "ok" on cr=1). Convention: K512/
+  K1024 = cr4 offset-0 (V4), K2048 = cr1 caller passes prev-1 (V3.2).
+  Bonus result: whole-array off-pointer preIdx is fail-soft-exact.
+- **`nsys profile -c cudaProfilerApi` exits 143 on SUCCESS** — any
+  `set -e` driver dies silently after the first cell. The op21 drivers
+  (`drive_nsys_*.sh`) survive only because they pipe the profile through
+  `| tail -1` (pipeline status = tail's 0) — new A/B scripts must not
+  `set -e` around a bare nsys invocation.

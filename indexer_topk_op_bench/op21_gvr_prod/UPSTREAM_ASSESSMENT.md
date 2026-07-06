@@ -63,7 +63,14 @@ slot-collect. The three top levers form a dependency chain rooted in L5.
 **Incremental porting captures L4 (+ maybe L3) only; the 1.14–1.29× vs
 production requires the op21 kernel body.**
 
-## 4. Exactness precondition (P0 blocker, found in this assessment)
+## 4. Exactness precondition (P0 blocker — RESOLVED in op21 iter11)
+
+> **Status update (iter11, same day)**: falsified at HEAD by
+> `scripts/smoke_adversarial_band.py` (72/72 FAIL), then fixed — path C
+> now falls back to the exact value-edge `phase4_band_snap_hist` and the
+> fixed-depth `_p4_band_fine_scatter` is deleted; gate suite + nsys A/B
+> (gm 0.996, flat) green. The port inherits the fixed kernel as-is; the
+> paragraph below is kept as the original analysis.
 
 Upstream commit `ec04147502` (2026-07-01) reverted rank-scatter-P4-by-default
 because **a fixed-depth histogram cannot separate two distinct values in the

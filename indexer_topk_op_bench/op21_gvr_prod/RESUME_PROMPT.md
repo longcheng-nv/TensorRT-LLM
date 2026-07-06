@@ -14,6 +14,19 @@ Continue the op21 GVR production-kernel campaign in
    tables (canonical numbers live here).
 3. `op21_gvr_prod/LEARNINGS.md` — falsified levers + mechanisms.
 
+## State after iter11 (2026-07-06)
+- **P4 path-C exact fallback SHIPPED (upstream-port PR-1 step 1)**: the
+  fixed-depth `_p4_band_fine_scatter` is DELETED; path C (and
+  OP21_P4_FAST=0) fall back to the value-edge `phase4_band_snap_hist`
+  (exact). Falsified first: NEW gate `scripts/smoke_adversarial_band.py`
+  (planted 2-ULP near-tie clusters at the K-th rank, production preIdx
+  conventions) failed 72/72 at HEAD, passes 72/72 post-fix. Full gate
+  suite green (synth 54 + real 60 + realxC 180 + adv-preIdx 36 + 16-bit
+  360 + FAST=0 adv 72). nsys old/new A/B on 5 cells: gm 0.996 = flat.
+  The UPSTREAM_ASSESSMENT P0 blocker is RESOLVED — PR-1 port can proceed.
+  New red line: never reintroduce a fixed-depth scatter emit as a P4
+  terminal (LEARNINGS iter11); adversarial-band joins the gate suite.
+
 ## State after iter10 (2026-07-06, docs-only iteration)
 - **SHIP_REVIEW.md** = the no-regress ship artifact (P0 17 cells × 3
   dtypes + P1 canaries + dispatch distillation + knob table). Regenerate
@@ -165,11 +178,11 @@ Continue the op21 GVR production-kernel campaign in
   `Made-with: Claude Code` + `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`.
   Update THIS FILE + ITERATIONS.md + LEARNINGS.md in the same commit.
 
-## Next (post-iter10, ranked)
-(a) Upstream port PR-1 per UPSTREAM_ASSESSMENT.md Strategy B — FIRST
-    code change = P4 path-C exact fallback (LEARNINGS iter10 P0
-    blocker), then kernel-variant port + runner extension + tests;
-    e2e = dsv4-pareto-bench 3-arm A/B + gsm8k canary (Stage 2/3).
+## Next (post-iter11, ranked)
+(a) Upstream port PR-1 per UPSTREAM_ASSESSMENT.md Strategy B — path-C
+    blocker RESOLVED (iter11); next = kernel-variant port + runner
+    extension + contract gaps (next_n, sort/LB modes, GvrParams kC map)
+    + tests; e2e = dsv4-pareto-bench 3-arm A/B + gsm8k canary.
 (b) Deferred: fp16 262K BS1/4 residual (~3%, B300 shows 262K BS1 already
     par-to-win there); P1 highBS structural wall.
 DONE/FALSIFIED (do not retry): C=8 at fp32 262K holes (noise; WINS at

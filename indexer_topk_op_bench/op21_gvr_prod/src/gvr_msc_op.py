@@ -1157,7 +1157,7 @@ _compiled = {}
 def _compile(dtype, n, K, cr_val, C, threads, dist_p1=False, dist_p4=False):
     # iter5 A/B: OP21_P4_RS=0 falls back to the legacy runtime-k band snap
     p4_rs = os.environ.get("OP21_P4_RS", "1") == "1"
-    # iter6 A/B: OP21_P4_FAST=0 forces the fine-recursion path (no fast paths)
+    # iter6/11 A/B: OP21_P4_FAST=0 disables the fast paths (P4 -> exact snap)
     p4_fast = os.environ.get("OP21_P4_FAST", "1") == "1"
     # iter7 A/B: OP21_P3_PUSH=0 restores the leader DSMEM gather (2 barriers)
     p3_push = os.environ.get("OP21_P3_PUSH", "1") == "1"
