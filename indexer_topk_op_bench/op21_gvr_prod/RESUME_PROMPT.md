@@ -31,8 +31,11 @@ Continue the op21 GVR production-kernel campaign in
   for ANY B300 host = **B300_RELAUNCH_PROMPT.md** (archive dp-185 partials
   to results/nsys/iter10_b300_dp185_partial/ first, then re-run all 51
   cells on one axis). B300_RESULTS.md still pending the 16-bit grids.
-- Still open from the iter10 plan: K2048 16-bit BS1 tail ablation
-  (bounded probe, acceptance is a legitimate outcome).
+- K2048 16-bit BS1 tail: ABLATED and ACCEPTED as structural (ITERATIONS
+  iter10 addendum, scripts/ablate_16bit_tail.py): P4 is normal (+0.5us vs
+  green K1024 ref); the penalty is floor-resident K-proportional P1
+  gather + P1b at cr=1 vs a K-flat radix 16-bit bar. v3.2 geometry only —
+  DSv4 Flash/Pro (K512/K1024) unaffected. Do NOT reopen.
 
 ## State after iter9 (2026-07-06, commits 2f35c0d192..HEAD)
 - iter9 SHIPPED the native 16-bit ladder (OP21_P2_NATIVE=0 = cvt A/B):
@@ -166,14 +169,10 @@ Continue the op21 GVR production-kernel campaign in
     on any B300 host (archive dp-185 partials first); then verdicts
     (nsys_verdict.py msa bf16/fp16 B300) + B300_RESULTS.md +
     `[op21 B300]` commit. fp32 verdict already DONE (gm 1.268, 17/17).
-(b) K2048 16-bit BS1 tail ablation (bounded probe ~20 min: extend
-    scripts/ablate_p3_split.py pattern to bf16 K2048 262K C8
-    full/noP4/noWG); acceptance is a legitimate outcome (v3.2-geometry
-    only — not DSv4-production-blocking).
-(c) Upstream port PR-1 per UPSTREAM_ASSESSMENT.md Strategy B — FIRST
+(b) Upstream port PR-1 per UPSTREAM_ASSESSMENT.md Strategy B — FIRST
     code change = P4 path-C exact fallback (LEARNINGS iter10 P0
     blocker), then kernel-variant port + runner extension + tests.
-(d) Deferred: fp16 262K BS1/4 residual (~3%); P1 highBS structural wall.
+(c) Deferred: fp16 262K BS1/4 residual (~3%); P1 highBS structural wall.
 DONE/FALSIFIED (do not retry): C=8 at fp32 262K holes (noise; WINS at
 16-bit — dtype-conditional); P1b QBINS=64 highBS; dist-P1/dist-P4;
 small-bin P4 SHIPPED iter6; P3 push SHIPPED iter7 (OP21_P3_PUSH=0);

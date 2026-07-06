@@ -567,3 +567,25 @@ LEARNINGS). Recommended route = Strategy B (kernel-variant PR chain,
 opt-in → tests → dispatch flip), with the e2e plan staged as unit →
 kernel nsys (B200+B300) → dsv4-pareto-bench 3-arm A/B (OFF/ON-old/ON-new)
 → gsm8k accuracy canary → soak + default flip.
+
+**Iter 10 addendum — K2048 16-bit BS1 tail ablation (ACCEPTED as
+structural)**: scripts/ablate_16bit_tail.py (event cold-L2 paired split on
+umbriel-b200-019 GPU1 — relative same-process split, throttle-immune, no
+re-anchor needed; absolute us NOT on the 047 axis). full/noP4/noWG at HEAD
+defaults (push+RS-P4+native ladder ON), C8:
+| cell | full | noP4 | noWG | P4_us |
+|---|---|---|---|---|
+| K2048 131K bf16 | 20.70 | 16.99 | 20.26 | 3.71 |
+| K2048 262K bf16 | 22.24 | 18.56 | 20.70 | 3.68 |
+| K2048 262K fp16 | 22.08 | 18.59 | 21.09 | 3.49 |
+| K1024 262K bf16 (green ref) | 20.19 | 17.06 | 18.43 | 3.14 |
+P4 at K2048 is only +0.5us over the green K1024 reference (K-proportional
+output writes) — NOT the anomaly. The K2048 penalty lives in the FLOOR
+(noWG +2.3us vs K1024 at 262K bf16): the K-proportional P1 preIdx gather +
+P1b histogram at cr=1, against a radix 16-bit rival bar that is K-flat
+(14.84 vs 14.87us). No P3/P4 lever exists; bf16==fp16 within noise
+confirms it is not a ladder/dtype effect. ACCEPTED: the 0.88-0.96 K2048
+16-bit BS1 family is a documented structural wall (v3.2 geometry only —
+DSv4 Flash/Pro are K512/K1024, unaffected). noWG runs P4's degenerate
+band=0 machinery, so noP4-noWG is negative by construction (the two
+ablations are not nested).
