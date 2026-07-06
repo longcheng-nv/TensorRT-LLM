@@ -22,6 +22,7 @@ GVR_BEST = ["gvr_cuda", "gvr_cutedsl", "gvr_cutedsl_rs", "gvr_multicta_cutedsl",
 
 PREFIX = sys.argv[1] if len(sys.argv) > 1 else "ms"
 DTYPE = sys.argv[2] if len(sys.argv) > 2 else "fp32"  # iter8: bf16/fp16 too
+HW = sys.argv[3] if len(sys.argv) > 3 else "B200"     # iter9: B300 cross-check
 
 P0 = [(1024, N, BS) for N in (65536, 131072, 262144) for BS in (1, 4, 8, 16)]
 if PREFIX == "msa":  # iter2 grid adds the cross-K largeN BS1 cells, no P1
@@ -37,7 +38,7 @@ def load_rivals():
     cells = {}
     for f in ("bs_data.csv", "seqlen_data.csv"):
         for r in csv.DictReader(open(_REPORT / f)):
-            if r["hw"] != "B200" or r["dtype"] != DTYPE:
+            if r["hw"] != HW or r["dtype"] != DTYPE:
                 continue
             key = (int(r["K"]), int(r["N"]), int(r["BS"]))
             if key in cells:
