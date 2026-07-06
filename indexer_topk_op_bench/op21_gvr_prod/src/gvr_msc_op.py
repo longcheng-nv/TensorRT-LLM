@@ -25,6 +25,7 @@ Red lines respected: no gmem scratch in the hot path (band moves via
 DSMEM), counts merged once (single cluster barrier chain), no warp
 collectives in the streaming loop.
 """
+import os
 import sys
 from pathlib import Path
 
@@ -986,7 +987,9 @@ _compiled = {}
 
 
 def _compile(dtype, n, K, cr_val, C, threads, dist_p1=False, dist_p4=False):
-    key = (dtype, n, K, cr_val, C, threads, dist_p1, dist_p4)
+    # iter5 A/B: OP21_P4_RS=0 falls back to the legacy runtime-k band snap
+    p4_rs = os.environ.get("OP21_P4_RS", "1") == "1"
+    key = (dtype, n, K, cr_val, C, threads, dist_p1, dist_p4, p4_rs)
     if key in _compiled:
         return _compiled[key]
     use256 = (n >= 16384)
@@ -996,7 +999,7 @@ def _compile(dtype, n, K, cr_val, C, threads, dist_p1=False, dist_p4=False):
                               min_blocks_per_mp=1, return_output_values=False,
                               M_thr=4, R_rounds=1, band_accept=64, place_mode=5,
                               fuse_collect=True, C_cta=C, dist_p1=dist_p1,
-                              dist_p4=dist_p4)
+                              dist_p4=dist_p4, p4_rank_scatter=p4_rs)
     nr, nc, nb = cute.sym_int(), cute.sym_int(), cute.sym_int()
     ia = 32 if use256 else 16
     in_f = cr.make_fake_compact_tensor(_DT[dtype], (nr, nc), stride_order=(1, 0), assumed_align=ia)

@@ -77,3 +77,27 @@
 - (iter4) phase-cost breakdown at P0 BS1 (ablation): P4 3.9-7us >> P3 2-3us
   >> everything else is the scan+P1 floor (~20us incl. ~11us N-term at
   262K/C4). Rival floor is ~19-20us — the winnable margin is ALL in P4/P3.
+- (iter5) umb-b200-035 GPU0 has degraded cooling (79C idle, GPU1 31C): a
+  17-cell nsys sweep drifted +2.3-2.7us (~+13%) on the LATER cells vs the
+  iter3 baseline while early cells improved — progressive load throttling,
+  sw_thermal_slowdown "Not Active" at idle. Unpaired nsys on GPU0 is now
+  untrustworthy on this node; canonical sweeps go GPU=1 (verified GPU1
+  reproduces iter3-era numbers within 1.5%). Paired same-process event A/B
+  ratios survive throttle; cross-run absolute comparisons do not. ALWAYS
+  eyeball per-cell deltas vs the prior iter's table before accepting a
+  verdict — the uniform-shift-with-run-order signature is thermal, not code.
+- (iter5) same-process A/B via env-var read per _compile call + key
+  inclusion (OP21_P4_RS/OP21_QBINS): both variants coexist in the compile
+  cache, so every cell pairs A and B back-to-back on identical GPU state —
+  drift-immune where separate-process A/B is not.
+- (iter5) P1b QBINS=64 at highBS FALSIFIED (event gm 1.004, 14 P1 cells,
+  all within ±2.5%): the 256-bin suffix scan (8 double-barrier steps) is
+  NOT the per-row highBS bottleneck. The P1-grid SGLang gap lives in the
+  scan/ladder structure itself (rows-per-SM serialization), not in P1b.
+- (iter5) op8's exact rank-scatter P4 ports cleanly onto the band refine:
+  band range [thr1, thr0) is already known (op8's min/max pass drops out),
+  rank target k_rem is runtime (vs op8's const K), all positions shift by
+  m0. s_iscalars[0..4] are free scratch inside P4 (terminal at every call
+  site) — but smem_hist[2]/[3] as post-fine-search scratch must respect
+  the op8 comment: NOT [0]/[1], the last fine warp's reverse scan reads
+  bins down to 0.

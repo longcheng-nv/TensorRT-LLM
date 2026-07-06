@@ -208,3 +208,71 @@ very cells where our snap costs 3.9-7us: port rank-scatter-exact as the
 band refine (single-CTA benefit too); (b) P1-grid highBS SGLang gap
 (P1b per-row cost, QBINS-vs-BS rule); (c) 16-bit ports (roadmap).
 
+## Iter 5 — 2026-07-06 — rank-scatter-exact P4 lands; P0 flips to 1.104
+
+**Lead (a) SHIPPED — phase4_band_rank_scatter (src/gvr_ms_op.py)**: op8's
+exact rank-scatter P4 (`op8b_gvr_b300/.../gvr_topk_decode_cluster_rs.py`,
+enable_p4_rank_scatter_exact — the PR #15709 primitive) ported as the band
+refine, default ON (p4_rank_scatter=True; OP21_P4_RS=0 = legacy snap A/B).
+Port deltas vs op8: band range [thr1, thr0) already known (min/max pass
+drops out), rank target = runtime k_rem (not const K), all output
+positions offset by m0. Chain = coarse kBins hist -> b* + rank_above ->
+ONE fine 256-bin recursion on b* -> single scatter pass; replaces the
+data-dependent snap-convergence loop entirely. One method in the base
+class serves gvr_ms AND gvr_msc (all 3 call sites incl. the dist_p4
+reference path).
+
+**Lead (b) FALSIFIED — P1b QBINS=64 at bs > NUM_SMS**: paired event A/B
+(OP21_QBINS, 14 P1 cells): gm q256/q64 = 1.004, everything within ±2.5%.
+The 8-step suffix scan is NOT the highBS per-row bottleneck; rule
+reverted (constant 256), env knob kept.
+
+**Exactness gates (all green)**: synth 54/54 (smoke_exact) + real
+single-CTA 60/60 + real x C {2,4,8} 180/180 + adversarial preIdx
+(random/half-invalid x ms/C4/C8) 36/36 (new scripts/smoke_real_msc.py).
+
+**Event screen (paired same-process via env-keyed compile cache, 22
+cells)**: gm snap/rs 1.058, rs wins 18/22; biggest at 262K BS8/16
+(1.24-1.25) and K2048 (1.05-1.12).
+
+**GOTCHA — first nsys grid discarded (GPU0 thermal)**: umb-b200-035 GPU0
+now idles at 79C (GPU1 31C) and throttled the later grid cells +2.3-2.7us
+(~+13%), mimicking a regression at 131K/262K while 65K cells improved.
+GPU1 probe reproduced iter3-era numbers within 1.5% (K512 262K BS1: snap
+20.19 vs iter3 19.87us) => iter1-4 baselines clean, GPU0 cooling since
+degraded. Poisoned run archived (results/nsys/iter5_gpu0_thermal_poisoned/);
+canonical grid re-run with GPU=1. Memory note saved.
+
+**nsys pure-kernel cold-L2 P0 VERDICT (canonical, GPU1; drive_nsys_iter2.sh
++ nsys_verdict.py msa; rival = per-cell best of report CSVs B200 fp32)**:
+gm rival/ms **1.104**, win **13/17** (iter3: 1.054, 12/17); vs best
+GVR-family op gm **1.007** (iter3 0.958) — first iter at/above op8
+aggregate. K2048 131K BS1 flips to a win (19.20us, 1.046).
+
+| K | N | BS | ms_us | rival | r/ms | | K | N | BS | ms_us | rival | r/ms |
+|---|---|----|-------|-------|------|-|---|---|----|-------|-------|------|
+|1024|65536|1|16.48|19.96|1.211| |1024|262144|8|22.34|24.16|1.082|
+|1024|65536|4|17.31|20.10|1.161| |1024|262144|16|22.98|31.36|**1.365**|
+|1024|65536|8|17.63|20.54|1.165| |512|131072|1|16.70|19.12|1.145|
+|1024|65536|16|18.11|21.16|1.168| |512|262144|1|19.71|19.13|0.971|
+|1024|131072|1|18.02|19.91|1.105| |2048|131072|1|19.20|20.09|1.046|
+|1024|131072|4|18.85|20.11|1.067| |2048|262144|1|22.05|19.81|**0.899**|
+|1024|131072|8|19.36|20.71|1.070| |2048|262144|16|24.26|31.97|1.318|
+|1024|131072|16|20.03|24.68|1.232| | | | | | | |
+|1024|262144|1|21.12|20.06|0.950| | | | | | | |
+|1024|262144|4|21.82|20.43|0.936| | | | | | | |
+
+**Remaining holes (all narrowed, none closed)**: K1024 262K BS1/4
+0.950/0.936 (was 0.922/0.911; rival bar 20.1-20.4us, we're 1.1-1.4us
+over); K512 262K BS1 0.971; K2048 262K BS1 0.899 (was 0.829). Pattern:
+pure smallBS-largeN scan floor — P4 is no longer the margin (rank-scatter
+took 0.6-2.2us out); what remains is the C4/C8 aggregate-BW N-term vs
+radix_cutedsl's flatter N-scaling. P1 highBS grid untouched (SGLang
+0.77-0.94, structural).
+**iter6 leads**: (a) C-scaling at the 262K BS1/4 holes: C=8 tier for
+K1024/K512 at N262K BS<=4 (iter3 saw K1024 noise-level with the OLD
+expensive P4 — the calculus may flip now that the serial tail shrank);
+(b) P3/P4 residual: leader band gather + K output writes; (c) 16-bit
+ports (roadmap); then iter5-roadmap items (dispatch distillation,
+no-regress full grid, B300 cross-check).
+
