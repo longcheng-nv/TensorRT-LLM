@@ -25,6 +25,8 @@ metadata:
   validated_against: Q9d-04b real SWE-Bench (production 1.94× ↔ skill upper bound 2.08-2.25×)
 ---
 
+> **SUPERSEDED (2026-07-06)** by [`indexer-topk-temporal-synth`](../indexer-topk-temporal-synth/SKILL.md) — unified V3.2/V4-Flash/V4-Pro generator with real-capture empirical-CDF + GPD-tail marginals and rank-conditional temporal calibration (this skill's single-Beta marginal was falsified by `synth_vs_real_validation/`: synth mass at the real top-K boundary → 0.00× at N≥128K). Kept for provenance; prefer the unified skill for all new work.
+
 # SWE-Bench-aligned temporal-coherence synthetic data — skill
 
 ## What this skill does
