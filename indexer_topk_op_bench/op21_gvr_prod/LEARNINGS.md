@@ -94,6 +94,27 @@
   all within ±2.5%): the 256-bin suffix scan (8 double-barrier steps) is
   NOT the per-row highBS bottleneck. The P1-grid SGLang gap lives in the
   scan/ladder structure itself (rows-per-SM serialization), not in P1b.
+- (iter6) measure the DATA before designing the fast path: the host probe
+  (cnt(b*) p50=2 max=4 on 68 rows) turned "small-bin fast path" from a
+  speculative branch zoo into ONE dominant path (warp0 register ranking,
+  <=32 members) + a never-firing fallback. 20 minutes of host replay
+  killed weeks of wrong-shape kernel work.
+- (iter6) event-axis A/B can produce a REPRODUCIBLE per-cell lie when the
+  binary changes: K512 131K BS1 showed fast-path 0.957 across 5 paired
+  reps, but nsys showed dead flat (16.74 vs 16.70us). Same-process
+  pairing removes thermal/run drift, NOT codegen jitter (different SASS
+  register allocation shifts whole-kernel behavior per cell). Single-cell
+  event verdicts don't gate a lever that wins 13/14 elsewhere — nsys
+  arbitrates.
+- (iter6) warp-exact selection beats a fine histogram when the group is
+  tiny: 32 constant-src shuffle_sync compares (tie by stash order) give
+  exact ranks with zero atomics and zero extra smem passes; positions are
+  computed, not contended. Constant-src shuffles avoid any doubt about
+  dynamic-lane support in the DSL.
+- (iter6) smem scratch aliasing rule for hist reuse: after the coarse
+  search, smem_hist is dead EXCEPT via cnt(b*) — read it into a register
+  BEFORE stashing into smem_hist[8..39], then the alias with b_star in
+  [8,40) is harmless because no pass re-reads the coarse hist.
 - (iter5) op8's exact rank-scatter P4 ports cleanly onto the band refine:
   band range [thr1, thr0) is already known (op8's min/max pass drops out),
   rank target k_rem is runtime (vs op8's const K), all positions shift by

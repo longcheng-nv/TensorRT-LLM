@@ -297,3 +297,56 @@ registers instead of building a full fine hist), cheaper P3 leader gather,
 or accept the wall and go 16-bit (lead c). Respect the iter3/4 red line:
 no new cluster barriers unless they buy >0.5us.
 
+## Iter 6 — 2026-07-06 — small-bin P4 fast paths; P0 gm 1.125, op8 +2.6%
+
+**Host probe first (scripts/proto_p4_smallbin.py, 68 synth+real rows)**:
+replayed the P1b->ladder->sandwich->coarse-bin chain on host: cnt(b*)
+p50=2 p90=3 **max=4** (band ~1K spread over >=1024 coarse bins); eq-hit
+(rank_above+cnt(b*)==k_rem) 69%; cnt(b*)<=32 **100%**. The fine 256-bin
+recursion is fallback-only in practice => GO.
+
+**Shipped (src/gvr_ms_op.py phase4_band_rank_scatter)**: three-way branch
+after the coarse search — (B) cnt(b*)<=32: stash the b* members' band
+indices (smem_hist[8..39] — coarse hist is dead there, cnt already in a
+register), ONE band pass emits above-members and stashes b*; warp0 exact
+register ranking (32 constant-src shuffle_sync compares, tie by stash
+order) emits at exact positions, NO fine hist, NO atomics on the b*
+group, 2 barriers total. (A) big-bin equality: whole-bin emit, skip fine.
+(C) fine recursion extracted to _p4_band_fine_scatter as the
+distribution-shift fallback (never fires on probe data). Default ON;
+OP21_P4_FAST=0 forces fine (A/B knob, env-keyed compile cache).
+
+**Exactness (both modes)**: FAST=1: synth 54/54 + real 60/60 + C-smoke
+27/27 + real x C 180/180 + adversarial 36/36. FAST=0 (forces the
+extracted fine path): 54/54 + 60/60 — extraction is lossless.
+
+**Event screen**: gm fine/fast 1.017, win 13/14. Sole apparent loss
+K512 131K BS1 (0.957, reproducible across 5 paired reps) was REFUTED by
+nsys (16.74 vs iter5 16.70us — flat): event-axis codegen jitter, not an
+algorithmic regression. Lesson: a paired-event single-cell verdict can
+still lie when the binary changes — nsys arbitrates.
+
+**nsys pure-kernel cold-L2 P0 VERDICT (canonical, GPU=1)**: gm rival/ms
+**1.125** (iter5 1.104), win 13/17; vs best GVR-family **1.026** (iter5
+1.007). K1024/K2048 -0.3..-0.6us across the board.
+
+| K | N | BS | ms_us | rival | r/ms | | K | N | BS | ms_us | rival | r/ms |
+|---|---|----|-------|-------|------|-|---|---|----|-------|-------|------|
+|1024|65536|1|16.10|19.96|1.240| |1024|262144|8|21.95|24.16|1.101|
+|1024|65536|4|16.80|20.10|1.197| |1024|262144|16|22.62|31.36|**1.386**|
+|1024|65536|8|17.09|20.54|1.202| |512|131072|1|16.74|19.12|1.143|
+|1024|65536|16|17.57|21.16|1.204| |512|262144|1|19.94|19.13|0.960|
+|1024|131072|1|17.73|19.91|1.123| |2048|131072|1|18.66|20.09|1.077|
+|1024|131072|4|18.53|20.11|1.085| |2048|262144|1|21.47|19.81|**0.923**|
+|1024|131072|8|19.01|20.71|1.090| |2048|262144|16|23.71|31.97|1.348|
+|1024|131072|16|19.55|24.68|1.263| | | | | | | |
+|1024|262144|1|20.74|20.06|0.967| | | | | | | |
+|1024|262144|4|21.50|20.43|0.950| | | | | | | |
+
+**Remaining holes**: the four 262K smallBS cells only — K1024 BS1/4
+0.967/0.950 (0.7-1.1us over the bar), K512 BS1 0.960, K2048 BS1 0.923.
+P4 is now essentially drained (fast path = 1 band pass + 2 barriers +
+warp ranking; fine never fires). **iter7 leads**: (a) P3 leader tail
+(slot walk vs DSMEM band gather ablation split first), (b) 16-bit ports
+(roadmap), (c) then dispatch distillation / no-regress full grid / B300.
+
