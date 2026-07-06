@@ -276,3 +276,24 @@ expensive P4 — the calculus may flip now that the serial tail shrank);
 ports (roadmap); then iter5-roadmap items (dispatch distillation,
 no-regress full grid, B300 cross-check).
 
+## Iter 6 opening probes — 2026-07-06 (same session as iter5, GPU1 event)
+**(a) C8-at-holes FALSIFIED-AS-MARGINAL**: C4/C8 paired event at the hole
+cells: K1024 262K BS1/4 1.007/1.006, K512 262K BS1 1.013, K2048 262K BS1
+1.007 (already C8 in auto), K1024 131K BS1 0.955 (C8 loses), BS16
+collapse unchanged (0.615). +0.6-1.3% = noise; the serial-tail shrink did
+NOT flip the C-scaling calculus. No gate change.
+**(b) fresh phase ablation (no-op subclass, event BS1, rank-scatter P4)**:
+| cell | full | P4_us | P3_us | scan floor (noP34) |
+|---|---|---|---|---|
+| K1024 262K C4 | 26.4 | 2.94 (was 3.9) | 2.75 | 20.7 |
+| K512 262K C4 | 24.8 | 2.30 | 1.95 | 20.5 |
+| K2048 262K C8 | 27.3 | 4.03 (was 7.0) | 3.36 | 19.9 |
+Scan floor is already AT the rival bar (19.8-20.4us) => the remaining
+1.1-2.2us nsys gap is still ALL in the leader-only P3+P4 tail (4.3-7.4us
+event). iter6 design space: small-bin P4 fast path (band ~900 in ~1024
+coarse bins => cnt(b*) usually tiny; skip the fine 256-hist when
+rank_above + cnt(b*) == k_rem, or select among <=64 b*-members in
+registers instead of building a full fine hist), cheaper P3 leader gather,
+or accept the wall and go 16-bit (lead c). Respect the iter3/4 red line:
+no new cluster barriers unless they buy >0.5us.
+

@@ -63,16 +63,18 @@ Continue the op21 GVR production-kernel campaign in
   `Made-with: Claude Code` + `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`.
   Update THIS FILE + ITERATIONS.md + LEARNINGS.md in the same commit.
 
-## Next (iter6 leads, ranked)
-(a) C-scaling at the remaining 262K BS<=4 holes: try a C=8 tier for
-    K1024/K512 at N262K BS<=4 — iter3 measured K1024 C8 as noise-level
-    with the OLD expensive P4; the serial tail just shrank, so the
-    oversubscription-vs-BW calculus may flip. Watch the BS16 collapse
-    (launch geometry) before widening any gate.
-(b) P3/P4 residual at BS1: leader DSMEM band gather + K output writes
-    (~2-3us ablation); a distributed OUTPUT write is NOT the falsified
-    dist-P4 (no cut-bin pick involved) but respect the iter3/4 red line:
-    any new cluster barrier must buy more than ~0.5us.
+## Next (iter6 leads, ranked; opening probes ALREADY RUN — see ITERATIONS
+## "Iter 6 opening probes")
+(a) ~~C=8 tier at the 262K BS<=4 holes~~ FALSIFIED-AS-MARGINAL 2026-07-06:
+    C4/C8 paired event +0.6-1.3% (noise) at every hole cell, BS16 collapse
+    unchanged. Do not retry.
+(b) P3/P4 leader tail is still the whole margin (fresh ablation: P4
+    2.3-4.0us + P3 2.0-3.4us; scan floor 19.9-20.7us == rival bar).
+    Design ideas: small-bin P4 fast path (cnt(b*) is tiny with band~900
+    in 1024 coarse bins — skip the fine 256-hist when rank_above +
+    cnt(b*) == k_rem, or register-select among <=64 b* members), cheaper
+    P3 leader band gather. Red line: no new cluster barrier unless it
+    buys >0.5us.
 (c) 16-bit ports (roadmap item, untouched).
 Then: iter5-roadmap tail = dispatch distillation (rules already <=3),
 no-regress full grid (largeN midBS/highBS must not regress), B300
