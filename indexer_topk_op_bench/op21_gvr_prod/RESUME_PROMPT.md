@@ -14,7 +14,26 @@ Continue the op21 GVR production-kernel campaign in
    tables (canonical numbers live here).
 3. `op21_gvr_prod/LEARNINGS.md` — falsified levers + mechanisms.
 
-## State after iter7 (2026-07-06, commits 2f35c0d192..HEAD)
+## State after iter8 (2026-07-06, commits 2f35c0d192..HEAD)
+- iter8 landed the 16-bit tier + P1 refresh (all on 047 GPU0):
+  * 16-bit exactness: real 360/360 (60L x ms/C4/C8 x bf16/fp16, NEW
+    scripts/smoke_real_16bit.py) + synth spot checks — the kernels were
+    already dtype-generic; no code port needed.
+  * C8-at-16bit dispatch rule SHIPPED (`C=8 iff 16-bit && N>=65536 &&
+    N>=32768*BS` in gvr_ms_auto): the fp32 C8 falsification does NOT
+    transfer to 16-bit (halved scan re-weights the tail; event C4/C8
+    1.08-1.14 at the win region, 262K BS16 still collapses 0.71).
+  * 16-bit nsys P0 verdict: bf16 gm 1.028 (11/17), fp16 gm 1.043
+    (11/17); vs best GVR-family 1.21/1.25. Holes = largeN smallBS
+    (262K BS1/4 0.92; K2048 262K BS1 0.86): per-element cost bound
+    (cvt+fp32 ladder) — lever = 16-bit native compares (PLAN #6).
+  * P1 nsys refreshed on HEAD (iter1 reps archived iter1_ms_p1/):
+    gm 0.816 -> 0.901 (5/24 wins); walls unchanged (SGLang midN-highBS,
+    radix N4-8K BS64).
+  * nsys archives: 16-bit C4-rule grid = iter8_16bit_c4rule/; current
+    msa_*_{bf16,fp16}_* = C8-rule verdict grid.
+
+## State after iter7 (2026-07-06)
 - iter7 SHIPPED P3 band remote-store push (src/gvr_msc_op.py): the slot
   walk writes band entries straight into the LEADER's smem at the
   pre-known global band prefix via new st.shared::cluster primitives —
@@ -107,23 +126,31 @@ Continue the op21 GVR production-kernel campaign in
   `Made-with: Claude Code` + `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`.
   Update THIS FILE + ITERATIONS.md + LEARNINGS.md in the same commit.
 
-## Next (iter8 leads, ranked) — P0 goal is MET; remaining = roadmap tail
-(a) 16-bit ports (roadmap item, untouched; kNumBins differs — 512/2048 —
-    and the small-bin CAP/fine semantics need real-capture re-validation;
-    push port should be mechanical but needs the exactness gates).
-(b) Dispatch distillation (rules already <=3) + no-regress FULL grid
-    (largeN midBS/highBS + P1 canaries must not regress).
-(c) B300 cross-check.
-(d) Optional stretch: P1 highBS grid (SGLang 0.77-0.94, single-CTA
-    scan/ladder structural — the known deprioritized wall).
-DONE/FALSIFIED (do not retry): C=8 tier at 262K holes (+0.6-1.3% noise);
-P1b QBINS=64 at highBS (gm 1.004); dist-P1/dist-P4; small-bin P4 fast
-paths SHIPPED iter6; P3 push SHIPPED iter7 (gather A/B via
-OP21_P3_PUSH=0).
+## Next (iter9 leads, ranked)
+(a) 16-bit native compares in the streaming ladder (skip 16->32 cvt;
+    PLAN fine-grain #6, untested): the remaining 16-bit largeN-smallBS
+    gap (0.86-0.92) is per-element-cost-bound with C8 already applied.
+    Careful: bf16 native compare needs an order-preserving trick
+    (bf16 as int16 compare works for same-sign; NaN/inf handling) —
+    validate exactness on real captures FIRST (op18/20 16-bit lineage
+    may have prior art).
+(b) Dispatch distillation writeup + no-regress FULL grid (fp32 P0 msa
+    grid + 16-bit grids + P1 canaries in one table for the ship review).
+(c) B300 cross-check (needs a B300 host; write a launch prompt like
+    op17's B300_FULLGRID_V2_PROMPT.md pattern).
+(d) Optional stretch: P1 highBS grid (SGLang 0.86-0.96 after refresh,
+    single-CTA scan/ladder structural — the known deprioritized wall).
+DONE/FALSIFIED (do not retry): C=8 at fp32 262K holes (+0.6-1.3% noise —
+but it WINS at 16-bit, rule shipped iter8; dtype-conditional!); P1b
+QBINS=64 at highBS (gm 1.004); dist-P1/dist-P4; small-bin P4 fast paths
+SHIPPED iter6; P3 push SHIPPED iter7 (gather A/B via OP21_P3_PUSH=0).
 
-## Open holes (nsys, after iter7)
-- P0 grid: NONE — 17/17 wins, gm 1.249 (rival) / 1.139 (op8).
-- P1 grid (N 4-16K, BS 64-1024): gm 0.816 (iter1 measurement; event
-  screens suggest ~5-10% total improvement since; push is a no-op there
-  — single-CTA), SGLang-dominated; BS64 smallN vs radix 0.60-0.79 is the
-  known deprioritized structural wall. P1b (QBINS) ruled out as cause.
+## Open holes (nsys, after iter8)
+- fp32 P0 grid: NONE — 17/17 wins, gm 1.249 (rival) / 1.139 (op8).
+- 16-bit P0: bf16 gm 1.028 / fp16 1.043, 11/17 each; holes = largeN
+  smallBS diagonal (K1024 262K BS1/4 ~0.92, K512 262K BS1 ~0.97, K2048
+  131K/262K BS1 0.95-0.86, 131K BS8 0.96-0.98) — per-element scan cost;
+  see iter9 lead (a).
+- P1 grid (N 4-16K, BS 64-1024, fp32): gm 0.901 (refreshed on iter7
+  HEAD), win 5/24; SGLang midN-highBS 0.86-0.96 + radix N4-8K BS64
+  0.68-0.86 walls unchanged. Deprioritized.

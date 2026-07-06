@@ -1145,14 +1145,23 @@ def gvr_msc(logits, pre_idx, seq_lens, index_topk, compress_ratio=1, out=None,
     return out
 
 
-# production entry: TWO extra dispatch rules on (K, BS, max-N buffer) only.
-# C=4 measured best or tied-best on 15/17 P0 cells (event screen 2026-07-05).
-# C=8 is a consistent ~5% win ONLY at K2048 huge-N BS<=4 (two independent
-# runs: 28.7/29.2 vs C4 30.3/30.7us); at K1024 it is noise-level and it
-# collapses at BS16 (47us) — hence the tight gate.
+# production entry: THREE extra dispatch rules on (dtype, K, BS, max-N
+# buffer) only.
+# C=4 measured best or tied-best on 15/17 fp32 P0 cells (event 2026-07-05).
+# C=8 fp32 is a consistent ~5% win ONLY at K2048 huge-N BS<=4; at K1024 it
+# is noise-level (iter6 re-probe +0.6-1.3%) and collapses at BS16 — tight
+# gate. At 16-bit the calculus FLIPS (iter8 probe 2026-07-06): the cheaper
+# scan makes 8-way chunking a 1.08-1.14x win across N>=131K BS<=4 AND 262K
+# BS8, still collapsing at 262K BS16 (0.71) — the single rule
+# `N >= 32768*BS` covers exactly the measured win region (65K BS1 neutral
+# 1.007 included; 131K BS8 marginal 1.019 excluded).
 def gvr_ms_auto(logits, pre_idx, seq_lens, index_topk, compress_ratio=1,
                 out=None):
     bs, n = logits.shape
+    dt16 = logits.dtype in (torch.bfloat16, torch.float16)
+    if dt16 and n >= 65536 and n >= 32768 * bs:
+        return gvr_msc(logits, pre_idx, seq_lens, index_topk, compress_ratio,
+                       out=out, C=8)
     if index_topk >= 2048 and n >= 196608 and bs <= 4:
         return gvr_msc(logits, pre_idx, seq_lens, index_topk, compress_ratio,
                        out=out, C=8)

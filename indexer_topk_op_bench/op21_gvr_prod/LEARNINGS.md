@@ -137,6 +137,23 @@
   phase that had never appeared in any ablation table (see blind-spot
   note above) — re-run the ablation split after every structural change;
   the ranking moves.
+- (iter8) falsifications can be DTYPE-conditional: C8-at-holes was
+  falsified at fp32 (iter6, +0.6-1.3% noise) but is a 1.08-1.14x WIN at
+  bf16/fp16 — halving the scan bytes re-weights the serial tail, so the
+  C-scaling calculus flips. Re-test C/cluster geometry per dtype tier
+  before inheriting an fp32 verdict. The win region compressed into ONE
+  rule: `N >= 32768*BS` (collapse at 262K BS16 and the 131K BS8 marginal
+  both fall out naturally).
+- (iter8) 16-bit speeds up the RIVAL more than us at C4: radix drops ~35%
+  (L2-BW-bound, flat N-scaling) while our C4 largeN smallBS time is flat
+  (18.85 -> 18.66us) — the fused scan is instruction-bound there, not
+  L2-BW-bound. C8 reclaims 2.5us; the residual gap is per-element cost
+  (16->32 cvt + fp32 ladder) => 16-bit native compares is the lever, not
+  more SMs.
+- (iter8) real_data_v2's per-dtype refs make the 16-bit real gate free to
+  write: dtype-truncated captures + tie-robust value_metrics — 360 checks
+  caught zero issues, confirming the fp32-validated band/P4 semantics are
+  dtype-independent (kNumBins differences included).
 - (iter5) op8's exact rank-scatter P4 ports cleanly onto the band refine:
   band range [thr1, thr0) is already known (op8's min/max pass drops out),
   rank target k_rem is runtime (vs op8's const K), all positions shift by

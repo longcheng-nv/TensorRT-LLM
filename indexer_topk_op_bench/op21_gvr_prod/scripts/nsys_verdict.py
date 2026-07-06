@@ -21,6 +21,7 @@ GVR_BEST = ["gvr_cuda", "gvr_cutedsl", "gvr_cutedsl_rs", "gvr_multicta_cutedsl",
             "gvr_op8", "gvr_port", "gvr_mt", "gvr_sandwich"]
 
 PREFIX = sys.argv[1] if len(sys.argv) > 1 else "ms"
+DTYPE = sys.argv[2] if len(sys.argv) > 2 else "fp32"  # iter8: bf16/fp16 too
 
 P0 = [(1024, N, BS) for N in (65536, 131072, 262144) for BS in (1, 4, 8, 16)]
 if PREFIX == "msa":  # iter2 grid adds the cross-K largeN BS1 cells, no P1
@@ -36,7 +37,7 @@ def load_rivals():
     cells = {}
     for f in ("bs_data.csv", "seqlen_data.csv"):
         for r in csv.DictReader(open(_REPORT / f)):
-            if r["hw"] != "B200" or r["dtype"] != "fp32":
+            if r["hw"] != "B200" or r["dtype"] != DTYPE:
                 continue
             key = (int(r["K"]), int(r["N"]), int(r["BS"]))
             if key in cells:
@@ -58,7 +59,7 @@ def load_rivals():
 
 
 def ms_med_us(K, N, BS):
-    rep = _ROOT / "results" / "nsys" / f"{PREFIX}_k{K}_fp32_n{N}_bs{BS}.nsys-rep"
+    rep = _ROOT / "results" / "nsys" / f"{PREFIX}_k{K}_{DTYPE}_n{N}_bs{BS}.nsys-rep"
     if not rep.exists():
         return None
     out = subprocess.run(

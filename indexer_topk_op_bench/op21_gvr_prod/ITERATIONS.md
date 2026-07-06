@@ -424,3 +424,54 @@ structural; deprioritized). **iter8 leads**: (a) 16-bit ports (roadmap),
 (b) dispatch distillation (rules already <=3) + no-regress full grid
 (largeN midBS/highBS + P1 canaries), (c) B300 cross-check.
 
+## Iter 8 — 2026-07-06 — 16-bit lands (C8 flips at 16-bit); P1 refreshed
+
+**P1 nsys refresh (24 cells, iter7 HEAD, 047 GPU0; iter1 reps archived
+results/nsys/iter1_ms_p1/)**: gm rival/ms **0.901** (iter1 0.816), win
+5/24 — the iter5-7 band-refine work carried ~10% into the P1 grid (push
+itself is a single-CTA no-op there). Structure unchanged: SGLang owns
+midN highBS (we sit 0.86-0.96), radix owns N4-8K BS64 (0.68-0.86, the
+deprioritized structural wall). New outright wins: K1024/K512 16384 BS64,
+K512 16384 BS1024, K2048 16384 BS256/1024.
+
+**16-bit port status**: the kernels (gvr_ms + gvr_msc incl. push + P4
+fast paths) already compile & run 16-bit from the op18/19 lineage —
+"port" reduced to validation + measurement + dispatch.
+- Exactness: NEW scripts/smoke_real_16bit.py — real captures
+  dtype-truncated (real_data_v2 per-dtype refs, tie-robust): 60 layers x
+  {ms, C4, C8} x {bf16, fp16} = **360/360 exact**; synth C4 6-cell + C8
+  12-cell spot checks exact.
+- First 16-bit nsys grid (C4-era rule, archived
+  results/nsys/iter8_16bit_c4rule/): bf16 gm 0.973 (7/17), fp16 0.985
+  (7/17). Diagnostic: our largeN smallBS time ~flat fp32->bf16 (18.85 ->
+  18.66us at K1024 262K BS1 C4) while radix drops 20.1 -> 14.9 — at
+  16-bit the C4 scan is NOT L2-BW-bound; radix's flatter multi-CTA
+  N-scaling wins.
+- **C8-at-16bit probe: the fp32 falsification does NOT transfer.** Event
+  C4/C8 at bf16: 262K BS1/4/8 1.10-1.14, 131K BS1/4 1.08-1.10, 65K BS1
+  1.007, 131K BS8 1.019 (marginal), 262K BS16 0.713 (same collapse);
+  fp16 matches. Halved scan cost re-weights the serial tail => 8-way
+  chunking pays at 16-bit where it was noise at fp32.
+- **Shipped dispatch rule** (gvr_ms_auto, ONE new production-legal
+  comparison on compile-time dtype + BS + max-N):
+  `C=8 iff 16-bit AND N >= 65536 AND N >= 32768*BS` — covers exactly the
+  measured win region, excludes the BS16 collapse and the 131K BS8
+  marginal. Exactness for 16-bit C8 already gated (real 360/360 incl.
+  C8; synth C8 12/12).
+
+**nsys pure-kernel cold-L2 16-bit P0 VERDICT (canonical, 047 GPU0, C8
+rule)**: bf16 gm rival/ms **1.028**, win **11/17**, vs best GVR-family
+1.211; fp16 gm **1.043**, win **11/17**, gvrbest 1.253. C8 cells
+improved 0.9-2.5us over the C4-rule grid (e.g. bf16 K1024 262K BS1
+18.66 -> 16.19, BS8 19.33 -> 16.77 = flips to 1.062 win).
+
+**Remaining 16-bit holes (all largeN smallBS)**: 262K BS1/4 K1024
+0.918/0.917 (bf16), K512 262K BS1 0.965, K2048 131K/262K BS1
+0.964/0.864; 131K BS8 0.960-0.984 (C8 marginal there, excluded).
+Mechanism: with C8 the SM count is no longer the binding constraint —
+the per-element scan cost (16->32 cvt + fp32 compare ladder) is. Lever =
+16-bit native compares in the streaming ladder (PLAN fine-grain #6,
+untested). **iter9 leads**: (a) 16-bit native-compare ladder,
+(b) dispatch distillation writeup + no-regress full grid, (c) B300
+cross-check (needs a B300 host; write launch prompt).
+
