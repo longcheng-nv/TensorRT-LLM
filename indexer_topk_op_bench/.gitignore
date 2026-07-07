@@ -1,0 +1,13 @@
+# nsys artifacts embed the process environment (tokens) — never commit.
+*.nsys-rep
+*.sqlite
+# real-data nsys sweep roots (per-machine, regenerable)
+results_b200_nsys_real/
+results_b300_nsys_real/
+results_pilot_real*/
+# slim real-data extractions (regenerable from the canonical captures)
+data/real_v2_*_laststep.pt
+# op22 temporal fixed-hr bench: generated bundles + per-machine nsys results
+op22_temporal_fixed_hr_bench/bundles/
+results_b200_op22/
+results_b300_op22/
