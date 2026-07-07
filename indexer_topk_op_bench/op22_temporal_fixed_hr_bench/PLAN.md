@@ -49,7 +49,17 @@ scenario:
 
 ## 2. Scenario definitions (the ONLY new data axis)
 
-Fixed `--seed 42` everywhere. `--row_mode replicate` semantics are NOT used —
+> **Seed-policy amendment (iter1, 2026-07-07)**: `synthesize()` draws the
+> row's LAYER as the first rng call from `default_rng(seed)`, so a constant
+> `--seed 42` would give every (K, N) cell the SAME layer — collapsing the
+> aggregate/tercile layer mixture (the exact trap `harness/synth_data_v2.
+> cell_seed` was built to avoid; see its docstring). We therefore derive
+> `seed(K, N) = 42 + crc32(f"{K}|{N}") % 1e6` (identical derivation to
+> synth_data_v2), shared across dtypes AND scenarios. Each bundle's exact
+> seed + equivalent CLI is recorded in its meta.json (`gen_cmd`) and in the
+> report. Everything remains fully deterministic from base 42.
+
+Fixed base seed 42 everywhere (per-cell derivation above). `--row_mode replicate` semantics are NOT used —
 we generate a 1-row bundle and replicate to BS in `_build_inputs`, exactly
 like report/report.html does (keeps comparability with the historical
 report; independent-rows realism is a documented caveat + optional

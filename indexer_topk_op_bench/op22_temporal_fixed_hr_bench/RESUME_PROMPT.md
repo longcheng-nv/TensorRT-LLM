@@ -20,32 +20,35 @@ order:
 3. `indexer_topk_op_bench/report/report.html` + `report/gen_report.py` —
    the report style/data-method to mirror (§1 seqlen BS=1, §2 BS-scaling).
 
-## State (2026-07-07, campaign not yet started)
-- PLAN.md authored; NO code, NO bundles, NO measurements yet.
+## State (2026-07-07, iter1: W1–W4 DONE on umbriel-b200-040, sweeps launching)
+- W1 DONE: gen_bundles.py → 234/234 bundles (152 MB, gitignored), 0 fails,
+  hr verified (best .900 / worst .050±.001 / real sampled per layer).
+  SEED AMENDMENT (PLAN §2): per-cell seed = 42 + crc32("{K}|{N}") % 1e6
+  (constant 42 would collapse the aggregate layer mixture — synthesize()
+  draws the layer as the FIRST rng call); exact seed + CLI in each
+  bundle's meta.json ("gen_cmd").
+- W2 DONE: bundle_data.py (legacy dict shape). NEXT_N=1 ⇒ skill seq_lens
+  == bench N*cr EXACTLY — no convention gap (asserted per load).
+- W3 DONE: sweep_op22.py + drive_nsys_op22.sh + parse_op22.py; headless
+  smoke 45/45 recs 0 errors (incl. N=512K/1M cells).
+- W4 DONE: gate_op22.py GATE exact=456 mismatches=0 errors=0 (all 5 ops ×
+  3 scenarios × 9 (dtype,K) × N {65536,1048576} × BS {1,16}).
 - op21 kernel state: iter12 @f51f50f4da — bench op `gvr_ms_auto`
   (op21_gvr_prod/src/gvr_msc_op.py) is the object under test. The upstream
   PR-1 integration is PAUSED by user decision — do NOT work on
   tensorrt_llm/ integration in this campaign.
-- Harness to reuse: harness/sweep_nsys.py + drive_nsys_full.sh (nsys
-  cudaProfilerApi, warm `w|` + cold `c|` NVTX ranges, resumable batches),
-  sweep_op21._build_op21_call, report/parse_nsys_full.py.
 
-## Next (= PLAN.md §4, in order)
-(a) W1 gen_bundles.py — generate 1-row bundles, scenarios best(beta_deep,
-    hr .90)/worst(beta_shallow, hr .05)/real(aggregate, sampled), models
-    v4flash/v4pro/v32 ↔ K512/1024/2048, dtypes fp32/bf16/fp16,
-    N 4K..1M, --seed 42; gitignore bundles/ FIRST.
-(b) W2 bundle_data.py adapter (same dict shape as harness/synth_data
-    .get_bundle; seq_lens = BENCH convention N*cr).
-(c) W3 sweep_op22.py + drive_nsys_op22.sh (5 ops: gvr_ms_auto,
-    gvr_cutedsl, gvr_multicta_cutedsl, radix_cutedsl, sglang_streaming;
-    N_SEQ + {524288,1048576}; OUT=results_b200_op22/<scenario>).
-(d) W4 exactness pre-gate BEFORE timing (sorted-set criterion for GVR —
-    output order is atomicAdd-nondeterministic, op21 iter12 LEARNINGS).
-(e) W5 run scenario-serial real → best → worst; parse; sanity `real` vs
-    report.html ratios.
-(f) W6 REPORT.html (CSS-only toggles, zero <script>; record the §2 CLI +
-    natural-language generation prompts verbatim for reproducibility).
+## Next
+(e) W5 IN PROGRESS: `cd op22_temporal_fixed_hr_bench && OUT=results_b200_op22
+    GPU=0 ./drive_nsys_op22.sh 2>&1 | tee ../results_b200_op22/drive.log`
+    (scenario-serial real → best → worst; batch-resumable via
+    results_b200_op22/<scen>/.done_* markers — just relaunch the same
+    command after a node loss). Then `python3 parse_op22.py`; sanity
+    `real` ratios vs report/report.html aggregates. Stretch after main:
+    SWEEPS=bs_hugeN ./drive_nsys_op22.sh (N {512K,1M} × BS 2–64).
+(f) W6 REPORT.html (CSS-only toggles, ZERO <script> — legacy report.html
+    has 3, do NOT copy them; inline-SVG charts; record the §2 CLI +
+    natural-language generation prompts + per-cell seed policy verbatim).
 (g) W7 commit per iteration `[op22 iterN]`, `git commit -s`, trailers
     Made-with + Co-Authored-By Claude; update PLAN/RESUME each commit.
 
