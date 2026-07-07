@@ -1,0 +1,843 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GVR Top-K: Threshold Estimation from preIdx — A Mathematical Analysis</title>
+<style>
+  :root {
+    --ink: #1a2333;
+    --muted: #5a6a80;
+    --accent: #0f6bb3;
+    --accent-soft: #e8f2fa;
+    --warn: #b3550f;
+    --warn-soft: #faf0e6;
+    --good: #1a7a4a;
+    --good-soft: #e9f6ef;
+    --line: #d8dfe8;
+    --bg: #f7f9fc;
+    --card: #ffffff;
+    --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 0 0 4rem 0;
+    font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", "Noto Sans SC", sans-serif;
+    color: var(--ink); background: var(--bg);
+    line-height: 1.62; font-size: 16px;
+  }
+  .page { max-width: 960px; margin: 0 auto; padding: 0 1.5rem; }
+  header.doc {
+    background: linear-gradient(135deg, #10263f 0%, #0f4a7a 100%);
+    color: #fff; padding: 2.2rem 0 1.8rem 0; margin-bottom: 2rem;
+  }
+  header.doc .page { max-width: 960px; }
+  header.doc h1 { margin: 0 0 .4rem 0; font-size: 1.55rem; line-height: 1.3; }
+  header.doc .sub { color: #b8d2e8; font-size: .95rem; }
+  .langbar { display: flex; gap: .5rem; justify-content: flex-end; margin-bottom: 1rem; }
+  .langbar label {
+    cursor: pointer; padding: .28rem 1rem; border-radius: 999px;
+    border: 1px solid rgba(255,255,255,.45); color: #d9e8f5; font-size: .85rem;
+    user-select: none;
+  }
+  h2 { font-size: 1.25rem; margin: 2.4rem 0 .8rem 0; padding-bottom: .35rem; border-bottom: 2px solid var(--line); }
+  h2 .no { color: var(--accent); margin-right: .5rem; font-variant-numeric: tabular-nums; }
+  h3 { font-size: 1.02rem; margin: 1.6rem 0 .5rem 0; }
+  p { margin: .7rem 0; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 1.1rem 1.3rem; margin: 1rem 0; }
+  .keybox { background: var(--accent-soft); border-left: 4px solid var(--accent); border-radius: 6px; padding: .9rem 1.1rem; margin: 1rem 0; }
+  .warnbox { background: var(--warn-soft); border-left: 4px solid var(--warn); border-radius: 6px; padding: .9rem 1.1rem; margin: 1rem 0; }
+  .goodbox { background: var(--good-soft); border-left: 4px solid var(--good); border-radius: 6px; padding: .9rem 1.1rem; margin: 1rem 0; }
+  .math {
+    font-family: Georgia, "Times New Roman", serif; font-style: italic;
+    background: #fff; border: 1px solid var(--line); border-radius: 8px;
+    padding: .8rem 1.2rem; margin: .9rem 0; text-align: center; font-size: 1.08rem;
+  }
+  .m { font-family: Georgia, "Times New Roman", serif; font-style: italic; white-space: nowrap; }
+  code, .mono { font-family: var(--mono); font-size: .86em; background: #eef2f7; border-radius: 4px; padding: .08em .35em; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: .92rem; background: var(--card); }
+  th, td { border: 1px solid var(--line); padding: .5rem .7rem; text-align: left; vertical-align: top; }
+  th { background: #eef3f9; font-weight: 600; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .small { font-size: .85rem; color: var(--muted); }
+  .tag { display: inline-block; font-size: .72rem; font-weight: 700; letter-spacing: .04em; border-radius: 4px; padding: .1em .5em; vertical-align: middle; }
+  .tag.fals { background: #f6dfdc; color: #8f2b1e; }
+  .tag.ship { background: #dcefe4; color: #175c38; }
+  .tag.open { background: #dfeafa; color: #14508f; }
+  ul, ol { margin: .5rem 0 .8rem 1.4rem; padding: 0; }
+  li { margin: .35rem 0; }
+  footer { margin-top: 3rem; color: var(--muted); font-size: .82rem; border-top: 1px solid var(--line); padding-top: 1rem; }
+  pre.code {
+    font-family: var(--mono); font-size: .82rem; line-height: 1.5;
+    background: #10263f; color: #dce8f5; border-radius: 8px;
+    padding: 1rem 1.2rem; overflow-x: auto; margin: 1rem 0;
+  }
+  pre.code .cm { color: #7fa8cc; }
+  .partbar {
+    background: linear-gradient(135deg, #10263f 0%, #0f4a7a 100%);
+    color: #fff; border-radius: 10px; padding: 1rem 1.3rem; margin: 3rem 0 1.5rem 0;
+  }
+  .partbar .pt { font-size: .78rem; letter-spacing: .12em; text-transform: uppercase; color: #9ec4e0; }
+  .partbar h2.p { border: none; margin: .15rem 0 0 0; padding: 0; color: #fff; font-size: 1.25rem; }
+  .thm { font-weight: 700; color: var(--accent); }
+
+  /* ---------- CSS-only language toggle (no JS) ---------- */
+  #lang-en, #lang-zh { position: absolute; left: -9999px; }
+  .zh { display: none; }
+  #lang-zh:checked ~ .wrap .zh { display: block; }
+  #lang-zh:checked ~ .wrap .en { display: none; }
+  #lang-en:checked ~ .wrap .langbar label[for="lang-en"],
+  #lang-zh:checked ~ .wrap .langbar label[for="lang-zh"] {
+    background: #fff; color: #0f4a7a; border-color: #fff; font-weight: 700;
+  }
+</style>
+</head>
+<body>
+
+<input type="radio" name="lang" id="lang-en" checked>
+<input type="radio" name="lang" id="lang-zh">
+
+<div class="wrap">
+
+<header class="doc">
+  <div class="page">
+    <div class="langbar">
+      <label for="lang-en">English</label>
+      <label for="lang-zh">中文</label>
+    </div>
+    <div class="en">
+      <h1>GVR Top-K: Optimal Threshold Estimation from preIdx<br>— A Mathematical Analysis</h1>
+      <div class="sub">Reframing the secant question · op21 GVR-MS campaign · 2026-07-07 · B200/B300, DSv3.2/DSv4 decode indexer</div>
+    </div>
+    <div class="zh">
+      <h1>GVR Top-K:基于 preIdx 的最优阈值估计<br>—— 数学角度的分析</h1>
+      <div class="sub">重新定位 secant 问题 · op21 GVR-MS 战役 · 2026-07-07 · B200/B300,DSv3.2/DSv4 decode indexer</div>
+    </div>
+  </div>
+</header>
+
+<div class="page">
+
+<!-- ================= TL;DR ================= -->
+<div class="en">
+<div class="keybox">
+<strong>TL;DR.</strong> Once the problem is formalized, the answer collapses cleanly: the optimal threshold is a
+<em>plug-in order statistic of the gathered sample</em>, and the only genuinely unknown quantity is the
+one-dimensional <em>effective retention rate h</em>. Because <span class="m">h</span> is scale-free and temporally
+stationary — unlike the threshold itself — the best efficient solution is <strong>not a better root-finder
+(secant) but a sequential estimator of h in rank space across decode steps</strong>. The GVR-MS fast path already
+sits at the information-theoretic one-pass lower bound; all remaining mathematical slack lives in estimating
+<span class="m">h</span> (buys tail robustness) and in a smarter fallback (regula falsi on already-measured CDF
+points instead of blind bisection). None of this raises the mainline geomean materially — it removes the
+preIdx-driven variance cliffs quantified by op22.
+</div>
+</div>
+<div class="zh">
+<div class="keybox">
+<strong>要点。</strong>问题一经形式化,答案会收敛得非常干净:最优阈值本质上是 <em>gather 样本的一个 plug-in
+次序统计量</em>,唯一真正未知的量是一维的<em>有效保留率 h</em>。由于 <span class="m">h</span> 是标度不变、跨步平稳的
+—— 而阈值本身不是 —— 最佳高效解<strong>不是更好的求根器(secant),而是在秩空间对 h 做跨 decode step
+的序贯估计</strong>。GVR-MS 快路径已经达到信息论意义上的单遍下界;剩余的全部数学余量在于估计
+<span class="m">h</span>(收益是尾部鲁棒性),以及更聪明的 fallback(在已测 CDF 点上做 regula falsi,替代盲二分)。
+这些都不会显著抬高主线 geomean —— 它们消除的是 op22 定量证实的 preIdx 驱动的性能方差悬崖。
+</div>
+</div>
+
+<!-- ================= 1. Formalization ================= -->
+<h2><span class="no">1</span><span class="en">Formalization</span><span class="zh">问题的形式化</span></h2>
+
+<div class="en">
+<p>Let the current decode step's logits row be <span class="m">x<sub>1</sub>, …, x<sub>N</sub></span>. The target is the
+K-th largest value <span class="m">v<sub>K</sub></span> — the ideal threshold. The observation is the gathered sample</p>
+<div class="math">S = { x<sub>j</sub> : j ∈ preIdx },&nbsp;&nbsp;|S| = K</div>
+<p>where preIdx is the <em>previous</em> step's top-K index set. The cost model (measured):
+one full-row <code>count_ge(θ)</code> pass costs one cold sweep (~22 µs at N=1M — the entire radix kernel's budget);
+any O(K) computation on S in shared memory is effectively free. Exactness never depends on the threshold —
+downstream counts plus the exact band refine are the authority — so the threshold only needs to
+<em>bracket K with high probability in one shot</em>.</p>
+<p><strong>The sample is not i.i.d.</strong> It is a temporally coherent sample biased toward the upper tail:
+of the global top-<span class="m">r</span> values, approximately <span class="m">H(r)</span> appear in S, where
+<span class="m">H</span> is the rank-conditional retention curve with average slope
+<span class="m">h</span> (the hit rate; measured Pro 0.69–0.77, Flash 0.36–0.46). The
+<span class="m">(1−h)K</span> "miss" entries have current values that sink <em>below</em>
+<span class="m">v<sub>K</sub></span> and concentrate near the selection boundary (real-capture measurement;
+op22 mechanism study).</p>
+</div>
+<div class="zh">
+<p>设当前 decode step 的 logits 行为 <span class="m">x<sub>1</sub>, …, x<sub>N</sub></span>,目标是第 K 大值
+<span class="m">v<sub>K</sub></span>(理想阈值)。观测为 gather 样本</p>
+<div class="math">S = { x<sub>j</sub> : j ∈ preIdx },&nbsp;&nbsp;|S| = K</div>
+<p>其中 preIdx 是<em>上一步</em>的 top-K 下标集。代价模型(实测):全行一次 <code>count_ge(θ)</code> = 1 遍冷
+pass(N=1M 时 ~22 µs,恰好等于 radix 整个内核的预算);对 S 的任何 O(K) smem 运算 ≈ 免费。精确性从不依赖阈值
+—— 下游 count + 精确 band refine 才是 authority —— 所以阈值只需<em>高概率一步夹住 K</em>。</p>
+<p><strong>样本不是 i.i.d. 的。</strong>它是偏向上尾的时间相干抽样:全局前 <span class="m">r</span> 名中约
+<span class="m">H(r)</span> 个出现在 S 里,<span class="m">H</span> 为秩条件保留曲线,平均斜率
+<span class="m">h</span>(命中率;实测 Pro 0.69–0.77、Flash 0.36–0.46)。未保留的
+<span class="m">(1−h)K</span> 个 "miss" 条目,其当前值沉到 <span class="m">v<sub>K</sub></span>
+之下且聚在选择边界附近(real capture 实测;op22 机制研究)。</p>
+</div>
+
+<!-- ================= 2. 1-D reduction ================= -->
+<h2><span class="no">2</span><span class="en">The key reduction: the problem is one-dimensional</span><span class="zh">关键化简:问题是一维的</span></h2>
+
+<div class="en">
+<p>Let <span class="m">G<sub>S</sub><sup>−1</sup>(m)</span> denote the m-th largest value of S. The sample's m-th
+order statistic corresponds to global rank ≈ <span class="m">H<sup>−1</sup>(m)</span>, so the estimator that makes
+the full-row count land at K is the plug-in quantile</p>
+<div class="math">θ&#770; = G<sub>S</sub><sup>−1</sup>( H(K) ) ≈ G<sub>S</sub><sup>−1</sup>( h·K )</div>
+<p>All value-space information is already contained in the sample's order statistics (they are the sufficient
+nonparametric summary). <strong>The only unknown is the scalar h.</strong> This reduction has three immediate
+consequences:</p>
+<ul>
+<li>P1b's histogram + rank-quantile placement is already the correct skeleton of this estimator.</li>
+<li>The static qfracs (0.25, 0.5, 0.75) are a <em>grid search over the unknown h</em>, batched into a single pass
+— the M-threshold ladder is a vectorized bracket, not an approximation artifact.</li>
+<li>Both measured performance cliffs are literally "<em>h fell outside the static bracket</em>":
+h &gt; 0.75 collapses the sandwich pair to columns (0,1), which the fused collect cannot serve → fallback
+(op22's refine cliff, 40 µs ↔ 240 µs at N=1M); rows with h &lt; 0.25 trigger the <code>all_ge</code> miss mode
+(iter0.5: 5.5% of rows); the K512 slot overflow is the same phenomenon at the collect column
+(cand ≈ 0.75K/h ≫ capacity when h is low → 124 µs ↔ 187 µs).</li>
+</ul>
+</div>
+<div class="zh">
+<p>记 <span class="m">G<sub>S</sub><sup>−1</sup>(m)</span> 为 S 的第 m 大值。样本第 m 名对应全局第
+≈ <span class="m">H<sup>−1</sup>(m)</span> 名,于是使全行 count 落在 K 的估计器就是 plug-in 分位数</p>
+<div class="math">θ&#770; = G<sub>S</sub><sup>−1</sup>( H(K) ) ≈ G<sub>S</sub><sup>−1</sup>( h·K )</div>
+<p>值空间的全部信息都已包含在样本次序统计量里(它们是非参数意义下的充分统计量)。<strong>唯一未知的是标量
+h。</strong>这一化简有三个直接推论:</p>
+<ul>
+<li>P1b 的直方图 + 秩分位放置已经是这个估计器的正确骨架。</li>
+<li>静态 qfracs (0.25, 0.5, 0.75) 本质是<em>对未知 h 的一次网格搜索</em>,批处理在同一遍 pass 里 ——
+多阈值 ladder 是向量化的夹逼,不是近似的权宜之计。</li>
+<li>两个已实测的性能悬崖恰好都是"<em>h 落在静态括号之外</em>":h &gt; 0.75 时 sandwich 对塌到 (0,1) 列,
+fused collect 服务不了 → fallback(op22 的 refine 悬崖,N=1M 处 40 µs ↔ 240 µs);h &lt; 0.25 的行触发
+<code>all_ge</code> miss 模式(iter0.5:5.5% 的行);K512 slot 溢出是同一现象在 collect 列上的表现
+(h 低时 cand ≈ 0.75K/h ≫ 容量 → 124 µs ↔ 187 µs)。</li>
+</ul>
+</div>
+
+<!-- ================= 3. Lower bound ================= -->
+<h2><span class="no">3</span><span class="en">Information-theoretic lower bound: the fast path is already at it</span><span class="zh">信息论下界:快路径已经打到界上</span></h2>
+
+<div class="en">
+<p>Any <em>exact</em> top-K algorithm must read every element at least once — an adversary can hide a top-K member
+at any unread position — so <strong>≥ 1 full pass is a hard lower bound</strong>. The GVR-MS fast path is exactly
+one full pass (fused M=4 ladder + speculative collect) plus O(K) side work plus an O(band) refine whose cost is
+barrier-floor-bound. It is therefore <em>pass-optimal</em>. The optimization space that remains has exactly two
+degrees of freedom:</p>
+<ol>
+<li><strong>Maximize the probability that one pass suffices</strong> (straddle within columns 1..M−1, no slot
+overflow) — purely an estimation-quality problem.</li>
+<li><strong>Minimize the price of failure</strong> — a fallback-design problem.</li>
+</ol>
+<p>Any scheme that adds an unconditional second pass to the fast path — including 1–2 unconditional secant
+iterations — moves <em>away</em> from the bound. This is the single mathematical statement that unifies the
+falsification record: op18's L2-trap (an extra round rides a cold pass, ~22K cyc vs ~5K warm), op16's
+threshold-pinning tax (P2 ×1.3–2.5), op12's opt-2 rejection, and the warm-start secant regressions
+(0.958–0.973×).</p>
+</div>
+<div class="zh">
+<p>任何<em>精确</em> top-K 算法都必须至少读全行一遍 —— 对手可以把一个 top-K 成员藏在任何未读位置 ——
+所以 <strong>≥ 1 遍全行是硬下界</strong>。GVR-MS 快路径恰好是 1 遍(fused M=4 ladder + 投机 collect)+
+O(K) 侧工作 + O(band) refine(其成本是 barrier 地板)。因此它已是 <em>pass 最优</em>。剩余的优化空间只有两个自由度:</p>
+<ol>
+<li><strong>最大化一遍即成功的概率</strong>(straddle 落在列 1..M−1 内、collect 不溢出)—— 纯估计质量问题。</li>
+<li><strong>最小化失败时的代价</strong> —— fallback 设计问题。</li>
+</ol>
+<p>任何往快路径上加无条件第 2 遍的方案 —— 包括无条件的 1–2 步 secant 迭代 —— 都是在<em>离开</em>下界。
+这一条数学陈述统一解释了全部证伪记录:op18 的 L2 陷阱(额外一轮骑在冷 pass 上,~22K cyc 对比 ~5K 热)、
+op16 的钉阈值税(P2 ×1.3–2.5)、op12 opt-2 的否决、以及 warm-start secant 的回退(0.958–0.973×)。</p>
+</div>
+
+<!-- ================= 4. Optimal estimator ================= -->
+<h2><span class="no">4</span><span class="en">The optimal estimator: sequential h-tracking, not per-step root-finding</span><span class="zh">最优估计器:h 的序贯估计,而非每步求根</span></h2>
+
+<div class="en">
+<p>This is the core of the analysis. Compare the temporal behavior of the two candidate state variables:</p>
+</div>
+<div class="zh">
+<p>这是整个分析的核心。比较两个候选状态量的时间行为:</p>
+</div>
+
+<div class="en">
+<table>
+<tr><th>Quantity</th><th>Space</th><th>Cross-step stability</th></tr>
+<tr>
+  <td>Threshold <span class="m">θ<sub>t</sub> = v<sub>K</sub><sup>(t)</sup></span></td>
+  <td>value space</td>
+  <td><strong>Unstable</strong> — the logits scale and offset drift per step. Caching <code>prev_thr</code>
+  (warm-start secant) was falsified in production benches: 0.958–0.973×, one variant caused a catastrophic
+  7-layer regression.</td>
+</tr>
+<tr>
+  <td>Retention rate <span class="m">h<sub>t</sub></span></td>
+  <td>rank space</td>
+  <td><strong>Stationary</strong> — invariant under any monotone transform of the logits; the very temporal
+  coherence that justifies GVR guarantees strong autocorrelation of <span class="m">h<sub>t</sub></span>
+  (the temporal-synth calibration measured the per-step hr distribution and its lag-1 correlation on real
+  captures).</td>
+</tr>
+</table>
+<p>The failure of value-space caching and the viability of rank-space state are <strong>two faces of the same
+mathematical fact</strong>, not a contradiction. The optimal efficient solution is therefore:</p>
+</div>
+<div class="zh">
+<table>
+<tr><th>量</th><th>空间</th><th>跨步稳定性</th></tr>
+<tr>
+  <td>阈值 <span class="m">θ<sub>t</sub> = v<sub>K</sub><sup>(t)</sup></span></td>
+  <td>值空间</td>
+  <td><strong>不稳定</strong> —— logits 的尺度与偏移随步漂移。缓存 <code>prev_thr</code>(warm-start secant)
+  已在生产基准中被证伪:0.958–0.973×,一个变体造成 7 层灾难性回退。</td>
+</tr>
+<tr>
+  <td>保留率 <span class="m">h<sub>t</sub></span></td>
+  <td>秩空间</td>
+  <td><strong>平稳</strong> —— 对 logits 的任何单调变换不变;GVR 赖以成立的时间相干性本身就保证
+  <span class="m">h<sub>t</sub></span> 强自相关(temporal-synth 校准在 real capture 上实测过 per-step hr
+  分布及其 lag-1 相关)。</td>
+</tr>
+</table>
+<p>值空间缓存的失败与秩空间状态的可行,是<strong>同一个数学事实的两面</strong>,并不矛盾。因此最优高效解为:</p>
+</div>
+
+<div class="en">
+<h3>(a) Cross-step recursion on h&#770;</h3>
+<p>At the end of each step, the realized h is readable at ~zero cost: the sandwich already knows
+<span class="m">M<sub>0</sub></span>, or a single predicated popcount over the smem stash gives
+<span class="m">|S ∩ {v ≥ θ<sub>final</sub>}| / K</span> — an O(K) shared-memory operation. Update
+<span class="m">h&#770;<sub>t+1</sub></span> with an EMA / first-order Kalman filter; cold-start falls back to the
+static bracket. Engineering cost: one persistent scalar per row, plumbed alongside preIdx (a side tensor).</p>
+
+<h3>(b) The ladder counts are a free within-step observation</h3>
+<p>After the single pass, the four exact points <span class="m">(θ<sub>m</sub>, c<sub>m</sub>)</span> are true
+samples of the global CDF; <span class="m">h&#770; = f<sub>m</sub>·K / c<sub>m</sub></span> at the bracketing
+columns is a direct per-step measurement of h, fed back into (a) at zero extra passes.</p>
+
+<h3>(c) h-aware placement is an optimal-experimental-design problem</h3>
+<p>Columns should not be spread uniformly but placed geometrically around <span class="m">h&#770;</span>
+(e.g. <span class="m">f ∈ h&#770;·{0.8, 1.0, 1.25}</span> plus the g<sub>min</sub> anchor), with width set by the
+AR(1) innovation std of <span class="m">h<sub>t</sub></span> so that P(straddle within columns 1..3) ≥ target.
+The collect column becomes h-aware the same way: choose <span class="m">f<sub>c</sub></span> such that
+<span class="m">f<sub>c</sub>·K/h&#770; ≤ slot capacity</span> — this single constraint eliminates the K512
+overflow cliff. Expected band shrinks from <span class="m">0.25·K/h</span> (measured ~900 at K1024 — the formula
+matches) toward the intrinsic noise floor of any K-sample estimator, the binomial order-statistic fluctuation
+<span class="m">O(√(h(1−h)K))/h</span> ≈ tens-to-hundreds of ranks. (See §6 for why band shrinkage itself is
+worth little.)</p>
+
+<h3>(d) The misses are not noise — they are free boundary-density samples</h3>
+<p>This is the most elegant structural feature of the problem: the <span class="m">(1−h)K</span> miss values
+concentrate just below <span class="m">v<sub>K</sub></span>, so their empirical distribution is precisely an
+estimate of the local density <span class="m">N·f(v<sub>K</sub>)</span> — the slope a secant step needs — sampled
+exactly where it is needed. The current histogram physically contains them (the stash is histogrammed in full),
+but static qfracs do not exploit this structure.</p>
+</div>
+<div class="zh">
+<h3>(a) 对 h&#770; 的跨步递归</h3>
+<p>每步结束时,realized h 几乎零成本可读:sandwich 已经知道 <span class="m">M<sub>0</sub></span>,或对 smem stash
+做一次谓词 popcount 得到 <span class="m">|S ∩ {v ≥ θ<sub>final</sub>}| / K</span> —— O(K) 的 smem 操作。用
+EMA / 一阶 Kalman 更新 <span class="m">h&#770;<sub>t+1</sub></span>;冷启动退回静态括号。工程代价:每行一个持久标量,
+随 preIdx 同路传递(side tensor)。</p>
+
+<h3>(b) ladder counts 是免费的当步观测</h3>
+<p>单遍 pass 之后,4 个精确点 <span class="m">(θ<sub>m</sub>, c<sub>m</sub>)</span> 就是全局 CDF 的真实采样;
+取夹 K 的列,<span class="m">h&#770; = f<sub>m</sub>·K / c<sub>m</sub></span> 即当步 h 的直接测量,零额外 pass
+地喂回 (a)。</p>
+
+<h3>(c) h-感知放置 = 最优实验设计问题</h3>
+<p>列不应均匀铺开,而应几何地围住 <span class="m">h&#770;</span>(如 <span class="m">f ∈ h&#770;·{0.8, 1.0, 1.25}</span>
+加 g<sub>min</sub> 锚点),宽度由 <span class="m">h<sub>t</sub></span> 的 AR(1) 创新标准差决定,使
+P(straddle 落在列 1..3 内) ≥ 目标。collect 列同理变为 h-感知:选 <span class="m">f<sub>c</sub></span> 使
+<span class="m">f<sub>c</sub>·K/h&#770; ≤ slot 容量</span> —— 这一条约束直接消灭 K512 溢出悬崖。期望 band 从
+<span class="m">0.25·K/h</span>(实测 K1024 处 ~900,公式吻合)收缩,趋向任何 K 样本估计器的固有噪声地板 ——
+次序统计量的二项涨落 <span class="m">O(√(h(1−h)K))/h</span> ≈ 几十到几百个 rank。(band 收缩本身为何不值钱,见 §6。)</p>
+
+<h3>(d) miss 值不是噪声 —— 是免费的边界密度样本</h3>
+<p>这是本问题最优雅的结构:<span class="m">(1−h)K</span> 个 miss 的当前值恰好聚在
+<span class="m">v<sub>K</sub></span> 下方,其经验分布正是局部密度 <span class="m">N·f(v<sub>K</sub>)</span>
+的估计 —— 即 secant 需要的斜率 —— 而且采样位置天然集中在最需要的地方。当前直方图物理上包含了它们
+(stash 全量进直方图),但静态 qfracs 没有利用这个结构。</p>
+</div>
+
+<!-- ================= 5. Where secant belongs ================= -->
+<h2><span class="no">5</span><span class="en">Secant's proper place: two roles, neither costs an extra pass</span><span class="zh">secant 的正确位置:两处,都不花额外 pass</span></h2>
+
+<div class="en">
+<p>Root-finding on the monotone step function <span class="m">g(θ) = count_ge(θ) − K</span>, where one evaluation
+costs one full-row pass, is an "expensive black box + free surrogate" problem. The optimal strategy: do
+<em>all interpolation on the free surrogate</em> (the sample CDF composed with the h-mapping) and spend expensive
+evaluations only to verify/bracket.</p>
+<ul>
+<li><strong>Fast path — secant is already there, implicitly.</strong> The ladder <em>is</em> a vectorized one-step
+secant: its four evaluation points are chosen by the surrogate and executed in a single pass. Once the counts
+return, no further evaluation is needed to locate <span class="m">v<sub>K</sub></span> inside the band: P4's exact
+rank-scatter performs that selection, and its cost is barrier-bound (~7 barriers), not band-size-bound. There is
+no seat for an explicit secant on the fast path — not because secant is bad, but because its work is already
+absorbed by free interpolation plus P4.</li>
+<li><strong>Fallback — the one place an explicit secant belongs.</strong> The current miss path runs geometric
+expansion (≤12 steps) + blind bisection (≤30 steps), each step one full-row pass; in the cluster kernel each pass
+is additionally amplified by the leader-only single-CTA recount (~95 µs/pass at N=1M). Blind bisection discards
+the four exact CDF points already in hand and the entire sample density shape. The correct update is regula
+falsi: interpolate within the measured bracket <span class="m">(θ<sub>m</sub>, c<sub>m</sub>)</span> using the
+sample histogram as the monotone interpolant, landing in [K, kC] in an expected 1–2 passes instead of 2–4+.
+This is exactly the user's secant idea — placed where it only pays when the row was going to pay anyway.</li>
+</ul>
+</div>
+<div class="zh">
+<p>对单调阶梯函数 <span class="m">g(θ) = count_ge(θ) − K</span> 求根、且每次评估 = 1 遍全行,属于
+"昂贵黑盒 + 免费代理模型"的求根问题。最优策略:<em>所有插值都在免费代理上做</em>(样本 CDF 复合 h 映射),
+昂贵评估只用于验证/夹逼。</p>
+<ul>
+<li><strong>快路径 —— secant 已经隐式存在。</strong>ladder 本身<em>就是</em>向量化的一步 secant:4 个评估点由代理模型
+选出、在同一遍 pass 内完成。counts 回来之后,band 内定位 <span class="m">v<sub>K</sub></span> 不再需要任何评估:
+P4 的精确 rank-scatter 就在做这个选择,且其成本是 barrier 地板(~7 个 barrier)而非 band 大小。快路径上没有
+显式 secant 的位置 —— 不是 secant 不好,而是它的工作已被免费插值 + P4 吸收。</li>
+<li><strong>fallback —— 显式 secant 唯一该在的地方。</strong>当前 miss 路径是几何扩张(≤12 步)+ 盲二分(≤30 步),
+每步 1 遍全行;cluster 内核里每遍还被 leader 单 CTA 重数放大(N=1M 处 ~95 µs/遍)。盲二分丢弃了手上已有的
+4 个精确 CDF 点和整个样本密度形状。正确的更新是 regula falsi:在已测夹逼区间
+<span class="m">(θ<sub>m</sub>, c<sub>m</sub>)</span> 内以样本直方图为单调插值函数,期望 1–2 遍落进 [K, kC]
+(对比现在 2–4+ 遍)。这正是"secant 思想"—— 但放在只有本来就要付费的行才付费的位置。</li>
+</ul>
+</div>
+
+<!-- ================= 6. Honest bounds ================= -->
+<h2><span class="no">6</span><span class="en">Honest bounds on the gains (against the measured record)</span><span class="zh">收益的诚实定界(对照实测记录)</span></h2>
+
+<div class="en">
+<ul>
+<li><strong>Band shrinkage is worth almost nothing on the fast path.</strong> P4 is barrier-floor-bound (op12:
+~7–14 barriers; only ~15% count-reducible, 7050→5959 cyc for cand 2K→1K), and at large N P4 is just 11–15% of the
+MS kernel (2.3–4.0 µs of ~25–27 µs). Exclude this from the expected payoff of §4(c).</li>
+<li><strong>The real payoff is entirely in the tail.</strong> Straddle probability rises (all_ge 5.5% → ≈0);
+the pair-(0,1) fallback cliff (op22: 40 µs ↔ 240 µs) and the K512 slot-overflow cliff (124 µs ↔ 187 µs) get pushed
+multiple σ out; the fallback itself drops from blind bisection to 1–2 interpolated passes. Net effect: the
+"op21 worst case ~2× slower than plain cutedsl" robustness gap named by op22 is closed, and the variance of
+performance with respect to preIdx quality collapses — which was the original concern motivating this analysis.</li>
+<li><strong>The mainline geomean barely moves.</strong> On real data in the production N range, the median P2
+iteration count is already 1, straddle is already 94.5%, and the fast path is at the pass lower bound.</li>
+</ul>
+</div>
+<div class="zh">
+<ul>
+<li><strong>band 收缩对快路径几乎不值钱。</strong>P4 是 barrier 地板(op12:~7–14 个 barrier;候选数只有 ~15%
+可缩减性,cand 2K→1K 时 7050→5959 cyc),且 largeN 时 P4 只占 MS 内核的 11–15%(~25–27 µs 中的 2.3–4.0 µs)。
+§4(c) 的期望收益中要剔除这一项。</li>
+<li><strong>真正的收益全在尾部。</strong>straddle 概率上升(all_ge 5.5% → ≈0);pair-(0,1) fallback 悬崖
+(op22:40 µs ↔ 240 µs)与 K512 slot 溢出悬崖(124 µs ↔ 187 µs)被推到多个 σ 之外;fallback 本身从盲二分变为
+1–2 遍插值。净效果:op22 点名的 "op21 worst case ~2× slower than plain cutedsl" 鲁棒性缺口被抹平,
+性能对 preIdx 质量的方差大幅收窄 —— 而这正是引发本次分析的原始问题意识。</li>
+<li><strong>主线 geomean 几乎不动。</strong>real 数据、生产 N 段上,P2 迭代中位数已是 1,straddle 已 94.5%,
+快路径已在 pass 下界上。</li>
+</ul>
+</div>
+
+<div class="en">
+<h3>Evidence table: why each "obvious" alternative was measured dead</h3>
+<table>
+<tr><th>Idea</th><th>Campaign</th><th>Measured result</th><th>Status</th></tr>
+<tr><td>Unconditional extra refinement pass at large N</td><td>op18</td><td class="num">extra round rides a cold pass (~22K cyc vs ~5K warm); M4 compare tax ×1.46 cold</td><td><span class="tag fals">FALSIFIED</span></td></tr>
+<tr><td>Secant convergence accelerators (quad / Illinois / parabolic init)</td><td>op16 iter4</td><td class="num">2.602 → 2.509 mean evals (−3.6%); others regressed</td><td><span class="tag fals">NEAR-NULL</span></td></tr>
+<tr><td>Pin a tight threshold to shrink the band</td><td>op16</td><td class="num">P2 tax ×1.3–2.5; +9.5% total at N=65K</td><td><span class="tag fals">TAX-BOUND</span></td></tr>
+<tr><td>Free-peel guaranteed winners + partition pass</td><td>op16 Scheme X</td><td class="num">K512 0.86–0.98× (loss at every N); K2048 neutral</td><td><span class="tag fals">FALSIFIED</span></td></tr>
+<tr><td>Tight kFTarget (kc_accept)</td><td>op12 opt-2</td><td class="num">did not shrink P4, added secant passes; worse at N≥16K</td><td><span class="tag fals">REJECTED</span></td></tr>
+<tr><td>Warm-start secant / cached prev_thr (value space)</td><td>gvr_phase_timing v2.2</td><td class="num">0.958–0.973×; one variant: 7-layer catastrophic regress</td><td><span class="tag fals">RULED OUT</span></td></tr>
+<tr><td>Sandwich peel off one ladder pass (rank space, free)</td><td>op19 → op21</td><td class="num">gm 1.122 (op19); op21 MS fp32 P0 1.249, 17/17</td><td><span class="tag ship">SHIPPED</span></td></tr>
+<tr><td>Sequential rank-space h&#770; tracking (EMA/Kalman)</td><td>—</td><td class="num">never tried; mathematically distinct from value-space caching</td><td><span class="tag open">OPEN</span></td></tr>
+<tr><td>Regula-falsi fallback on measured CDF points</td><td>—</td><td class="num">never tried; replaces expansion + ≤30-step blind bisection</td><td><span class="tag open">OPEN</span></td></tr>
+<tr><td>Cluster-parallel fallback recount (vs leader-only)</td><td>—</td><td class="num">never tried; removes the C× amplification (~95 µs/pass at N=1M)</td><td><span class="tag open">OPEN</span></td></tr>
+</table>
+</div>
+<div class="zh">
+<h3>证据表:每个"显然的"替代方案为何已被测死</h3>
+<table>
+<tr><th>思路</th><th>战役</th><th>实测结果</th><th>状态</th></tr>
+<tr><td>largeN 上无条件加一轮 refine pass</td><td>op18</td><td class="num">额外一轮骑在冷 pass 上(~22K cyc 对 ~5K 热);M4 比较税冷遍 ×1.46</td><td><span class="tag fals">已证伪</span></td></tr>
+<tr><td>secant 收敛加速器(quad / Illinois / 抛物线初始化)</td><td>op16 iter4</td><td class="num">平均求值 2.602 → 2.509(−3.6%);其余变体回退</td><td><span class="tag fals">近乎零效</span></td></tr>
+<tr><td>钉紧阈值以收缩 band</td><td>op16</td><td class="num">P2 税 ×1.3–2.5;N=65K 处总时长 +9.5%</td><td><span class="tag fals">税负绑定</span></td></tr>
+<tr><td>免费 peel 必然赢家 + partition 遍</td><td>op16 Scheme X</td><td class="num">K512 0.86–0.98×(每个 N 都亏);K2048 中性</td><td><span class="tag fals">已证伪</span></td></tr>
+<tr><td>紧 kFTarget(kc_accept)</td><td>op12 opt-2</td><td class="num">P4 没缩小,反增 secant 遍数;N≥16K 更差</td><td><span class="tag fals">数据否决</span></td></tr>
+<tr><td>warm-start secant / 缓存 prev_thr(值空间)</td><td>gvr_phase_timing v2.2</td><td class="num">0.958–0.973×;一个变体 7 层灾难回退</td><td><span class="tag fals">已排除</span></td></tr>
+<tr><td>sandwich 在同一遍 ladder 上免费 peel(秩空间)</td><td>op19 → op21</td><td class="num">gm 1.122(op19);op21 MS fp32 P0 1.249,17/17</td><td><span class="tag ship">已上线</span></td></tr>
+<tr><td>秩空间 h&#770; 序贯跟踪(EMA/Kalman)</td><td>—</td><td class="num">从未尝试;与值空间缓存有本质数学区别</td><td><span class="tag open">开放</span></td></tr>
+<tr><td>fallback 内基于已测 CDF 点的 regula falsi</td><td>—</td><td class="num">从未尝试;替代扩张 + ≤30 步盲二分</td><td><span class="tag open">开放</span></td></tr>
+<tr><td>fallback 重数改 cluster 并行(替代 leader 单 CTA)</td><td>—</td><td class="num">从未尝试;消除 C× 放大(N=1M 处 ~95 µs/遍)</td><td><span class="tag open">开放</span></td></tr>
+</table>
+</div>
+
+<!-- ================= 7. Summary ================= -->
+<h2><span class="no">7</span><span class="en">One-sentence answer</span><span class="zh">一句话总结</span></h2>
+
+<div class="en">
+<div class="goodbox">
+Given preIdx and its gathered values, the best efficient estimator of "the threshold whose count ≈ K" is the
+<strong>plug-in sample-quantile <span class="m">G<sub>S</sub><sup>−1</sup>(h&#770;·K)</span>, with
+<span class="m">h&#770;</span> tracked sequentially across decode steps by an EMA/Kalman filter in rank space and
+corrected for free by each step's ladder counts; the multi-threshold ladder is the optimal single-pass
+experimental design under h-uncertainty; and explicit secant survives only in the fallback, as regula falsi with
+the sample density as its slope.</strong> GVR-MS already implements the h-agnostic version of this solution and
+sits at the one-pass lower bound; all remaining mathematical headroom lies in sequentializing
+<span class="m">h&#770;</span> — a direction never yet tried, fundamentally distinct from the falsified value-space
+warm-start — and its payoff shape is collapsing tail variance, not raising the mean.
+</div>
+</div>
+<div class="zh">
+<div class="goodbox">
+已知 preIdx 及其 gather 值,估计"count ≈ K 的阈值"的最佳高效解 = <strong>plug-in 样本分位估计
+<span class="m">G<sub>S</sub><sup>−1</sup>(h&#770;·K)</span>:其中 <span class="m">h&#770;</span> 用 EMA/Kalman
+在秩空间跨 decode step 序贯跟踪、由每步 ladder counts 免费校正;多阈值 ladder 是 h 不确定下的最优单遍实验设计;
+显式 secant 只保留在 fallback,以样本密度为斜率做 regula falsi。</strong>GVR-MS 已实现该解的 h-不可知版本并达到
+单遍 pass 下界;剩余的全部数学余量在于 <span class="m">h&#770;</span> 的序贯化 —— 一个从未被尝试、且与已证伪的
+值空间 warm-start 有本质区别的方向 —— 其收益形态是砍掉尾部方差,而非抬高均值。
+</div>
+</div>
+
+<!-- ======================================================================
+     PART II — secant × preIdx × multi-threshold: optimal design
+     ====================================================================== -->
+<div class="partbar">
+  <div class="en">
+    <div class="pt">Part II · Continuation</div>
+    <h2 class="p">Secant × preIdx × Multi-Threshold: a Unified Optimal-Design Framework</h2>
+  </div>
+  <div class="zh">
+    <div class="pt">第二部分 · 续篇</div>
+    <h2 class="p">secant × preIdx × 多阈值:统一的最优设计框架</h2>
+  </div>
+</div>
+
+<div class="en">
+<p class="small">Motivating premise (user): the secant iteration is the most GPU-architecture-friendly primitive
+because its iterations carry no synchronization. Part II calibrates that premise, formalizes the full design
+space — how many evaluation points per pass, where to place them, how many rounds — as a solvable
+optimal-design problem, and derives the optimal algorithm.</p>
+<p class="small"><strong>Validation erratum (2026-07-07)</strong>: the host prototype
+(<code>HLS_VALIDATION_REPORT.html</code>) subsequently <em>falsified the §9 bridge interpolant</em> (rank-space
+sample-CCDF; unidentified where the sample is thin) in favor of <strong>log-count regula falsi</strong>, corrected
+the tracked invariant from h̄ to <strong>ρ\* = G<sub>S</sub>(v<sub>K</sub>)</strong> (rank-conditional retention),
+and revised Theorem 1's constants (M\*=3 in both regimes once the fallback costs one pass). Theorems 2–3 confirmed.</p>
+</div>
+<div class="zh">
+<p class="small">出发前提(用户):secant 迭代无同步操作,对 GPU 架构最亲和。第二部分先校准这一前提,再把完整的设计空间
+—— 每遍评估几个点、放在哪、评估几轮 —— 形式化为一个可解的最优设计问题,并推导出最优算法。</p>
+<p class="small"><strong>验证勘误(2026-07-07)</strong>:宿主原型(<code>HLS_VALIDATION_REPORT.html</code>)随后
+<em>证伪了 §9 的桥式插值</em>(秩空间样本-CCDF;样本稀薄处不可辨识),改为 <strong>log-count regula falsi</strong>;
+把跟踪不变量从 h̄ 修正为 <strong>ρ\* = G<sub>S</sub>(v<sub>K</sub>)</strong>(秩条件保留);并修订了定理 1 的常数
+(fallback 降到一遍后,两个 regime 都取 M\*=3)。定理 2–3 证实。</p>
+</div>
+
+<!-- ================= 8. Premise + cost model ================= -->
+<h2><span class="no">8</span><span class="en">Calibrating the premise, and the unified cost model</span><span class="zh">校准前提,与统一代价模型</span></h2>
+
+<div class="en">
+<p>Decompose one secant iteration into its two components:</p>
+<ul>
+<li><strong>The O(N) streaming body</strong>: <code>v = load; cnt += (v ≥ θ)</code> — predicated compare +
+register accumulation, with <em>zero</em> shared memory, atomics, divergence, or sync in the hot loop, and
+perfectly coalesced loads. This is indeed the friendliest primitive on the architecture; the premise holds
+exactly here.</li>
+<li><strong>The O(1) sync epilogue</strong>: warp reduce + 1–2 block barriers + a tid0 decision — nanosecond-scale
+on a single CTA, negligible.</li>
+</ul>
+<p>Two corrections then reshape the design space:</p>
+<ol>
+<li><strong>The ladder inherits secant's streaming body wholesale.</strong> An M-threshold ladder's hot loop is the
+same predicated compare + register accumulate (op21's fused collect is per-thread slots — also atomic-free). It
+introduces no new synchronization; what it introduces is a <em>compare/accumulator width tax</em>
+<span class="m">τ(M)</span>, measured on cold passes by op18: τ(1)=τ(2)=1.0, τ(4)=1.46, τ(8)=2.7. So
+"secant vs. ladder" is not sync-free vs. sync-heavy — it is a <strong>rounds × width resource-allocation
+problem</strong>.</li>
+<li><strong>Sync cost is regime-dependent, and clusters invert the conclusion.</strong> On a single CTA an extra
+secant round costs ≈0 in sync. But hugeN rows must be row-chunked across C CTAs, where <em>every</em> iteration
+needs a DSMEM count merge + cluster barrier (measured ~0.3–0.5 µs each; iter3/4: every "distribute the fixed
+part" move lost to cluster-barrier cost; today's msc fallback degenerates further to a leader-only single-CTA
+full-row recount, ~95 µs/pass at N=1M). <strong>Exactly where secant's "one more round" looks cheapest, the
+cluster architecture taxes it hardest.</strong></li>
+</ol>
+<p>The correct formal object is therefore the cost of one pass of width M at round r with C CTAs:</p>
+<div class="math">T<sub>pass</sub>(M, r, C) = γ<sub>r</sub> · τ(M) · P<sub>N</sub>/C + s(C)</div>
+<table>
+<tr><th>Symbol</th><th>Meaning</th><th>Measured anchors</th></tr>
+<tr><td><span class="m">P<sub>N</sub></span></td><td>single-CTA cold pass base price</td><td class="num">≈20 µs at N=262K fp32; ≈90 µs+ at N=1M</td></tr>
+<tr><td><span class="m">γ<sub>r</sub></span></td><td>cold/warm factor of round r</td><td class="num">Regime W (active set ≤ L2 ≈126 MB): γ<sub>1</sub>=1, γ<sub>r≥2</sub>≈0.23 (5K vs 22K cyc). Regime C (hugeN / high active rows): γ<sub>r</sub>≡1</td></tr>
+<tr><td><span class="m">τ(M)</span></td><td>compare-width tax (rides the pass)</td><td class="num">1 / 1 / 1.46 / 2.7 for M = 1/2/4/8 (op18, cold)</td></tr>
+<tr><td><span class="m">s(C)</span></td><td>per-round sync term</td><td class="num">s(1)≈0; s(C&gt;1) = DSMEM merge + cluster barrier (µs-scale)</td></tr>
+</table>
+<p>Termination requires an adjacent evaluated pair with <span class="m">c(θ<sub>a</sub>) ≥ K &gt; c(θ<sub>b</sub>)</span>
+whose band fits the collect coverage (slot capacity, collect column below the band's lower edge); the terminal
+cost afterwards is the P4 barrier floor (constant, ~7 barriers).</p>
+</div>
+<div class="zh">
+<p>把一次 secant 迭代拆成两段:</p>
+<ul>
+<li><strong>O(N) 流式主体</strong>:<code>v = load; cnt += (v ≥ θ)</code> —— 谓词化比较 + 寄存器累加,热循环内
+<em>零</em> smem、零原子、零分支发散、零同步,访存完美合并。这确实是架构上最亲和的原语;前提在这一段完全成立。</li>
+<li><strong>O(1) 同步尾声</strong>:warp reduce + 1–2 个 block barrier + tid0 决策 —— 单 CTA 下纳秒级,可忽略。</li>
+</ul>
+<p>但两个修正重塑了设计空间:</p>
+<ol>
+<li><strong>ladder 完整继承了 secant 的流式主体。</strong>M 阈值 ladder 的热循环同样是谓词比较 + 寄存器累加
+(op21 的 fused collect 用 per-thread slot,同样无原子)。它没有引入任何新同步 —— 引入的是<em>比较/累加器宽度税</em>
+<span class="m">τ(M)</span>,op18 冷遍实测:τ(1)=τ(2)=1.0,τ(4)=1.46,τ(8)=2.7。所以 "secant vs ladder"
+不是"无同步 vs 有同步"之争,而是<strong>"轮数 × 每轮宽度"的资源分配问题</strong>。</li>
+<li><strong>同步代价是 regime 依赖的,cluster 模式下结论反转。</strong>单 CTA 下多一轮 secant 的同步开销 ≈ 0;但
+hugeN 必须用 C-CTA 切行,此时<em>每一轮</em>迭代都需要 DSMEM count 合并 + cluster barrier(实测每个
+~0.3–0.5 µs;iter3/4:所有"distribute the fixed part"的尝试都输给 barrier 成本;现役 msc 的 fallback
+更退化为 leader 单 CTA 全行重数,N=1M 处 ~95 µs/遍)。<strong>恰恰在 secant 的"再来一轮"看似最便宜的地方,
+cluster 架构收最重的税。</strong></li>
+</ol>
+<p>因此正确的形式化对象是:宽度 M、第 r 轮、C 个 CTA 协作的一遍 pass 的成本:</p>
+<div class="math">T<sub>pass</sub>(M, r, C) = γ<sub>r</sub> · τ(M) · P<sub>N</sub>/C + s(C)</div>
+<table>
+<tr><th>符号</th><th>含义</th><th>实测锚点</th></tr>
+<tr><td><span class="m">P<sub>N</sub></span></td><td>单 CTA 冷遍基价</td><td class="num">N=262K fp32 ≈20 µs;N=1M ≈90 µs+</td></tr>
+<tr><td><span class="m">γ<sub>r</sub></span></td><td>第 r 轮冷/热系数</td><td class="num">Regime W(活跃集 ≤ L2 ≈126 MB):γ<sub>1</sub>=1,γ<sub>r≥2</sub>≈0.23(5K 对 22K cyc)。Regime C(hugeN / 高活跃行):γ<sub>r</sub>≡1</td></tr>
+<tr><td><span class="m">τ(M)</span></td><td>比较宽度税(骑在 pass 上)</td><td class="num">M=1/2/4/8 → 1 / 1 / 1.46 / 2.7(op18,冷遍)</td></tr>
+<tr><td><span class="m">s(C)</span></td><td>每轮同步项</td><td class="num">s(1)≈0;s(C&gt;1) = DSMEM 合并 + cluster barrier(µs 级)</td></tr>
+</table>
+<p>终止条件:存在相邻已评估对 <span class="m">c(θ<sub>a</sub>) ≥ K &gt; c(θ<sub>b</sub>)</span> 且 band
+落入 collect 覆盖(slot 容量,且 collect 列在 band 下沿之下);终止后成本 = P4 barrier 地板(常数,~7 个 barrier)。</p>
+</div>
+
+<!-- ================= 9. Theorems + bridge ================= -->
+<h2><span class="no">9</span><span class="en">Sequential design: three structure theorems, and the optimal form of secant</span><span class="zh">序贯设计:三条结构定理,与 secant 的最优形态</span></h2>
+
+<div class="en">
+<p>Work in rank space (invariant under monotone transforms of logits). Define the target sample rank
+<span class="m">ρ* = H(K) ≈ h·K</span> — "the equivalent rank of <span class="m">v<sub>K</sub></span> inside the
+sample" — with prior <span class="m">π(ρ)</span>: wide (the marginal h distribution over rows/layers/models,
+support [0.2, 0.9+]) without tracking; a tight AR(1) posterior (innovation σ dominating the
+<span class="m">√(h(1−h)K)</span> order-statistic floor, ~±15 ranks at K=1024) with the Part-I sequential
+<span class="m">h&#770;</span>. Each round: choose M evaluation points at sample-rank fractions
+<span class="m">f<sub>1</sub>&lt;…&lt;f<sub>M</sub></span> (thresholds
+<span class="m">θ<sub>m</sub> = G<sub>S</sub><sup>−1</sup>(f<sub>m</sub>K)</span>), pay
+<span class="m">T<sub>pass</sub></span>, receive exact counts — the posterior collapses onto the adjacent interval
+containing K. This is <strong>Bayesian sequential experimental design with batched evaluations</strong>, and its
+optimal policy has clean structure:</p>
+
+<p><span class="thm">Theorem 1 (regime split — the optimal M×R).</span> Compare the marginal cost of "one more
+round" vs. "more width". <strong>Regime W</strong>: a second round costs γ<sub>2</sub>P ≈ 0.2P while widening
+M 2→4 costs 0.46P riding the cold first pass; 0.2 &lt; 0.46 ⇒ <em>narrow width + sequential refine is optimal</em>
+(M*=2–3, warm secant on miss). <strong>Regime C</strong> (single-CTA hugeN or cluster): a second round costs a
+full <span class="m">P + s(C)</span>, dwarfing any width tax ⇒ <em>one-shot is optimal</em>: R*=1, with
+<span class="m">M* = argmin<sub>M</sub> τ(M)P + (1−cov(M))·C<sub>miss</sub></span> — M*=4 at current miss prices.
+This theorem <em>retro-dicts two independently measured optima</em>: op18's dispatch ("M2R2 at ≥131K — M2 is the
+only tax-free width on a cold pass; R2's warm refine is the safety net"; "M4-collapse-everything" forbidden) and
+op21-msc's hard constraint (<code>R_rounds==1 AND fuse_collect</code> required for cluster). The theory unifies
+two locally discovered optima as the two corners of one cost model.</p>
+
+<p><span class="thm">Theorem 2 (placement = prior-quantile quantization).</span> Given M, the placement maximizing
+one-shot success puts <span class="m">f<sub>1</sub>..f<sub>M−1</sub></span> at quantiles of
+<span class="m">π(h)</span>, plus the g<sub>min</sub> anchor which guarantees the count ≥ K side:</p>
+<div class="math">Pr(miss) = π(h ≤ f<sub>min</sub>) + π(h &gt; f<sub>max</sub>)</div>
+<p>Static (0.25, 0.5, 0.75) is the wide-prior solution — hence Flash's low-h tail yields 5.5% <code>all_ge</code>
+and h &gt; 0.75 (Pro's upper edge / the op22 stress construction) yields the pair-(0,1) cliff: <em>the two observed
+failure classes are the inevitable tax of a wide prior</em>. With tracked h&#770; the prior tightens; the same
+M=4 columns move to <span class="m">h&#770;·{1−2σ, 1, 1+2σ}</span> and the miss probability drops from percents to
+a multi-σ event. The <strong>collect-column constraint</strong>
+<span class="m">f<sub>c</sub>·K/h&#770;<sub>lo</sub> ≤ cap</span> is solved by the same formula — the K512
+overflow cliff disappears inside it.</p>
+
+<p><span class="thm">Theorem 3 (the evaluation target is an interior point, not K).</span> The acceptance interval
+[K, kC] is wide (kC/K = 10 / 5 / 2.5–3). Undershoot (count &lt; K) pays an upward extra round; overshoot beyond kC
+pays the overflow fallback. The optimal aim point is
+<span class="m">m* = K·(kC/K)<sup>α</sup></span> with α set by the ratio of the two failure prices (α ≈ 0.3–0.5).
+<em>The legacy secant kernel's kFTarget ≈ 1.5–2×K (3072/4096 for K2048) is precisely the empirical form of this
+solution</em> — another retro-validation.</p>
+
+<h3>The optimal form of secant: bridge regula falsi (nonparametric, reuses all measured information)</h3>
+<p>After a miss (or inside the fallback), classical secant interpolates linearly in <em>value</em> space — an
+implicit local-linearity assumption on the CDF, which is exactly what blows up at density spikes (the op13
+linear-eval finding). But a strictly better interpolant is in hand: <strong>the sample CCDF affinely calibrated
+inside the measured bracket</strong>. Given measured
+<span class="m">(θ<sub>a</sub>, c<sub>a</sub>), (θ<sub>b</sub>, c<sub>b</sub>)</span> bracketing the target
+(<span class="m">c<sub>a</sub> ≥ m* &gt; c<sub>b</sub></span>), define</p>
+<div class="math">
+c&#770;(θ) = c<sub>b</sub> + (c<sub>a</sub> − c<sub>b</sub>) ·
+( G<sub>S</sub>(θ) − G<sub>S</sub>(θ<sub>b</sub>) ) / ( G<sub>S</sub>(θ<sub>a</sub>) − G<sub>S</sub>(θ<sub>b</sub>) ),
+&nbsp;&nbsp; θ<sub>next</sub> = c&#770;<sup>−1</sup>(m*)
+</div>
+<p>— <em>shape from the sample</em> (free; an O(K) smem lookup straight off the P1b histogram), <em>level and
+slope pinned by two exact measured points</em>. Three mathematical properties:</p>
+<ol>
+<li><strong>Endpoint-exact and monotone</strong> — cannot leave the bracket (regula-falsi stability built in,
+stronger than raw secant).</li>
+<li><strong>Its slope comes from the miss density</strong>: when the bracket sits near the selection boundary,
+the sample values inside it are dominated by the <span class="m">(1−h)K</span> misses — Part I §4(d)'s "free
+boundary density" formally enters the update rule. This is the substantive union of preIdx and secant.</li>
+<li><strong>Expected one-step landing</strong>: the landing-rank error is
+<span class="m">O(√(#samples in bracket))/h</span> ≈ tens of ranks, while the acceptance width kC−K is hundreds to
+thousands ⇒ Pr(land in [K, kC] in one step) → 1. Blind bisection needs log<sub>2</sub>(bracket/acceptance) ≈ 2–4+
+steps, each a full-price pass (C×-amplified in msc today).</li>
+</ol>
+</div>
+<div class="zh">
+<p>在秩空间工作(对 logits 的单调变换不变)。定义目标样本秩
+<span class="m">ρ* = H(K) ≈ h·K</span> —— "<span class="m">v<sub>K</sub></span> 在样本内的等效秩" —— 先验
+<span class="m">π(ρ)</span>:无跟踪时为宽先验(h 的行/层/模型边缘分布,支撑 [0.2, 0.9+]);有第一部分的序贯
+<span class="m">h&#770;</span> 时为紧的 AR(1) 后验(创新 σ 主导,次序统计量噪声地板
+<span class="m">√(h(1−h)K)</span> 在 K=1024 处仅 ~±15 ranks)。每一轮:在样本秩分数
+<span class="m">f<sub>1</sub>&lt;…&lt;f<sub>M</sub></span> 处选 M 个评估点(阈值
+<span class="m">θ<sub>m</sub> = G<sub>S</sub><sup>−1</sup>(f<sub>m</sub>K)</span>),付
+<span class="m">T<sub>pass</sub></span>,收回精确 counts —— 后验坍缩到含 K 的相邻区间。这是
+<strong>带批量评估的贝叶斯序贯实验设计</strong>,其最优策略结构清晰:</p>
+
+<p><span class="thm">定理 1(regime 分裂 —— 最优的 M×R 组合)。</span>比较"加一轮"与"加宽度"的边际成本。
+<strong>Regime W</strong>:第二轮成本 γ<sub>2</sub>P ≈ 0.2P,而 M 从 2 加宽到 4 的成本 = 0.46P(骑在冷首轮上);
+0.2 &lt; 0.46 ⇒ <em>窄宽度 + 序贯 refine 最优</em>(M*=2–3,失手后温遍 secant)。<strong>Regime C</strong>
+(单 CTA hugeN 或 cluster):第二轮成本 = 全价 <span class="m">P + s(C)</span>,远超任何宽度税 ⇒
+<em>一轮定胜负最优</em>:R*=1,<span class="m">M* = argmin<sub>M</sub> τ(M)P + (1−cov(M))·C<sub>miss</sub></span>
+—— 按当前 miss 价格,M*=4。这条定理<em>回验了两个独立实测出的最优</em>:op18 的 dispatch 表("≥131K 用
+M2R2 —— M2 是冷遍上唯一免税宽度,R2 的温 refine 是安全网";禁 "M4-collapse-everything")和 op21-msc
+的硬约束(cluster 要求 <code>R_rounds==1 AND fuse_collect</code>)。理论把两个各自摸出的局部最优统一为同一
+代价模型的两个角点。</p>
+
+<p><span class="thm">定理 2(放置 = 先验分位数量化)。</span>给定 M,使一轮成功概率最大的放置是把
+<span class="m">f<sub>1</sub>..f<sub>M−1</sub></span> 放在 <span class="m">π(h)</span> 的分位点上,外加
+g<sub>min</sub> 锚点保证 count ≥ K 一侧永不缺失:</p>
+<div class="math">Pr(miss) = π(h ≤ f<sub>min</sub>) + π(h &gt; f<sub>max</sub>)</div>
+<p>静态 (0.25, 0.5, 0.75) 是宽先验下的解 —— 于是 Flash 的低 h 尾部给出 5.5% 的 <code>all_ge</code>,h &gt; 0.75
+(Pro 上沿 / op22 压力构造)给出 pair-(0,1) 悬崖:<em>观测到的两类失败正是宽先验的必然税</em>。有 h&#770;
+跟踪后先验收窄,同样的 M=4 列改放 <span class="m">h&#770;·{1−2σ, 1, 1+2σ}</span>,miss 概率从百分位压到多 σ
+事件。<strong>collect 列约束</strong> <span class="m">f<sub>c</sub>·K/h&#770;<sub>lo</sub> ≤ cap</span>
+由同一公式解出 —— K512 溢出悬崖在其中消失。</p>
+
+<p><span class="thm">定理 3(评估目标是内点,不是 K)。</span>接受域 [K, kC] 很宽(kC/K = 10 / 5 / 2.5–3)。
+undershoot(count &lt; K)付"向上再一轮";overshoot 超过 kC 付溢出 fallback。最优目标点为
+<span class="m">m* = K·(kC/K)<sup>α</sup></span>,α 由两侧失败代价之比决定(α ≈ 0.3–0.5)。
+<em>旧 secant 内核的 kFTarget ≈ 1.5–2×K(K2048 用 3072/4096)正是这个解的经验形态</em> —— 又一次回验。</p>
+
+<h3>secant 的最优形态:桥式 regula falsi(非参数,每步复用全部已测信息)</h3>
+<p>一轮 miss 之后(或 fallback 内),经典 secant 在<em>值</em>空间做线性插值 —— 隐含"CDF 局部线性"假设,
+在密度尖峰处正是它爆掉的地方(op13 的 linear-eval 发现)。而我们手里有严格更好的插值函数:
+<strong>在已测括号内做仿射校准的样本 CCDF</strong>。设已测
+<span class="m">(θ<sub>a</sub>, c<sub>a</sub>), (θ<sub>b</sub>, c<sub>b</sub>)</span> 夹住目标
+(<span class="m">c<sub>a</sub> ≥ m* &gt; c<sub>b</sub></span>),定义</p>
+<div class="math">
+c&#770;(θ) = c<sub>b</sub> + (c<sub>a</sub> − c<sub>b</sub>) ·
+( G<sub>S</sub>(θ) − G<sub>S</sub>(θ<sub>b</sub>) ) / ( G<sub>S</sub>(θ<sub>a</sub>) − G<sub>S</sub>(θ<sub>b</sub>) ),
+&nbsp;&nbsp; θ<sub>next</sub> = c&#770;<sup>−1</sup>(m*)
+</div>
+<p>—— <em>形状取自样本</em>(免费;P1b 直方图上 O(K) 的 smem 查询),<em>水平与斜率由两个精确已测点钉死</em>。
+三条数学性质:</p>
+<ol>
+<li><strong>端点精确、单调</strong> —— 不会跳出括号(自带 regula falsi 的稳定性,比裸 secant 强)。</li>
+<li><strong>斜率来自 miss 密度</strong>:括号落在选择边界附近时,区间内样本以 <span class="m">(1−h)K</span>
+个 miss 值为主 —— 第一部分 §4(d) 的"免费边界密度"在这里正式进入更新公式。这就是 preIdx 与 secant
+结合的实质。</li>
+<li><strong>期望一步命中</strong>:落点秩误差 ~ <span class="m">O(√(括号内样本数))/h</span> ≈ 几十 ranks,
+而接受域宽 kC−K ≈ 数百到数千 ranks ⇒ Pr(一步落入 [K, kC]) → 1。盲二分需要
+log<sub>2</sub>(括号/接受域) ≈ 2–4+ 步,每步全价 pass(现役 msc 里还被 C× 放大)。</li>
+</ol>
+</div>
+
+<!-- ================= 10. HLS algorithm ================= -->
+<h2><span class="no">10</span><span class="en">Synthesis: the HLS algorithm (h-tracked Ladder-Secant), optimality, residuals</span><span class="zh">合成:HLS 算法(h-tracked Ladder-Secant)、最优性与残余</span></h2>
+
+<div class="en">
+<pre class="code">
+<span class="cm"># Per-row state, plumbed alongside preIdx:  ĥ (EMA), σ̂ (innovation)   # cold start: static prior</span>
+regime = W if active_set ≤ L2 else C ;  C_cta = dispatch(N, BS)
+
+P1  : gather K preIdx values → stash + stats                     <span class="cm"># unchanged</span>
+P1b : histogram = the representation of G_S ; columns move to π(ĥ,σ̂) quantiles:
+        f ∈ { ĥ·(1−2σ̂), ĥ, ĥ·(1+2σ̂) } + g_min anchor
+      collect column: smallest f_c with  f_c·K/(ĥ−2σ̂) ≤ slot_cap
+R0  : ONE fused pass — M=4 (regime C) / M=2–3 (regime W)          <span class="cm"># same structure as MS</span>
+      → if sandwich pair ∈ collect coverage: P3/P4 as-is, done    <span class="cm"># prob → multi-σ</span>
+R1  : on miss: ONE bridge regula-falsi step (§9) → θ_next, target m* = K·(kC/K)^α
+        regime W: warm M=2 pass { θ_next, θ_next ± guard },  γ≈0.23
+        regime C: cluster-parallel count (P/C + one cluster barrier) — never leader-only
+R≥2 : bridge interpolation continues on the monotone envelope of ALL measured points
+posterior: ĥ ← EMA( f_m·K/c_m  [R0 counts],  |S ∩ {v ≥ θ_final}|/K  [popcount] )
+</pre>
+<p>The diff against the shipped MS kernel is exactly four items — everything else (streaming body, fused collect,
+sandwich, P4 rank-scatter) is already at its bound or floor:</p>
+<ol>
+<li>column placement: static qfracs → ĥ-adaptive (one formula in P1b);</li>
+<li>collect column: fixed 0.75 → the constraint solution;</li>
+<li>fallback: expansion + blind bisection → bridge regula falsi;</li>
+<li>msc fallback recount: leader-only single-CTA → cluster-parallel.</li>
+</ol>
+<p><strong>Optimality.</strong>
+<span class="m">E[T] = τ(M*)·P/C + s(C) + Pr(miss)·T<sub>R1</sub> + fixed(P1 + P1b + P4)</span>.
+Tracking drives Pr(miss) → ε; the bridge drives the expected number of extra rounds → 1. Hence E[T] converges to
+<em>the one-pass lower bound plus the hardware fixed floor</em> — no lower point is reachable within this cost
+model. The variance quantified by op22 (40 ↔ 240 µs) collapses to an ε-probability event times one pass.</p>
+<p><strong>Irreducible residuals</strong> (no algorithm in this framework escapes them): ① the single cold R0
+pass (information-theoretic); ② P1's K scattered cold-gather lines; ③ P4's barrier floor; ④ the small-N
+phase-chain fixed machinery (radix keeps winning below ~32K).</p>
+<div class="warnbox">
+<strong>Risks &amp; validation obligations.</strong> (i) ĥ tracking needs cross-step per-row scalar state in the
+production pipeline (a side tensor with preIdx's lifecycle) — the dominant engineering cost. (ii) Theorem 2
+assumes AR(1) stationarity of h<sub>t</sub>; under MTP (next_n &gt; 1) the h-correlation of adjacent rows must be
+measured separately. (iii) Every item must pass the nsys cold-L2 canonical axis plus the full exactness gates;
+the historical lesson (host projections of −40…−60% collapsing to a measured 0.72–0.87×) mandates a host
+prototype before any kernel work. Payoff shape, consistent with Part I: the mainline geomean barely moves —
+what is removed is the preIdx-quality-driven tail variance. The difference now: every design degree of freedom
+(M, R, placement, aim point, interpolant, parallelism of the fallback) has a closed or near-closed-form
+solution.</div>
+</div>
+<div class="zh">
+<pre class="code">
+<span class="cm"># 每行状态,随 preIdx 同路传递:ĥ(EMA), σ̂(创新方差)   # 冷启动:静态先验</span>
+regime = W if 活跃集 ≤ L2 else C ;  C_cta = dispatch(N, BS)
+
+P1  : gather K 个 preIdx 值 → stash + 统计                        <span class="cm"># 不变</span>
+P1b : 直方图 = G_S 的表示;列放置改为 π(ĥ,σ̂) 分位数:
+        f ∈ { ĥ·(1−2σ̂), ĥ, ĥ·(1+2σ̂) } + g_min 锚
+      collect 列:最小的 f_c 使  f_c·K/(ĥ−2σ̂) ≤ slot_cap
+R0  : 一遍 fused pass — M=4(regime C)/ M=2–3(regime W)          <span class="cm"># 结构同现役 MS</span>
+      → 若 sandwich 对 ∈ collect 覆盖:P3/P4 照旧,结束            <span class="cm"># 概率 → 多 σ</span>
+R1  : miss 时:一步桥式 regula falsi(§9)→ θ_next,目标 m* = K·(kC/K)^α
+        regime W:温遍 M=2 { θ_next, θ_next ± guard },γ≈0.23
+        regime C:cluster 并行 count(P/C + 1 个 cluster barrier)—— 永不 leader 单 CTA
+R≥2 : 在全部已测点的单调包络上继续桥式插值
+后验更新:ĥ ← EMA( f_m·K/c_m [R0 counts],  |S ∩ {v ≥ θ_final}|/K [popcount] )
+</pre>
+<p>与现役 MS 内核的差分恰好四处 —— 其余(流式主体、fused collect、sandwich、P4 rank-scatter)都已在各自的
+下界或地板上:</p>
+<ol>
+<li>列放置:静态 qfracs → ĥ 自适应(P1b 里一行公式);</li>
+<li>collect 列:固定 0.75 → 约束解;</li>
+<li>fallback:扩张 + 盲二分 → 桥式 regula falsi;</li>
+<li>msc fallback 重数:leader 单 CTA → cluster 并行。</li>
+</ol>
+<p><strong>最优性。</strong>
+<span class="m">E[T] = τ(M*)·P/C + s(C) + Pr(miss)·T<sub>R1</sub> + fixed(P1 + P1b + P4)</span>。
+跟踪使 Pr(miss) → ε;桥式插值使额外轮数期望 → 1。于是 E[T] 收敛到<em>一遍 pass 下界 + 硬件固定地板</em>
+—— 在本代价模型内没有更低的可达点。op22 量化的方差(40 ↔ 240 µs)坍缩为 ε 概率事件 × 单遍代价。</p>
+<p><strong>不可约残余</strong>(本框架内任何算法都躲不开):① R0 那一遍冷 pass(信息论);② P1 的 K 条散列
+冷 gather;③ P4 的 barrier 地板;④ 小 N 的相位链固定机器(N &lt; ~32K 时 radix 仍会赢)。</p>
+<div class="warnbox">
+<strong>风险与验证义务。</strong>(i) ĥ 跟踪要求生产管线支持跨步的每行标量状态(与 preIdx 同生命周期的
+side tensor)—— 工程成本的大头。(ii) 定理 2 依赖 h<sub>t</sub> 的 AR(1) 平稳性;MTP(next_n &gt; 1)下相邻行
+的 h 相关性需单独实测。(iii) 每一项都必须过 nsys 冷 L2 canonical 轴 + 全套 exactness 门;历史教训
+(host 投影 −40…−60% 实测塌成 0.72–0.87×)要求先做 host 原型再动内核。收益形态与第一部分一致:主线 geomean
+基本不动 —— 消除的是 preIdx 质量驱动的尾部方差。不同之处在于:现在每个设计自由度(M、R、放置、目标点、
+插值函数、fallback 并行度)都有了闭式或近闭式的解。</div>
+</div>
+
+<footer>
+<div class="en">
+Sources: <code>op21_gvr_prod/ITERATIONS.md</code> (iter0.5–12), <code>op21_gvr_prod/port/gvr_topk_decode_ms.py</code>,
+<code>op22_temporal_fixed_hr_bench/MECH_FINDINGS.md</code> (crossover experiment),
+<code>op12_gvr_lp/LEARNINGS.md</code>, <code>op16_gvr_dualthresh/{LEARNINGS,ITERATIONS}.md</code>,
+<code>op18_gvr_1cta_multithresh/LEARNINGS.md</code>, <code>op19_gvr_sandwich/ITERATIONS.md</code>,
+<code>report/algorithms.html</code> §1/§2/§7, gvr_phase_timing <code>REPORT_v22.md</code>.
+All timings: nsys pure-kernel cold-L2 unless noted as event-axis screens. Generated 2026-07-07; Part II (§8–§10, unified cost model + HLS design) appended same day.
+</div>
+<div class="zh">
+来源:<code>op21_gvr_prod/ITERATIONS.md</code>(iter0.5–12)、<code>op21_gvr_prod/port/gvr_topk_decode_ms.py</code>、
+<code>op22_temporal_fixed_hr_bench/MECH_FINDINGS.md</code>(交叉实验)、
+<code>op12_gvr_lp/LEARNINGS.md</code>、<code>op16_gvr_dualthresh/{LEARNINGS,ITERATIONS}.md</code>、
+<code>op18_gvr_1cta_multithresh/LEARNINGS.md</code>、<code>op19_gvr_sandwich/ITERATIONS.md</code>、
+<code>report/algorithms.html</code> §1/§2/§7、gvr_phase_timing <code>REPORT_v22.md</code>。
+所有计时除注明 event 轴外均为 nsys pure-kernel cold-L2。生成于 2026-07-07;第二部分(§8–§10,统一代价模型 + HLS 设计)同日追加。
+</div>
+</footer>
+
+</div><!-- /page -->
+</div><!-- /wrap -->
+
+</body>
+</html>

@@ -1,0 +1,1153 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>op21 GVR 生产化战役 iter0.5–12 | op21 GVR productionization progress</title>
+<style>
+  .viz-root {
+    --surface-1: #fcfcfb;
+    --page: #f9f9f7;
+    --ink-1: #0b0b0b;
+    --ink-2: #52514e;
+    --muted: #898781;
+    --grid: #e1e0d9;
+    --baseline: #c3c2b7;
+    --border: rgba(11,11,11,0.10);
+    --good: #006300;
+    --s1: #2a78d6;   /* fp32 — categorical slot 1 */
+    --s2: #1baf7a;   /* bf16 — slot 2 */
+    --s3: #eda100;   /* fp16 — slot 3 */
+    --discard: #898781;
+    --tipbg: #ffffff;
+    --sel: #2a78d6;
+    --track: #cde2fb;
+    --s5: #4a3aa7;
+  }
+  @media (prefers-color-scheme: dark) {
+    .viz-root {
+      --surface-1: #1a1a19;
+      --page: #0d0d0d;
+      --ink-1: #ffffff;
+      --ink-2: #c3c2b7;
+      --muted: #898781;
+      --grid: #2c2c2a;
+      --baseline: #383835;
+      --border: rgba(255,255,255,0.10);
+      --good: #0ca30c;
+      --s1: #3987e5;
+      --s2: #199e70;
+      --s3: #c98500;
+      --tipbg: #242423;
+      --sel: #3987e5;
+      --track: #0d366b;
+      --s5: #9085e9;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--page); }
+  .viz-root {
+    font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: var(--ink-1);
+    background: var(--page);
+    max-width: 1220px;
+    margin: 0 auto;
+    padding: 24px 24px 48px;
+  }
+  h1 { font-size: 22px; margin: 0 0 4px; font-weight: 650; }
+  .sub { color: var(--ink-2); font-size: 13.5px; margin: 0 0 18px; line-height: 1.55; }
+  .sub b { color: var(--ink-1); font-weight: 600; }
+
+  /* ---------- hidden radios (language + iteration) ---------- */
+  input[name="it"], input[name="lang"] { position: absolute; opacity: 0; width: 1px; height: 1px; }
+
+  /* ---------- language switching ---------- */
+  #lang-en:checked ~ * .zh, #lang-en:checked ~ .zh { display: none; }
+  #lang-zh:checked ~ * .en, #lang-zh:checked ~ .en { display: none; }
+
+  .langbar { display: flex; gap: 6px; justify-content: flex-end; margin: 0 0 10px; }
+  .langbar label {
+    padding: 4px 16px; border: 1px solid var(--border); border-radius: 999px;
+    background: var(--surface-1); color: var(--ink-2); cursor: pointer; user-select: none;
+    font-size: 13px;
+  }
+  .langbar label:hover { border-color: var(--sel); color: var(--ink-1); }
+  #lang-zh:checked ~ .langbar label[for="lang-zh"],
+  #lang-en:checked ~ .langbar label[for="lang-en"] {
+    background: var(--sel); border-color: var(--sel); color: #fff; font-weight: 600;
+  }
+
+  /* ---------- hero stat tiles ---------- */
+  .tiles { display: flex; gap: 12px; flex-wrap: wrap; margin: 0 0 20px; }
+  .tile {
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px;
+    padding: 12px 16px 10px; min-width: 168px; flex: 1;
+  }
+  .tile .lb { font-size: 12px; color: var(--ink-2); }
+  .tile .v { font-size: 30px; font-weight: 650; margin: 2px 0 0; letter-spacing: -0.01em; }
+  .tile .d { font-size: 12px; color: var(--good); font-weight: 600; margin-top: 2px; }
+  .tile .d.n { color: var(--ink-2); font-weight: 500; }
+
+  /* ---------- chart card ---------- */
+  .card {
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px;
+    padding: 16px 16px 8px; margin-bottom: 14px;
+  }
+  .card h2 { font-size: 15px; margin: 0 0 2px; font-weight: 650; }
+  .card .note { font-size: 12px; color: var(--ink-2); margin: 0 0 8px; }
+  .legend { display: flex; gap: 18px; flex-wrap: wrap; font-size: 12.5px; color: var(--ink-2); margin: 6px 0 2px; }
+  .legend span.item { display: inline-flex; align-items: center; gap: 6px; }
+  .k-line { width: 20px; height: 0; border-top: 2.5px solid var(--s1); border-radius: 2px; flex: none; }
+  .k-line.b { border-color: var(--s2); }
+  .k-line.f { border-color: var(--s3); }
+  .k-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--discard); opacity: .6; flex: none; }
+  .k-open { width: 9px; height: 9px; border-radius: 50%; background: var(--surface-1); border: 2px solid var(--s1); flex: none; }
+  .k-par { width: 20px; height: 0; border-top: 1.5px solid var(--baseline); flex: none; }
+  svg { width: 100%; height: auto; display: block; }
+  svg text { font-family: inherit; }
+
+  .axis-t { font-size: 12px; fill: var(--muted); }
+  .anno   { font-size: 12px; fill: var(--ink-2); }
+  .anno-x { font-size: 11px; fill: var(--muted); }
+  .step   { fill: none; stroke: var(--s1); stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
+  .l16b   { fill: none; stroke: var(--s2); stroke-width: 2; stroke-linecap: round; }
+  .l16f   { fill: none; stroke: var(--s3); stroke-width: 2; stroke-linecap: round; }
+  .dot    { fill: var(--s1); stroke: var(--surface-1); stroke-width: 2; }
+  .dot.open { fill: var(--surface-1); stroke: var(--s1); stroke-width: 2; }
+  .dot.b  { fill: var(--s2); }
+  .dot.f  { fill: var(--s3); }
+  .dot.g  { fill: var(--discard); opacity: .6; stroke: var(--surface-1); stroke-width: 2; }
+  .hit    { fill: transparent; }
+  .selring { fill: none; stroke: var(--sel); stroke-width: 2; opacity: 0; }
+  .pt { cursor: pointer; }
+
+  .tip { opacity: 0; pointer-events: none; transition: opacity .08s; }
+  .tip rect { fill: var(--tipbg); stroke: var(--border); rx: 8; filter: drop-shadow(0 2px 6px rgba(0,0,0,.18)); }
+  .tip .t0 { font-size: 12px; font-weight: 650; fill: var(--ink-1); }
+  .tip .t1 { font-size: 11.5px; fill: var(--ink-1); font-weight: 600; }
+  .tip .t2 { font-size: 11.5px; fill: var(--ink-2); }
+
+  /* hover reveals tooltip (tips live in a later sibling layer of the points) */
+  #p1:hover  ~ .tips #t1,  #p2:hover  ~ .tips #t2,  #p3:hover  ~ .tips #t3,
+  #p4:hover  ~ .tips #t4,  #p5:hover  ~ .tips #t5,  #p6:hover  ~ .tips #t6,
+  #p7:hover  ~ .tips #t7,  #p8:hover  ~ .tips #t8,  #p9:hover  ~ .tips #t9,
+  #p10:hover ~ .tips #t10, #p11:hover ~ .tips #t11, #p12:hover ~ .tips #t12,
+  #pb8:hover ~ .tips #tb8, #pb9:hover ~ .tips #tb9,
+  #pf8:hover ~ .tips #tf8, #pf9:hover ~ .tips #tf9,
+  #pg3:hover ~ .tips #tg3, #pg4:hover ~ .tips #tg4,
+  #pg5:hover ~ .tips #tg5, #pg6:hover ~ .tips #tg6 { opacity: 1; }
+
+  /* radio selection pins the tooltip + lights the marker ring */
+  #it1:checked  ~ .card #t1,  #it2:checked  ~ .card #t2,  #it3:checked ~ .card #t3,
+  #it4:checked  ~ .card #t4,  #it5:checked  ~ .card #t5,  #it6:checked ~ .card #t6,
+  #it7:checked  ~ .card #t7,  #it8:checked  ~ .card #t8,  #it9:checked ~ .card #t9,
+  #it10:checked ~ .card #t10, #it11:checked ~ .card #t11, #it12:checked ~ .card #t12 { opacity: 1; }
+  #it1:checked  ~ .card #p1 .selring,  #it2:checked  ~ .card #p2 .selring,
+  #it3:checked  ~ .card #p3 .selring,  #it4:checked  ~ .card #p4 .selring,
+  #it5:checked  ~ .card #p5 .selring,  #it6:checked  ~ .card #p6 .selring,
+  #it7:checked  ~ .card #p7 .selring,  #it8:checked  ~ .card #p8 .selring,
+  #it9:checked  ~ .card #p9 .selring,  #it10:checked ~ .card #p10 .selring,
+  #it11:checked ~ .card #p11 .selring, #it12:checked ~ .card #p12 .selring { opacity: 1; }
+
+  /* ---------- segmented iteration selector ---------- */
+  .seg {
+    display: flex; gap: 6px; flex-wrap: wrap; align-items: center;
+    margin: 2px 0 14px; font-size: 13px;
+  }
+  .seg .cap { color: var(--ink-2); margin-right: 6px; font-size: 12.5px; }
+  .seg label {
+    padding: 5px 12px; border: 1px solid var(--border); border-radius: 999px;
+    background: var(--surface-1); color: var(--ink-2); cursor: pointer; user-select: none;
+    font-variant-numeric: tabular-nums;
+  }
+  .seg label:hover { border-color: var(--sel); color: var(--ink-1); }
+  #it05:checked ~ .seg label[for="it05"], #it1:checked ~ .seg label[for="it1"],
+  #it2:checked  ~ .seg label[for="it2"],  #it3:checked ~ .seg label[for="it3"],
+  #it4:checked  ~ .seg label[for="it4"],  #it5:checked ~ .seg label[for="it5"],
+  #it6:checked  ~ .seg label[for="it6"],  #it7:checked ~ .seg label[for="it7"],
+  #it8:checked  ~ .seg label[for="it8"],  #it9:checked ~ .seg label[for="it9"],
+  #it10:checked ~ .seg label[for="it10"], #it11:checked ~ .seg label[for="it11"],
+  #it12:checked ~ .seg label[for="it12"] {
+    background: var(--sel); border-color: var(--sel); color: #fff; font-weight: 600;
+  }
+
+  /* ---------- detail cards ---------- */
+  .details > div { display: none; }
+  #it05:checked ~ .details .d05, #it1:checked ~ .details .d1,
+  #it2:checked  ~ .details .d2,  #it3:checked ~ .details .d3,
+  #it4:checked  ~ .details .d4,  #it5:checked ~ .details .d5,
+  #it6:checked  ~ .details .d6,  #it7:checked ~ .details .d7,
+  #it8:checked  ~ .details .d8,  #it9:checked ~ .details .d9,
+  #it10:checked ~ .details .d10, #it11:checked ~ .details .d11,
+  #it12:checked ~ .details .d12 { display: block; }
+  .dcard {
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px;
+    padding: 16px 20px; margin-bottom: 16px;
+  }
+  .dcard h3 { margin: 0 0 2px; font-size: 16px; font-weight: 650; }
+  .dcard .date { color: var(--muted); font-size: 12px; margin-bottom: 10px; }
+  .dcard dl { display: grid; grid-template-columns: 110px 1fr; gap: 7px 14px; margin: 0; font-size: 13.5px; line-height: 1.6; }
+  .dcard dt { color: var(--ink-2); font-weight: 600; }
+  .dcard dd { margin: 0; color: var(--ink-1); }
+  .dcard code { background: rgba(137,135,129,.14); border-radius: 4px; padding: 1px 5px; font-size: 12.5px; }
+  .gm-up { color: var(--good); font-weight: 650; }
+
+  /* ---------- cost bars ---------- */
+  .costrow { display: flex; gap: 26px; flex-wrap: wrap; margin: 8px 0 4px; }
+  .costrow div { font-size: 12.5px; color: var(--ink-2); }
+  .costrow b { color: var(--ink-1); font-size: 17px; font-weight: 650; }
+  .cbars { display: grid; grid-template-columns: 52px 1fr 130px; gap: 5px 10px; align-items: center; margin: 12px 0 6px; max-width: 760px; }
+  .cbars .clb { font-size: 12px; color: var(--ink-2); text-align: right; font-variant-numeric: tabular-nums; }
+  .cbars .track { background: var(--track); border-radius: 0 4px 4px 0; height: 14px; }
+  .cbars .fill { background: var(--s1); border-radius: 0 4px 4px 0; height: 14px; }
+  .cbars .cval { font-size: 12px; color: var(--ink-1); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .cbars .cval span.zh, .cbars .cval span.en { color: var(--muted); }
+
+  /* ---------- phase-breakdown stacked bars ---------- */
+  .pbars { display: grid; grid-template-columns: 120px 1fr 84px; gap: 6px 10px; align-items: center; margin: 12px 0 6px; max-width: 860px; }
+  .pbars .plb { font-size: 12px; color: var(--ink-2); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .pbars .pstack { display: flex; gap: 2px; height: 16px; }
+  .pbars .pstack div { height: 16px; }
+  .pbars .pstack div:first-child { border-radius: 4px 0 0 4px; }
+  .pbars .pstack div:last-child { border-radius: 0 4px 4px 0; }
+  .pbars .pv { font-size: 12px; color: var(--ink-1); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .sg-p4 { background: var(--s1); }
+  .sg-p3 { background: var(--s2); }
+  .sg-p2 { background: var(--s3); }
+  .sg-p1b { background: var(--s5); }
+  .sg-fx { background: var(--discard); opacity: .55; }
+  .k-sw { width: 11px; height: 11px; border-radius: 3px; flex: none; }
+
+  /* ---------- data table ---------- */
+  .tblcard { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 16px 20px; margin-bottom: 16px; overflow-x: auto; }
+  .tblcard h2 { font-size: 15px; margin: 0 0 10px; font-weight: 650; }
+  table { border-collapse: collapse; font-size: 12.8px; width: 100%; min-width: 900px; }
+  th { text-align: left; color: var(--ink-2); font-weight: 600; border-bottom: 1px solid var(--baseline); padding: 6px 10px; white-space: nowrap; }
+  td { border-bottom: 1px solid var(--grid); padding: 6px 10px; vertical-align: top; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .foot { font-size: 12px; color: var(--ink-2); line-height: 1.7; margin-top: 6px; }
+  .foot b { color: var(--ink-1); }
+</style>
+</head>
+<body>
+<div class="viz-root">
+
+  <!-- ALL radios first, so ~ selectors reach every content block -->
+  <input type="radio" name="lang" id="lang-zh" checked>
+  <input type="radio" name="lang" id="lang-en">
+  <input type="radio" name="it" id="it05">
+  <input type="radio" name="it" id="it1">
+  <input type="radio" name="it" id="it2">
+  <input type="radio" name="it" id="it3">
+  <input type="radio" name="it" id="it4">
+  <input type="radio" name="it" id="it5">
+  <input type="radio" name="it" id="it6">
+  <input type="radio" name="it" id="it7" checked>
+  <input type="radio" name="it" id="it8">
+  <input type="radio" name="it" id="it9">
+  <input type="radio" name="it" id="it10">
+  <input type="radio" name="it" id="it11">
+  <input type="radio" name="it" id="it12">
+
+  <nav class="langbar">
+    <label for="lang-zh">中文</label>
+    <label for="lang-en">English</label>
+  </nav>
+
+  <h1>
+    <span class="zh">op21 GVR 生产化战役 — 迭代优化进程(autoresearch 视图)</span>
+    <span class="en">op21 GVR productionization campaign — iteration progress (autoresearch view)</span>
+  </h1>
+  <p class="sub">
+    <span class="zh">12 次迭代 + 1 次 host 原型 · <b>8 个保留性能杠杆 · 5 项证伪 · 1 项正确性修复 · 1 个上游移植产物</b> ·
+    fp32 P0 geomean <b>0.830 → 1.249</b>(vs 每-cell 最强对手,nsys 纯核 cold-L2,B200 轴)·
+    全程由 <b>Claude Fable 5</b>(<code>claude-fable-5</code>)在 Claude Code 内自主执行,总花费估 <b>≈$573</b>(详见下方成本卡)。
+    悬停图中任意点看该步的手段与机制;点击下方迭代号(或用 Tab/方向键)固定选择并展开完整详情。</span>
+    <span class="en">12 iterations + 1 host prototype · <b>8 kept perf levers · 5 falsifications · 1 exactness fix · 1 upstream-port artifact</b> ·
+    fp32 P0 geomean <b>0.830 → 1.249</b> (vs per-cell best rival, nsys pure-kernel cold-L2, B200 axis) ·
+    executed end-to-end by <b>Claude Fable 5</b> (<code>claude-fable-5</code>) inside Claude Code, total est. cost <b>≈$573</b> (see the cost card below).
+    Hover any point for that step's lever and mechanism; click an iteration number below (or Tab/arrow keys) to pin the selection and expand full details.</span>
+  </p>
+
+  <div class="tiles">
+    <div class="tile">
+      <div class="lb"><span class="zh">fp32 P0 geomean(vs 最强对手)</span><span class="en">fp32 P0 geomean (vs best rival)</span></div>
+      <div class="v">1.249</div>
+      <div class="d"><span class="zh">17/17 全胜 · 自 iter1 +50.5%</span><span class="en">17/17 sweep · +50.5% since iter1</span></div>
+    </div>
+    <div class="tile">
+      <div class="lb"><span class="zh">bf16 P0 geomean</span><span class="en">bf16 P0 geomean</span></div>
+      <div class="v">1.091</div>
+      <div class="d"><span class="zh">15/17 · 自 iter8 上线 +6.1%</span><span class="en">15/17 · +6.1% since iter8 launch</span></div>
+    </div>
+    <div class="tile">
+      <div class="lb"><span class="zh">fp16 P0 geomean</span><span class="en">fp16 P0 geomean</span></div>
+      <div class="v">1.055</div>
+      <div class="d"><span class="zh">12/17 · vs GVR 族最优 1.267</span><span class="en">12/17 · 1.267 vs best GVR-family op</span></div>
+    </div>
+    <div class="tile">
+      <div class="lb"><span class="zh">B300 交叉验证 / 上游门禁</span><span class="en">B300 cross-check / upstream gates</span></div>
+      <div class="v">HW-inv.</div>
+      <div class="d n"><span class="zh">Δgm ≤ 0.02,零胜负翻转 · 上游网格 384/384</span><span class="en">Δgm ≤ 0.02, zero flips · upstream grid 384/384</span></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="zh">P0 网格 geomean 加速比 × 迭代(running best 阶梯)</span><span class="en">P0-grid geomean speedup × iteration (running-best steps)</span></h2>
+    <p class="note">
+      <span class="zh">纵轴 = op21 相对每-cell 最强对手的 geomean 加速比(&gt;1 = 胜);nsys 纯核 cold-L2,B200(035-GPU1 / 047-GPU0,锚点校准 ±1%)。P0 = fp32 K1024×N{65K,131K,262K}×BS{1..16} 等 17 cell。</span>
+      <span class="en">Y = op21 geomean speedup vs the per-cell best rival (&gt;1 = win); nsys pure-kernel cold-L2, B200 (035-GPU1 / 047-GPU0, anchor-calibrated ±1%). P0 = 17 cells: fp32 K1024 × N{65K,131K,262K} × BS{1..16} etc.</span>
+    </p>
+    <div class="legend">
+      <span class="item"><span class="k-line"></span><span class="zh">fp32(主线,running best)</span><span class="en">fp32 (main, running best)</span></span>
+      <span class="item"><span class="k-line b"></span><span class="zh">bf16(iter8 起)</span><span class="en">bf16 (from iter8)</span></span>
+      <span class="item"><span class="k-line f"></span><span class="zh">fp16(iter8 起)</span><span class="en">fp16 (from iter8)</span></span>
+      <span class="item"><span class="k-open"></span><span class="zh">该迭代 fp32 持平(工作在其他维度)</span><span class="en">fp32 flat this iter (work in other dims)</span></span>
+      <span class="item"><span class="k-dot"></span><span class="zh">证伪 / 丢弃(纵向位置为 A/B 实测比的估算)</span><span class="en">falsified / discarded (y ≈ estimate from A/B ratio)</span></span>
+      <span class="item"><span class="k-par"></span><span class="zh">1.0 = 与最强对手持平</span><span class="en">1.0 = par with best rival</span></span>
+    </div>
+
+    <svg viewBox="0 0 1140 522" role="img" aria-label="op21 iteration geomean speedup step chart">
+      <!-- gridlines -->
+      <line x1="70" y1="425" x2="1105" y2="425" stroke="var(--grid)" stroke-width="1"/>
+      <line x1="70" y1="351" x2="1105" y2="351" stroke="var(--grid)" stroke-width="1"/>
+      <line x1="70" y1="203" x2="1105" y2="203" stroke="var(--grid)" stroke-width="1"/>
+      <line x1="70" y1="129" x2="1105" y2="129" stroke="var(--grid)" stroke-width="1"/>
+      <line x1="70" y1="55"  x2="1105" y2="55"  stroke="var(--grid)" stroke-width="1"/>
+      <!-- parity reference -->
+      <line x1="70" y1="277" x2="1105" y2="277" stroke="var(--baseline)" stroke-width="1.5"/>
+      <text x="1100" y="272" text-anchor="end" class="anno-x zh">1.0 = 与每-cell 最强对手持平</text>
+      <text x="1100" y="272" text-anchor="end" class="anno-x en">1.0 = par with the per-cell best rival</text>
+      <!-- baseline axis -->
+      <line x1="70" y1="445" x2="1105" y2="445" stroke="var(--baseline)" stroke-width="1"/>
+
+      <!-- y tick labels -->
+      <text x="62" y="429" text-anchor="end" class="axis-t">0.8</text>
+      <text x="62" y="355" text-anchor="end" class="axis-t">0.9</text>
+      <text x="62" y="281" text-anchor="end" class="axis-t">1.0</text>
+      <text x="62" y="207" text-anchor="end" class="axis-t">1.1</text>
+      <text x="62" y="133" text-anchor="end" class="axis-t">1.2</text>
+      <text x="62" y="59"  text-anchor="end" class="axis-t">1.3</text>
+      <!-- x tick labels -->
+      <text x="85"   y="464" text-anchor="middle" class="axis-t">0.5</text>
+      <text x="170"  y="464" text-anchor="middle" class="axis-t">1</text>
+      <text x="255"  y="464" text-anchor="middle" class="axis-t">2</text>
+      <text x="340"  y="464" text-anchor="middle" class="axis-t">3</text>
+      <text x="425"  y="464" text-anchor="middle" class="axis-t">4</text>
+      <text x="510"  y="464" text-anchor="middle" class="axis-t">5</text>
+      <text x="595"  y="464" text-anchor="middle" class="axis-t">6</text>
+      <text x="680"  y="464" text-anchor="middle" class="axis-t">7</text>
+      <text x="765"  y="464" text-anchor="middle" class="axis-t">8</text>
+      <text x="850"  y="464" text-anchor="middle" class="axis-t">9</text>
+      <text x="935"  y="464" text-anchor="middle" class="axis-t">10</text>
+      <text x="1020" y="464" text-anchor="middle" class="axis-t">11</text>
+      <text x="1105" y="464" text-anchor="middle" class="axis-t">12</text>
+      <text x="587" y="492" text-anchor="middle" class="axis-t zh">迭代 #(host 原型 = 0.5)</text>
+      <text x="587" y="492" text-anchor="middle" class="axis-t en">iteration # (host prototype = 0.5)</text>
+      <text x="20" y="250" text-anchor="middle" class="axis-t zh" transform="rotate(-90 20 250)">geomean 加速比(越高越好)</text>
+      <text x="20" y="250" text-anchor="middle" class="axis-t en" transform="rotate(-90 20 250)">geomean speedup (higher is better)</text>
+
+      <!-- host prototype marker (no metric) -->
+      <text x="85" y="440" text-anchor="middle" class="anno-x zh">host 原型 GO</text>
+      <text x="85" y="440" text-anchor="middle" class="anno-x en">host proto GO</text>
+
+      <!-- fp32 running-best step line -->
+      <path class="step" d="M170 403 H255 V239 H340 V237 H510 V200 H595 V184 H680 V93 H1105"/>
+      <!-- 16-bit series -->
+      <path class="l16b" d="M765 256 L850 210"/>
+      <path class="l16f" d="M765 245 L850 236"/>
+
+      <!-- kept-improvement annotations (direct labels, selective) -->
+      <text x="182" y="392" class="anno zh">iter1 单CTA v1 · 0.830</text>
+      <text x="182" y="392" class="anno en">iter1 single-CTA v1 · 0.830</text>
+      <text x="263" y="224" class="anno zh">iter2 多CTA cluster · 1.051</text>
+      <text x="263" y="224" class="anno en">iter2 multi-CTA cluster · 1.051</text>
+      <text x="346" y="258" class="anno">iter3 +C8@K2048 · 1.054</text>
+      <text x="502" y="190" text-anchor="end" class="anno">iter5 rank-scatter P4 · 1.104</text>
+      <text x="605" y="205" class="anno zh">iter6 P4 小bin 快速路径 · 1.125</text>
+      <text x="605" y="205" class="anno en">iter6 P4 small-bin fast paths · 1.125</text>
+      <text x="688" y="80" class="anno zh">iter7 P3 remote-store push · 1.249(17/17 全胜)</text>
+      <text x="688" y="80" class="anno en">iter7 P3 remote-store push · 1.249 (17/17 sweep)</text>
+      <text x="750" y="226" text-anchor="middle" class="anno zh">iter8 16-bit 上线</text>
+      <text x="750" y="226" text-anchor="middle" class="anno en">iter8 16-bit tier</text>
+      <text x="800" y="190" text-anchor="middle" class="anno zh">iter9 原生16-bit ladder</text>
+      <text x="800" y="190" text-anchor="middle" class="anno en">iter9 native 16-bit ladder</text>
+      <text x="935" y="114" text-anchor="middle" class="anno-x">iter10 B300 HW-invariant</text>
+      <text x="1020" y="130" text-anchor="middle" class="anno-x zh">iter11 P4 exact 回退(平)</text>
+      <text x="1020" y="130" text-anchor="middle" class="anno-x en">iter11 P4 exact fallback (flat)</text>
+      <text x="1098" y="78" text-anchor="end" class="anno-x">iter12 PR-1 · 384/384</text>
+      <text x="862" y="214" class="anno">bf16 · 1.091 (15/17)</text>
+      <text x="862" y="240" class="anno">fp16 · 1.055 (12/17)</text>
+      <!-- discarded labels (language-neutral) -->
+      <text x="322" y="301" text-anchor="middle" class="anno-x">✗ dist-P1</text>
+      <text x="407" y="295" text-anchor="middle" class="anno-x">✗ dist-P4</text>
+      <text x="482" y="224" text-anchor="end" class="anno-x">✗ QBINS64</text>
+      <text x="567" y="170" text-anchor="end" class="anno-x zh">✗ C8@fp32洞</text>
+      <text x="567" y="170" text-anchor="end" class="anno-x en">✗ C8@fp32 holes</text>
+
+      <!-- ====== interactive points (hit target 32px > mark) ====== -->
+      <!-- discarded (grey) -->
+      <g class="pt" id="pg3"><circle class="hit" cx="322" cy="284" r="14"/><circle class="dot g" cx="322" cy="284" r="4.5"/></g>
+      <g class="pt" id="pg4"><circle class="hit" cx="407" cy="278" r="14"/><circle class="dot g" cx="407" cy="278" r="4.5"/></g>
+      <g class="pt" id="pg5"><circle class="hit" cx="496" cy="207" r="14"/><circle class="dot g" cx="496" cy="207" r="4.5"/></g>
+      <g class="pt" id="pg6"><circle class="hit" cx="581" cy="177" r="14"/><circle class="dot g" cx="581" cy="177" r="4.5"/></g>
+      <!-- 16-bit points -->
+      <g class="pt" id="pb8"><circle class="hit" cx="765" cy="256" r="14"/><circle class="dot b" cx="765" cy="256" r="5"/></g>
+      <g class="pt" id="pb9"><circle class="hit" cx="850" cy="210" r="14"/><circle class="dot b" cx="850" cy="210" r="5"/></g>
+      <g class="pt" id="pf8"><circle class="hit" cx="765" cy="245" r="14"/><circle class="dot f" cx="765" cy="245" r="5"/></g>
+      <g class="pt" id="pf9"><circle class="hit" cx="850" cy="236" r="14"/><circle class="dot f" cx="850" cy="236" r="5"/></g>
+      <!-- fp32 points (kept = filled, flat = open) -->
+      <g class="pt" id="p1"><circle class="hit" cx="170" cy="403" r="16"/><circle class="selring" cx="170" cy="403" r="10"/><circle class="dot" cx="170" cy="403" r="5.5"/></g>
+      <g class="pt" id="p2"><circle class="hit" cx="255" cy="239" r="16"/><circle class="selring" cx="255" cy="239" r="10"/><circle class="dot" cx="255" cy="239" r="5.5"/></g>
+      <g class="pt" id="p3"><circle class="hit" cx="340" cy="237" r="16"/><circle class="selring" cx="340" cy="237" r="10"/><circle class="dot" cx="340" cy="237" r="5.5"/></g>
+      <g class="pt" id="p4"><circle class="hit" cx="425" cy="237" r="16"/><circle class="selring" cx="425" cy="237" r="10"/><circle class="dot open" cx="425" cy="237" r="5.5"/></g>
+      <g class="pt" id="p5"><circle class="hit" cx="510" cy="200" r="16"/><circle class="selring" cx="510" cy="200" r="10"/><circle class="dot" cx="510" cy="200" r="5.5"/></g>
+      <g class="pt" id="p6"><circle class="hit" cx="595" cy="184" r="16"/><circle class="selring" cx="595" cy="184" r="10"/><circle class="dot" cx="595" cy="184" r="5.5"/></g>
+      <g class="pt" id="p7"><circle class="hit" cx="680" cy="93" r="16"/><circle class="selring" cx="680" cy="93" r="10"/><circle class="dot" cx="680" cy="93" r="5.5"/></g>
+      <g class="pt" id="p8"><circle class="hit" cx="765" cy="93" r="16"/><circle class="selring" cx="765" cy="93" r="10"/><circle class="dot open" cx="765" cy="93" r="5.5"/></g>
+      <g class="pt" id="p9"><circle class="hit" cx="850" cy="93" r="16"/><circle class="selring" cx="850" cy="93" r="10"/><circle class="dot open" cx="850" cy="93" r="5.5"/></g>
+      <g class="pt" id="p10"><circle class="hit" cx="935" cy="93" r="16"/><circle class="selring" cx="935" cy="93" r="10"/><circle class="dot open" cx="935" cy="93" r="5.5"/></g>
+      <g class="pt" id="p11"><circle class="hit" cx="1020" cy="93" r="16"/><circle class="selring" cx="1020" cy="93" r="10"/><circle class="dot open" cx="1020" cy="93" r="5.5"/></g>
+      <g class="pt" id="p12"><circle class="hit" cx="1105" cy="93" r="16"/><circle class="selring" cx="1105" cy="93" r="10"/><circle class="dot open" cx="1105" cy="93" r="5.5"/></g>
+
+      <!-- ====== tooltip layer (last siblings: pop above everything) ====== -->
+      <g class="tips">
+        <g class="tip" id="t1"><rect x="184" y="330" width="292" height="70"/>
+          <g class="zh">
+            <text class="t0" x="196" y="348">iter1 · 单CTA gvr_ms v1</text>
+            <text class="t1" x="196" y="364">P0 gm → 0.830(4/12)</text>
+            <text class="t2" x="196" y="378">rank-quantile P1b + M4 融合 ladder + slot-collect</text>
+            <text class="t2" x="196" y="392">教训:tid0 串行扫 +30µs → 并行后缀扫描</text>
+          </g>
+          <g class="en">
+            <text class="t0" x="196" y="348">iter1 · single-CTA gvr_ms v1</text>
+            <text class="t1" x="196" y="364">P0 gm → 0.830 (4/12)</text>
+            <text class="t2" x="196" y="378">rank-quantile P1b + fused M4 ladder + collect</text>
+            <text class="t2" x="196" y="392">lesson: tid0 serial scan +30µs → parallel scan</text>
+          </g></g>
+        <g class="tip" id="t2"><rect x="269" y="166" width="292" height="70"/>
+          <g class="zh">
+            <text class="t0" x="281" y="184">iter2 · 多CTA cluster(gvr_msc / auto)</text>
+            <text class="t1" x="281" y="200">P0 gm 0.830 → 1.051(12/17,翻盘为胜)</text>
+            <text class="t2" x="281" y="214">复制播种(零通信)+ DSMEM 计数合并</text>
+            <text class="t2" x="281" y="228">+ 分布式 P3 直写;dispatch 仅 1 条 C=4 规则</text>
+          </g>
+          <g class="en">
+            <text class="t0" x="281" y="184">iter2 · multi-CTA cluster (gvr_msc / auto)</text>
+            <text class="t1" x="281" y="200">P0 gm 0.830 → 1.051 (12/17, first P0 win)</text>
+            <text class="t2" x="281" y="214">replicated seeding (zero comm) + DSMEM merge</text>
+            <text class="t2" x="281" y="228">+ distributed P3 write; single C=4 rule</text>
+          </g></g>
+        <g class="tip" id="t3"><rect x="354" y="164" width="284" height="70"/>
+          <g class="zh">
+            <text class="t0" x="366" y="182">iter3 · C8 tier(仅 K2048 hugeN BS≤4)</text>
+            <text class="t1" x="366" y="198">P0 gm 1.051 → 1.054</text>
+            <text class="t2" x="366" y="212">K 是编译期 dispatch 键 → per-K C 规则合法</text>
+            <text class="t2" x="366" y="226">同迭代证伪 dist-P1:L2 使复制近乎免费</text>
+          </g>
+          <g class="en">
+            <text class="t0" x="366" y="182">iter3 · C8 tier (K2048 hugeN BS≤4 only)</text>
+            <text class="t1" x="366" y="198">P0 gm 1.051 → 1.054</text>
+            <text class="t2" x="366" y="212">K is a compile-time key → per-K rule legal</text>
+            <text class="t2" x="366" y="226">also falsified dist-P1: L2 makes copies free</text>
+          </g></g>
+        <g class="tip" id="t4"><rect x="439" y="164" width="284" height="70"/>
+          <g class="zh">
+            <text class="t0" x="451" y="182">iter4 · 消融定位 + dist-P4 证伪</text>
+            <text class="t1" x="451" y="198">P0 gm 持平 1.054</text>
+            <text class="t2" x="451" y="212">no-op 子类消融:P4 = 3.9–7µs = 全部剩余差距</text>
+            <text class="t2" x="451" y="226">红线确立:勿分布串行固定部分(barrier 更贵)</text>
+          </g>
+          <g class="en">
+            <text class="t0" x="451" y="182">iter4 · ablation + dist-P4 falsified</text>
+            <text class="t1" x="451" y="198">P0 gm flat at 1.054</text>
+            <text class="t2" x="451" y="212">no-op ablation: P4 = 3.9–7µs = whole gap</text>
+            <text class="t2" x="451" y="226">red line: don't distribute serial fixed parts</text>
+          </g></g>
+        <g class="tip" id="t5"><rect x="524" y="127" width="284" height="70"/>
+          <g class="zh">
+            <text class="t0" x="536" y="145">iter5 · rank-scatter exact P4(op8 移植)</text>
+            <text class="t1" x="536" y="161">P0 gm 1.054 → 1.104(13/17)</text>
+            <text class="t2" x="536" y="175">coarse hist → fine 256-bin → 单 scatter pass</text>
+            <text class="t2" x="536" y="189">首次追平 op8(1.007);GPU0 热毒网格作废</text>
+          </g>
+          <g class="en">
+            <text class="t0" x="536" y="145">iter5 · exact rank-scatter P4 (op8 port)</text>
+            <text class="t1" x="536" y="161">P0 gm 1.054 → 1.104 (13/17)</text>
+            <text class="t2" x="536" y="175">coarse hist → fine 256-bin → one scatter</text>
+            <text class="t2" x="536" y="189">first op8 parity; GPU0 thermal grid voided</text>
+          </g></g>
+        <g class="tip" id="t6"><rect x="609" y="111" width="284" height="70"/>
+          <g class="zh">
+            <text class="t0" x="621" y="129">iter6 · P4 小bin 快速路径</text>
+            <text class="t1" x="621" y="145">P0 gm 1.104 → 1.125(13/17)</text>
+            <text class="t2" x="621" y="159">host 探针:cnt(b*) p50=2 max=4 → warp0</text>
+            <text class="t2" x="621" y="173">寄存器精确排名 ≤32;fine 仅作回退</text>
+          </g>
+          <g class="en">
+            <text class="t0" x="621" y="129">iter6 · small-bin P4 fast paths</text>
+            <text class="t1" x="621" y="145">P0 gm 1.104 → 1.125 (13/17)</text>
+            <text class="t2" x="621" y="159">host probe: cnt(b*) p50=2 max=4 → warp0</text>
+            <text class="t2" x="621" y="173">register ranking ≤32; fine = fallback only</text>
+          </g></g>
+        <g class="tip" id="t7"><rect x="694" y="107" width="292" height="70"/>
+          <g class="zh">
+            <text class="t0" x="706" y="125">iter7 · P3 band remote-store push ★</text>
+            <text class="t1" x="706" y="141">P0 gm 1.125 → 1.249(17/17 首次全胜)</text>
+            <text class="t2" x="706" y="155">st.shared::cluster 直写 leader smem;删 gather</text>
+            <text class="t2" x="706" y="169">+1 对 cluster barrier;4 个 262K 洞全关</text>
+          </g>
+          <g class="en">
+            <text class="t0" x="706" y="125">iter7 · P3 band remote-store push ★</text>
+            <text class="t1" x="706" y="141">P0 gm 1.125 → 1.249 (17/17 clean sweep)</text>
+            <text class="t2" x="706" y="155">st.shared::cluster writes into leader smem;</text>
+            <text class="t2" x="706" y="169">kills gather + 1 barrier pair; all holes shut</text>
+          </g></g>
+        <g class="tip" id="t8"><rect x="479" y="107" width="292" height="70"/>
+          <g class="zh">
+            <text class="t0" x="491" y="125">iter8 · 16-bit 上线 + C8@16bit 规则</text>
+            <text class="t1" x="491" y="141">fp32 持平;bf16 1.028 / fp16 1.043(各 11/17)</text>
+            <text class="t2" x="491" y="155">fp32 的 C8 证伪不迁移:16-bit 扫描减半重排尾部</text>
+            <text class="t2" x="491" y="169">real 360/360;P1 网格重测 0.816 → 0.901</text>
+          </g>
+          <g class="en">
+            <text class="t0" x="491" y="125">iter8 · 16-bit tier + C8@16bit rule</text>
+            <text class="t1" x="491" y="141">fp32 flat; bf16 1.028 / fp16 1.043 (11/17)</text>
+            <text class="t2" x="491" y="155">the fp32 C8 verdict doesn't transfer to 16-bit</text>
+            <text class="t2" x="491" y="169">real 360/360; P1 grid retest 0.816 → 0.901</text>
+          </g></g>
+        <g class="tip" id="t9"><rect x="556" y="107" width="292" height="70"/>
+          <g class="zh">
+            <text class="t0" x="568" y="125">iter9 · 原生 16-bit 比较 ladder</text>
+            <text class="t1" x="568" y="141">bf16 1.091(15/17)/ fp16 1.055(12/17)</text>
+            <text class="t2" x="568" y="155">阈值一次量化到 dtype 网格 → 与 fp32 位等价</text>
+            <text class="t2" x="568" y="169">set.ge.16x2+add.rn packed;microbench 1.73× GO</text>
+          </g>
+          <g class="en">
+            <text class="t0" x="568" y="125">iter9 · native 16-bit compare ladder</text>
+            <text class="t1" x="568" y="141">bf16 1.091 (15/17) / fp16 1.055 (12/17)</text>
+            <text class="t2" x="568" y="155">thresholds quantized once to the dtype grid</text>
+            <text class="t2" x="568" y="169">= bit-exact; set.ge.16x2 packed; µbench 1.73×</text>
+          </g></g>
+        <g class="tip" id="t10"><rect x="641" y="107" width="292" height="70"/>
+          <g class="zh">
+            <text class="t0" x="653" y="125">iter10 · 收口文档 + B300 交叉验证</text>
+            <text class="t1" x="653" y="141">B300:1.268 / 1.089 / 1.053 — HW-invariant</text>
+            <text class="t2" x="653" y="155">SHIP_REVIEW + UPSTREAM_ASSESSMENT(发现 P4</text>
+            <text class="t2" x="653" y="169">path-C P0 blocker);K2048 16-bit 尾=结构墙</text>
+          </g>
+          <g class="en">
+            <text class="t0" x="653" y="125">iter10 · ship review + B300 cross-check</text>
+            <text class="t1" x="653" y="141">B300: 1.268 / 1.089 / 1.053 — HW-invariant</text>
+            <text class="t2" x="653" y="155">SHIP_REVIEW + UPSTREAM_ASSESSMENT (found P4</text>
+            <text class="t2" x="653" y="169">path-C P0 blocker); K2048 16-bit tail = wall</text>
+          </g></g>
+        <g class="tip" id="t11"><rect x="726" y="107" width="292" height="70"/>
+          <g class="zh">
+            <text class="t0" x="738" y="125">iter11 · P4 path-C exact 回退</text>
+            <text class="t1" x="738" y="141">性能 A/B 0.996 = 平;正确性 0/72 → 72/72</text>
+            <text class="t2" x="738" y="155">删固定深度 fine-scatter(bin 是值区间非并列组)</text>
+            <text class="t2" x="738" y="169">回退 value-edge snap;上游 blocker 解除</text>
+          </g>
+          <g class="en">
+            <text class="t0" x="738" y="125">iter11 · P4 path-C exact fallback</text>
+            <text class="t1" x="738" y="141">perf A/B 0.996 = flat; exactness 0/72 → 72/72</text>
+            <text class="t2" x="738" y="155">fixed-depth fine-scatter deleted (a bin is a</text>
+            <text class="t2" x="738" y="169">value interval); fallback = value-edge snap</text>
+          </g></g>
+        <g class="tip" id="t12"><rect x="806" y="107" width="292" height="70"/>
+          <g class="zh">
+            <text class="t0" x="818" y="125">iter12 · PR-1 kernel artifact 组装</text>
+            <text class="t1" x="818" y="141">上游主测试网格 384/384 + 全门禁绿</text>
+            <text class="t2" x="818" y="155">port/gvr_topk_decode_ms.py 3436 行(确定性抽取)</text>
+            <text class="t2" x="818" y="169">发现:输出顺序非确定 → A/B 须比排序集合</text>
+          </g>
+          <g class="en">
+            <text class="t0" x="818" y="125">iter12 · PR-1 kernel artifact assembled</text>
+            <text class="t1" x="818" y="141">upstream test grid 384/384 + all gates green</text>
+            <text class="t2" x="818" y="155">port/gvr_topk_decode_ms.py, 3436 lines</text>
+            <text class="t2" x="818" y="169">finding: order nondet → compare sorted sets</text>
+          </g></g>
+        <g class="tip" id="tb8"><rect x="779" y="185" width="264" height="56"/>
+          <g class="zh">
+            <text class="t0" x="791" y="203">bf16 @ iter8</text>
+            <text class="t1" x="791" y="219">gm 1.028(11/17)</text>
+            <text class="t2" x="791" y="233">洞 = largeN smallBS(cvt+fp32 ladder 成本)</text>
+          </g>
+          <g class="en">
+            <text class="t0" x="791" y="203">bf16 @ iter8</text>
+            <text class="t1" x="791" y="219">gm 1.028 (11/17)</text>
+            <text class="t2" x="791" y="233">holes = largeN smallBS (cvt+ladder cost)</text>
+          </g></g>
+        <g class="tip" id="tb9"><rect x="770" y="139" width="264" height="56"/>
+          <g class="zh">
+            <text class="t0" x="782" y="157">bf16 @ iter9(原生 ladder)</text>
+            <text class="t1" x="782" y="173">gm 1.028 → 1.091(15/17)</text>
+            <text class="t2" x="782" y="187">K1024 列全绿;262K BS1 0.918→1.035</text>
+          </g>
+          <g class="en">
+            <text class="t0" x="782" y="157">bf16 @ iter9 (native ladder)</text>
+            <text class="t1" x="782" y="173">gm 1.028 → 1.091 (15/17)</text>
+            <text class="t2" x="782" y="187">K1024 col all green; 262K BS1 0.918→1.035</text>
+          </g></g>
+        <g class="tip" id="tf8"><rect x="779" y="264" width="264" height="56"/>
+          <g class="zh">
+            <text class="t0" x="791" y="282">fp16 @ iter8</text>
+            <text class="t1" x="791" y="298">gm 1.043(11/17)</text>
+            <text class="t2" x="791" y="312">与 bf16 同构;vs GVR 族最优 1.253</text>
+          </g>
+          <g class="en">
+            <text class="t0" x="791" y="282">fp16 @ iter8</text>
+            <text class="t1" x="791" y="298">gm 1.043 (11/17)</text>
+            <text class="t2" x="791" y="312">same shape as bf16; vs best GVR-family 1.253</text>
+          </g></g>
+        <g class="tip" id="tf9"><rect x="770" y="255" width="264" height="56"/>
+          <g class="zh">
+            <text class="t0" x="782" y="273">fp16 @ iter9(原生 ladder)</text>
+            <text class="t1" x="782" y="289">gm 1.043 → 1.055(12/17)</text>
+            <text class="t2" x="782" y="303">残洞 262K BS1/4 ≈0.97(B300 上已近平)</text>
+          </g>
+          <g class="en">
+            <text class="t0" x="782" y="273">fp16 @ iter9 (native ladder)</text>
+            <text class="t1" x="782" y="289">gm 1.043 → 1.055 (12/17)</text>
+            <text class="t2" x="782" y="303">residual 262K BS1/4 ≈0.97 (near-par on B300)</text>
+          </g></g>
+        <g class="tip" id="tg3"><rect x="336" y="214" width="272" height="56"/>
+          <g class="zh">
+            <text class="t0" x="348" y="232">✗ dist-P1(iter3 证伪)</text>
+            <text class="t1" x="348" y="248">event A/B:每 cell +0.6~1.7µs 更差</text>
+            <text class="t2" x="348" y="262">复制读同地址 L2 命中≈免费;barrier 才贵</text>
+          </g>
+          <g class="en">
+            <text class="t0" x="348" y="232">✗ dist-P1 (falsified, iter3)</text>
+            <text class="t1" x="348" y="248">event A/B: +0.6–1.7µs worse per cell</text>
+            <text class="t2" x="348" y="262">same-addr reads hit L2 ≈ free; barriers cost</text>
+          </g></g>
+        <g class="tip" id="tg4"><rect x="421" y="208" width="272" height="56"/>
+          <g class="zh">
+            <text class="t0" x="433" y="226">✗ dist-P4(iter4 证伪)</text>
+            <text class="t1" x="433" y="242">event A/B:+0.1~1.7µs 更差</text>
+            <text class="t2" x="433" y="256">snap 固定机器仍在 leader;+4 对 barrier</text>
+          </g>
+          <g class="en">
+            <text class="t0" x="433" y="226">✗ dist-P4 (falsified, iter4)</text>
+            <text class="t1" x="433" y="242">event A/B: +0.1–1.7µs worse</text>
+            <text class="t2" x="433" y="256">snap fixed cost stays on leader; +4 barriers</text>
+          </g></g>
+        <g class="tip" id="tg5"><rect x="510" y="136" width="272" height="56"/>
+          <g class="zh">
+            <text class="t0" x="522" y="154">✗ P1b QBINS=64(iter5 证伪)</text>
+            <text class="t1" x="522" y="170">event gm 1.004 = 平(14 个 P1 cell)</text>
+            <text class="t2" x="522" y="184">后缀扫描非 highBS 瓶颈;knob 保留</text>
+          </g>
+          <g class="en">
+            <text class="t0" x="522" y="154">✗ P1b QBINS=64 (falsified, iter5)</text>
+            <text class="t1" x="522" y="170">event gm 1.004 = flat (14 P1 cells)</text>
+            <text class="t2" x="522" y="184">suffix scan isn't the highBS bottleneck</text>
+          </g></g>
+        <g class="tip" id="tg6"><rect x="595" y="104" width="272" height="56"/>
+          <g class="zh">
+            <text class="t0" x="607" y="122">✗ C8@fp32 洞(iter6 证伪为噪声)</text>
+            <text class="t1" x="607" y="138">+0.6~1.3% = 噪声级</text>
+            <text class="t2" x="607" y="152">但 16-bit 下翻转为 1.08–1.14× 赢(iter8)</text>
+          </g>
+          <g class="en">
+            <text class="t0" x="607" y="122">✗ C8 @ fp32 holes (noise, iter6)</text>
+            <text class="t1" x="607" y="138">+0.6–1.3% = noise level</text>
+            <text class="t2" x="607" y="152">flips to a 1.08–1.14× WIN at 16-bit (iter8)</text>
+          </g></g>
+      </g>
+    </svg>
+  </div>
+
+  <nav class="seg">
+    <span class="cap"><span class="zh">选择迭代查看详情:</span><span class="en">Select an iteration for details:</span></span>
+    <label for="it05">0.5</label><label for="it1">1</label><label for="it2">2</label>
+    <label for="it3">3</label><label for="it4">4</label><label for="it5">5</label>
+    <label for="it6">6</label><label for="it7">7 ★</label><label for="it8">8</label>
+    <label for="it9">9</label><label for="it10">10</label><label for="it11">11</label>
+    <label for="it12">12</label>
+  </nav>
+
+  <section class="details">
+    <div class="d05"><div class="dcard">
+      <div class="zh">
+        <h3>iter 0.5 — HOST 原型:P1 order-statistics M-threshold 播种</h3>
+        <div class="date">2026-07-05 · <code>scripts/proto_p1_orderstat.py</code></div>
+        <dl>
+          <dt>问题</dt><dd>不依赖离线表,仅用 preIdx 上一步 top-K 的顺序统计量做 M 个数据驱动括号阈值,能否在真实数据上一轮 straddle 住 K?</dd>
+          <dt>结果</dt><dd><span class="gm-up">GO</span> — 55 行(Pro 30 层 + Flash 7 + v3.2 9 + synth 9):M=4 放置 (0.25,0.5,0.75,1.0)·K straddle <b>94.5%</b>,Pro 与 synth <b>100%</b>;miss 全部是良性 <code>all_ge</code>(round-2 向上补一轮即可),<code>g_min</code> 锚保证永不 <code>all_lt</code>。</dd>
+          <dt>关键规律</dt><dd>gathered 第 i 名 ↔ 全局排名 ≈ i/h(h = preIdx 命中率);推测 collect 列是 per-K 常数(Pro f=0.75 覆盖 30/30 层)。</dd>
+          <dt>决策</dt><dd>iter1 kernel 方案定型:order-stat 播种 + 一轮 M=4 融合计数 + 推测 slot-collect + band refine;彻底摆脱离线 straddle-fracs 表。</dd>
+        </dl>
+      </div>
+      <div class="en">
+        <h3>iter 0.5 — HOST prototype: P1 order-statistics M-threshold seeding</h3>
+        <div class="date">2026-07-05 · <code>scripts/proto_p1_orderstat.py</code></div>
+        <dl>
+          <dt>Question</dt><dd>Can M data-driven bracket thresholds, selected purely from the order statistics of the previous step's top-K (preIdx) — no offline tables — straddle K in one round on real data?</dd>
+          <dt>Result</dt><dd><span class="gm-up">GO</span> — 55 rows (Pro 30 layers + Flash 7 + v3.2 9 + synth 9): the M=4 placement (0.25,0.5,0.75,1.0)·K straddles <b>94.5%</b>, <b>100%</b> on Pro and synth; every miss is the benign <code>all_ge</code> mode (one round-2 above fixes it), and the <code>g_min</code> anchor guarantees never <code>all_lt</code>.</dd>
+          <dt>Key law</dt><dd>gathered rank i ↔ global rank ≈ i/h (h = preIdx hit-rate); the speculative collect column is a per-K constant (Pro f=0.75 fits 30/30 layers).</dd>
+          <dt>Decision</dt><dd>iter1 kernel design locked: order-stat seeding + one fused M=4 count round + speculative slot-collect + band refine; no offline straddle-fracs dependency.</dd>
+        </dl>
+      </div>
+    </div></div>
+
+    <div class="d1"><div class="dcard">
+      <div class="zh">
+        <h3>iter 1 — 单CTA kernel v1(gvr_ms,rank-quantile 播种)</h3>
+        <div class="date">2026-07-05 · <code>src/gvr_ms_op.py</code> · fp32 P0 gm <b>0.830</b>(4/12)· P1 gm 0.816</div>
+        <dl>
+          <dt>手段</dt><dd>histogram-quantile P1b 放置(QBINS=256)+ M=4 R=1 融合 ladder + 推测 slot-collect + band refine;phase1 stash(prev-K 值存进闲置的 smem_keys,省掉 P1b 的 L2 重取);dispatch 零表格,2 条 fuse 规则。</dd>
+          <dt>主要教训</dt><dd>v1 的 P1b 在 tid0 上串行跑 256-bin 累计扫描(~1800 次依赖性 smem 操作)= <b>+30µs 固定成本</b>;换成 Hillis-Steele 并行后缀扫描(8 步双 barrier)后 N4K 时延 45.5 → 16.3µs。</dd>
+          <dt>诊断</dt><dd>nsys N-斜率 87ns/Kelt vs op8 的 17 → P0 差距 = 单 SM 聚合 L2 带宽,不是算法 → iter2 多 CTA 是唯一 P0 杠杆。</dd>
+          <dt>门禁</dt><dd>synth 54/54 + 真实 capture 60/60(Pro30 + Flash21 + v3.2 9)。</dd>
+        </dl>
+      </div>
+      <div class="en">
+        <h3>iter 1 — single-CTA kernel v1 (gvr_ms, rank-quantile seeding)</h3>
+        <div class="date">2026-07-05 · <code>src/gvr_ms_op.py</code> · fp32 P0 gm <b>0.830</b> (4/12) · P1 gm 0.816</div>
+        <dl>
+          <dt>Levers</dt><dd>histogram-quantile P1b placement (QBINS=256) + fused M=4 R=1 ladder + speculative slot-collect + band refine; phase1 stash (prev-K values parked in the idle smem_keys, killing P1b's L2 re-gather); zero dispatch tables, a 2-rule fuse gate.</dd>
+          <dt>Main lesson</dt><dd>v1 ran the 256-bin cumulative scan serially on tid0 (~1800 dependent smem ops) = <b>+30µs fixed cost</b>; replaced with a Hillis-Steele parallel suffix scan (8 double-barrier steps): 45.5 → 16.3µs at N4K.</dd>
+          <dt>Diagnosis</dt><dd>nsys N-slope 87ns/Kelt vs op8's 17 → the P0 gap is single-SM aggregate L2 bandwidth, not the algorithm → multi-CTA (iter2) is THE P0 lever.</dd>
+          <dt>Gates</dt><dd>synth 54/54 + real captures 60/60 (Pro30 + Flash21 + v3.2 9).</dd>
+        </dl>
+      </div>
+    </div></div>
+
+    <div class="d2"><div class="dcard">
+      <div class="zh">
+        <h3>iter 2 — 行分块 C-CTA cluster(gvr_msc / gvr_ms_auto)</h3>
+        <div class="date">2026-07-05 · <code>src/gvr_msc_op.py</code> · fp32 P0 gm <b>0.830 → 1.051</b>(12/17)<span class="gm-up"> +26.6%,P0 翻盘为胜</span></div>
+        <dl>
+          <dt>手段</dt><dd>C 个 CTA 分块同一行:<b>复制播种</b>(P1/P1b 每 CTA 对相同输入位等价重算,零跨 CTA 通信)+ DSMEM 单 barrier 合并 M 计数 + 分布式 P3 按 rank-prefix 偏移直写输出 + leader DSMEM band gather + 原 P4 snap。<code>gvr_ms_auto</code> 只加一条规则:C=4 iff N≥65536 且 4·BS≤NUM_SMS。</dd>
+          <dt>修复的 bug</dt><dd>① leader 回退路径喂了 slice-local 的 smem_ptcnt(vendored P3 不重计数 → 646/1024 输出空洞);② 借用了 vendored 的 s_iscalars[1..3] 槽位。</dd>
+          <dt>发现</dt><dd>C8 在 BS16 崩溃(128 CTA 超订 43.8 vs 28.5µs)→ 单条 C4 规则胜过双层规则;真实 capture 门禁抓住 synth 抓不到的 pair=(0,1) 回退路径。</dd>
+          <dt>门禁</dt><dd>real × C∈{2,4,8} 180/180 + 对抗 preIdx 16/16。</dd>
+        </dl>
+      </div>
+      <div class="en">
+        <h3>iter 2 — row-chunked C-CTA cluster (gvr_msc / gvr_ms_auto)</h3>
+        <div class="date">2026-07-05 · <code>src/gvr_msc_op.py</code> · fp32 P0 gm <b>0.830 → 1.051</b> (12/17)<span class="gm-up"> +26.6%, P0 flips to a win</span></div>
+        <dl>
+          <dt>Levers</dt><dd>C CTAs chunk one row: <b>replicated seeding</b> (each CTA recomputes bit-identical thresholds on identical inputs, zero cross-CTA traffic) + one-barrier DSMEM merge of the M counts + distributed P3 direct-write at rank-prefix offsets + leader DSMEM band gather + the unchanged P4 snap. <code>gvr_ms_auto</code> adds ONE rule: C=4 iff N≥65536 and 4·BS≤NUM_SMS.</dd>
+          <dt>Bugs fixed</dt><dd>① the leader fallback fed slice-local smem_ptcnt to the vendored P3 (it never recounts → 646/1024 output holes); ② borrowed the vendored s_iscalars[1..3] slots as scratch.</dd>
+          <dt>Findings</dt><dd>C8 collapses at BS16 (128 CTAs oversubscribe: 43.8 vs 28.5µs) → one C4 rule beats a two-tier rule; the real-capture gate catches the pair=(0,1) fallback path synth never fires.</dd>
+          <dt>Gates</dt><dd>real × C∈{2,4,8} 180/180 + adversarial preIdx 16/16.</dd>
+        </dl>
+      </div>
+    </div></div>
+
+    <div class="d3"><div class="dcard">
+      <div class="zh">
+        <h3>iter 3 — dist-P1 证伪;C8 tier 仅落地 K2048</h3>
+        <div class="date">2026-07-05 · fp32 P0 gm <b>1.051 → 1.054</b>(12/17)</div>
+        <dl>
+          <dt>证伪</dt><dd><b>dist-P1</b>(各 CTA 只取 K/C 个 preIdx,DSMEM 合并重建种子):event A/B 每个 K512/K1024 cell <b>+0.6~1.7µs 更差</b>。机制:BS≤16 时所有 CTA 取相同地址——首个 CTA miss 后其余全部 L2 命中,复制近乎免费;而多出的 3 对 cluster barrier 比省下的 load 更贵。</dd>
+          <dt>保留</dt><dd>C=8 tier:仅在 K2048 hugeN BS≤4 一致获胜(28.7 vs 30.3µs);K 是编译期 dispatch 键 → per-K 规则生产合法。K2048 262K BS1 rival 比 0.798 → 0.829。</dd>
+          <dt>教训</dt><dd>cluster barrier 才是稀缺资源,冗余 L2 读不是——与 op14 "减 pass 数省不了 DRAM" 同族。</dd>
+        </dl>
+      </div>
+      <div class="en">
+        <h3>iter 3 — dist-P1 falsified; C8 tier lands K2048-only</h3>
+        <div class="date">2026-07-05 · fp32 P0 gm <b>1.051 → 1.054</b> (12/17)</div>
+        <dl>
+          <dt>Falsified</dt><dd><b>dist-P1</b> (each CTA gathers only K/C preIdx, DSMEM merges rebuild the seeds): event A/B <b>+0.6–1.7µs worse</b> on every K512/K1024 cell. Mechanism: at BS≤16 all CTAs read the SAME addresses — after the first CTA misses, the rest hit L2, so replication is nearly free; the 3 extra cluster-barrier pairs cost more than the loads saved.</dd>
+          <dt>Kept</dt><dd>C=8 tier: a consistent win only at K2048 hugeN BS≤4 (28.7 vs 30.3µs); K is a compile-time dispatch key → per-K rules are production-legal. K2048 262K BS1 rival ratio 0.798 → 0.829.</dd>
+          <dt>Lesson</dt><dd>cluster barriers are the scarce resource, redundant L2 reads are not — same family as op14's "pass-count reduction saves zero DRAM".</dd>
+        </dl>
+      </div>
+    </div></div>
+
+    <div class="d4"><div class="dcard">
+      <div class="zh">
+        <h3>iter 4 — 消融定位 P4;dist-P4 也证伪(红线确立)</h3>
+        <div class="date">2026-07-05 · fp32 P0 gm 持平 <b>1.054</b></div>
+        <dl>
+          <dt>方法</dt><dd>no-op <code>@cute.jit</code> 子类覆写 = 20 分钟相位消融:P4 band snap(leader-only)= <b>3.9–7µs</b> ≫ P3 2–3µs ≫ 其余是扫描地板 ~20µs——P4 恰好等于两个命名洞的全部剩余差距。</dd>
+          <dt>证伪</dt><dd><b>dist-P4</b>(per-CTA 256-bin 局部 band 直方图 + DSMEM 合并 + 分布式 bulk 发射,仅边界 bin 交 leader snap):event A/B +0.1~1.7µs 更差。机制:P4 成本主要是 snap 自身的固定机器,leader 在边界 bin 上照样要跑;预过滤只添了 4 对 barrier + 每 CTA 一次 256-bin 后缀扫描。</dd>
+          <dt>红线</dt><dd>综合 iter3+4:此 kernel 族上「把串行固定部分分布到 cluster」全输——正确方向是把串行相位本身做便宜(→ iter5)。</dd>
+        </dl>
+      </div>
+      <div class="en">
+        <h3>iter 4 — ablation pins P4; dist-P4 falsified too (red line set)</h3>
+        <div class="date">2026-07-05 · fp32 P0 gm flat at <b>1.054</b></div>
+        <dl>
+          <dt>Method</dt><dd>no-op <code>@cute.jit</code> subclass overrides = a 20-minute phase ablation: P4 band snap (leader-only) = <b>3.9–7µs</b> ≫ P3 2–3µs ≫ the rest is the ~20µs scan floor — P4 equals the entire remaining gap at both named holes.</dd>
+          <dt>Falsified</dt><dd><b>dist-P4</b> (per-CTA 256-bin local-band histogram + DSMEM merge + distributed bulk emit, only the boundary bin sent to the leader snap): event A/B +0.1–1.7µs worse. Mechanism: P4's cost is dominated by the snap's own fixed machinery, which the leader still runs on the boundary bin; the pre-filter only added 4 barrier pairs + a replicated 256-bin suffix scan per CTA.</dd>
+          <dt>Red line</dt><dd>iter3+4 combined: on this kernel family, "distribute the serial fixed part across the cluster" LOSES — the productive direction is making the serial phase itself cheaper (→ iter5).</dd>
+        </dl>
+      </div>
+    </div></div>
+
+    <div class="d5"><div class="dcard">
+      <div class="zh">
+        <h3>iter 5 — rank-scatter exact P4 移植(op8 / PR #15709 原语)</h3>
+        <div class="date">2026-07-06 · fp32 P0 gm <b>1.054 → 1.104</b>(13/17)· vs GVR 族最优 1.007,首次追平 op8</div>
+        <dl>
+          <dt>手段</dt><dd>op8 的精确 rank-scatter P4 移植为 band refine(默认 ON,<code>OP21_P4_RS=0</code> A/B):coarse kBins hist → b* + rank_above → 一次 fine 256-bin 递归 → 单 scatter pass,整体取代数据依赖的 snap 收敛循环。band 范围 [thr1,thr0) 已知 → op8 的 min/max pass 直接省掉。</dd>
+          <dt>证伪</dt><dd>P1b QBINS=64 @ highBS:paired event gm 1.004(14 cell 全在 ±2.5% 内)——8 步后缀扫描不是 highBS 每行瓶颈。</dd>
+          <dt>环境事故</dt><dd>035-GPU0 冷却退化(79C idle),首个 nsys 网格后半程 +13% 漂移作废 → 换 GPU1 重测,存档 <code>iter5_gpu0_thermal_poisoned/</code>;确立同进程 env-keyed A/B(免疫热漂移)。</dd>
+          <dt>门禁</dt><dd>synth 54/54 + real 60/60 + real×C 180/180 + 对抗 36/36(新 <code>smoke_real_msc.py</code>)。</dd>
+        </dl>
+      </div>
+      <div class="en">
+        <h3>iter 5 — exact rank-scatter P4 ported (op8 / PR #15709 primitive)</h3>
+        <div class="date">2026-07-06 · fp32 P0 gm <b>1.054 → 1.104</b> (13/17) · 1.007 vs best GVR-family op — first parity with op8</div>
+        <dl>
+          <dt>Lever</dt><dd>op8's exact rank-scatter P4 ported as the band refine (default ON, <code>OP21_P4_RS=0</code> A/B): coarse kBins hist → b* + rank_above → one fine 256-bin recursion → a single scatter pass, replacing the data-dependent snap convergence loop entirely. The band range [thr1,thr0) is already known → op8's min/max pass drops out.</dd>
+          <dt>Falsified</dt><dd>P1b QBINS=64 at high BS: paired event gm 1.004 (14 cells all within ±2.5%) — the 8-step suffix scan is not the per-row highBS bottleneck.</dd>
+          <dt>Incident</dt><dd>035-GPU0 cooling degraded (79C idle): the first nsys grid drifted +13% on later cells and was voided → re-run on GPU1, archived <code>iter5_gpu0_thermal_poisoned/</code>; established same-process env-keyed A/B (throttle-immune).</dd>
+          <dt>Gates</dt><dd>synth 54/54 + real 60/60 + real×C 180/180 + adversarial 36/36 (new <code>smoke_real_msc.py</code>).</dd>
+        </dl>
+      </div>
+    </div></div>
+
+    <div class="d6"><div class="dcard">
+      <div class="zh">
+        <h3>iter 6 — P4 小 bin 快速路径(host 探针先行)</h3>
+        <div class="date">2026-07-06 · fp32 P0 gm <b>1.104 → 1.125</b>(13/17)· vs GVR 族最优 1.026</div>
+        <dl>
+          <dt>探针先行</dt><dd><code>proto_p4_smallbin.py</code> 在 68 行 synth+real 上回放整条链:cnt(b*) p50=2 <b>max=4</b>,≤32 覆盖 100% → 快速路径不是分支动物园而是一条主路径。20 分钟 host 回放砍掉数周错形状的 kernel 工作。</dd>
+          <dt>手段</dt><dd>三分支 P4:(B)cnt(b*)≤32 → b* 成员索引 stash 进死区 smem_hist[8..39],一次 band pass + <b>warp0 寄存器精确排名</b>(32 次常量源 shuffle,按 stash 序破并列),零 atomic 零 fine hist,共 2 个 barrier;(A)大 bin 等值整 bin 发射;(C)fine 递归仅作分布漂移回退。</dd>
+          <dt>证伪</dt><dd>C8-at-fp32洞:+0.6~1.3% 噪声级,不改 dispatch。<b>event 单 cell 谎言第一例</b>:K512 131K BS1 五次配对复现 0.957,nsys 驳回(16.74 vs 16.70µs 持平)= codegen 抖动 → nsys 仲裁单 cell 判决。</dd>
+        </dl>
+      </div>
+      <div class="en">
+        <h3>iter 6 — small-bin P4 fast paths (host probe first)</h3>
+        <div class="date">2026-07-06 · fp32 P0 gm <b>1.104 → 1.125</b> (13/17) · 1.026 vs best GVR-family op</div>
+        <dl>
+          <dt>Probe first</dt><dd><code>proto_p4_smallbin.py</code> replays the whole chain on host over 68 synth+real rows: cnt(b*) p50=2 <b>max=4</b>, ≤32 covers 100% → the fast path is ONE dominant path, not a branch zoo. 20 minutes of host replay killed weeks of wrong-shape kernel work.</dd>
+          <dt>Levers</dt><dd>three-way P4: (B) cnt(b*)≤32 → stash b* member indices into dead smem_hist[8..39], one band pass + <b>warp0 exact register ranking</b> (32 constant-src shuffles, ties by stash order), zero atomics, zero fine hist, 2 barriers total; (A) big-bin equality whole-bin emit; (C) fine recursion kept only as the distribution-shift fallback.</dd>
+          <dt>Falsified</dt><dd>C8-at-fp32-holes: +0.6–1.3% = noise, dispatch unchanged. <b>First event single-cell lie</b>: K512 131K BS1 reproduced 0.957 across 5 paired reps; nsys refuted it (16.74 vs 16.70µs flat) = codegen jitter → nsys arbitrates single-cell verdicts.</dd>
+        </dl>
+      </div>
+    </div></div>
+
+    <div class="d7"><div class="dcard">
+      <div class="zh">
+        <h3>iter 7 ★ — P3 band remote-store push(全战役最大单步)</h3>
+        <div class="date">2026-07-06 · fp32 P0 gm <b>1.125 → 1.249</b>,<span class="gm-up">17/17 首次全胜</span> · vs GVR 族最优 1.139 · 4 个 262K smallBS 洞全部关闭</div>
+        <dl>
+          <dt>盲区发现</dt><dd>iter6 消融表里的 "P3" 只是 slot walk——leader DSMEM band gather <b>内联</b>在 kernel body 里,no-op 子类看不见它的 1.7–2.4µs,一直伪装成 "扫描地板"。拆出 <code>_p3_leader_band_gather</code> 后分账:gather 恰好是 K1024/K2048 洞 cell 的大头。</dd>
+          <dt>手段</dt><dd>每个 CTA 的全局 band 前缀 b_off 在 walk 之前就已知(ladder 计数发布)→ slot walk 用新的 <code>st.shared::cluster</code> 原语把 band 条目<b>直接写进 leader 的 smem</b>(fire-and-forget,无往返停顿)。删掉整个 gather pass + 一对 cluster barrier + band 计数发布。与被红线的 "分布串行部分" 本质不同:没有新 barrier,反而少一对。</dd>
+          <dt>效果</dt><dd>K1024 262K BS1/4:0.967/0.950 → <b>1.064/1.038</b>;K512 262K BS1 → 1.064;K2048 262K BS1 → 1.115;event 配对 14/14 全胜(gm 1.077)。</dd>
+          <dt>教训</dt><dd>+11% gm 来自一个从未出现在任何消融表里的相位——每次结构变更后重跑消融拆分,排名会动;所有相位必须放进可覆写方法。</dd>
+        </dl>
+      </div>
+      <div class="en">
+        <h3>iter 7 ★ — P3 band remote-store push (biggest single step of the campaign)</h3>
+        <div class="date">2026-07-06 · fp32 P0 gm <b>1.125 → 1.249</b>, <span class="gm-up">first 17/17 clean sweep</span> · 1.139 vs best GVR-family op · all four 262K smallBS holes closed</div>
+        <dl>
+          <dt>Blind spot</dt><dd>iter6's ablation "P3" was only the slot walk — the leader DSMEM band gather sat <b>INLINE</b> in the kernel body, invisible to the no-op-subclass harness, hiding its 1.7–2.4µs inside the "scan floor". After extracting <code>_p3_leader_band_gather</code>, the split shows the gather is the bigger half at exactly the K1024/K2048 hole cells.</dd>
+          <dt>Lever</dt><dd>each CTA's global band prefix b_off is known BEFORE the walk (ladder-count publish) → the slot walk writes band entries <b>straight into the LEADER's smem</b> via new <code>st.shared::cluster</code> primitives (fire-and-forget, no round-trip stall). Deletes the whole gather pass + one cluster-barrier pair + the count publish. Unlike the red-lined "distribute the serial part": no new barriers — one fewer.</dd>
+          <dt>Effect</dt><dd>K1024 262K BS1/4: 0.967/0.950 → <b>1.064/1.038</b>; K512 262K BS1 → 1.064; K2048 262K BS1 → 1.115; paired event 14/14 (gm 1.077).</dd>
+          <dt>Lesson</dt><dd>the +11% gm came from a phase that never appeared in any ablation table — re-run the ablation split after every structural change; keep every phase in an overridable method.</dd>
+        </dl>
+      </div>
+    </div></div>
+
+    <div class="d8"><div class="dcard">
+      <div class="zh">
+        <h3>iter 8 — 16-bit 层级上线 + C8@16bit dispatch 规则;P1 重测</h3>
+        <div class="date">2026-07-06 · bf16 gm <b>1.028</b>(11/17)/ fp16 <b>1.043</b>(11/17)· fp32 不变 1.249 · P1 网格 0.816 → 0.901</div>
+        <dl>
+          <dt>手段</dt><dd>kernel 从 op18/19 谱系继承即已 dtype-generic——"移植" 缩为验证+测量+dispatch。新 <code>smoke_real_16bit.py</code>:真实 capture 按 dtype 截断,<b>360/360 exact</b>。</dd>
+          <dt>dtype 条件翻转</dt><dd>fp32 下证伪的 C8(iter6 噪声)在 16-bit 是 1.08–1.14× 的赢:扫描字节减半重新加权串行尾部 → C-scaling 结论按 dtype 重测。新规则一条:<code>C=8 iff 16-bit && N≥65536 && N≥32768·BS</code>(自然排除 BS16 崩溃与 131K BS8 边缘)。</dd>
+          <dt>诊断</dt><dd>16-bit 下对手(radix)提速 ~35% 而我们 C4 largeN smallBS 几乎不动(指令绑定非 L2 带宽绑定)→ 残余差距在逐元素成本(16→32 cvt + fp32 ladder)→ iter9 的杠杆。</dd>
+        </dl>
+      </div>
+      <div class="en">
+        <h3>iter 8 — 16-bit tier lands + C8@16bit dispatch rule; P1 refreshed</h3>
+        <div class="date">2026-07-06 · bf16 gm <b>1.028</b> (11/17) / fp16 <b>1.043</b> (11/17) · fp32 unchanged 1.249 · P1 grid 0.816 → 0.901</div>
+        <dl>
+          <dt>Levers</dt><dd>the kernels were already dtype-generic from the op18/19 lineage — the "port" reduced to validation + measurement + dispatch. New <code>smoke_real_16bit.py</code>: real captures truncated per dtype, <b>360/360 exact</b>.</dd>
+          <dt>Dtype flip</dt><dd>C8, falsified at fp32 (iter6 noise), is a 1.08–1.14× WIN at 16-bit: halved scan bytes re-weight the serial tail → re-test C-scaling per dtype. One new rule: <code>C=8 iff 16-bit && N≥65536 && N≥32768·BS</code> (naturally excludes the BS16 collapse and the 131K BS8 marginal).</dd>
+          <dt>Diagnosis</dt><dd>at 16-bit the rival (radix) speeds up ~35% while our C4 largeN smallBS time is flat (instruction-bound, not L2-BW-bound) → the residual gap is per-element cost (16→32 cvt + fp32 ladder) → iter9's lever.</dd>
+        </dl>
+      </div>
+    </div></div>
+
+    <div class="d9"><div class="dcard">
+      <div class="zh">
+        <h3>iter 9 — 原生 16-bit 比较 ladder(阈值量化 = 位等价)</h3>
+        <div class="date">2026-07-06 · bf16 gm <b>1.028 → 1.091</b>(15/17)/ fp16 <b>1.043 → 1.055</b>(12/17)</div>
+        <dl>
+          <dt>microbench 先行</dt><dd><code>probe/count16_native.cu</code>:20 分钟 .cu 排名 3 个比较方案——p2(set.ge.16x2 + add.rn packed)单 CTA N262K <b>1.73×</b>、C8 切片 1.21×、满占用 ~1.0(L2 绑定)——精确预测生产收益出现的位置。</dd>
+          <dt>正确性钥匙</dt><dd>P1b 在发射时把所有阈值列<b>一次量化到 dtype 网格</b>(cvt.rn 单调,非降序保持)→ 16-bit 域的 ladder 比较与其他相位对精确嵌入值做的 fp32 比较<b>位等价</b>——单点一致性,零相位改动,并列语义不变。</dd>
+          <dt>实现</dt><dd>双 ladder(单CTA + msc slice)走 u32 256-bit 载入 + packed 计数(每 16 迭代 flush 到 int32,增长界 ≤128 ≪ bf16 精确整数 256);collect 列用 set.ge.u32 掩码(slot 游标必须逐元素精确)。fp32 二进制 const_expr 剪枝不变。</dd>
+          <dt>教训</dt><dd>fp16 event 出现两个 ~5% 单 cell "回归",nsys 驳回(~1%)——codegen 抖动谎言第三例。</dd>
+        </dl>
+      </div>
+      <div class="en">
+        <h3>iter 9 — native 16-bit compare ladder (threshold quantization = bit-equivalence)</h3>
+        <div class="date">2026-07-06 · bf16 gm <b>1.028 → 1.091</b> (15/17) / fp16 <b>1.043 → 1.055</b> (12/17)</div>
+        <dl>
+          <dt>µbench first</dt><dd><code>probe/count16_native.cu</code> ranked 3 compare schemes in 20 minutes of .cu work — p2 (set.ge.16x2 + add.rn packed) <b>1.73×</b> at N262K single-CTA, 1.21× on the C8 slice, ~1.0 at full occupancy (L2-bound) — predicting exactly where the production win would (and wouldn't) show.</dd>
+          <dt>Exactness key</dt><dd>P1b quantizes all threshold columns <b>once to the dtype grid</b> at emit (cvt.rn is monotonic, non-descending survives) → the 16-bit-domain ladder compares become <b>bit-equivalent</b> to the fp32 compares every other phase performs on the exactly-embedded values — one consistency point, zero per-phase changes, tie semantics unchanged.</dd>
+          <dt>Implementation</dt><dd>both ladders (single-CTA + msc slice) take u32 256-bit loads + packed counts (int32 flush every 16 iters; growth bound ≤128 ≪ bf16's exact-integer 256); the collect column uses a set.ge.u32 mask (the slot cursor must be exact per element). fp32 binaries untouched (const_expr).</dd>
+          <dt>Lesson</dt><dd>fp16 events showed two ~5% single-cell "regressions" that nsys refuted at ~1% — third instance of the codegen-jitter lie.</dd>
+        </dl>
+      </div>
+    </div></div>
+
+    <div class="d10"><div class="dcard">
+      <div class="zh">
+        <h3>iter 10 — SHIP_REVIEW + 上游评估 + B300 交叉验证(文档收口,无 kernel 改动)</h3>
+        <div class="date">2026-07-06 · B300 51-cell:fp32 <b>1.268</b>(17/17)/ bf16 <b>1.089</b>(15/17)/ fp16 <b>1.053</b>(13/17)</div>
+        <dl>
+          <dt>B300 结论</dt><dd><b>HW-invariant</b>:所有 gm 与 B200 差 ≤0.02,零胜→负翻转;NUM_SMS=148 两代相同 → dispatch 阈值位一致。跨 B300 节点复现 ±1%。测量阶段关闭。</dd>
+          <dt>P0 blocker</dt><dd>交叉阅读上游 <code>ec04147502</code>(rank-scatter 默认档被 30 个对抗用例杀掉后回滚)发现:op21 的 P4 path-C <code>_p4_band_fine_scatter</code> 固定深度直方图携带<b>同一潜伏非 exact 模式</b>(同一 fine bin 内 >32 个不同 fp32 值跨越切点)——op21 门禁只对抗 preIdx、不对抗 logits 碰撞结构,存在盲区。移植前必须修(→ iter11)。</dd>
+          <dt>结构墙接受</dt><dd>K2048 16-bit BS1 尾巴消融(<code>ablate_16bit_tail.py</code>):P4 正常(仅 +0.5µs vs 绿的 K1024 参照),罚分住在地板——cr=1 下 K-比例的 P1 gather+P1b 对上 K-平坦的 radix 16-bit 杆。无 P3/P4 杠杆,<b>接受为结构墙</b>(仅 v3.2 几何;DSv4 Flash/Pro K512/K1024 不受影响)。B300 独立复现(0.958/0.876)。</dd>
+        </dl>
+      </div>
+      <div class="en">
+        <h3>iter 10 — SHIP_REVIEW + upstream assessment + B300 cross-check (docs only, no kernel edits)</h3>
+        <div class="date">2026-07-06 · B300 51 cells: fp32 <b>1.268</b> (17/17) / bf16 <b>1.089</b> (15/17) / fp16 <b>1.053</b> (13/17)</div>
+        <dl>
+          <dt>B300 verdict</dt><dd><b>HW-invariant</b>: every gm within 0.02 of B200, zero win→loss flips; NUM_SMS=148 on both parts → dispatch thresholds bit-identical. Cross-B300-node reproduction within ±1%. Measurement phase CLOSED.</dd>
+          <dt>P0 blocker</dt><dd>cross-reading upstream <code>ec04147502</code> (the rank-scatter default revert after 30 adversarial failures) revealed that op21's P4 path-C <code>_p4_band_fine_scatter</code> fixed-depth histogram carries the <b>same latent inexactness</b> (&gt;32 distinct fp32 values inside one fine bin straddling the cut) — op21's gates adversarialize preIdx, not logits collision structure: a blind spot. Must be fixed before any port (→ iter11).</dd>
+          <dt>Wall accepted</dt><dd>K2048 16-bit BS1 tail ablation (<code>ablate_16bit_tail.py</code>): P4 is normal (+0.5µs vs the green K1024 ref); the penalty lives in the floor — K-proportional P1 gather + P1b at cr=1 against a K-flat radix 16-bit bar. No P3/P4 lever exists; <b>ACCEPTED as a structural wall</b> (v3.2 geometry only — DSv4 Flash/Pro K512/K1024 unaffected). Independently reproduced on B300 (0.958/0.876).</dd>
+        </dl>
+      </div>
+    </div></div>
+
+    <div class="d11"><div class="dcard">
+      <div class="zh">
+        <h3>iter 11 — P4 path-C exact 回退(上游移植 PR-1 第 1 步)</h3>
+        <div class="date">2026-07-06 · 性能 nsys A/B gm <b>0.996 = 平</b> · 正确性:对抗 band 0/72 → <b>72/72</b></div>
+        <dl>
+          <dt>先证伪</dt><dd>新门禁 <code>smoke_adversarial_band.py</code>:在 K 名次处种植 2-ULP 间隔的 300 个不同 fp32 值的近并列簇(生产 preIdx 方言)——HEAD <b>72/72 全挂</b>,vdiff 全是 ULP 级 = iter10 预测的 fine-bin stash 序截断,证伪完整成立。</dd>
+          <dt>修复</dt><dd>删除 <code>_p4_band_fine_scatter</code>;path C(和 <code>OP21_P4_FAST=0</code>)回退到 <b>value-edge snap</b>(<code>block_band_snap_iter</code> 踩在实际数据值上 → ==sel_thr 是真并列组,任何 k_rem 切分都 exact)。path A/B 与全部入口条件字节不变;path C 在 real/synth 上从不触发 → 性能表全部不变。</dd>
+          <dt>红线</dt><dd>固定深度直方图 bin 是值区间不是并列组——<b>永不再用固定深度 scatter 发射作 P4 终端</b>;只有数据值终端(warp 寄存器排名 / value-edge snap)是 exact 的。</dd>
+          <dt>门禁陷阱</dt><dd>对抗 harness 必须讲生产 preIdx 方言:cr=1 裸指针会被 kernel 的 +1 对角偏移推进 bulk → 静默走 exact 的 fail-soft 基线路径 → 假通过。</dd>
+        </dl>
+      </div>
+      <div class="en">
+        <h3>iter 11 — P4 path-C exact fallback (upstream-port PR-1 step 1)</h3>
+        <div class="date">2026-07-06 · perf nsys A/B gm <b>0.996 = flat</b> · exactness: adversarial band 0/72 → <b>72/72</b></div>
+        <dl>
+          <dt>Falsify first</dt><dd>new gate <code>smoke_adversarial_band.py</code> plants near-tie clusters (300 distinct fp32 values at 2-ULP spacing straddling the K-th rank) with production preIdx conventions — HEAD <b>fails 72/72</b>, vdiff always ULP-scale = exactly the fine-bin stash-order truncation predicted in iter10.</dd>
+          <dt>Fix</dt><dd>delete <code>_p4_band_fine_scatter</code>; path C (and <code>OP21_P4_FAST=0</code>) falls back to the <b>value-edge snap</b> (<code>block_band_snap_iter</code> steps onto actual data values → ==sel_thr is a true tie group; any k_rem cut of it is exact). Paths A/B and all entry conditions byte-identical; path C never fires on real/synth data → all perf tables stand.</dd>
+          <dt>Red line</dt><dd>a fixed-depth histogram bin is a value INTERVAL, not a tie group — <b>never reintroduce a fixed-depth scatter emit as a P4 terminal</b>; only data-value terminals (warp register ranking / value-edge snap) are exact.</dd>
+          <dt>Gate trap</dt><dd>adversarial harnesses must speak the production preIdx dialect: cr=1 raw pointers get the kernel's +1 diagonal offset → the attack lands in the bulk → the (exact) fail-soft baseline silently absorbs it → false pass.</dd>
+        </dl>
+      </div>
+    </div></div>
+
+    <div class="d12"><div class="dcard">
+      <div class="zh">
+        <h3>iter 12 — PR-1 kernel-variant artifact 组装 + 全门禁(上游移植 PR-1 第 2 步)</h3>
+        <div class="date">2026-07-07 · <code>port/gvr_topk_decode_ms.py</code> 3436 行 · 上游主测试网格 <b>384/384</b></div>
+        <dl>
+          <dt>产物</dt><dd><code>assemble_ms.py</code> 确定性抽取(精确行区间 + 内容断言编辑,源漂移即响亮失败)组装 torch-free、上游 main import 布局的 kernel 文件:<code>GvrMsKernel</code> / <code>GvrMsClusterKernel</code>;env knob 全部变构造参数;本地验证走 <code>port/portshim/</code> 再导出垫片,artifact 本身永不为本地运行而改。</dd>
+          <dt>门禁</dt><dd>synth fp32 54/54 · 16-bit 24/24 · 对抗 band 72/72 · real×C 180/180 · 选择恒等 vs bench 7/7 · <b>新 next_n/varlen 门 12/12</b> · 上游网格 <b>384/384</b>(含杀死 rank-scatter 上游的 30 个对抗用例;上游 <code>_make_inputs/_tie_aware_check</code> 原样提取)。</dd>
+          <dt>方法发现</dt><dd><b>GVR 输出行内顺序运行时非确定</b>(P3/P4 smem atomicAdd 发射游标按 warp 调度序分配槽位;bench kernel 自身背靠背同输入也换排列)→ 任何新旧 A/B 必须比<b>排序后的 index 集合</b>;positional torch.equal 假失败 7/7。</dd>
+          <dt>下一步</dt><dd>PR-1 集成须在<b>干净的上游分支</b>上做(本 checkout 工作树有无关 Jun-5 残留);runner 粘贴稿 <code>port/runner_ms_extension.py</code> 就绪。集成当前 PAUSED(用户决定,转 op22 性能战役)。</dd>
+        </dl>
+      </div>
+      <div class="en">
+        <h3>iter 12 — PR-1 kernel-variant artifact assembled + full gate suite (upstream-port PR-1 step 2)</h3>
+        <div class="date">2026-07-07 · <code>port/gvr_topk_decode_ms.py</code>, 3436 lines · upstream main-test grid <b>384/384</b></div>
+        <dl>
+          <dt>Artifact</dt><dd><code>assemble_ms.py</code> does deterministic extraction (exact line ranges + content-asserted edits; any source drift fails loudly) into a torch-free kernel file in upstream-main import layout: <code>GvrMsKernel</code> / <code>GvrMsClusterKernel</code>; env knobs became constructor flags; local validation goes through the <code>port/portshim/</code> re-export shims — the artifact itself is never edited for local runs.</dd>
+          <dt>Gates</dt><dd>synth fp32 54/54 · 16-bit 24/24 · adversarial band 72/72 · real×C 180/180 · selection identity vs bench ops 7/7 · <b>NEW next_n/varlen gate 12/12</b> · upstream grid <b>384/384</b> (incl. the 30 adversarial cases that killed rank-scatter upstream; upstream <code>_make_inputs/_tie_aware_check</code> extracted verbatim).</dd>
+          <dt>Method finding</dt><dd><b>GVR output row order is run-to-run nondeterministic</b> (P3/P4 smem atomicAdd emission cursors allocate slots by warp-scheduling order; the bench kernel itself permutes across identical back-to-back calls) → any old/new A/B must compare <b>SORTED index sets</b>; positional torch.equal false-fails 7/7.</dd>
+          <dt>Next</dt><dd>PR-1 integration must happen on a <b>clean upstream-based branch</b> (this checkout carries unrelated Jun-5 leftovers); the runner paste-in <code>port/runner_ms_extension.py</code> is ready. Integration currently PAUSED (user decision — pivoted to the op22 perf campaign).</dd>
+        </dl>
+      </div>
+    </div></div>
+  </section>
+
+  <div class="card">
+    <h2><span class="zh">执行模型与花费(/cost 估算)</span><span class="en">Executing model &amp; cost (/cost estimate)</span></h2>
+    <p class="note">
+      <span class="zh">全部 13 次迭代(含 host 原型)由 <b>Claude Fable 5</b>(<code>claude-fable-5</code>,Anthropic Mythos 级旗舰模型,1M 上下文)在 Claude Code 代理框架内自主执行:读代码、写 CUDA/cuteDSL kernel、跑 nsys/门禁、写报告与提交,全部出自同一模型 —— 时间窗内 <b>1,382 条 assistant API 消息 100% 为 claude-fable-5</b>,无 subagent 降级到 Sonnet/Haiku。花费按本地会话转录(<code>~/.claude/projects/…/*.jsonl</code>)逐消息 usage 汇总,以标准 API 牌价折算:输入 $10 / 输出 $50 / cache 5m 写 $12.5 / cache 读 $1(每 MTok)。</span>
+      <span class="en">All 13 iterations (incl. the host prototype) were executed autonomously by <b>Claude Fable 5</b> (<code>claude-fable-5</code>, Anthropic's Mythos-class flagship, 1M context) inside the Claude Code agent harness — reading code, writing the CUDA/cuteDSL kernels, driving nsys/gates, writing reports and commits. <b>1,382 assistant API messages in the window are 100% claude-fable-5</b>; no subagent downgrades to Sonnet/Haiku. Costs are aggregated per-message from the local session transcripts (<code>~/.claude/projects/…/*.jsonl</code>) at standard API list prices: $10 in / $50 out / $12.5 cache-write-5m / $1 cache-read per MTok.</span>
+    </p>
+    <div class="costrow">
+      <div><span class="zh">总花费(估)</span><span class="en">Total (est.)</span><br><b>≈ $573</b></div>
+      <div><span class="zh">性能战役 iter0.5–9</span><span class="en">Perf campaign iter0.5–9</span><br><b>≈ $264</b></div>
+      <div><span class="zh">收口+移植 iter10–12</span><span class="en">Ship+port iter10–12</span><br><b>≈ $310</b></div>
+      <div><span class="zh">输出 token</span><span class="en">Output tokens</span><br><b>1.53M</b></div>
+      <div><span class="zh">cache 读 / 写</span><span class="en">Cache read / write</span><br><b>293.9M / 15.9M</b></div>
+      <div><span class="zh">成本构成</span><span class="en">Cost split</span><br><b><span class="zh">读51% 写35% 出13%</span><span class="en">rd 51% · wr 35% · out 13%</span></b></div>
+    </div>
+    <div class="cbars">
+      <div class="clb">0.5</div><div class="track"><div class="fill" style="width:21.1%"></div></div><div class="cval">$23.9 · 68 <span class="zh">条</span><span class="en">msgs</span></div>
+      <div class="clb">1</div><div class="track"><div class="fill" style="width:34.5%"></div></div><div class="cval">$39.1 · 119</div>
+      <div class="clb">2</div><div class="track"><div class="fill" style="width:21.4%"></div></div><div class="cval">$24.2 · 45</div>
+      <div class="clb">3</div><div class="track"><div class="fill" style="width:6.9%"></div></div><div class="cval">$7.8 · 19</div>
+      <div class="clb">4</div><div class="track"><div class="fill" style="width:8.4%"></div></div><div class="cval">$9.5 · 21</div>
+      <div class="clb">5</div><div class="track"><div class="fill" style="width:18.8%"></div></div><div class="cval">$21.3 · 85</div>
+      <div class="clb">6</div><div class="track"><div class="fill" style="width:32.9%"></div></div><div class="cval">$37.2 · 73</div>
+      <div class="clb">7 ★</div><div class="track"><div class="fill" style="width:20.2%"></div></div><div class="cval">$22.9 · 84</div>
+      <div class="clb">8</div><div class="track"><div class="fill" style="width:33.5%"></div></div><div class="cval">$37.9 · 110</div>
+      <div class="clb">9</div><div class="track"><div class="fill" style="width:35.5%"></div></div><div class="cval">$40.2 · 87</div>
+      <div class="clb">10</div><div class="track"><div class="fill" style="width:93.3%"></div></div><div class="cval">$105.6 · 208</div>
+      <div class="clb">11</div><div class="track"><div class="fill" style="width:100%"></div></div><div class="cval">$113.2 · 211</div>
+      <div class="clb">12</div><div class="track"><div class="fill" style="width:80.3%"></div></div><div class="cval">$90.9 · 252</div>
+    </div>
+    <p class="foot">
+      <span class="zh"><b>归因方法</b>:iter 窗口 = 上一 <code>[op21 iter N]</code> 提交时刻 → 本 iter 提交时刻(git 时间戳,UTC);窗口内本项目全部 Claude Code 会话的 assistant 消息按时间戳归入(含 B300 远端节点会话 —— NFS 共享 home,转录同目录;按 requestId 去重)。
+      <b>为何 iter10–12 偏高</b>:iter10 含 B300 51-cell 交叉验证长程看护 + SHIP_REVIEW/UPSTREAM_ASSESSMENT 两份收口文档 + 16-bit 尾巴消融;iter11 含对抗门从零编写与 72 用例证伪-修复循环;iter12 含 3436 行 artifact 确定性组装 + 7 组门禁(含上游 384 用例网格)。
+      <b>注意</b>:此为按 API 牌价的折算估计 —— 订阅制(Max plan)下实际现金支出不同;cache 读占 token 量 95% 但只占成本 51%,是 agent 长会话的典型形态;iter7(全战役最大性能收益 +11% gm)只花了 $22.9 —— 花费与收益无相关性,证伪迭代(iter3/4 合计 $17)同样是必要开支。</span>
+      <span class="en"><b>Attribution</b>: each iteration window = previous <code>[op21 iter N]</code> commit → this iteration's commit (git timestamps, UTC); all assistant messages of this project's Claude Code sessions inside the window are attributed by timestamp (incl. remote B300-node sessions — NFS-shared home, same transcript dir; deduped by requestId).
+      <b>Why iter10–12 cost more</b>: iter10 includes babysitting the 51-cell B300 cross-check + the SHIP_REVIEW/UPSTREAM_ASSESSMENT documents + the 16-bit tail ablation; iter11 includes authoring the adversarial gate from scratch and the 72-case falsify-fix loop; iter12 includes the 3436-line deterministic artifact assembly + 7 gate suites (incl. the 384-case upstream grid).
+      <b>Caveats</b>: this is an API-list-price conversion — actual cash spend differs on subscription (Max) plans; cache reads are 95% of tokens but only 51% of cost, the typical shape of long agent sessions; iter7 (the campaign's biggest perf win, +11% gm) cost only $22.9 — spend does not correlate with gain, and the falsification iterations (iter3/4, $17 combined) were equally necessary spend.</span>
+    </p>
+  </div>
+
+  <div class="tblcard">
+    <h2><span class="zh">数据表(全部数值可不经悬停获取)</span><span class="en">Data table (every value reachable without hovering)</span></h2>
+    <div class="zh">
+      <table>
+        <thead><tr>
+          <th>iter</th><th>日期</th><th>关键手段(保留)</th>
+          <th>fp32 P0 gm</th><th>胜率</th><th>bf16 gm</th><th>fp16 gm</th><th>≈成本</th><th>证伪 / 备注</th>
+        </tr></thead>
+        <tbody>
+          <tr><td>0.5</td><td>07-05</td><td>host 原型:order-stat 播种可行性</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">$24</td><td>GO:straddle 94.5%(Pro 100%),g_min 锚消灭 all_lt</td></tr>
+          <tr><td>1</td><td>07-05</td><td>单CTA gvr_ms v1(P1b 并行后缀扫描 + M4 融合 ladder + slot-collect)</td><td class="num">0.830</td><td class="num">4/12</td><td class="num">—</td><td class="num">—</td><td class="num">$39</td><td>修复 tid0 串行扫 +30µs;诊断出单 SM 带宽墙</td></tr>
+          <tr><td>2</td><td>07-05</td><td>多CTA cluster gvr_msc + gvr_ms_auto(复制播种、DSMEM 合并、分布式 P3)</td><td class="num">1.051</td><td class="num">12/17</td><td class="num">—</td><td class="num">—</td><td class="num">$24</td><td>P0 翻盘为胜;修 2 个回退路径 bug</td></tr>
+          <tr><td>3</td><td>07-05</td><td>C8 tier(仅 K2048 hugeN BS≤4)</td><td class="num">1.054</td><td class="num">12/17</td><td class="num">—</td><td class="num">—</td><td class="num">$8</td><td>✗ dist-P1(+0.6~1.7µs;L2 使复制免费)</td></tr>
+          <tr><td>4</td><td>07-05</td><td>(消融定位:P4 = 3.9–7µs = 全部剩余差距)</td><td class="num">1.054</td><td class="num">12/17</td><td class="num">—</td><td class="num">—</td><td class="num">$9</td><td>✗ dist-P4;红线:勿分布串行固定部分</td></tr>
+          <tr><td>5</td><td>07-06</td><td>rank-scatter exact P4(op8 移植)</td><td class="num">1.104</td><td class="num">13/17</td><td class="num">—</td><td class="num">—</td><td class="num">$21</td><td>✗ QBINS=64(gm 1.004);GPU0 热毒网格作废改 GPU1</td></tr>
+          <tr><td>6</td><td>07-06</td><td>P4 小bin 快速路径(warp0 寄存器排名 ≤32;host 探针 max=4)</td><td class="num">1.125</td><td class="num">13/17</td><td class="num">—</td><td class="num">—</td><td class="num">$37</td><td>✗ C8@fp32洞(噪声);event 单 cell 谎言 → nsys 仲裁</td></tr>
+          <tr><td>7 ★</td><td>07-06</td><td>P3 band remote-store push(st.shared::cluster 直写;−gather −1 对 barrier)</td><td class="num"><b>1.249</b></td><td class="num"><b>17/17</b></td><td class="num">—</td><td class="num">—</td><td class="num">$23</td><td>4 个 262K smallBS 洞全关;消融盲区教训(内联相位)</td></tr>
+          <tr><td>8</td><td>07-06</td><td>16-bit 上线 + C8@16bit 规则(N≥65536 且 N≥32768·BS)</td><td class="num">1.249</td><td class="num">17/17</td><td class="num">1.028(11/17)</td><td class="num">1.043(11/17)</td><td class="num">$38</td><td>real 16-bit 360/360;P1 网格重测 0.816→0.901;fp32 证伪不迁移到 16-bit</td></tr>
+          <tr><td>9</td><td>07-06</td><td>原生 16-bit ladder(阈值量化位等价;set.ge.16x2 packed 计数)</td><td class="num">1.249</td><td class="num">17/17</td><td class="num"><b>1.091(15/17)</b></td><td class="num"><b>1.055(12/17)</b></td><td class="num">$40</td><td>microbench 1.73× GO;codegen 抖动谎言第三例</td></tr>
+          <tr><td>10</td><td>07-06</td><td>SHIP_REVIEW + UPSTREAM_ASSESSMENT + B300 51-cell 交叉验证</td><td class="num">1.249</td><td class="num">17/17</td><td class="num">1.091</td><td class="num">1.055</td><td class="num">$106</td><td>B300 1.268/1.089/1.053 HW-invariant;发现 P4 path-C blocker;K2048 16-bit 尾 = 结构墙(接受)</td></tr>
+          <tr><td>11</td><td>07-06</td><td>P4 path-C exact 回退(删固定深度 fine-scatter → value-edge snap)</td><td class="num">1.249(A/B 0.996)</td><td class="num">17/17</td><td class="num">1.091</td><td class="num">1.055</td><td class="num">$113</td><td>对抗 band 门 0/72 → 72/72;上游 blocker 解除;新红线</td></tr>
+          <tr><td>12</td><td>07-07</td><td>PR-1 kernel artifact(3436 行,确定性组装)+ runner 粘贴稿</td><td class="num">1.249</td><td class="num">17/17</td><td class="num">1.091</td><td class="num">1.055</td><td class="num">$91</td><td>全门禁绿 + 上游网格 384/384;发现输出顺序非确定 → A/B 比排序集合</td></tr>
+        </tbody>
+      </table>
+      <p class="foot">
+        <b>测量协议</b>:判决一律 nsys 纯核 cold-L2(event 仅做筛查;event 轴曾三次产生单 cell 谎言)。对手 = report.html 各算子(radix CUDA 单/多 CTA、radix cuteDSL、SGLang StreamingTopK)B200 fp32/16-bit cold CSV 的每-cell 最优。
+        <b>轴历史</b>:iter1–4 = 035-GPU1;iter5–6 = 035-GPU1(GPU0 热毒弃用);iter7 起 = 047-GPU0(锚点 +0.95%,同轴)。
+        <b>口径</b>:iter1 的 P0 为 12-cell 网格,iter2 起为 17-cell(K512/K2048 列加入),故 0.830→1.051 略含口径变化;灰点纵向位置按各自 event A/B 实测比换算,为示意估算。
+        B300 数值(1.268/1.089/1.053)在 umb-b300-dp-192 单轴重测,对手取 B300 CSV,不与本图 B200 纵轴混画。
+        每次迭代门禁:synth ×3 seeds + 真实 capture(Pro30/Flash21/v3.2-9 层)+ 对抗 preIdx;iter11 起增加对抗 band 门。
+      </p>
+    </div>
+    <div class="en">
+      <table>
+        <thead><tr>
+          <th>iter</th><th>date</th><th>key lever (kept)</th>
+          <th>fp32 P0 gm</th><th>wins</th><th>bf16 gm</th><th>fp16 gm</th><th>≈cost</th><th>falsified / notes</th>
+        </tr></thead>
+        <tbody>
+          <tr><td>0.5</td><td>07-05</td><td>host prototype: order-stat seeding feasibility</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">$24</td><td>GO: straddle 94.5% (Pro 100%), g_min anchor kills all_lt</td></tr>
+          <tr><td>1</td><td>07-05</td><td>single-CTA gvr_ms v1 (parallel-suffix-scan P1b + fused M4 ladder + slot-collect)</td><td class="num">0.830</td><td class="num">4/12</td><td class="num">—</td><td class="num">—</td><td class="num">$39</td><td>fixed tid0 serial scan +30µs; diagnosed the single-SM bandwidth wall</td></tr>
+          <tr><td>2</td><td>07-05</td><td>multi-CTA cluster gvr_msc + gvr_ms_auto (replicated seeding, DSMEM merge, distributed P3)</td><td class="num">1.051</td><td class="num">12/17</td><td class="num">—</td><td class="num">—</td><td class="num">$24</td><td>P0 flips to a win; 2 fallback-path bugs fixed</td></tr>
+          <tr><td>3</td><td>07-05</td><td>C8 tier (K2048 hugeN BS≤4 only)</td><td class="num">1.054</td><td class="num">12/17</td><td class="num">—</td><td class="num">—</td><td class="num">$8</td><td>✗ dist-P1 (+0.6–1.7µs; L2 makes replication free)</td></tr>
+          <tr><td>4</td><td>07-05</td><td>(ablation pins P4 = 3.9–7µs = the whole remaining gap)</td><td class="num">1.054</td><td class="num">12/17</td><td class="num">—</td><td class="num">—</td><td class="num">$9</td><td>✗ dist-P4; red line: don't distribute serial fixed parts</td></tr>
+          <tr><td>5</td><td>07-06</td><td>exact rank-scatter P4 (op8 port)</td><td class="num">1.104</td><td class="num">13/17</td><td class="num">—</td><td class="num">—</td><td class="num">$21</td><td>✗ QBINS=64 (gm 1.004); GPU0 thermal-poisoned grid voided, moved to GPU1</td></tr>
+          <tr><td>6</td><td>07-06</td><td>small-bin P4 fast paths (warp0 register ranking ≤32; host probe max=4)</td><td class="num">1.125</td><td class="num">13/17</td><td class="num">—</td><td class="num">—</td><td class="num">$37</td><td>✗ C8@fp32-holes (noise); event single-cell lie → nsys arbitrates</td></tr>
+          <tr><td>7 ★</td><td>07-06</td><td>P3 band remote-store push (st.shared::cluster direct write; −gather −1 barrier pair)</td><td class="num"><b>1.249</b></td><td class="num"><b>17/17</b></td><td class="num">—</td><td class="num">—</td><td class="num">$23</td><td>all four 262K smallBS holes closed; ablation-blind-spot lesson (inline phases)</td></tr>
+          <tr><td>8</td><td>07-06</td><td>16-bit tier + C8@16bit rule (N≥65536 and N≥32768·BS)</td><td class="num">1.249</td><td class="num">17/17</td><td class="num">1.028 (11/17)</td><td class="num">1.043 (11/17)</td><td class="num">$38</td><td>real 16-bit 360/360; P1 grid retest 0.816→0.901; fp32 falsification doesn't transfer</td></tr>
+          <tr><td>9</td><td>07-06</td><td>native 16-bit ladder (threshold quantization = bit-exact; set.ge.16x2 packed counts)</td><td class="num">1.249</td><td class="num">17/17</td><td class="num"><b>1.091 (15/17)</b></td><td class="num"><b>1.055 (12/17)</b></td><td class="num">$40</td><td>microbench 1.73× GO; codegen-jitter lie, third instance</td></tr>
+          <tr><td>10</td><td>07-06</td><td>SHIP_REVIEW + UPSTREAM_ASSESSMENT + B300 51-cell cross-check</td><td class="num">1.249</td><td class="num">17/17</td><td class="num">1.091</td><td class="num">1.055</td><td class="num">$106</td><td>B300 1.268/1.089/1.053 HW-invariant; found the P4 path-C blocker; K2048 16-bit tail = structural wall (accepted)</td></tr>
+          <tr><td>11</td><td>07-06</td><td>P4 path-C exact fallback (fixed-depth fine-scatter deleted → value-edge snap)</td><td class="num">1.249 (A/B 0.996)</td><td class="num">17/17</td><td class="num">1.091</td><td class="num">1.055</td><td class="num">$113</td><td>adversarial band gate 0/72 → 72/72; upstream blocker resolved; new red line</td></tr>
+          <tr><td>12</td><td>07-07</td><td>PR-1 kernel artifact (3436 lines, deterministic assembly) + runner paste-in</td><td class="num">1.249</td><td class="num">17/17</td><td class="num">1.091</td><td class="num">1.055</td><td class="num">$91</td><td>all gates green + upstream grid 384/384; output order nondeterministic → compare sorted sets</td></tr>
+        </tbody>
+      </table>
+      <p class="foot">
+        <b>Measurement protocol</b>: verdicts are always nsys pure-kernel cold-L2 (events are screening only; the event axis produced single-cell lies three times). Rival = the per-cell best of the report.html ops (radix CUDA single/multi-CTA, radix cuteDSL, SGLang StreamingTopK), B200 fp32/16-bit cold CSVs.
+        <b>Axis history</b>: iter1–4 = 035-GPU1; iter5–6 = 035-GPU1 (GPU0 thermally poisoned, abandoned); from iter7 = 047-GPU0 (anchor +0.95%, same axis).
+        <b>Caveats</b>: iter1's P0 was a 12-cell grid, 17 cells from iter2 (K512/K2048 columns added), so 0.830→1.051 includes a small grid-definition change; grey-dot y-positions are converted from each lever's measured event-A/B ratio — illustrative estimates.
+        B300 numbers (1.268/1.089/1.053) were re-measured on one axis on umb-b300-dp-192 against B300 rival CSVs and are not mixed into this chart's B200 y-axis.
+        Per-iteration gates: synth ×3 seeds + real captures (Pro30/Flash21/v3.2-9 layers) + adversarial preIdx; the adversarial-band gate joins from iter11.
+      </p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="zh">附录:seq-len 扫(BS=1)相位时间拆解与瓶颈定位(2026-07-07)</span><span class="en">Appendix: seq-len sweep (BS=1) phase-time breakdown &amp; bottleneck attribution (2026-07-07)</span></h2>
+    <p class="note">
+      <span class="zh">方法:嵌套 no-op 子类消融(战役 iter4/6/7 标准),B200-081 GPU0,CUDA-graph cold-L2 配对 event 中位数——<b>只取相邻变体差值</b>(~15µs 的 graph/event 固定开销经逐 cell 校验为常数,差值自消);占比分母 = 报告 §1 的 <b>B300 direct nsys</b> full-kernel 时延(HW-invariant,Δ≤2%)。生产 dispatch 原样复现:N&lt;65536 → 单 CTA <code>gvr_ms</code>(K512/K1024 fuse ON,K2048 fuse OFF);N≥65536 → C4(K2048 262K → C8)。cluster 的 ladder 剥离会因垃圾计数导致跨 CTA 分支发散、破坏集体 barrier(launch failure),故 cluster 只用已验证的 full/noP4/noP34 链,scan 与固定底座用 N-斜率回归分账(K512 21.8 / K1024 26.3 ns/Kelt)。复跑:<code>scripts/ablate_seqlen_bs1.py</code>。</span>
+      <span class="en">Method: nested no-op subclass ablation (campaign iter4/6/7 standard), B200-081 GPU0, CUDA-graph cold-L2 paired event medians — <b>adjacent-variant increments only</b> (the ~15µs graph/event overhead is per-cell constant and cancels); share denominators = the report §1 <b>B300 direct nsys</b> full-kernel times (HW-invariant, Δ≤2%). Production dispatch reproduced verbatim: N&lt;65536 → single-CTA <code>gvr_ms</code> (fuse ON for K512/K1024, OFF for K2048); N≥65536 → C4 (K2048 262K → C8). No-op'ing the cluster ladder breaks collective barriers via garbage-driven cross-CTA branch divergence (launch failure), so the cluster uses the proven full/noP4/noP34 chain with the floor split by N-slope regression (K512 21.8 / K1024 26.3 ns/Kelt). Re-run: <code>scripts/ablate_seqlen_bs1.py</code>.</span>
+    </p>
+    <div class="legend">
+      <span class="item"><span class="k-sw sg-p4"></span><span class="zh">P4 band 精修</span><span class="en">P4 band refine</span></span>
+      <span class="item"><span class="k-sw sg-p3"></span><span class="zh">P3 发射</span><span class="en">P3 emit</span></span>
+      <span class="item"><span class="k-sw sg-p2"></span><span class="zh">P2 融合扫描</span><span class="en">P2 fused scan</span></span>
+      <span class="item"><span class="k-sw sg-p1b"></span>P1b</span>
+      <span class="item"><span class="k-sw sg-fx"></span><span class="zh">前端固定(P1 gather / merge / barrier / launch)</span><span class="en">front-end fixed (P1 gather / merge / barriers / launch)</span></span>
+    </div>
+    <div class="pbars">
+      <div class="plb">K1024 N=4K · ms</div><div class="pstack"><div class="sg-p4" style="width:32.8%"></div><div class="sg-p3" style="width:14.9%"></div><div class="sg-p2" style="width:11.4%"></div><div class="sg-p1b" style="width:7.6%"></div><div class="sg-fx" style="width:33.3%"></div></div><div class="pv">10.47 µs</div>
+      <div class="plb">N=16K · ms</div><div class="pstack"><div class="sg-p4" style="width:26.7%"></div><div class="sg-p3" style="width:17.0%"></div><div class="sg-p2" style="width:18.8%"></div><div class="sg-p1b" style="width:4.5%"></div><div class="sg-fx" style="width:33.0%"></div></div><div class="pv">12.09 µs</div>
+      <div class="plb">N=32K · ms</div><div class="pstack"><div class="sg-p4" style="width:22.9%"></div><div class="sg-p3" style="width:10.7%"></div><div class="sg-p2" style="width:32.3%"></div><div class="sg-p1b" style="width:5.6%"></div><div class="sg-fx" style="width:28.5%"></div></div><div class="pv">14.29 µs</div>
+      <div class="plb">N=65K · msc C4</div><div class="pstack"><div class="sg-p4" style="width:17.4%"></div><div class="sg-p3" style="width:5.9%"></div><div class="sg-p2" style="width:12.3%"></div><div class="sg-fx" style="width:64.4%"></div></div><div class="pv">13.99 µs</div>
+      <div class="plb">N=262K · msc C4</div><div class="pstack"><div class="sg-p4" style="width:15.3%"></div><div class="sg-p3" style="width:5.1%"></div><div class="sg-p2" style="width:36.4%"></div><div class="sg-fx" style="width:43.2%"></div></div><div class="pv">18.96 µs</div>
+    </div>
+    <p class="note"><span class="zh">上图 = K1024(P0 优先列)各相位占 B300 nsys full-kernel 时延的百分比;cluster 行的 P1b 并入前端固定(消融链止于 noP34,由回归分账)。</span><span class="en">Bars = K1024 (the P0-priority column), each phase as a share of the B300 nsys full-kernel time; on cluster rows P1b is folded into front-end fixed (ablation chain stops at noP34; regression splits the floor).</span></p>
+
+    <div class="zh">
+      <table>
+        <thead><tr><th>K</th><th>N</th><th>kernel</th><th>B300 nsys µs</th><th>P4 µs(%)</th><th>P3 µs(%)</th><th>P2 scan µs(%)</th><th>P1b µs(%)</th><th>前端固定 µs(%)</th></tr></thead>
+        <tbody>
+          <tr><td>512</td><td class="num">4096</td><td>ms</td><td class="num">10.50</td><td class="num">2.88(27%)</td><td class="num">1.03(10%)</td><td class="num">1.08(10%)</td><td class="num">1.09(10%)</td><td class="num">4.42(42%)</td></tr>
+          <tr><td>512</td><td class="num">16384</td><td>ms</td><td class="num">11.73</td><td class="num">3.04(26%)</td><td class="num">1.28(11%)</td><td class="num">2.24(19%)</td><td class="num">0.96(8%)</td><td class="num">4.21(36%)</td></tr>
+          <tr><td>512</td><td class="num">32768</td><td>ms</td><td class="num">12.84</td><td class="num">3.30(26%)</td><td class="num">0.90(7%)</td><td class="num">4.35(34%)</td><td class="num">0.57(4%)</td><td class="num">3.72(29%)</td></tr>
+          <tr><td>512</td><td class="num">65536</td><td>msc C4</td><td class="num">13.40</td><td class="num">1.99(15%)</td><td class="num">0.76(6%)</td><td class="num">≈1.43(11%)</td><td class="num" colspan="2">固定底座 ≈9.2(69%)</td></tr>
+          <tr><td>512</td><td class="num">262144</td><td>msc C4</td><td class="num">17.30</td><td class="num">3.13(18%)</td><td class="num">0.20(1%)</td><td class="num">≈5.72(33%)</td><td class="num" colspan="2">固定底座 ≈8.3(48%)</td></tr>
+          <tr><td>1024</td><td class="num">4096</td><td>ms</td><td class="num">10.47</td><td class="num">3.43(33%)</td><td class="num">1.56(15%)</td><td class="num">1.19(11%)</td><td class="num">0.80(8%)</td><td class="num">3.49(33%)</td></tr>
+          <tr><td>1024</td><td class="num">16384</td><td>ms</td><td class="num">12.09</td><td class="num">3.23(27%)</td><td class="num">2.05(17%)</td><td class="num">2.27(19%)</td><td class="num">0.55(5%)</td><td class="num">3.99(33%)</td></tr>
+          <tr><td>1024</td><td class="num">32768</td><td>ms</td><td class="num">14.29</td><td class="num">3.27(23%)</td><td class="num">1.53(11%)</td><td class="num">4.61(32%)</td><td class="num">0.80(6%)</td><td class="num">4.08(29%)</td></tr>
+          <tr><td>1024</td><td class="num">65536</td><td>msc C4</td><td class="num">13.99</td><td class="num">2.43(17%)</td><td class="num">0.83(6%)</td><td class="num">≈1.72(12%)</td><td class="num" colspan="2">固定底座 ≈9.0(64%)</td></tr>
+          <tr><td>1024</td><td class="num">262144</td><td>msc C4</td><td class="num">18.96</td><td class="num">2.91(15%)</td><td class="num">0.96(5%)</td><td class="num">≈6.90(36%)</td><td class="num" colspan="2">固定底座 ≈8.2(43%)</td></tr>
+          <tr><td>2048</td><td class="num">16384</td><td>ms(非fuse)</td><td class="num">14.78</td><td class="num">3.20(22%)</td><td class="num">4.52(31%)</td><td class="num">~0</td><td class="num">1.15(8%)</td><td class="num">残差 5.9(40%)†</td></tr>
+          <tr><td>2048</td><td class="num">32768</td><td>ms(非fuse)</td><td class="num">19.28</td><td class="num">3.52(18%)</td><td class="num">6.82(35%)</td><td class="num">~0</td><td class="num">0.41(2%)</td><td class="num">残差 8.5(44%)†</td></tr>
+          <tr><td>2048</td><td class="num">65536</td><td>msc C4</td><td class="num">15.35</td><td class="num">3.20(21%)</td><td class="num">1.35(9%)</td><td class="num" colspan="3">floor 10.8(70%,C4→C8 跨界不做斜率分账)</td></tr>
+          <tr><td>2048</td><td class="num">262144</td><td>msc C8</td><td class="num">17.60</td><td class="num">3.78(21%)</td><td class="num">0.83(5%)</td><td class="num" colspan="3">floor 13.0(74%)</td></tr>
+        </tbody>
+      </table>
+      <p class="foot">† K2048 走非 fuse 路径:P3 列 = classic collect(O(N) 收集 pass,随 N 增长成为最大项);其计数扫描不在本消融组覆盖的方法里,落在残差中——残差 = 计数扫描 + P1 gather + launch。K2048 N=8192 消融已做(P4 3.20 / P3 2.53)但报告 §1 无该 cell 的 B300 nsys 分母,不列占比。</p>
+    </div>
+    <div class="en">
+      <table>
+        <thead><tr><th>K</th><th>N</th><th>kernel</th><th>B300 nsys µs</th><th>P4 µs(%)</th><th>P3 µs(%)</th><th>P2 scan µs(%)</th><th>P1b µs(%)</th><th>front-end fixed µs(%)</th></tr></thead>
+        <tbody>
+          <tr><td>512</td><td class="num">4096</td><td>ms</td><td class="num">10.50</td><td class="num">2.88(27%)</td><td class="num">1.03(10%)</td><td class="num">1.08(10%)</td><td class="num">1.09(10%)</td><td class="num">4.42(42%)</td></tr>
+          <tr><td>512</td><td class="num">16384</td><td>ms</td><td class="num">11.73</td><td class="num">3.04(26%)</td><td class="num">1.28(11%)</td><td class="num">2.24(19%)</td><td class="num">0.96(8%)</td><td class="num">4.21(36%)</td></tr>
+          <tr><td>512</td><td class="num">32768</td><td>ms</td><td class="num">12.84</td><td class="num">3.30(26%)</td><td class="num">0.90(7%)</td><td class="num">4.35(34%)</td><td class="num">0.57(4%)</td><td class="num">3.72(29%)</td></tr>
+          <tr><td>512</td><td class="num">65536</td><td>msc C4</td><td class="num">13.40</td><td class="num">1.99(15%)</td><td class="num">0.76(6%)</td><td class="num">≈1.43(11%)</td><td class="num" colspan="2">fixed floor ≈9.2(69%)</td></tr>
+          <tr><td>512</td><td class="num">262144</td><td>msc C4</td><td class="num">17.30</td><td class="num">3.13(18%)</td><td class="num">0.20(1%)</td><td class="num">≈5.72(33%)</td><td class="num" colspan="2">fixed floor ≈8.3(48%)</td></tr>
+          <tr><td>1024</td><td class="num">4096</td><td>ms</td><td class="num">10.47</td><td class="num">3.43(33%)</td><td class="num">1.56(15%)</td><td class="num">1.19(11%)</td><td class="num">0.80(8%)</td><td class="num">3.49(33%)</td></tr>
+          <tr><td>1024</td><td class="num">16384</td><td>ms</td><td class="num">12.09</td><td class="num">3.23(27%)</td><td class="num">2.05(17%)</td><td class="num">2.27(19%)</td><td class="num">0.55(5%)</td><td class="num">3.99(33%)</td></tr>
+          <tr><td>1024</td><td class="num">32768</td><td>ms</td><td class="num">14.29</td><td class="num">3.27(23%)</td><td class="num">1.53(11%)</td><td class="num">4.61(32%)</td><td class="num">0.80(6%)</td><td class="num">4.08(29%)</td></tr>
+          <tr><td>1024</td><td class="num">65536</td><td>msc C4</td><td class="num">13.99</td><td class="num">2.43(17%)</td><td class="num">0.83(6%)</td><td class="num">≈1.72(12%)</td><td class="num" colspan="2">fixed floor ≈9.0(64%)</td></tr>
+          <tr><td>1024</td><td class="num">262144</td><td>msc C4</td><td class="num">18.96</td><td class="num">2.91(15%)</td><td class="num">0.96(5%)</td><td class="num">≈6.90(36%)</td><td class="num" colspan="2">fixed floor ≈8.2(43%)</td></tr>
+          <tr><td>2048</td><td class="num">16384</td><td>ms (unfused)</td><td class="num">14.78</td><td class="num">3.20(22%)</td><td class="num">4.52(31%)</td><td class="num">~0</td><td class="num">1.15(8%)</td><td class="num">residual 5.9(40%)†</td></tr>
+          <tr><td>2048</td><td class="num">32768</td><td>ms (unfused)</td><td class="num">19.28</td><td class="num">3.52(18%)</td><td class="num">6.82(35%)</td><td class="num">~0</td><td class="num">0.41(2%)</td><td class="num">residual 8.5(44%)†</td></tr>
+          <tr><td>2048</td><td class="num">65536</td><td>msc C4</td><td class="num">15.35</td><td class="num">3.20(21%)</td><td class="num">1.35(9%)</td><td class="num" colspan="3">floor 10.8(70%; C4→C8 boundary — no slope split)</td></tr>
+          <tr><td>2048</td><td class="num">262144</td><td>msc C8</td><td class="num">17.60</td><td class="num">3.78(21%)</td><td class="num">0.83(5%)</td><td class="num" colspan="3">floor 13.0(74%)</td></tr>
+        </tbody>
+      </table>
+      <p class="foot">† K2048 takes the unfused path: the P3 column = classic collect (an O(N) gather pass that grows with N into the biggest item); its counting scan is not covered by this ablation group and lands in the residual — residual = counting scan + P1 gather + launch. K2048 N=8192 was ablated (P4 3.20 / P3 2.53) but report §1 has no B300 nsys denominator for that cell, so no shares are quoted.</p>
+    </div>
+
+    <div class="zh"><dl style="display:grid;grid-template-columns:150px 1fr;gap:7px 14px;font-size:13.5px;line-height:1.6;margin:10px 0 0">
+      <dt style="color:var(--ink-2);font-weight:600">瓶颈 ① smallN</dt><dd style="margin:0"><b>&lt;32K 的瓶颈是相位链固定成本,不是内存</b>:N4K 时 P4+P3+P1b+前端固定 ≈ 89%,扫描仅 ~11%。单 P4(3.2–3.4µs)≈ radix 在该点整个 kernel(≈6.3µs)的一半——smallN 输给 radix 的全部原因,与 op12 地板分析定量吻合。</dd>
+      <dt style="color:var(--ink-2);font-weight:600">瓶颈 ② N=32K 盲区</dt><dd style="margin:0"><b>dispatch 边界(R-C 的 N≥65536)把 32K 留在单 CTA 上</b>:32K 的 scan 占比升至 32–34%,且 B300 nsys 显示 32K 比 65K 还慢(K1024 14.29 vs 13.99;K2048 19.28 vs 15.35)。C4 下探到 ~32K 从未被测过——本次拆解暴露的头号快赢候选。</dd>
+      <dt style="color:var(--ink-2);font-weight:600">瓶颈 ③ cluster 底座</dt><dd style="margin:0"><b>≥65K 的瓶颈是 ~8–9µs 的固定底座</b>(P1 gather×C 复制 + P1b + DSMEM merge + cluster barrier + 多 CTA launch 尾),65K 时占 64–69%,262K 被 scan 稀释后仍占 43–48%。这就是战役"scan floor 贴着对手杆"的定量本体;dist-P1 已证伪(barrier 更贵),现架构下接近结构性。</dd>
+      <dt style="color:var(--ink-2);font-weight:600">瓶颈 ④ P4 现状</dt><dd style="margin:0">P4 仍是最大单一相位方法(全域 15–33%),但经 iter5/6/11 三轮后其绝对值(2–3.8µs)已贴近 warp 排名 + K 次输出写的物理下限,继续压缩空间有限。K2048 非 fuse 路径的真实大头是 classic collect(31–35%),不是 P4。</dd>
+    </dl></div>
+    <div class="en"><dl style="display:grid;grid-template-columns:170px 1fr;gap:7px 14px;font-size:13.5px;line-height:1.6;margin:10px 0 0">
+      <dt style="color:var(--ink-2);font-weight:600">Bottleneck ① smallN</dt><dd style="margin:0"><b>Below 32K the bottleneck is phase-chain fixed cost, not memory</b>: at N4K, P4+P3+P1b+front-end fixed ≈ 89%, scan only ~11%. P4 alone (3.2–3.4µs) ≈ half of radix's ENTIRE kernel at that point (≈6.3µs) — the whole reason smallN loses to radix, quantitatively matching the op12 floor analysis.</dd>
+      <dt style="color:var(--ink-2);font-weight:600">Bottleneck ② N=32K gap</dt><dd style="margin:0"><b>The dispatch boundary (R-C's N≥65536) strands 32K on single-CTA</b>: scan share rises to 32–34% there, and B300 nsys shows 32K is SLOWER than 65K (K1024 14.29 vs 13.99; K2048 19.28 vs 15.35). C4 below 65K was never tested — the #1 quick-win candidate exposed by this breakdown.</dd>
+      <dt style="color:var(--ink-2);font-weight:600">Bottleneck ③ cluster floor</dt><dd style="margin:0"><b>At ≥65K the bottleneck is the ~8–9µs fixed floor</b> (replicated P1 gather×C + P1b + DSMEM merge + cluster barriers + multi-CTA launch tail): 64–69% at 65K, still 43–48% at 262K after scan dilution. This is the quantitative body of the campaign's "scan floor sits at the rival bar"; dist-P1 is falsified (barriers cost more), so it is near-structural on this architecture.</dd>
+      <dt style="color:var(--ink-2);font-weight:600">Bottleneck ④ P4 status</dt><dd style="margin:0">P4 remains the largest single phase method (15–33% everywhere), but after iter5/6/11 its absolute cost (2–3.8µs) sits near the physical floor of warp ranking + K output writes — little headroom left. On the K2048 unfused path the real top item is classic collect (31–35%), not P4.</dd>
+    </dl></div>
+    <p class="foot">
+      <span class="zh"><b>口径注意</b>:相位增量在 B200 测得(配对同进程,免疫热漂移),占比分母为 B300 nsys——跨架构混合的依据是战役 iter10 的 HW-invariance 判决(Δgm≤0.02);cluster 行 P1b/P1 未单独剥离(V4/V5 在 cluster 上不可用:垃圾计数导致跨 CTA 分支发散破坏 barrier;单 CTA 的 V5 亦有负值伪影,弃用)。event 轴为 SCREENING 口径;若需 B300 本机复测,同脚本 1:1 可跑。</span>
+      <span class="en"><b>Caveats</b>: phase increments measured on B200 (paired same-process, throttle-immune) against B300 nsys denominators — the cross-arch mix is justified by the iter10 HW-invariance verdict (Δgm≤0.02); P1b/P1 are not separately peeled on cluster rows (V4/V5 unusable there: garbage counts drive cross-CTA branch divergence that breaks the collective barriers; single-CTA V5 also showed negative-increment artifacts and was dropped). The event axis is SCREENING-grade; the same script re-runs 1:1 on a B300 host if needed.</span>
+    </p>
+  </div>
+
+</div>
+</body>
+</html>

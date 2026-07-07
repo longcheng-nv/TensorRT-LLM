@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HLS Host-Prototype Validation — Theorems 1-3 on the op22 Three-Scenario Bundles</title>
+<style>
+  :root {
+    --ink: #1a2333; --muted: #5a6a80; --accent: #0f6bb3;
+    --accent-soft: #e8f2fa; --warn: #b3550f; --warn-soft: #faf0e6;
+    --good: #1a7a4a; --good-soft: #e9f6ef; --bad: #a12a1e; --bad-soft: #f9e8e6;
+    --line: #d8dfe8; --bg: #f7f9fc; --card: #ffffff;
+    --mono: "SFMono-Regular", Consolas, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 0 0 4rem 0;
+    font-family: -apple-system, "Segoe UI", Roboto, "Noto Sans SC", sans-serif;
+    color: var(--ink); background: var(--bg); line-height: 1.6; font-size: 15.5px; }
+  .page { max-width: 1020px; margin: 0 auto; padding: 0 1.5rem; }
+  header.doc { background: linear-gradient(135deg, #10263f 0%, #0f4a7a 100%);
+    color: #fff; padding: 2rem 0 1.6rem 0; margin-bottom: 2rem; }
+  header.doc h1 { margin: 0 0 .35rem 0; font-size: 1.45rem; line-height: 1.3; }
+  header.doc .sub { color: #b8d2e8; font-size: .92rem; }
+  .langbar { display: flex; gap: .5rem; justify-content: flex-end; margin-bottom: 1rem; }
+  .langbar label { cursor: pointer; padding: .26rem 1rem; border-radius: 999px;
+    border: 1px solid rgba(255,255,255,.45); color: #d9e8f5; font-size: .85rem; user-select: none; }
+  h2 { font-size: 1.2rem; margin: 2.3rem 0 .7rem 0; padding-bottom: .3rem;
+    border-bottom: 2px solid var(--line); }
+  h2 .no { color: var(--accent); margin-right: .5rem; }
+  h3 { font-size: 1rem; margin: 1.4rem 0 .45rem 0; }
+  p { margin: .65rem 0; }
+  .keybox { background: var(--accent-soft); border-left: 4px solid var(--accent);
+    border-radius: 6px; padding: .85rem 1.05rem; margin: 1rem 0; }
+  .warnbox { background: var(--warn-soft); border-left: 4px solid var(--warn);
+    border-radius: 6px; padding: .85rem 1.05rem; margin: 1rem 0; }
+  .goodbox { background: var(--good-soft); border-left: 4px solid var(--good);
+    border-radius: 6px; padding: .85rem 1.05rem; margin: 1rem 0; }
+  .m { font-family: Georgia, "Times New Roman", serif; font-style: italic; white-space: nowrap; }
+  code, .mono { font-family: var(--mono); font-size: .85em; background: #eef2f7;
+    border-radius: 4px; padding: .06em .35em; }
+  table { border-collapse: collapse; width: 100%; margin: .9rem 0; font-size: .89rem;
+    background: var(--card); }
+  th, td { border: 1px solid var(--line); padding: .42rem .6rem; text-align: left; vertical-align: top; }
+  th { background: #eef3f9; font-weight: 600; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .tag { display: inline-block; font-size: .7rem; font-weight: 700; letter-spacing: .04em;
+    border-radius: 4px; padding: .08em .5em; vertical-align: middle; }
+  .tag.ok   { background: #dcefe4; color: #175c38; }
+  .tag.rev  { background: #fdeeda; color: #8a5a12; }
+  .tag.fals { background: #f6dfdc; color: #8f2b1e; }
+  .hl-good { background: var(--good-soft); font-weight: 600; }
+  .hl-bad  { background: var(--bad-soft); }
+  ul, ol { margin: .45rem 0 .75rem 1.35rem; padding: 0; }
+  li { margin: .3rem 0; }
+  .small { font-size: .84rem; color: var(--muted); }
+  pre.code { font-family: var(--mono); font-size: .8rem; line-height: 1.5;
+    background: #10263f; color: #dce8f5; border-radius: 8px;
+    padding: .9rem 1.1rem; overflow-x: auto; margin: .9rem 0; }
+  pre.code .cm { color: #7fa8cc; }
+  footer { margin-top: 3rem; color: var(--muted); font-size: .8rem;
+    border-top: 1px solid var(--line); padding-top: 1rem; }
+  #lang-en, #lang-zh { position: absolute; left: -9999px; }
+  .zh { display: none; }
+  #lang-zh:checked ~ .wrap .zh { display: block; }
+  #lang-zh:checked ~ .wrap .en { display: none; }
+  #lang-en:checked ~ .wrap .langbar label[for="lang-en"],
+  #lang-zh:checked ~ .wrap .langbar label[for="lang-zh"] {
+    background: #fff; color: #0f4a7a; border-color: #fff; font-weight: 700; }
+</style>
+</head>
+<body>
+
+<input type="radio" name="lang" id="lang-en" checked>
+<input type="radio" name="lang" id="lang-zh">
+
+<div class="wrap">
+
+<header class="doc">
+  <div class="page">
+    <div class="langbar">
+      <label for="lang-en">English</label>
+      <label for="lang-zh">中文</label>
+    </div>
+    <div class="en">
+      <h1>HLS Host-Prototype Validation: Theorems 1–3 on the op22 Three-Scenario Bundles</h1>
+      <div class="sub">scripts/proto_hls.py · 78 fp32 rows (best / worst / real × K512/1024/2048 × N 4K–1M) ·
+      validate→optimize cycles to the in-family global optimum · 2026-07-07</div>
+    </div>
+    <div class="zh">
+      <h1>HLS 宿主原型验证:op22 三场景 bundle 上的定理 1–3</h1>
+      <div class="sub">scripts/proto_hls.py · 78 个 fp32 行(best / worst / real × K512/1024/2048 × N 4K–1M)·
+      验证→优化循环直至族内全局最优 · 2026-07-07</div>
+    </div>
+  </div>
+</header>
+
+<div class="page">
+
+<!-- ================= TLDR ================= -->
+<div class="en">
+<div class="keybox">
+<strong>TL;DR.</strong> The validate→optimize loop converged in three iterations and returned a policy that is the
+exhaustive-grid optimum of the whole parameter family, stable under leave-one-scenario-out.
+Two theory components were <em>corrected by the data</em>: (1) the tracked invariant must be the
+<strong>boundary-local retention ρ\*</strong> (sample rank of v<sub>K</sub>), not the mean hit-rate h̄ — the worst
+scenario has h̄=0.05 but ρ\*/K≈0.2; (2) the rank-space sample-CCDF bridge of Part II §9 is
+<strong>falsified</strong> — <strong>log-count regula falsi</strong> (value-space, exponential-tail assumption)
+dominates every alternative: <strong>mean 1.00 fallback passes, max 1, 0 failures on all 78 rows</strong> at
+α=0.2. Final model-level result: the op22 tail collapses — best-scenario worst case 149.5 → 27.7 µs (deployable) /
+21.6 µs (tracking upper bound); real worst case 83.3 → 27.7 µs. The load-bearing change is the fallback fix
+(log-falsi + cluster-parallel recount); ρ-aware placement adds the last ~5–7% and makes the system insensitive to
+estimator error.
+</div>
+</div>
+<div class="zh">
+<div class="keybox">
+<strong>要点。</strong>验证→优化循环三轮收敛,产出的策略是整个参数族的穷举网格最优,并在 leave-one-scenario-out
+下稳定。两处理论组件<em>被数据修正</em>:(1) 跟踪不变量必须是<strong>边界局部保留率 ρ\*</strong>(v<sub>K</sub>
+的样本秩),而非平均命中率 h̄ —— worst 场景 h̄=0.05 但 ρ\*/K≈0.2;(2) Part II §9 的秩空间样本-CCDF 桥被
+<strong>证伪</strong> —— <strong>log-count regula falsi</strong>(值空间、指数尾假设)全面胜出:α=0.2 时
+<strong>78 行全部:fallback 平均 1.00 遍、最大 1 遍、0 次失败</strong>。最终模型级结果:op22 尾部塌缩 ——
+best 场景最坏情形 149.5 → 27.7 µs(可部署)/ 21.6 µs(跟踪上界);real 最坏 83.3 → 27.7 µs。承重的改动是
+fallback 修复(log-falsi + cluster 并行重数);ρ-感知放置贡献最后 ~5–7%,并使系统对估计误差不敏感。
+</div>
+</div>
+
+<!-- ================= 1 methodology ================= -->
+<h2><span class="no">1</span><span class="en">Methodology: what is exact, what is modeled</span><span class="zh">方法:哪些是精确的,哪些是模型</span></h2>
+
+<div class="en">
+<p><strong>Data</strong>: the op22 fixed-hit-rate bundles (temporal-synth skill output), fp32, BS=1: 3 scenarios
+(<code>best</code> = beta_deep hr .90 — P2-init-adversarial; <code>worst</code> = beta_shallow hr .05 —
+boundary-flat; <code>real</code> = aggregate, hr sampled from the real per-step distribution) × K ∈ {512, 1024,
+2048} (v4flash / v4pro / v32) × N 4K–1M = <strong>78 rows</strong>. Ground truth per row: exact top-K, v<sub>K</sub>,
+h̄, ρ\* = G<sub>S</sub>(v<sub>K</sub>)/K<sub>valid</sub>.</p>
+<p><strong>Host-exact</strong> (algorithm level): all counts, order statistics, straddle/collect outcomes
+(msc semantics: sandwich pair must sit at columns ≥ 1, band ≤ kC, collect count ≤ capacity; non-fused single-CTA
+semantics for K2048 below 65K), and fallback pass counts (port-faithful control-flow replay). The classic-secant
+baseline is the op22-verified replay <code>harness/count_gvr_iters.py</code>.</p>
+<p><strong>Modeled</strong> (cost level, constants from measured campaigns): pass price
+P<sub>N</sub> = N·4B / 190 GB/s single-CTA (op22 ev-slope); warm extra-pass factor γ = 0.235 (op18 L2 / op22
+22/93.3 µs); width tax τ(M) = 1/1/1.46/2.7 for M 1/2/4/8 (op18 cold microbench; M3 = 1.2 interpolated);
+cluster sync s<sub>C</sub> = 0.5 µs; C = 4 CTAs at N ≥ 65536; collect capacity 4096 (op22 overflow at ~4500);
+fixed floor 8.5 µs. All final numbers are <em>model-µs</em>, not kernel measurements.</p>
+</div>
+<div class="zh">
+<p><strong>数据</strong>:op22 固定命中率 bundle(temporal-synth skill 产物),fp32,BS=1:3 场景
+(<code>best</code> = beta_deep hr .90,P2-初始化对抗;<code>worst</code> = beta_shallow hr .05,边界平坦;
+<code>real</code> = aggregate,hr 从真实 per-step 分布采样)× K ∈ {512, 1024, 2048}(v4flash / v4pro / v32)×
+N 4K–1M = <strong>78 行</strong>。每行真值:精确 top-K、v<sub>K</sub>、h̄、ρ\* =
+G<sub>S</sub>(v<sub>K</sub>)/K<sub>valid</sub>。</p>
+<p><strong>宿主精确</strong>(算法层):全部 counts、次序统计量、straddle/collect 判定(msc 语义:sandwich 对须落在
+列 ≥ 1、band ≤ kC、collect 计数 ≤ 容量;K2048 在 65K 以下按单 CTA 非 fused 语义)、fallback 遍数(忠实重放 port
+控制流)。经典 secant 基线用 op22 已验证的重放器 <code>harness/count_gvr_iters.py</code>。</p>
+<p><strong>模型化</strong>(成本层,常数来自实测战役):pass 价格 P<sub>N</sub> = N·4B / 190 GB/s 单 CTA(op22 ev
+斜率);温遍系数 γ = 0.235(op18 L2 / op22 22/93.3 µs);宽度税 τ(M) = 1/1/1.46/2.7 对 M 1/2/4/8(op18 冷遍
+microbench;M3 = 1.2 插值);cluster 同步 s<sub>C</sub> = 0.5 µs;N ≥ 65536 时 C = 4;collect 容量 4096(op22 在
+~4500 处溢出);固定地板 8.5 µs。所有最终数字是<em>模型 µs</em>,不是内核实测。</p>
+</div>
+
+<!-- ================= 2 cycles ================= -->
+<h2><span class="no">2</span><span class="en">The validate→optimize cycles (what the loop discovered)</span><span class="zh">验证→优化循环(每轮发现了什么)</span></h2>
+
+<div class="en">
+<table>
+<tr><th>Iter</th><th>Found</th><th>Change made</th></tr>
+<tr><td>1</td><td>Rank-space bridge failed on best-scenario rows (12-step non-convergence): the bracket spans counts
+393→27430 across only 128 sample ranks — the sample carries no resolution below its own support when h→1. Also:
+pair01/overflow are not misses on the non-fused single-CTA path; the collect-cap constraint (Theorem 2c) was not
+yet enforced.</td>
+<td>Added fused/non-fused semantics; collect-cap shrink rule on the lowest column; Illinois safeguard in the
+bridge.</td></tr>
+<tr><td>2</td><td>The h̄·K placement shortcut collapsed on <code>worst</code>: h̄ = 0.05 but the retention curve is
+rank-conditional — the count-K crossing sits at sample rank ≈ 0.2·K. The one-column ratio estimator f·K/c was
+similarly biased (est error med 0.10).</td>
+<td>Re-derived the tracked invariant as <strong>ρ\* = G<sub>S</sub>(v<sub>K</sub>)</strong> (exactly Part I's H(K));
+estimator became log-log interpolation of the measured (rank, count) ladder points to the count-K crossing
+(error med 0.049, p90 0.095, max 0.112).</td></tr>
+<tr><td>3</td><td>Even the safeguarded bridge stayed inferior (mean 2.1–4.0 passes, 5–18 failures). The failure is
+structural, not a bug: rank→count is violently nonlinear where the sample is thin.</td>
+<td>Added <strong>log-count regula falsi</strong> (value space; CCDF tail ≈ exponential ⇒ log c linear in θ):
+mean 1.00 / max 1 / 0 fails at α=0.2. Adopted; bridge and the resolution-gated hybrid retired.</td></tr>
+<tr><td>4</td><td>Exhaustive grid (7 placements × 4 widths × 2 interpolants × regimes) — global optimum within the
+family; LOSO picked the identical (δ=0.35, α=0.2) on all three train splits.</td>
+<td>Converged. Cycle 5 selected the deployable variant (est-ρ̂ source).</td></tr>
+</table>
+</div>
+<div class="zh">
+<table>
+<tr><th>轮</th><th>发现</th><th>改动</th></tr>
+<tr><td>1</td><td>秩空间桥在 best 场景行上失败(12 步不收敛):括号跨 counts 393→27430 却只有 128 个样本秩 ——
+h→1 时样本在自身支撑之下没有分辨率。另:非 fused 单 CTA 路径上 pair01/overflow 不是 miss;定理 2c 的 collect
+容量约束尚未实现。</td>
+<td>加入 fused/非 fused 语义;最低列的 collect-cap 收缩规则;桥加 Illinois 保障步。</td></tr>
+<tr><td>2</td><td>h̄·K 放置捷径在 <code>worst</code> 上塌了:h̄ = 0.05 但保留曲线是秩条件的 —— count=K 交叉点位于
+样本秩 ≈ 0.2·K。单列比值估计器 f·K/c 同样有偏(估计误差中位 0.10)。</td>
+<td>把跟踪不变量重推导为 <strong>ρ\* = G<sub>S</sub>(v<sub>K</sub>)</strong>(正是 Part I 的 H(K));估计器改为对
+已测 (rank, count) ladder 点做 log-log 插值求 count=K 交叉(误差中位 0.049、p90 0.095、max 0.112)。</td></tr>
+<tr><td>3</td><td>加了保障步的桥仍然劣(平均 2.1–4.0 遍、5–18 次失败)。失败是结构性的,不是 bug:样本稀薄处
+rank→count 剧烈非线性。</td>
+<td>加入 <strong>log-count regula falsi</strong>(值空间;CCDF 尾 ≈ 指数 ⇒ log c 对 θ 线性):α=0.2 时平均 1.00 /
+最大 1 / 0 失败。采纳;桥与分辨率门控 hybrid 退役。</td></tr>
+<tr><td>4</td><td>穷举网格(7 放置 × 4 宽度 × 2 插值 × regime)—— 族内全局最优;LOSO 三个训练分割都选出同一组
+(δ=0.35, α=0.2)。</td>
+<td>收敛。循环 5 选出可部署变体(est-ρ̂ 来源)。</td></tr>
+</table>
+</div>
+
+<!-- ================= 3 theorem verdicts ================= -->
+<h2><span class="no">3</span><span class="en">Theorem verdicts</span><span class="zh">定理裁决</span></h2>
+
+<div class="en">
+<h3>Theorem 2 (placement = prior-quantile) — <span class="tag ok">CONFIRMED</span>, with the ρ\* correction</h3>
+<table>
+<tr><th>Placement</th><th class="num">fast rate</th><th class="num">band (med)</th><th>residual misses</th></tr>
+<tr><td>static qfracs (0.75/0.5/0.25) — current MS</td><td class="num">23.1% (best 0 / worst 0 / real 69.2%)</td>
+<td class="num">4066</td><td>26 all_ge + 11 pair01 + 22 band&gt;kC + 1 overflow</td></tr>
+<tr class="hl-good"><td>ρ-aware, oracle ρ\*, δ=0.35</td><td class="num">94.9%</td><td class="num">234</td>
+<td>1 band&gt;kC + 3 overflow</td></tr>
+<tr><td>ρ-aware, one-step-behind ρ̂ (est_r0), δ=0.65</td><td class="num">69.2%</td><td class="num">676-ish</td>
+<td>misses now cost 1 log-falsi pass</td></tr>
+</table>
+<p>The 256-bin P1b histogram is indistinguishable from exact order statistics (identical outcome modes; band med
+4048 vs 4066) — re-confirming the op21 QBINS finding at the semantics level. The two observed static-failure
+classes are exactly "ρ\* outside the static bracket", as Theorem 2 predicts.</p>
+
+<h3>Theorem 3 (interior aim point) — <span class="tag ok">CONFIRMED</span></h3>
+<p>With log-falsi: α=0 (aim at K) → 1.27 mean passes; <strong>α=0.2 → 1.00</strong>; α=1.0 (aim at kC) → 2.13.
+An interior aim point strictly dominates both endpoints; the optimum α ≈ 0.2 sits at
+m\* = K·(kC/K)<sup>0.2</sup> ≈ 1.2–1.6×K, consistent with the legacy kFTarget ≈ 1.5–2×K.</p>
+
+<h3>Bridge interpolant (Part II §9 / Part I §4d) — <span class="tag fals">FALSIFIED</span></h3>
+<p>Forced-fallback on all 78 rows: bisect 1.77 mean / max 6 / 0 fails; bridge 2.06–3.96 mean, 5–18 failures;
+<strong>log-falsi 1.00 mean / max 1 / 0 fails</strong>. The "misses are free boundary-density samples" idea does
+not survive the h→1 stress geometry: there the sample has no support in the bracket, so any rank-space interpolant
+is unidentified. The exponential-tail (log-count) interpolant uses only measured counts and wins everywhere.</p>
+
+<h3>Theorem 1 (regime split M×R) — <span class="tag rev">DIRECTIONALLY CONFIRMED, REVISED</span></h3>
+<p>Regime split direction confirmed: fixing placement+fallback buys 1.13× in regime W but 1.30× in regime C, and
+2.4× vs the current msc leader-recount (best scenario). Revision: with a 95% fast rate and a 1-pass fallback, the
+optimizer picks <strong>M=3 in BOTH regimes</strong> (τ(3)=1.2 beats M4's marginal coverage). The original
+"M\*=4 in regime C" assumed expensive misses; once misses cost one cluster-parallel pass, width tax dominates.
+E[T] = τ(M)·P/C + Pr(miss)·1·(P/C + s) is minimized at smaller M — the theorem's own formula, new constants.</p>
+</div>
+<div class="zh">
+<h3>定理 2(放置 = 先验分位)—— <span class="tag ok">证实</span>,附 ρ\* 修正</h3>
+<table>
+<tr><th>放置</th><th class="num">fast 率</th><th class="num">band(中位)</th><th>残余 miss</th></tr>
+<tr><td>静态 qfracs (0.75/0.5/0.25) —— 现役 MS</td><td class="num">23.1%(best 0 / worst 0 / real 69.2%)</td>
+<td class="num">4066</td><td>26 all_ge + 11 pair01 + 22 band&gt;kC + 1 溢出</td></tr>
+<tr class="hl-good"><td>ρ-感知,oracle ρ\*,δ=0.35</td><td class="num">94.9%</td><td class="num">234</td>
+<td>1 band&gt;kC + 3 溢出</td></tr>
+<tr><td>ρ-感知,一步滞后 ρ̂(est_r0),δ=0.65</td><td class="num">69.2%</td><td class="num">~676</td>
+<td>miss 现在只花 1 遍 log-falsi</td></tr>
+</table>
+<p>256-bin P1b 直方图与精确次序统计量不可区分(判定模式完全一致;band 中位 4048 对 4066)—— 在语义层复验了 op21
+的 QBINS 结论。静态放置的两类失败恰好就是定理 2 预言的 "ρ\* 出静态括号"。</p>
+
+<h3>定理 3(内点目标)—— <span class="tag ok">证实</span></h3>
+<p>log-falsi 下:α=0(瞄准 K)→ 平均 1.27 遍;<strong>α=0.2 → 1.00</strong>;α=1.0(瞄准 kC)→ 2.13。内点目标
+严格优于两个端点;最优 α ≈ 0.2 即 m\* = K·(kC/K)<sup>0.2</sup> ≈ 1.2–1.6×K,与旧内核 kFTarget ≈ 1.5–2×K 一致。</p>
+
+<h3>桥式插值(Part II §9 / Part I §4d)—— <span class="tag fals">证伪</span></h3>
+<p>78 行全部强制进 fallback:bisect 平均 1.77 / 最大 6 / 0 失败;桥 2.06–3.96,5–18 次失败;
+<strong>log-falsi 平均 1.00 / 最大 1 / 0 失败</strong>。"miss 是免费边界密度样本"的想法没有扛住 h→1 压力几何:
+那里样本在括号内没有支撑,任何秩空间插值都不可辨识。指数尾(log-count)插值只用已测 counts,处处胜出。</p>
+
+<h3>定理 1(regime 分裂 M×R)—— <span class="tag rev">方向证实,常数修订</span></h3>
+<p>regime 分裂方向证实:放置+fallback 修好后,regime W 收益 1.13×,regime C 收益 1.30×,对现役 msc leader 重数
+2.4×(best 场景)。修订:在 95% fast 率 + 1 遍 fallback 下,优化器在<strong>两个 regime 都选 M=3</strong>
+(τ(3)=1.2 胜过 M4 的边际覆盖)。原 "regime C 下 M\*=4" 假设 miss 昂贵;当 miss 只花一遍 cluster 并行 pass 后,
+宽度税占主导。E[T] = τ(M)·P/C + Pr(miss)·1·(P/C + s) 在更小 M 处最小 —— 公式没变,常数变了。</p>
+</div>
+
+<!-- ================= 4 final algorithm + table ================= -->
+<h2><span class="no">4</span><span class="en">The converged algorithm (HLS v2) and final numbers</span><span class="zh">收敛后的算法(HLS v2)与最终数字</span></h2>
+
+<div class="en">
+<pre class="code">
+state per row : ρ̂ (tracked; validated proxy = previous static-R0 log-log estimate; |err| med .049 p90 .095)
+P1/P1b        : unchanged gather+stash; columns at sample ranks ρ̂·{1+δ, 1, 1−δ}·K_v + g_min anchor, M=3
+                collect column shrunk until  f_c·K_v/ρ̂_lo ≤ 0.8·cap          <span class="cm"># kills K512 overflow</span>
+R0            : ONE fused M=3 ladder pass (both regimes)
+miss          : ONE log-count regula-falsi pass, target m* = K·(kC/K)^0.2, Illinois-safeguarded
+                (converged in exactly 1 pass on 78/78 rows)
+msc fallback  : cluster-parallel recount (P/C + one cluster barrier) — NEVER leader-only
+</pre>
+<table>
+<tr><th>Policy (model µs, per scenario)</th>
+<th class="num">best mean</th><th class="num">best max</th>
+<th class="num">worst mean</th><th class="num">worst max</th>
+<th class="num">real mean</th><th class="num">real max</th></tr>
+<tr class="hl-bad"><td>current msc (static + bisect + leader recount)</td>
+<td class="num">26.8</td><td class="num">149.5</td><td class="num">15.9</td><td class="num">39.1</td>
+<td class="num">17.4</td><td class="num">83.3</td></tr>
+<tr><td>HLS deployable (ρ̂ = one-step estimate, δ=0.65, M3)</td>
+<td class="num">11.2</td><td class="num">27.7</td><td class="num">11.0</td><td class="num">21.6</td>
+<td class="num">11.3</td><td class="num">27.7</td></tr>
+<tr class="hl-good"><td>HLS oracle (tracking upper bound, δ=0.35, M3)</td>
+<td class="num">10.8</td><td class="num">21.6</td><td class="num">10.4</td><td class="num">15.6</td>
+<td class="num">10.5</td><td class="num">15.6</td></tr>
+</table>
+<div class="goodbox">
+<strong>Tail collapse</strong>: best-scenario worst case 149.5 → 27.7 µs (5.4×; oracle 6.9×); real worst case
+83.3 → 27.7 µs (3.0×). Means improve 1.4–2.4×. Classic-secant baseline for context: 2.32 mean full-row evals
+(best 2.96 / worst 1.00 / real 3.00) — reproducing the op22 mechanism numbers.
+<br><strong>Structural insight</strong>: once the fallback costs one cluster-parallel pass, the system is
+<em>insensitive to placement quality</em> — the deployable policy (69% fast rate) lands within 4–7% of the oracle
+(95% fast rate). The load-bearing fix is the fallback; ρ-placement is the trim.
+</div>
+</div>
+<div class="zh">
+<pre class="code">
+每行状态   : ρ̂(跟踪;验证代理 = 上一步 static-R0 的 log-log 估计;|err| 中位 .049 p90 .095)
+P1/P1b     : gather+stash 不变;列放在样本秩 ρ̂·{1+δ, 1, 1−δ}·K_v + g_min 锚,M=3
+             collect 列收缩至  f_c·K_v/ρ̂_lo ≤ 0.8·cap                  <span class="cm"># 消灭 K512 溢出</span>
+R0         : 一遍 fused M=3 ladder(两个 regime 相同)
+miss       : 一遍 log-count regula falsi,目标 m* = K·(kC/K)^0.2,Illinois 保障
+             (78/78 行恰好 1 遍收敛)
+msc 回退   : cluster 并行重数(P/C + 1 个 cluster barrier)—— 永不 leader 单 CTA
+</pre>
+<table>
+<tr><th>策略(模型 µs,分场景)</th>
+<th class="num">best 均值</th><th class="num">best 最大</th>
+<th class="num">worst 均值</th><th class="num">worst 最大</th>
+<th class="num">real 均值</th><th class="num">real 最大</th></tr>
+<tr class="hl-bad"><td>现役 msc(静态 + 二分 + leader 重数)</td>
+<td class="num">26.8</td><td class="num">149.5</td><td class="num">15.9</td><td class="num">39.1</td>
+<td class="num">17.4</td><td class="num">83.3</td></tr>
+<tr><td>HLS 可部署(ρ̂ = 一步滞后估计,δ=0.65,M3)</td>
+<td class="num">11.2</td><td class="num">27.7</td><td class="num">11.0</td><td class="num">21.6</td>
+<td class="num">11.3</td><td class="num">27.7</td></tr>
+<tr class="hl-good"><td>HLS oracle(跟踪上界,δ=0.35,M3)</td>
+<td class="num">10.8</td><td class="num">21.6</td><td class="num">10.4</td><td class="num">15.6</td>
+<td class="num">10.5</td><td class="num">15.6</td></tr>
+</table>
+<div class="goodbox">
+<strong>尾部塌缩</strong>:best 场景最坏情形 149.5 → 27.7 µs(5.4×;oracle 6.9×);real 最坏 83.3 → 27.7 µs
+(3.0×)。均值改善 1.4–2.4×。经典 secant 基线对照:平均 2.32 次全行求值(best 2.96 / worst 1.00 / real 3.00)——
+复现 op22 机制数字。<br><strong>结构性洞察</strong>:fallback 降到一遍 cluster 并行 pass 之后,系统对
+<em>放置质量不敏感</em> —— 可部署策略(69% fast 率)与 oracle(95% fast 率)成本只差 4–7%。承重的是 fallback
+修复;ρ-放置是收尾微调。</div>
+</div>
+
+<!-- ================= 5 caveats ================= -->
+<h2><span class="no">5</span><span class="en">Caveats and the kernel-validation obligation</span><span class="zh">告诫与内核验证义务</span></h2>
+
+<div class="en">
+<div class="warnbox">
+<ol>
+<li><strong>All µs are cost-model outputs</strong>, not nsys measurements. Pass counts and outcome modes are
+host-exact; prices are the Part-II constants. The historical red line stands: host projections have collapsed on
+contact with silicon before (op16: −40..−60% projected → 0.72–0.87× measured). Kernel A/B on the nsys cold-L2
+canonical axis + the full exactness gates is mandatory before any adoption claim.</li>
+<li><strong>78 rows, one row per cell</strong>; the two stress scenarios are synthetic constructions. Statistical
+power for "multi-σ" claims is limited; the real-scenario column is the production-relevant one.</li>
+<li><strong>est_r0 is a stationarity proxy</strong> for cross-step tracking (the estimate a previous step's counts
+would hand over), not a replayed multi-step chain. A chained validation (temporal-synth multi-step mode, lag-1 ρ)
+is the natural next experiment; MTP (next_n&gt;1) row-adjacency is untested.</li>
+<li><strong>Collect capacity is a scalar model</strong> (4096) for a per-thread-slot mechanism; the kernel's true
+overflow boundary is shape-dependent.</li>
+<li>Cluster-parallel fallback recount requires a real DSMEM merge implementation in <code>gvr_msc_op.py</code>
+(the current leader-recount exists precisely because the vendored P3 prefix contract made it the easy exact
+choice — iter2's 646/1024-hole lesson).</li>
+</ol>
+</div>
+</div>
+<div class="zh">
+<div class="warnbox">
+<ol>
+<li><strong>所有 µs 都是代价模型输出</strong>,不是 nsys 实测。遍数与判定模式是宿主精确的;价格是 Part II 常数。
+历史红线仍然有效:host 投影曾在硅上塌过(op16:投影 −40..−60% → 实测 0.72–0.87×)。任何采纳结论之前,必须过
+nsys 冷 L2 canonical 轴的内核 A/B + 全套 exactness 门。</li>
+<li><strong>78 行、每 cell 一行</strong>;两个压力场景是合成构造。"多 σ"论断的统计功效有限;real 列才是生产相关的。</li>
+<li><strong>est_r0 是跨步跟踪的平稳性代理</strong>(上一步 counts 会交出的估计),不是重放的多步链。链式验证
+(temporal-synth 多步模式,lag-1 ρ)是自然的下一个实验;MTP(next_n&gt;1)行相邻性未测。</li>
+<li><strong>collect 容量是标量模型</strong>(4096),真实溢出边界依赖 per-thread slot 形状。</li>
+<li>cluster 并行 fallback 重数需要在 <code>gvr_msc_op.py</code> 里实现真正的 DSMEM 合并(现在的 leader 重数正是
+因为 vendored P3 前缀契约使它成为容易的精确选择 —— iter2 的 646/1024 空洞教训)。</li>
+</ol>
+</div>
+</div>
+
+<footer>
+<div class="en">
+Prototype: <code>op21_gvr_prod/scripts/proto_hls.py</code> (5 cycles, ~5 s/run on 1 GPU). Raw outputs:
+<code>op21_gvr_prod/results/proto_hls/{summary.json, records.jsonl}</code>. Data:
+<code>op22_temporal_fixed_hr_bench/bundles/</code> (fp32, seed per meta.json). Baseline replay:
+<code>harness/count_gvr_iters.py</code>. Theory: <code>MATH_THRESHOLD_ESTIMATION.html</code> Parts I–II (this
+report supersedes its §9 bridge claim and refines Theorem 1's constants). Generated 2026-07-07.
+</div>
+<div class="zh">
+原型:<code>op21_gvr_prod/scripts/proto_hls.py</code>(5 个循环,单 GPU ~5 s/次)。原始输出:
+<code>op21_gvr_prod/results/proto_hls/{summary.json, records.jsonl}</code>。数据:
+<code>op22_temporal_fixed_hr_bench/bundles/</code>(fp32,seed 见 meta.json)。基线重放:
+<code>harness/count_gvr_iters.py</code>。理论:<code>MATH_THRESHOLD_ESTIMATION.html</code> Part I–II(本报告
+取代其 §9 的桥式论断,并修订定理 1 的常数)。生成于 2026-07-07。
+</div>
+</footer>
+
+</div><!-- /page -->
+</div><!-- /wrap -->
+
+</body>
+</html>
