@@ -20,53 +20,55 @@ order:
 3. `indexer_topk_op_bench/report/report.html` + `report/gen_report.py` —
    the report style/data-method to mirror (§1 seqlen BS=1, §2 BS-scaling).
 
-## State (2026-07-07 ~06:40Z, iter1.5 MIGRATION CHECKPOINT off umbriel-b200-040)
-- W1–W4 DONE + committed iter1 @2dac88d7f7 (bundles 234/234 152 MB
-  gitignored; hr verified .900/.050/sampled; SEED AMENDMENT per-cell
-  seed = 42 + crc32("{K}|{N}") % 1e6, see PLAN §2; bundle_data NEXT_N=1
-  ⇒ seq_lens == N*cr asserted; gate 456/456 exact).
-- W5 MEASUREMENT PARTIAL (all on NFS results_b200_op22/, safe):
-  * real 18/18 batches DONE + PARSED. SANITY PASS: op21 vs gvr_cutedsl
-    fp32 1.198 / bf16 1.105 / fp16 1.078 vs op21-campaign anchor
-    1.249/1.091/1.055 (−4.1%/+1.3%/+2.2%). vs radix fp32 1.089,
-    bf16 0.892, fp16 0.839 (16-bit weakness as known).
-  * best 15/18 batches done at checkpoint (in-flight batch is auto-redone
-    on resume: driver deletes any un-.done batch's jsonl+rep). worst 0/18.
-  * bs_hugeN NOT started (the queued waiter died with the node —
-    relaunch it manually after main grid, see Next).
-- ⚠️ HEADLINE SIGNAL (pending verification): `best` (beta_deep, hr .90)
-  makes the WHOLE GVR family much SLOWER, not faster — partial geomeans
-  vs radix fp32 0.805 / bf16 0.634 / fp16 0.579; K2048 fp32 N=1M: op21
-  236 µs vs real-scenario 28.6 µs, radix flat ~20 µs. Same-layer (L22)
-  best-vs-real also ~2× slower ⇒ high hr / deep marginal → tie-dense
-  boundary → GVR count-convergence refine blowup (consistent with known
-  GVR undershoot non-convergence). VERIFY before reporting as fact:
-  (1) does `worst` (hr .05) come out FAST? (2) count refine iterations
-  on best vs worst bundles via harness/count_gvr_iters.py (check its op
-  compatibility first) — artifact-vs-mechanism discriminator.
-- W6 generator READY: gen_report_op22.py smoke-built 3× on partial data
-  (0 <script>, bilingual CSS-only, inline SVG; auto TL;DR + sanity note,
-  §6 extreme-cell findings, bs_hugeN folded into §2 view).
+## State (2026-07-07 ~13:4xZ, iter2-pre MIGRATION CHECKPOINT off umbriel-b200-049)
+- W1–W4 DONE (iter1 @2dac88d7f7); iter1.5 checkpoint @78e40c6945.
+- W5 MEASUREMENT: MAIN GRID 54/54 DONE + PARSED (results.jsonl fresh for
+  all 3 scenarios). Node split: b200-040 = real 18 + best 16;
+  b200-049 = best bs_K2048_{bf16,fp16} + worst 18 (+hugeN below).
+  bs_hugeN: real 9/9, best 9/9 DONE; worst 5/9 at checkpoint (driver
+  auto-redoes the in-flight batch on resume).
+- ✅ MECHANISM RESOLVED (was the ⚠️ headline signal; full detail
+  MECH_FINDINGS.md, artifacts mech_check_iters.py/.jsonl,
+  mech_crossover.py): tie-density/non-convergence FALSIFIED (replay 162/162
+  converged). Cost = extra full-row re-scans, a PURE function of preIdx
+  (crossover: swap preIdx ⇒ 40↔240 µs regardless of logits). hr→GVR-speed
+  NON-monotone: hr .90 poisons init (pmean ≈ top-K median → undershoot →
+  1-3 re-scans); boundary misses (real/worst) seed ≈ K-th value → ev1.
+  op21 msc has TWO fallback triggers, both observed in isolation:
+  refine-driven (best K2048: 236 vs 28.6 µs) and candidate-band slot
+  overflow (worst K2048 N=1M: 105 µs at ev1, cand=4318≈kC; K512 real
+  crossover 186 vs 124 µs). Each fallback = leader 1-CTA full-row recount
+  (~95 µs @N=1M fp32, gvr_msc_op.py:1096).
+- MAIN-GRID VERDICT (cold geomeans, rival/op21, >1 ⇒ op21 faster):
+  real: cutedsl 1.244/1.157/1.130 (anchor ✓), radix 1.089/0.895/0.844,
+  sglang 1.186, multicta ≈1.0. best: op21 loses to ALL (radix
+  0.766/0.584/0.557; even cutedsl 0.844). worst: radix 1.021/0.818/0.778.
+  hr-sensitivity t_worst/t_best: GVR family 0.72-0.82 (worst FASTER),
+  radix/sglang flat 1.00-1.01. op21 wins ONLY on real; each stress
+  scenario trips one msc trigger.
+- W6 generator UPDATED: gen_report_op22.py now has §7 mechanism section
+  (crossover table + replay summary + build-time worst-prediction check),
+  corrected §1/§6 prose (tie-density claim removed), two-node meta line.
+  Smoke-built on partial data: 4.3 MB, 0 <script>.
 - op21 kernel object unchanged: gvr_ms_auto @f51f50f4da; upstream PR-1
   integration remains PAUSED — bench-only.
 
-## Next (on the NEW B200 node, same NFS)
+## Next (on the NEW B200 node, same NFS — nothing to copy, /tmp loses only
+## disposable task logs)
 1. Preflight: temps <50C idle (019/035 GPU0 broken-cooling → GPU1 there);
    co-tenancy by output-file growth; python3 -c "import torch, cutlass".
-2. Resume main grid (auto-skips done batches, redoes the in-flight one):
+2. Finish stretch grid (auto-skips 23 done batches, redoes in-flight):
    `cd indexer_topk_op_bench/op22_temporal_fixed_hr_bench && OUT=results_b200_op22
-   GPU=0 ./drive_nsys_op22.sh 2>&1 | tee -a ../results_b200_op22/drive.log`
-3. Then stretch grid: `OUT=results_b200_op22 GPU=0 SWEEPS=bs_hugeN
-   ./drive_nsys_op22.sh 2>&1 | tee ../results_b200_op22/drive_hugeN.log`
-4. Mechanism check for the best-scenario signal (see ⚠️ above).
-5. `python3 parse_op22.py` → `python3 gen_report_op22.py` (writes
-   REPORT.html; verify 0 <script>) → review findings text.
-6. W7 commit `[op22 iter2]` (`git commit -s`, trailers Made-with +
-   Co-Authored-By Claude Fable 5); update PLAN/RESUME. NOTE absolute µs
-   differ across nodes — if resuming mid-scenario mixes nodes, per-cell
-   ratios remain valid but note the node change in the report; `best`
-   was 15/18 on b200-040, the remaining 3 best batches + all worst will
-   be from the new node. Record new hostname in the report meta line.
+   GPU=0 SWEEPS=bs_hugeN ./drive_nsys_op22.sh 2>&1 | tee -a
+   ../results_b200_op22/drive_hugeN.log`  (~4 batches ≈ 30-40 min)
+3. `python3 parse_op22.py` → `python3 gen_report_op22.py` (REPORT.html;
+   verify prints 0 <script>) → review TL;DR/§6/§7 text, check the §7
+   build-time worst-prediction line reads sensibly.
+4. If worst hugeN absolute µs matter for a figure: worst is all b200-049 +
+   the 4 remaining hugeN batches from the NEWEST node — add that hostname
+   to the report meta line (edit gen_report_op22.py meta string).
+5. W7 commit `[op22 iter2]` (`git commit -s`, trailers Made-with +
+   Co-Authored-By Claude Fable 5); update PLAN/RESUME State to CLOSED.
 
 ## Environment / recovery (NFS-shared; a node timeout loses only /tmp)
 1. `cd` this checkout; `git log --oneline -1` should show f51f50f4da or a

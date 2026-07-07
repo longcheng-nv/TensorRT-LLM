@@ -330,7 +330,10 @@ def main():
     B.append(bi(
         "<h1 style='font-size:16px;color:var(--mut);margin:0'>GVR op#21 vs 4 rivals on temporally-coherent synthetic data with FIXED hit rate (best / worst / realistic scenarios)</h1>",
         "<h1 style='font-size:16px;color:var(--mut);margin:0'>GVR op#21 对 4 个对手,在固定 hit-rate 的时序相关合成数据上(best / worst / realistic 三场景)</h1>"))
-    B.append('<p class="meta">2026-07-07 · B200 (sm_100, umbriel-b200-040, GPU0) · '
+    B.append('<p class="meta">2026-07-07 · B200 (sm_100), GPU0 · nodes: umbriel-b200-040 '
+             '(real 18/18 + best 16/18) / umbriel-b200-049 (best bs-K2048-bf16/fp16 + worst '
+             '+ bs_hugeN) — absolute µs do not transfer across nodes; per-cell rival ratios '
+             '(the canonical metric) are node-internal · '
              'branch <code>omni/op21-gvr-prod</code> · bucket <code>indexer_topk_op_bench/'
              'op22_temporal_fixed_hr_bench/</code> · nsys pure-kernel (NVTX→GPU projection), '
              'cold-L2 (512 MB evict) canonical + warm-L2 · data: <code>indexer-topk-temporal-synth</code> '
@@ -345,14 +348,16 @@ def main():
     B.append(bi(
         """<p>Measure the production-dispatch GVR kernel <b>op#21</b> (<code>gvr_ms_auto</code>, iter12 @f51f50f4da)
         against 4 rivals on data whose <b>temporal-hint quality (hit rate) is controlled</b>:
-        GVR's refine loop consumes the previous step's top-K as a hint, so its cost is a direct
-        function of hit rate — radix/streaming rivals are hint-blind. Scenarios: BEST
+        GVR seeds its threshold search from the previous step's top-K hint, so its cost depends
+        on the hint — radix/streaming rivals are hint-blind. (§7 shows the dependence is on
+        threshold-init quality and is NON-monotone in hit rate.) Scenarios: BEST
         (deep-layer marginal, hr=0.90), WORST (shallow-layer marginal, hr=0.05), REAL
         (aggregate layer mixture, hr sampled from the real per-step distribution — the anchor
         comparable to <code>report/report.html</code>).</p>""",
         """<p>把生产 dispatch 的 GVR 内核 <b>op#21</b>(<code>gvr_ms_auto</code>, iter12 @f51f50f4da)
-        与 4 个对手放在 <b>时序提示质量(hit rate)受控</b> 的数据上对比:GVR 的 refine 循环以上一步
-        top-K 为提示,代价直接依赖 hit rate,而 radix/streaming 对手对提示不敏感。三场景:BEST
+        与 4 个对手放在 <b>时序提示质量(hit rate)受控</b> 的数据上对比:GVR 以上一步 top-K 提示
+        为阈值搜索的种子,代价依赖提示质量,而 radix/streaming 对手对提示不敏感。(§7 证明该依赖
+        实为『阈值初始化质量』,且对 hit rate 非单调。)三场景:BEST
         (深层 marginal,hr=0.90)、WORST(浅层 marginal,hr=0.05)、REAL(aggregate 层混合、
         hr 按真实 per-step 分布采样 —— 与 <code>report/report.html</code> 可比的锚点)。</p>"""))
     B.append("<table><tr><th>op</th><th>impl</th></tr>" + "".join(
@@ -427,14 +432,21 @@ def main():
     B.append(bi(
         "<p>Per scenario, the 5 worst and 5 best cells by radix/op21 time ratio "
         "(cold-L2), with the cell's hit-rate, source layer and op21 dispatch path — "
-        "the raw material for regime analysis. In REAL, losses cluster where the "
-        "sampled layer has a tie-dense selection boundary (marginal-shape "
-        "sensitivity), not merely where hr is low.</p>",
+        "the raw material for regime analysis. §7 identifies the mechanism behind "
+        "the loss cells: extra full-row re-scans triggered by poisoned "
+        "threshold-init, a pure function of the preIdx hint (NOT value "
+        "tie-density, and NOT monotone in hr).</p>",
         "<p>每场景按 radix/op21 时间比(cold-L2)列最差 5 个与最好 5 个 cell,附该 cell 的 "
-        "hit-rate、来源层与 op21 dispatch 路径 —— regime 分析的原始素材。REAL 中的失利 cell "
-        "集中在抽到『选择边界 tie 密集』的层(marginal 形状敏感),而不只是 hr 低的地方。</p>"))
+        "hit-rate、来源层与 op21 dispatch 路径 —— regime 分析的原始素材。失利 cell 背后的机制"
+        "见 §7:阈值初始化被污染导致的额外全行重扫,纯粹由 preIdx 提示决定(与 value tie 密度"
+        "无关,对 hr 也非单调)。</p>"))
     B.append(f'<div class="cold">{findings_html(data, "us_cold")}</div>')
     B.append(f'<div class="warm">{findings_html(data, "us_warm")}</div>')
+
+    # ---- 7. mechanism ----
+    B.append("<h2>" + bi("7. Mechanism — why hr=0.90 slows the GVR family down",
+                         "7. 机制 — 为什么 hr=0.90 反而拖慢整个 GVR 家族", "span") + "</h2>")
+    B.append(mech_html(data))
 
     B.append("</div></body></html>")
     out = Path(args.out)
@@ -527,6 +539,156 @@ def findings_html(data, metric="us_cold"):
             "<th class='num'>radix/op21</th><th class='num'>hr</th>"
             "<th>layer/path</th></tr>" + "".join(rows) + "</table>")
     return "".join(blocks)
+
+
+def mech_summary_table():
+    """Per-scenario summary of the count_gvr_iters host replay (162 cells)."""
+    p = HERE / "mech_check_iters.jsonl"
+    if not p.exists():
+        return "<p class='small'>mech_check_iters.jsonl missing — run mech_check_iters.py</p>"
+    recs = [json.loads(l) for l in p.read_text().splitlines() if l.strip()]
+    rows = []
+    for scen in SCENARIOS:
+        rs = [r for r in recs if r["scenario"] == scen]
+        if not rs:
+            continue
+        n = len(rs)
+        p2 = sorted(r["p2_iters"] for r in rs)
+        ev = sorted(r["p2_evals"] for r in rs)
+        p4 = sorted(r["p4_snap_iters"] for r in rs)
+        ncv = sum(not r["p2_converged"] for r in rs)
+        rows.append(f"<tr><td>{SCEN_LABEL[scen]}</td><td>{n}</td>"
+                    f"<td>{p2[n // 2]} / {p2[-1]}</td>"
+                    f"<td>{ev[n // 2]} / {ev[-1]}</td>"
+                    f"<td>{ncv}/{n}</td>"
+                    f"<td>{p4[n // 2]} / {p4[-1]}</td></tr>")
+    return ("<table><tr><th>scenario</th><th>cells</th>"
+            "<th>P2 refine iters med/max</th><th>full-row count evals med/max</th>"
+            "<th>P2 non-converged</th><th>P4 snap iters med/max</th></tr>"
+            + "".join(rows) + "</table>")
+
+
+def mech_worst_check(data):
+    """Build-time check of the replay prediction: worst (ev1 everywhere)
+    should run FAST — geomean t_worst/t_real per op on matched cells."""
+    if "worst" not in data or not data["worst"] or "real" not in data:
+        return None
+    out = []
+    for op in OPS:
+        rs = []
+        for sweep in ("seqlen", "bs"):
+            cw = data["worst"].get(sweep, {})
+            cr_ = data["real"].get(sweep, {})
+            for key, ops_w in cw.items():
+                ops_r = cr_.get(key)
+                if not ops_r or op not in ops_w or op not in ops_r:
+                    continue
+                a, b = ops_w[op].get("us_cold"), ops_r[op].get("us_cold")
+                if a and b:
+                    rs.append(a / b)
+        g = gm(rs)
+        if g:
+            out.append((op, g, len(rs)))
+    return out
+
+
+def mech_html(data):
+    xover = """<table>
+<tr><th>op / cell (N=1M fp32)</th><th>lg=best,pi=best</th><th>lg=best,pi=real</th>
+<th>lg=real,pi=best</th><th>lg=real,pi=real</th></tr>
+<tr><td>ms_auto K2048</td><td>247.8</td><td><b>40.7</b></td><td>229.1</td><td><b>40.5</b></td></tr>
+<tr><td>cutedsl K2048</td><td>146.0</td><td><b>103.1</b></td><td>168.0</td><td><b>102.3</b></td></tr>
+<tr><td>ms_auto K512</td><td><b>125.0</b></td><td>187.0</td><td><b>124.5</b></td><td>186.2</td></tr>
+<tr><td>cutedsl K512</td><td>123.9</td><td>125.7</td><td>125.5</td><td>128.0</td></tr>
+</table>"""
+    wc = mech_worst_check(data)
+    wc_en = wc_zh = ""
+    if wc:
+        seg = " · ".join(f"{OP_LABEL[o]} <b>{g:.3f}×</b> (n={n})" for o, g, n in wc)
+        wc_en = ("<p><b>Prediction check (build-time)</b> — replay says WORST needs zero "
+                 "refines (ev1 in 54/54 cells) ⇒ the refine trigger is absent; the "
+                 "single-CTA/multi-CTA GVR should match REAL. op21's msc paths carry the "
+                 "second trigger: worst's boundary-flat data yields wide candidate bands "
+                 "(replay cand→kC, e.g. 4318 at K2048 N=1M) → slot-overflow fallback, so "
+                 "ms_auto may stay slower than REAL at hugeN even with ev1. Geomean "
+                 "t<sub>worst</sub>/t<sub>real</sub> on matched cells (&lt;1 ⇒ worst "
+                 "faster): " + seg + ". <i>Caveat: worst ran on b200-049, real on "
+                 "b200-040 — cross-node absolute-µs comparison, treat direction-only.</i></p>")
+        wc_zh = ("<p><b>预言验证(构建时计算)</b> — 回放表明 WORST 零 refine(54/54 cell "
+                 "ev1)⇒ refine 触发器缺席;单 CTA/多 CTA GVR 应与 REAL 持平。op21 的 msc "
+                 "路径带第二触发器:worst 的『贴边界平坦』数据产生宽候选带(回放 cand→kC,"
+                 "如 K2048 N=1M 时 4318)→ slot 溢出 fallback,因此 ms_auto 在 hugeN 即使 "
+                 "ev1 也可能仍慢于 REAL。匹配 cell 上 t<sub>worst</sub>/t<sub>real</sub> "
+                 "几何均值(&lt;1 ⇒ worst 更快):" + seg +
+                 "。<i>注意:worst 在 b200-049、real 在 b200-040 —— 跨节点绝对 µs 对比,"
+                 "只看方向。</i></p>")
+    en = f"""
+<p><b>Verdict: the BEST-scenario slowdown is real and data-dependent, but the
+tie-density hypothesis is falsified.</b> The cost driver is the number of
+<b>extra full-row re-scans</b> during threshold search, and that number is a
+<b>pure function of the preIdx hint</b> — not of the logits value distribution.
+Chain of evidence (full detail: <code>MECH_FINDINGS.md</code>, artifacts
+<code>mech_check_iters.py/.jsonl</code>, <code>mech_crossover.py</code>):</p>
+<ol>
+<li><b>Non-convergence never happens.</b> A verified host replay of the vendored
+kernel's control flow (<code>harness/count_gvr_iters.py</code>) on the actual
+bundles: P2 converges in 162/162 cells, all scenarios.
+{mech_summary_table()}</li>
+<li><b>GVR single-CTA obeys a linear law in eval count, scenario drops out</b>:
+K2048 fp32 N=1M ev1→93.3 µs, ev3→136.7 µs (≈22 µs per extra full-row scan);
+best/real N=524K both ev4 → 86.2/86.3 µs (identical).</li>
+<li><b>Crossover experiment (decisive)</b>: swap logits and preIdx between the
+best and real bundles at the headline cells (CUDA-event median, 50 cold reps,
+b200-049 GPU1, screening-only). Cost follows the <b>preIdx column only</b>:
+{xover}
+K512 flips the sign (real-preIdx slower than best-preIdx) ⇒ NON-monotone
+in hit rate.</li>
+<li><b>Why hr→1 poisons the init</b>: GVR seeds the threshold with
+mean(logits[preIdx]). A near-perfect hint makes that ≈ the top-K <b>median</b>
+→ initial count ≈ K/2 &lt; K → guaranteed undershoot → 1–3 refine re-scans.
+Boundary-clustered misses (REAL, and WORST whose miss-depth model sits at the
+selection boundary) put the seed ≈ the K-th value → first count already lands
+in the [K, kC] acceptance band.</li>
+<li><b>op21's cliff is sharper</b>: on a ladder miss or slot overflow the msc
+kernels take the leader-CTA full-row fallback (<code>gvr_msc_op.py:1096</code>,
+~95 µs per pass at N=1M fp32) — 236 µs (ev3) vs 28.6 µs (ev1) at the headline
+cell. K512 shows the overflow trigger alone: all crossover combos replay ev2,
+but real-preIdx yields cand≈4500 (&gt; slot cap) vs 654 → fallback → 186 vs
+124 µs.</li>
+</ol>
+{wc_en}
+<p class="small">Methodology note: a synthetic FIXED hr≥0.9 preIdx is a stress
+construction — real captures never place the hint mean at the top-K median,
+because real misses concentrate at the selection boundary.</p>"""
+    zh = f"""
+<p><b>结论:BEST 场景的变慢是真实、数据依赖的,但 tie 密度假设被证伪。</b>
+代价来自阈值搜索期间的<b>额外全行重扫</b>次数,而该次数是 <b>preIdx 提示的纯函数</b>
+—— 与 logits 值分布无关。证据链(详见 <code>MECH_FINDINGS.md</code>,工件
+<code>mech_check_iters.py/.jsonl</code>、<code>mech_crossover.py</code>):</p>
+<ol>
+<li><b>非收敛从未发生。</b>用忠实复刻内核控制流的 host 回放
+(<code>harness/count_gvr_iters.py</code>)在真实 bundle 上:162/162 cell P2 全收敛。
+{mech_summary_table()}</li>
+<li><b>GVR 单 CTA 的用时是 eval 次数的线性函数,场景变量消失</b>:K2048 fp32 N=1M
+ev1→93.3 µs、ev3→136.7 µs(每次额外全行扫描 ≈22 µs);best/real N=524K 同为 ev4 →
+86.2/86.3 µs(完全一致)。</li>
+<li><b>交叉实验(决定性)</b>:在头条 cell 上把 best 与 real 的 logits、preIdx 两两互换
+(CUDA-event 中位数,50 次 cold,b200-049 GPU1,仅筛查用)。用时<b>只跟随 preIdx 列</b>:
+{xover}
+K512 方向反转(real-preIdx 反而比 best-preIdx 慢)⇒ 对 hit rate 非单调。</li>
+<li><b>为什么 hr→1 会毒化初始化</b>:GVR 用 mean(logits[preIdx]) 作阈值种子。近乎完美的
+提示使它 ≈ top-K 的<b>中位数</b> → 初始计数 ≈ K/2 &lt; K → 必然 undershoot → 1–3 次
+refine 重扫。而边界聚集的 miss(REAL,以及 miss-depth 模型贴着选择边界的 WORST)使种子
+≈ 第 K 个值 → 首次计数即落入 [K, kC] 接受带。</li>
+<li><b>op21 的悬崖更陡</b>:ladder 未命中或 slot 溢出时,msc 内核走 leader-CTA 全行
+fallback(<code>gvr_msc_op.py:1096</code>,N=1M fp32 每遍 ~95 µs)—— 头条 cell
+236 µs(ev3)对 28.6 µs(ev1)。K512 单独展示溢出触发:交叉组合回放全为 ev2,但
+real-preIdx 的 cand≈4500(超 slot 容量)对 654 → fallback → 186 对 124 µs。</li>
+</ol>
+{wc_zh}
+<p class="small">方法论注记:合成的固定 hr≥0.9 preIdx 是一种应力构造 —— 真实捕获中提示
+均值从不落在 top-K 中位数上,因为真实 miss 聚集在选择边界。</p>"""
+    return f'<div class="card">{bi(en, zh)}</div>'
 
 
 def methodology_html():
