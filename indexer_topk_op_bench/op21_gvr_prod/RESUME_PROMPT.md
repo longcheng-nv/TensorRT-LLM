@@ -14,6 +14,46 @@ Continue the op21 GVR production-kernel campaign in
    tables (canonical numbers live here).
 3. `op21_gvr_prod/LEARNINGS.md` — falsified levers + mechanisms.
 
+## State after iter12 (2026-07-07, upstream-port PR-1 step 2)
+- **PR-1 kernel artifact SHIPPED to `port/gvr_topk_decode_ms.py`** (3436
+  lines, torch-free, upstream-main import layout): assembled by
+  `port/assemble_ms.py` (deterministic line-range extraction + content-
+  asserted edits from the frozen iter11 sources; re-runnable, drift fails
+  loudly). Validated AS THE SHIPPED BYTES via `port/portshim/` re-export
+  shims (vendored tree keeps cluster primitives in a separate file;
+  upstream main has them unified — the artifact imports the upstream
+  layout, never edit it for local runs).
+- **Full gate suite GREEN on the artifact (b200-027)**: synth fp32 54/54
+  + 16-bit 24/24 + adversarial-band 72/72 + real x C 180/180 + selection
+  identity vs bench ops 7/7 + NEW next_n/varlen gate 12/12
+  (`port/run_gate6_nextn.py`) + **upstream main-test grid 384/384**
+  (`port/run_upstream_cases.py`, upstream _make_inputs/_tie_aware_check
+  verbatim — includes the 30 adversarial cases that killed rank-scatter
+  upstream).
+- **KEY METHOD FINDING**: GVR output row ORDER is run-to-run
+  nondeterministic (P3/P4 smem atomicAdd emission cursors — the bench
+  kernel itself permutes across identical back-to-back calls). Any
+  old/new A/B must compare SORTED index sets; positional torch.equal
+  false-fails (LEARNINGS iter12).
+- **Contract gaps closed**: next_n/varlen was a validation gap only (code
+  inherited verbatim; gate 6 12/12); GvrParams kC map = vendored and
+  upstream tables byte-identical; return_output_values const_expr'd.
+  sort-indirect + LB deliberately excluded from PR-1 step 1 (classic
+  runner keeps those batches).
+- **Runner extension draft READY**: `port/runner_ms_extension.py` —
+  paste-ready `CuteDSLGvrTopKDecodeMsRunner` + opt-in
+  `trtllm::cute_dsl_gvr_topk_decode_ms` custom op for
+  cute_dsl_custom_ops.py; tuning = op21 _config verbatim, cluster policy
+  = gvr_ms_auto verbatim, all dispatch keys capture-time constants. All
+  referenced upstream helpers verified on origin/main a0c406ff88; #15709
+  not merged there (irrelevant — sibling-file route).
+- GOTCHA (this checkout): working tree carries UNRELATED Jun-5 leftovers
+  (radix-topk dispatch tuning in cute_dsl_custom_ops.py /
+  cpp_custom_ops.py / model_engine.py + untracked
+  tensorrt_llm/.../top_k/gvr_topk_decode.py). PR-1 integration must NOT
+  be built in this working tree — apply runner_ms_extension.py on a
+  clean upstream-based branch.
+
 ## State after iter11 (2026-07-06)
 - **P4 path-C exact fallback SHIPPED (upstream-port PR-1 step 1)**: the
   fixed-depth `_p4_band_fine_scatter` is DELETED; path C (and
@@ -178,12 +218,19 @@ Continue the op21 GVR production-kernel campaign in
   `Made-with: Claude Code` + `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`.
   Update THIS FILE + ITERATIONS.md + LEARNINGS.md in the same commit.
 
-## Next (post-iter11, ranked)
-(a) Upstream port PR-1 per UPSTREAM_ASSESSMENT.md Strategy B — path-C
-    blocker RESOLVED (iter11); next = kernel-variant port + runner
-    extension + contract gaps (next_n, sort/LB modes, GvrParams kC map)
-    + tests; e2e = dsv4-pareto-bench 3-arm A/B + gsm8k canary.
-(b) Deferred: fp16 262K BS1/4 residual (~3%, B300 shows 262K BS1 already
+## Next (post-iter12, ranked)
+(a) PR-1 integration on a CLEAN upstream-based branch (not this checkout
+    — see iter12 gotcha): copy port/gvr_topk_decode_ms.py into
+    tensorrt_llm/_torch/cute_dsl_kernels/blackwell/top_k/, paste
+    port/runner_ms_extension.py into cute_dsl_custom_ops.py, build, run
+    the upstream unit suite + port gates against the installed package.
+(b) PR-2 tests per UPSTREAM_ASSESSMENT §5 item 4: extend
+    test_cute_dsl_gvr_topk_decode.py to parametrize over both ops
+    (port/run_upstream_cases.py already proves the grid passes); add the
+    adversarial-band + real-capture gates.
+(c) e2e: dsv4-pareto-bench 3-arm A/B (OFF / ON-old / ON-new) + gsm8k
+    canary (UPSTREAM_ASSESSMENT §6 stages 2-3).
+(d) Deferred: fp16 262K BS1/4 residual (~3%, B300 shows 262K BS1 already
     par-to-win there); P1 highBS structural wall.
 DONE/FALSIFIED (do not retry): C=8 at fp32 262K holes (noise; WINS at
 16-bit — dtype-conditional); P1b QBINS=64 highBS; dist-P1/dist-P4;

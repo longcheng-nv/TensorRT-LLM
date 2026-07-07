@@ -236,3 +236,35 @@
   (`drive_nsys_*.sh`) survive only because they pipe the profile through
   `| tail -1` (pipeline status = tail's 0) — new A/B scripts must not
   `set -e` around a bare nsys invocation.
+
+## Iter 12 findings (upstream-port PR-1 step 2: kernel assembly)
+
+- **GVR output row ORDER is run-to-run nondeterministic — equivalence
+  gates must compare sorted index SETS, never positions.** The P3
+  direct-write cursor (`atomicAdd(s_iscalars[4], ...)`) and the P4
+  emission cursors (`bp_gt`/`bp_eq` smem atomics) allocate output slots
+  by warp-scheduling order: the BENCH kernel itself returns a different
+  within-row permutation on back-to-back identical calls (verified 4x,
+  K512 N262144; sorted sets bit-stable every time). This is inherited
+  vendored-GVR behavior, not an op21 artifact. A naive `torch.equal`
+  old-vs-new A/B "fails" 7/7 with 82-478 mismatched slots while the
+  selection is exactly identical.
+- **Line-anchored extraction scripts must be authored against the real
+  sources, not memory**: assemble_ms.py's first draft had 2 wrong cut
+  bounds (one clipping a trailing comment line, one overlapping the
+  next method) and 3 stale edit anchors (multi-line def signature,
+  banner wording) — every one caught by the content asserts, none by
+  AST parsing. The content-assert-everything pattern paid for itself;
+  keep it for any future re-assembly.
+- **The next_n/varlen contract was already complete in the bench kernel
+  body** (inherited verbatim from the vendored production kernel:
+  row//next_n mapping, cr=1 diagonal preIdxOffset, per-row
+  actual_kv_len) — the UPSTREAM_ASSESSMENT "op21 lacks next_n" gap was
+  a VALIDATION gap, not a code gap. Closed by port/run_gate6_nextn.py
+  (12/12: next_n {2,4} x varlen x {K512/cr4, K1024/cr4, K2048/cr1} x
+  {ms, C4}).
+- **vendored-vs-upstream import topology**: upstream main has the #15198
+  cluster primitives unified into gvr_topk_decode.py; the bench vendored
+  tree keeps them in gvr_topk_decode_cluster.py. The PR artifact imports
+  the upstream layout; local validation goes through port/portshim/
+  (re-export shim), never by editing the artifact.

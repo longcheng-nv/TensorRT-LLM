@@ -645,3 +645,68 @@ stand unchanged. (Method gotcha: `nsys profile -c cudaProfilerApi` exits
 **Standing**: the UPSTREAM_ASSESSMENT P0 port blocker is RESOLVED in
 op21; PR-1 can now port the kernel with exactness unconditional. The
 adversarial-band gate joins the per-iteration gate suite.
+
+## Iter 12 — 2026-07-07 — PR-1 step 2: kernel-variant assembled + full gate suite
+
+**Deliverable — `port/gvr_topk_decode_ms.py` (3436 lines, the PR-1 kernel
+artifact)**: assembled by `port/assemble_ms.py` — deterministic extraction
+(exact line ranges + content-asserted edits, every slice/edit fails loudly
+on source drift) from the frozen iter11 sources: vendored #14602 base
+(copy-atom/reduces, block_count_ge, phase3 stream-write worker
+[renamed from phase3_collect_candidates], snap-iter, phase4_histogram_snap)
++ op18 block_count_ge_multi + op21 ms (16-bit PTX helpers, fused ladder,
+sandwich P3, band P4 incl. iter11 exact path-C, stats-stash P1,
+rank-quantile P1b, kernel body) + op21 msc (st.shared::cluster helpers,
+slice ladder, distributed P3, leader gather, cluster body). Dropped as
+const_expr-dead: place_mode 0-4 tables, smem-row, dist_p1/p4, secant P2,
+all OP21_* env knobs (constructor flags now). Two classes:
+`GvrMsKernel` / `GvrMsClusterKernel`; module is torch-free; imports match
+upstream main's unified gvr_topk_decode.py (cluster primitives are
+module-level there; bench-local validation goes through `port/portshim/`
+re-export shims — the artifact itself is never edited).
+
+**Gate results (b200-027 GPU0, assembled kernel imported through portshim,
+i.e. the exact bytes that ship)**:
+| gate | grid | result |
+|---|---|---|
+| 1 synth fp32 | K{512,1024,2048} x N{8K,65K,262K} x BS{1,16} x 3 seeds, ms | 54/54 |
+| 2 synth 16-bit | bf16/fp16 x 3(K,N) x BS{1,8} x {ms,C8} | 24/24 |
+| 3 adversarial band (iter11 gate) | 24 cases x {ms,C4,C8} | 72/72 |
+| 4 real x C | pro30+flash21+v32 9 layers x {ms,C4,C8} | 180/180 |
+| 5 selection identity vs bench ops | 7 (K,N,path) spot cells | 7/7 sorted-set bitwise equal |
+| 6 next_n varlen (NEW — bench never ran next_n>1) | nn{2,4} x {K512/cr4,K1024/cr4,K2048/cr1} x {ms,C4}, per-request varlen | 12/12 |
+| upstream main-test grid (incl. the 30 adversarial cases) | 4 (dtype,K) pairs x N{4K,65K} x varlen x nn{1,2} x BS{1,32} x cr{1,4} x hit{0,.5} x cs{1,4}, minus sort-indirect | 384/384 (tie-aware upstream reference; 128 skipped per upstream rules) |
+
+**KEY FINDING (gate-5 method)**: GVR output row ORDER is run-to-run
+nondeterministic (P3/P4 smem atomicAdd emission cursors; the BENCH kernel
+itself permutes across back-to-back identical calls — verified 4x). A
+positional `torch.equal` old/new A/B false-fails 7/7 with 82-478 permuted
+slots while the SORTED index sets are bit-identical. Equivalence criterion
+for any GVR A/B = sorted-set equality (LEARNINGS iter12).
+
+**Contract-gap status (UPSTREAM_ASSESSMENT §5 item 3)**: next_n/varlen was
+a VALIDATION gap, not a code gap — the contract (row//next_n, cr=1
+diagonal preIdxOffset, per-row actual_kv_len) is inherited verbatim in
+both kernel bodies; gate 6 closes it. GvrParams kC map: vendored and
+upstream tables are byte-identical (18 entries) — resolved by the kernel's
+own GvrParams.get. return_output_values=False: const_expr'd, ctor-assert
+indices-only. sort-indirect + LB: deliberately NOT in PR-1 step 1 (route
+those batches to the classic runner; op#9 dispatcher lesson).
+
+**Runner extension draft — `port/runner_ms_extension.py`**: paste-ready
+`CuteDSLGvrTopKDecodeMsRunner` + opt-in custom op
+`trtllm::cute_dsl_gvr_topk_decode_ms` + register_fake, for the
+IS_CUTLASS_DSL_AVAILABLE block of cute_dsl_custom_ops.py. Tuning = op21
+`_config` verbatim (T/256-bit/min_blocks — the SHIP_REVIEW tables were
+measured with exactly these); cluster policy = `gvr_ms_auto` verbatim
+(16-bit C8 rule, K2048-fp32-hugeN C8, C4 one-wave rule) + hw clamp; all
+dispatch keys capture-time constants (CUDA-graph identity by
+construction). All referenced upstream helpers verified present on
+origin/main (a0c406ff88): _get_num_sms, _query_max_cluster_size,
+_TORCH_TO_CUTLASS_DTYPE, is_sm_100f, logger. #15709 NOT merged at that
+SHA — irrelevant to PR-1 (sibling-file route).
+
+**Validation harness (committed)**: port/validate_port.py (gates 1-5),
+port/run_gate6_nextn.py, port/run_upstream_cases.py +
+port/_upstream_test_helpers.py (upstream _make_inputs/_tie_aware_check
+extracted VERBATIM from origin/main), port/portshim/.

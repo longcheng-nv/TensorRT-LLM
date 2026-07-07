@@ -108,6 +108,23 @@ K2048 fp32 cell; leaves the 1.14–1.29× core on the table.
 route**: land `gvr_ms`/`gvr_msc` (with §4 fix) as e.g.
 `gvr_topk_decode_ms.py` next to the existing kernel, runner-selected.
 
+> **Progress (iter12, 2026-07-07)**: item 1's kernel file is BUILT and
+> GATED — `port/gvr_topk_decode_ms.py` (assembled via
+> `port/assemble_ms.py`, all OP21_* env knobs → constructor flags,
+> copyright header, torch-free, upstream import layout). Gates on the
+> shipped bytes: synth 54+24 / adversarial-band 72 / real×C 180 /
+> selection-identity-vs-bench 7 / next_n-varlen 12 (NEW,
+> `run_gate6_nextn.py`) / **upstream main-test grid 384/384**
+> (`run_upstream_cases.py`) — all green. Item 2's runner code is drafted
+> paste-ready in `port/runner_ms_extension.py`. Item 3 status: next_n —
+> was a validation gap only, code already present, now gated;
+> GvrParams kC — vendored/upstream tables byte-identical, resolved;
+> sort-indirect/LB — excluded per the recommendation below. Remaining
+> for PR-1: apply on a clean upstream-based branch + build + run the
+> real unit suite through the custom op. NOTE: old/new A/B must compare
+> sorted index sets — GVR row order is atomically nondeterministic
+> (LEARNINGS iter12).
+
 Work items for Strategy B, in PR order (mirrors how #14602→#15304 landed):
 1. **PR-1 kernel (opt-in, default OFF)**: port `src/gvr_ms_op.py` +
    `src/gvr_msc_op.py` (~3.4K ln today; expect ~2.5–3K after dropping bench
