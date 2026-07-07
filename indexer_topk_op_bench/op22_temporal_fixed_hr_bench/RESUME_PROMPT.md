@@ -23,7 +23,9 @@ order:
 ## State: CLOSED (2026-07-07 ~14:2xZ, iter2 final on umbriel-b200-019)
 - CAMPAIGN CLOSED at iter2. Full grid 81/81 batches DONE (main 54 +
   bs_hugeN 27), parsed (3834 recs × 3 scenarios, 0 errors), REPORT.html
-  final (5.42 MB, 0 <script>). No measurement ran on b200-019 — the
+  final (iter2.1 restyled to report/report.html conventions: dark theme,
+  header cards, latency+speedup pairs, §3 Full-data CSV+table; still
+  CSS-only 0 <script>, 8.4 MB). No measurement ran on b200-019 — the
   b200-049 session finished all worst-hugeN batches at 13:49Z before
   handoff (the "worst 5/9" note below was stale at write time).
 - W1–W4 DONE (iter1 @2dac88d7f7); iter1.5 checkpoint @78e40c6945.
