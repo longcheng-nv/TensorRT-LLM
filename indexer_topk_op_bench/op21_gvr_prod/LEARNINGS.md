@@ -268,3 +268,28 @@
   tree keeps them in gvr_topk_decode_cluster.py. The PR artifact imports
   the upstream layout; local validation goes through port/portshim/
   (re-export shim), never by editing the artifact.
+
+## Iter 13 (HLS log-falsi) — mechanisms
+- **Ladder counts make the fallback bracket FREE**: done=2 arrives with
+  count(s_thr[1]) tracked in s_msti[0] and count(s_thr[2]) still resident
+  in the last round's s_mt_cnt (ms), or cluster-merged global counts (msc).
+  The legacy entry + hi-end full-row passes were re-measuring known
+  numbers — 2 of the 4-8 fallback passes were pure waste.
+- **Falsi aim exponent is silicon-invariant (alpha 0.1 vs 0.2 identical)**:
+  the accepted-count size does NOT move the P4 cost enough to matter at
+  these shapes; do not spend more probes on alpha.
+- **The K2048 light-fallback pocket (-3..-6%) is codegen, not algorithm**:
+  fast-path cells never execute the new code, yet per-binary deltas of
+  BOTH signs (+5.5% K1024, -5.4% K2048) appear and reproduce across
+  datasets — same-binary register-allocation lottery (iter6 precedent),
+  with a mild systematic negative at K2048's kC=6144 smem/register
+  ceiling. Do not chase per-binary +-5% without a phase-level mechanism.
+- **worst-scenario (all_ge-mode) misses gain nothing from falsi**: with no
+  count<K column, the bracket hi end is unknown -> hi-end pass + expansion
+  still run; only the entry-skip helps. A future lever would need a
+  cheap hi-end estimate (NOT another full pass).
+- **HLS proto accounting held on silicon** for the ladder-seeded band
+  misses (its headline case): kernel refine converges in ~1 falsi pass.
+  The proto's known blind spot (leader-bound msc recount) is untouched —
+  Step 2 (cluster-parallel recount via the iter7 st.shared::cluster
+  primitives) is where the remaining 116us-at-1M tail lives.

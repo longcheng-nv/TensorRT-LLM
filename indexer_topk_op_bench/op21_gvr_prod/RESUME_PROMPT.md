@@ -14,6 +14,33 @@ Continue the op21 GVR production-kernel campaign in
    tables (canonical numbers live here).
 3. `op21_gvr_prod/LEARNINGS.md` — falsified levers + mechanisms.
 
+## State after iter13 (2026-07-07, HLS Step 0 + Step 1 SHIPPED)
+- **HLS log-falsi fallback SHIPPED default-ON** (src/gvr_ms_op.py +
+  gvr_msc_op.py; `OP21_FB_LOGFALSI=0` = exact legacy arm, `OP21_FB_ALPHA`
+  aim knob, default 0.2 — probed silicon-INVARIANT vs 0.1): s_iscalars[5]/
+  [6] carry ladder-known bracket counts; entry + hi-end full-row passes
+  skipped when known; refine aims by log-count regula falsi
+  (lg2.approx.f32); msc done=2 pre-recount skipped (do_rc gate).
+- **Step 0: tau(3)=1.219 @262K fp32 CONFIRMED** (HLS used 1.2;
+  count_ge_multi_bench/results_m3.csv, M=3 case added to the microbench).
+- **nsys A/B (op22 bundles, b200-028 GPU1, paired same-process)**: best gm
+  1.265 (K2048 1M BS1 **2.105x**, 244.7->116.3us), worst 1.003 flat, real
+  1.039; ALL gm 1.096/45 cells. HLS tail collapse CONFIRMED on silicon.
+  K2048 light-fallback pocket -3..-6% = codegen tax at the kC=6144 ceiling
+  (NOT the aim point — alpha-invariant; NOT data — same-binary reproduces
+  across datasets); DSv4 production K512/K1024 pocket-free. P0 spot (5
+  cells) mean ~+1%, anchor 17.76us on-axis (028-GPU1 == iter7 axis -1.3%).
+- **Gates all green** incl. NEW op22 stress-bundle gate 456/456
+  (gate_op22.py exercises the forced-fallback paths) + OFF-arm legacy
+  smoke. Full list in ITERATIONS iter13.
+- **port/ FROZEN at iter11 semantics** — src/ edits shifted line ranges so
+  port/assemble_ms.py now fails loudly BY DESIGN. Log-falsi is a post-PR-1
+  candidate lever, NOT part of PR-1.
+- Next lever (HLS Step 2): cluster-parallel msc fallback recount (DSMEM
+  merge via iter7 st.shared::cluster primitives) — owns the remaining
+  116us-at-1M best-tail. Step 3 (rho-aware placement) stays deferred:
+  fallback is now ~1 pass, placement is the 5-7% trim.
+
 ## State after iter12 (2026-07-07, upstream-port PR-1 step 2)
 - **PR-1 kernel artifact SHIPPED to `port/gvr_topk_decode_ms.py`** (3436
   lines, torch-free, upstream-main import layout): assembled by

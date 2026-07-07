@@ -871,7 +871,8 @@ class GvrMsClusterKernel(GvrSandwichKernel):
         smem_wsum = smem.allocate_tensor(element_type=cutlass.Float32, layout=cute.make_ordered_layout((num_warps,), order=(0,)), byte_alignment=64)
         smem_wcnt_p1 = smem.allocate_tensor(element_type=cutlass.Int32, layout=cute.make_ordered_layout((num_warps,), order=(0,)), byte_alignment=64)
         s_thr = smem.allocate_tensor(element_type=cutlass.Float32, layout=cute.make_ordered_layout((3,), order=(0,)), byte_alignment=16)
-        s_iscalars = smem.allocate_tensor(element_type=cutlass.Int32, layout=cute.make_ordered_layout((5,), order=(0,)), byte_alignment=16)
+        # iter13: +2 slots ([5]/[6] = log-falsi bracket counts)
+        s_iscalars = smem.allocate_tensor(element_type=cutlass.Int32, layout=cute.make_ordered_layout((7,), order=(0,)), byte_alignment=16)
         smem_ptcnt_multi = smem.allocate_tensor(element_type=cutlass.Int32, layout=cute.make_ordered_layout((M * num_threads,), order=(0,)), byte_alignment=128)
         smem_wcnt_multi = smem.allocate_tensor(element_type=cutlass.Int32, layout=cute.make_ordered_layout((M * num_warps,), order=(0,)), byte_alignment=64)
         s_mt_thr = smem.allocate_tensor(element_type=cutlass.Float32, layout=cute.make_ordered_layout((M,), order=(0,)), byte_alignment=16)
@@ -1106,30 +1107,52 @@ class GvrMsClusterKernel(GvrSandwichKernel):
                             thr_c = s_mt_thr[best_m]
                         if tidx == cutlass.Int32(0):
                             s_thr[0] = thr_c
+                            if cutlass.const_expr(self.fb_logfalsi):
+                                s_iscalars[5] = cutlass.Int32(-1)
+                                s_iscalars[6] = cutlass.Int32(-1)
                             if best_m >= cutlass.Int32(0) and m1g <= cutlass.Int32(kC):
                                 s_iscalars[1] = cutlass.Int32(1)
                             else:
                                 s_iscalars[1] = cutlass.Int32(2)
                                 if best_m >= cutlass.Int32(0):
                                     s_thr[1] = s_mt_thr[best_m]
+                                    if cutlass.const_expr(self.fb_logfalsi):
+                                        # iter13 (HLS): s_mt_cnt holds the
+                                        # cluster-MERGED (global) ladder
+                                        # counts here — seed the log-falsi
+                                        # bracket. m1g > kC on this branch.
+                                        s_iscalars[5] = m1g
                                     if best_m < cutlass.Int32(M - 1):
                                         s_thr[2] = s_mt_thr[best_m + cutlass.Int32(1)]
+                                        if cutlass.const_expr(self.fb_logfalsi):
+                                            s_iscalars[6] = s_mt_cnt[best_m + cutlass.Int32(1)]
                                     else:
                                         s_thr[2] = v_hi
                                 else:
                                     s_thr[1] = v_lo
                                     s_thr[2] = s_mt_thr[0]
+                                    if cutlass.const_expr(self.fb_logfalsi):
+                                        s_iscalars[6] = s_mt_cnt[0]
                             s_iscalars[2] = pre_idx_count + (pre_idx_count >> 2)
                             s_iscalars[3] = cutlass.Int32(1)
                             s_iscalars[4] = cutlass.Int32(0)
                             s_swi[0] = cutlass.Int32(0)  # no sandwich
                         smem_ptcnt_up[tidx] = cutlass.Int32(0)
                         cute.arch.barrier()
-                        # full-row recount at thr_c -> smem_ptcnt + cand_count
-                        self.block_count_ge(input_row, N, thr_c, smem_ptcnt,
-                                            smem_wcnt, s_iscalars, tidx,
-                                            warp_id, lane)
-                        cute.arch.barrier()
+                        # full-row recount at thr_c -> smem_ptcnt + cand_count.
+                        # iter13: on the done=2 path the log-falsi override
+                        # counts full-row itself (its final count re-warms
+                        # smem_ptcnt) — the pre-recount is only needed for
+                        # done=1 (vendored collect-all prefix contract).
+                        do_rc = cutlass.Int32(1)
+                        if cutlass.const_expr(self.fb_logfalsi):
+                            if s_iscalars[1] == cutlass.Int32(2):
+                                do_rc = cutlass.Int32(0)
+                        if do_rc == cutlass.Int32(1):
+                            self.block_count_ge(input_row, N, thr_c, smem_ptcnt,
+                                                smem_wcnt, s_iscalars, tidx,
+                                                warp_id, lane)
+                            cute.arch.barrier()
                         self.phase3_collect_candidates(input_row, N, smem_keys, smem_vals, smem_ptcnt,
                                                        smem_wcnt, s_thr, s_iscalars, tidx, warp_id, lane)
                         cand_count_p4 = s_iscalars[0]
@@ -1163,8 +1186,12 @@ def _compile(dtype, n, K, cr_val, C, threads, dist_p1=False, dist_p4=False):
     p3_push = os.environ.get("OP21_P3_PUSH", "1") == "1"
     # iter9 A/B: OP21_P2_NATIVE=0 restores the cvt->fp32 ladder (16-bit only)
     p2_nat = os.environ.get("OP21_P2_NATIVE", "1") == "1"
+    # iter13 A/B: OP21_FB_LOGFALSI=0 restores the blind-bisection fallback;
+    # OP21_FB_ALPHA probes the interior aim exponent (default 0.2)
+    fb_lf = os.environ.get("OP21_FB_LOGFALSI", "1") == "1"
+    fb_al = float(os.environ.get("OP21_FB_ALPHA", "0.2"))
     key = (dtype, n, K, cr_val, C, threads, dist_p1, dist_p4, p4_rs, p4_fast,
-           p3_push, p2_nat)
+           p3_push, p2_nat, fb_lf, fb_al)
     if key in _compiled:
         return _compiled[key]
     use256 = (n >= 16384)
@@ -1176,7 +1203,8 @@ def _compile(dtype, n, K, cr_val, C, threads, dist_p1=False, dist_p4=False):
                               fuse_collect=True, C_cta=C, dist_p1=dist_p1,
                               dist_p4=dist_p4, p4_rank_scatter=p4_rs,
                               p4_smallbin=p4_fast, p3_push=p3_push,
-                              p2_native=p2_nat)
+                              p2_native=p2_nat, fb_logfalsi=fb_lf,
+                              fb_alpha=fb_al)
     nr, nc, nb = cute.sym_int(), cute.sym_int(), cute.sym_int()
     ia = 32 if use256 else 16
     in_f = cr.make_fake_compact_tensor(_DT[dtype], (nr, nc), stride_order=(1, 0), assumed_align=ia)

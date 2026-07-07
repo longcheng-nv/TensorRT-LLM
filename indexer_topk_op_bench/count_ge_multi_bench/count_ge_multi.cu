@@ -110,6 +110,7 @@ void dispatchM(int M,const T* d_row,int N,const float* d_thr,int* d_out,int BS,i
   switch(M){
     case 1: launch<T,1,VECW>(d_row,N,d_thr,d_out,BS,TT); break;
     case 2: launch<T,2,VECW>(d_row,N,d_thr,d_out,BS,TT); break;
+    case 3: launch<T,3,VECW>(d_row,N,d_thr,d_out,BS,TT); break;
     case 4: launch<T,4,VECW>(d_row,N,d_thr,d_out,BS,TT); break;
     case 6: launch<T,6,VECW>(d_row,N,d_thr,d_out,BS,TT); break;
     case 8: launch<T,8,VECW>(d_row,N,d_thr,d_out,BS,TT); break;

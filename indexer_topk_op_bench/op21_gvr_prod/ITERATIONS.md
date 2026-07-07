@@ -710,3 +710,86 @@ SHA — irrelevant to PR-1 (sibling-file route).
 port/run_gate6_nextn.py, port/run_upstream_cases.py +
 port/_upstream_test_helpers.py (upstream _make_inputs/_tie_aware_check
 extracted VERBATIM from origin/main), port/portshim/.
+
+## Iter 13 — 2026-07-07 — HLS Step 0 + Step 1: log-falsi fallback SHIPPED
+
+**Context**: executes the HLS validation's two silicon steps
+(HLS_VALIDATION_REPORT.html §5 obligation): Step 0 = measure the
+interpolated tau(M=3) cost-model constant; Step 1 = kernel-ize the
+load-bearing HLS lever (log-count regula-falsi fallback) and A/B it on the
+nsys cold-L2 axis. Node umbriel-b200-028 (both GPUs 37-38C idle); anchor
+K512 fp32 262K BS1 = 17.76-17.81us (iter7 axis 18.0±0.3 => same axis,
+-1.3%).
+
+**Step 0 — tau(3) CONFIRMED** (`count_ge_multi_bench/results_m3.csv`,
+M∈{1,2,3,4} re-measured same-silicon, nsys cold-L2 median-of-3):
+fp32 262K tau(3)=1.219 / 131K 1.196 (HLS interpolated 1.2 — within 2%);
+tau(4)=1.496 consistent with the old-axis 1.464. fp16 spot: tau(3)=1.45-1.55
+(steeper 16-bit width tax) but M3<M4 ordering holds both dtypes. Theorem 1's
+M3-both-regimes revision stands on its only unmeasured constant.
+
+**Step 1 — implementation** (src/gvr_ms_op.py + src/gvr_msc_op.py, default
+ON, `OP21_FB_LOGFALSI=0` = exact legacy A/B arm, `OP21_FB_ALPHA` probes the
+aim exponent):
+- s_iscalars 5->7: [5]/[6] carry ladder-KNOWN bracket counts (invariants
+  [5]>kC at s_thr[1], [6]<K at s_thr[2], -1 unknown). Seeded at the ms
+  done=2 finalize (count tracked with s_mstf[2] across rounds; [6] from the
+  LAST round's s_mt_cnt — consistent because s_mstf[1] is also last-round)
+  and at the msc fallback branch (s_mt_cnt is cluster-MERGED global there).
+- phase3_collect_candidates override: known c_lo skips the ENTRY full-row
+  pass; known c_hi skips the HI-END full-row pass (+expansion); the refine
+  loop aims by log-count regula falsi (lg2.approx.f32 PTX helper; target
+  m* = K*(kC/K)^0.2; strict-interior guard else midpoint) instead of blind
+  bisection, updating [5]/[6] with every measured count.
+- msc done=2 explicit full-row recount skipped (do_rc gate): the override's
+  final count re-warms smem_ptcnt; done=1 keeps it (vendored collect-all
+  prefix contract).
+- Common ladder-seeded miss: OLD = recount + entry + hi-end + n x bisect
+  (4-8 leader passes) -> NEW = ~1 falsi pass. The proto headline (1.00 mean
+  / 1 max forced-fallback passes) reproduced in kernel control flow.
+
+**Gates (all green, b200-028)**: synth 54/54 + real 60/60 + msc C{2,4,8} +
+real x C 180/180 + adversarial preIdx 36/36 + adversarial-band 72/72 +
+FAST=0 72/72 + real 16-bit 360/360 + **op22 stress bundles 456/456**
+(gate_op22.py — the scenarios that force the fallback) + OFF-arm legacy
+smoke green (A/B purity).
+
+**nsys verdict — paired same-process A/B on the op22 bundles**
+(scripts/{ab_hls_logfalsi.py,drive_ab_hls.sh,parse_ab_hls.py}; 15 cells x
+scenario, 30 cold-L2 reps, arms interleaved per rep; archives
+results/nsys/iter13_ab_hls*/):
+| scenario | gm old/new | win(new) | headline |
+|---|---|---|---|
+| best (hr .90) | **1.265** | 13/15 | K2048 1M BS1 **2.105x** (244.7->116.3us); K1024 1M 1.514x; K2048 262K 1.533x |
+| worst (hr .05) | 1.003 | 8/15 | flat (all_ge-mode misses: bracket-hi unknown, only entry-skip helps) |
+| real | 1.039 | 7/15 | K512 1M 1.526x, K512 65K 1.353x; K2048 column -3..-7% pocket |
+| ALL | 1.096 | 45 cells | exactness ok/ok per cell |
+**The HLS model-level tail collapse is CONFIRMED on silicon** where the
+model located it (best scenario, ladder-seeded band misses). msc leader
+recount is still leader-bound — the remaining tail (116us at 1M) is Step 2
+(cluster-parallel recount) territory.
+
+**alpha probe — aim point is silicon-INVARIANT**: full A/B re-run at
+OP21_FB_ALPHA=0.1 (results/nsys/iter13_ab_hls_a01/): best 1.259 / worst
+1.004 / real 1.041 — identical within jitter, K2048 pocket unchanged
+(0.925 vs 0.927). The pocket is NOT the falsi aim; alpha default stays 0.2.
+
+**K2048 pocket + P0 no-regress spot** (iter11 precedent, 5 cells old/new,
+results/nsys/iter13_p0_spot/): K512 262K +4.4%, K1024 65K +5.5%, K1024
+262K +4.5%, K2048 262K -5.4%, bf16 262K -0.6% => mean ~+1%. Fast path
+never calls phase3_collect_candidates; per-binary deltas of both signs at
+±5% match the iter6 codegen-jitter precedent (same binary reproduces its
+own delta on synth AND real data — not a data mechanism). K2048 shows
+small negatives across 3 binaries (mild systematic ~3-6% register-pressure
+tax at the kC=6144 ceiling) BUT: K2048 is v3.2 legacy geometry (DSv4
+production = K512/K1024, pocket-free) and the best-scenario K2048 tail
+wins 1.24-2.11x where the fallback actually fires. SHIP default ON.
+
+**Files**: src/gvr_ms_op.py (lg2_f32 helper, fb_logfalsi/fb_alpha ctor,
+finalize seeding, override rewrite), src/gvr_msc_op.py (seeding, do_rc
+gate), scripts/{ab_hls_logfalsi.py,drive_ab_hls.sh,parse_ab_hls.py,
+ab_p0_spot_logfalsi.sh}, count_ge_multi_bench/{count_ge_multi.cu +M3,
+run_m3_sweep.sh,results_m3.csv}. NOTE: port/ (PR-1 artifact) untouched and
+FROZEN at iter11 semantics — port/assemble_ms.py now fails loudly on the
+shifted src/ line ranges by design; log-falsi is a post-PR-1 candidate,
+not part of PR-1.

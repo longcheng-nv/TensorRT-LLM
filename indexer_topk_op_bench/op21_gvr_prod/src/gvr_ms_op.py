@@ -34,6 +34,7 @@ requires band <= kC instead of M1 <= kC.
 Fallback: no sandwich pair (M0 == 0) -> exact op18 path (P3 collect-all +
 const-K P4). done=2 (band > kC) -> baseline retry-shrink path. Exact.
 """
+import math
 import os
 import sys
 from pathlib import Path
@@ -172,15 +173,49 @@ def pair_sum_i32_16(acc2, kind):
     return _pair_sum_i32_16(acc2, kind)
 
 
+@dsl_user_op
+def _lg2_f32(f, *, loc=None, ip=None):
+    # iter13 (HLS log-falsi): approx log2 for the fallback interpolant.
+    # Base cancels in the falsi ratio; approx precision only shapes the
+    # aim point — the bracket safeguard guarantees convergence regardless.
+    return cutlass.Float32(llvm.inline_asm(
+        T.f32(), [f.ir_value(loc=loc, ip=ip)], "lg2.approx.f32 $0, $1;",
+        "=f,f", has_side_effects=False, is_align_stack=False,
+        asm_dialect=llvm.AsmDialect.AD_ATT, loc=loc, ip=ip))
+
+
+@cute.jit
+def lg2_f32(f):
+    return _lg2_f32(f)
+
+
 class GvrSandwichKernel(GvrMultiThreshKernel):
     """Sandwich two-threshold single-CTA kernel. New tunable: band_accept
     (stop refining once band <= band_accept; replaces op18 c_accept)."""
 
     def __init__(self, *a, band_accept=64, fuse_collect=False, smem_row_elems=0,
                  qfracs=(0.75, 0.5, 0.25), p4_rank_scatter=True, qbins=256,
-                 p4_smallbin=True, p2_native=True, **kw):
+                 p4_smallbin=True, p2_native=True, fb_logfalsi=True,
+                 fb_alpha=0.2, **kw):
         super().__init__(*a, **kw)
         self.band_accept = int(band_accept)
+        # op21 iter13 (HLS): log-count regula-falsi fallback refine. The
+        # fallback bracket [s_thr[1], s_thr[2]] arrives with ladder-KNOWN
+        # counts (s_iscalars[5]/[6]); CCDF tails are ~exponential so log
+        # count is ~linear in threshold — the host prototype (proto_hls.py,
+        # 78 op22 rows, forced fallback) measured 1.00 mean / 1 max passes
+        # vs bisect 1.77 mean / 6 max. Aim at the interior target
+        # m* = K*(kC/K)^alpha, alpha=0.2 (HLS Theorem 3 grid optimum);
+        # accepting anywhere in [K, kC] is unchanged. False = legacy blind
+        # bisection (A/B knob OP21_FB_LOGFALSI=0).
+        self.fb_logfalsi = bool(fb_logfalsi)
+        # fb_alpha: interior aim exponent. 0.2 = the HLS grid optimum on
+        # PASS COUNT; silicon (iter13 A/B) shows the accepted-count side
+        # effect (P4 is cand-linear) — smaller alpha lands tighter cand at
+        # the cost of more undershoot retries. OP21_FB_ALPHA probes it.
+        self.fb_alpha = float(fb_alpha)
+        self.log2_mstar = math.log2(
+            self.top_k * (self.kC / self.top_k) ** self.fb_alpha)
         # iter9: native 16-bit ladder compares. Thresholds are quantized to
         # the dtype grid at P1b emit (thr_q = f32(dtype(thr))), which makes
         # 16-bit-domain compares bit-equivalent to the fp32 compares every
@@ -1211,50 +1246,80 @@ class GvrSandwichKernel(GvrMultiThreshKernel):
         kK = cutlass.const_expr(self.top_k)
         kCC = cutlass.const_expr(self.kC)
         if s_iscalars[1] != cutlass.Int32(1):
-            # entry count at the current threshold (also warms smem_ptcnt)
-            self.block_count_ge(input_row, N, s_thr[0], smem_ptcnt, smem_wcnt,
-                                s_iscalars, tidx, warp_id, lane)
-            cute.arch.barrier()  # block_count_ge has NO trailing barrier
+            # iter13 (HLS): s_iscalars[5]/[6] carry the ladder-KNOWN bracket
+            # counts (invariants: [5] > kCC == count at s_thr[1]; [6] < kK
+            # == count at s_thr[2]; -1 = unknown). Known ends let the entry
+            # and hi-end full-row passes be skipped outright, and the refine
+            # step aims by log-count regula falsi instead of blind bisection.
+            kn_lo = cutlass.Int32(0)
+            if cutlass.const_expr(self.fb_logfalsi):
+                if s_iscalars[5] > cutlass.Int32(0):
+                    kn_lo = cutlass.Int32(1)
+            if kn_lo == cutlass.Int32(0):
+                # entry count at the current threshold (also warms smem_ptcnt)
+                self.block_count_ge(input_row, N, s_thr[0], smem_ptcnt, smem_wcnt,
+                                    s_iscalars, tidx, warp_id, lane)
+                cute.arch.barrier()  # block_count_ge has NO trailing barrier
             need = cutlass.Int32(0)
-            if s_iscalars[0] > cutlass.Int32(kCC) or s_iscalars[0] < cutlass.Int32(kK):
+            if kn_lo == cutlass.Int32(1):
+                need = cutlass.Int32(1)  # count(s_thr[1]) > kCC by invariant
+            elif s_iscalars[0] > cutlass.Int32(kCC) or s_iscalars[0] < cutlass.Int32(kK):
                 need = cutlass.Int32(1)
             if need == cutlass.Int32(1):
-                if tidx == 0:
-                    if s_iscalars[0] > cutlass.Int32(kCC):
-                        s_thr[1] = s_thr[0]
-                    else:
-                        s_thr[2] = s_thr[0]
-                cute.arch.barrier()
-                # hi-end guarantee: count(hi) must be < kK, else expand
-                self.block_count_ge(input_row, N, s_thr[2], smem_ptcnt,
-                                    smem_wcnt, s_iscalars, tidx, warp_id, lane)
-                cute.arch.barrier()
-                if s_iscalars[0] >= cutlass.Int32(kK) and s_iscalars[0] <= cutlass.Int32(kCC):
-                    # hi itself already valid: adopt it
+                if kn_lo == cutlass.Int32(0):
                     if tidx == 0:
-                        s_thr[0] = s_thr[2]
+                        if s_iscalars[0] > cutlass.Int32(kCC):
+                            s_thr[1] = s_thr[0]
+                            if cutlass.const_expr(self.fb_logfalsi):
+                                s_iscalars[5] = s_iscalars[0]
+                        else:
+                            s_thr[2] = s_thr[0]
+                            if cutlass.const_expr(self.fb_logfalsi):
+                                s_iscalars[6] = s_iscalars[0]
                     cute.arch.barrier()
-                else:
-                    # geometric expansion: double the bracket upward until
-                    # count(hi) < kK (hit~0 rows can have >= K elements above
-                    # the max gathered value; a one-shot huge hi would need
-                    # ~96 bisection steps — doubling keeps the bracket tight)
-                    ex = cutlass.Int32(0)
-                    while ex < cutlass.Int32(12) and s_iscalars[0] >= cutlass.Int32(kK):
+                kn_hi = cutlass.Int32(0)
+                if cutlass.const_expr(self.fb_logfalsi):
+                    if s_iscalars[6] >= cutlass.Int32(0):
+                        kn_hi = cutlass.Int32(1)  # count(s_thr[2]) < kK known
+                run_refine = cutlass.Int32(1)
+                if kn_hi == cutlass.Int32(0):
+                    # hi-end guarantee: count(hi) must be < kK, else expand
+                    self.block_count_ge(input_row, N, s_thr[2], smem_ptcnt,
+                                        smem_wcnt, s_iscalars, tidx, warp_id, lane)
+                    cute.arch.barrier()
+                    if s_iscalars[0] >= cutlass.Int32(kK) and s_iscalars[0] <= cutlass.Int32(kCC):
+                        # hi itself already valid: adopt it
                         if tidx == 0:
-                            rngx = s_thr[2] - s_thr[1]
-                            if rngx <= cutlass.Float32(0.0):
-                                rngx = cutlass.Float32(1e-3)
-                            s_thr[2] = s_thr[2] + rngx
+                            s_thr[0] = s_thr[2]
                         cute.arch.barrier()
-                        self.block_count_ge(input_row, N, s_thr[2], smem_ptcnt,
-                                            smem_wcnt, s_iscalars, tidx,
-                                            warp_id, lane)
+                        run_refine = cutlass.Int32(0)
+                    else:
+                        # geometric expansion: double the bracket upward until
+                        # count(hi) < kK (hit~0 rows can have >= K elements above
+                        # the max gathered value; a one-shot huge hi would need
+                        # ~96 bisection steps — doubling keeps the bracket tight)
+                        ex = cutlass.Int32(0)
+                        while ex < cutlass.Int32(12) and s_iscalars[0] >= cutlass.Int32(kK):
+                            if tidx == 0:
+                                rngx = s_thr[2] - s_thr[1]
+                                if rngx <= cutlass.Float32(0.0):
+                                    rngx = cutlass.Float32(1e-3)
+                                s_thr[2] = s_thr[2] + rngx
+                            cute.arch.barrier()
+                            self.block_count_ge(input_row, N, s_thr[2], smem_ptcnt,
+                                                smem_wcnt, s_iscalars, tidx,
+                                                warp_id, lane)
+                            cute.arch.barrier()
+                            ex = ex + cutlass.Int32(1)
+                        if tidx == 0:
+                            s_thr[0] = s_thr[2]  # provisional; loop re-places
+                            if cutlass.const_expr(self.fb_logfalsi):
+                                # learn the hi-end count (hi-end check or last
+                                # expansion step; tidx0-only falsi reads it)
+                                if s_iscalars[0] < cutlass.Int32(kK):
+                                    s_iscalars[6] = s_iscalars[0]
                         cute.arch.barrier()
-                        ex = ex + cutlass.Int32(1)
-                    if tidx == 0:
-                        s_thr[0] = s_thr[2]  # provisional; loop re-places
-                    cute.arch.barrier()
+                if run_refine == cutlass.Int32(1):
                     rs = cutlass.Int32(0)
                     ok3 = cutlass.Int32(0)
                     while rs < cutlass.Int32(30) and ok3 == cutlass.Int32(0):
@@ -1262,6 +1327,26 @@ class GvrSandwichKernel(GvrMultiThreshKernel):
                             lo3 = s_thr[1]
                             hi3 = s_thr[2]
                             mid3 = (lo3 + hi3) * cutlass.Float32(0.5)
+                            if cutlass.const_expr(self.fb_logfalsi):
+                                # log-count regula falsi: aim where the
+                                # ~exponential CCDF predicts count == m*;
+                                # strict-interior guard falls back to the
+                                # midpoint (Illinois-style safeguard)
+                                clo3 = s_iscalars[5]
+                                chi3 = s_iscalars[6]
+                                if clo3 > cutlass.Int32(0) and chi3 >= cutlass.Int32(0):
+                                    chic = chi3
+                                    if chic < cutlass.Int32(1):
+                                        chic = cutlass.Int32(1)
+                                    l_lo = lg2_f32(cutlass.Float32(clo3))
+                                    l_hi = lg2_f32(cutlass.Float32(chic))
+                                    den3 = l_lo - l_hi
+                                    if den3 > cutlass.Float32(0.0):
+                                        t3 = (cutlass.Float32(self.log2_mstar)
+                                              - l_hi) / den3
+                                        cnd3 = hi3 + t3 * (lo3 - hi3)
+                                        if cnd3 > lo3 and cnd3 < hi3:
+                                            mid3 = cnd3
                             if mid3 <= lo3:
                                 mid3 = hi3
                             s_thr[0] = mid3
@@ -1276,8 +1361,12 @@ class GvrSandwichKernel(GvrMultiThreshKernel):
                         if tidx == 0:
                             if c3 > cutlass.Int32(kCC):
                                 s_thr[1] = s_thr[0]
+                                if cutlass.const_expr(self.fb_logfalsi):
+                                    s_iscalars[5] = c3
                             elif c3 < cutlass.Int32(kK):
                                 s_thr[2] = s_thr[0]
+                                if cutlass.const_expr(self.fb_logfalsi):
+                                    s_iscalars[6] = c3
                         cute.arch.barrier()
                         rs = rs + cutlass.Int32(1)
                     if ok3 == cutlass.Int32(0):
@@ -1552,7 +1641,8 @@ class GvrSandwichKernel(GvrMultiThreshKernel):
         smem_wsum = smem.allocate_tensor(element_type=cutlass.Float32, layout=cute.make_ordered_layout((num_warps,), order=(0,)), byte_alignment=64)
         smem_wcnt_p1 = smem.allocate_tensor(element_type=cutlass.Int32, layout=cute.make_ordered_layout((num_warps,), order=(0,)), byte_alignment=64)
         s_thr = smem.allocate_tensor(element_type=cutlass.Float32, layout=cute.make_ordered_layout((3,), order=(0,)), byte_alignment=16)
-        s_iscalars = smem.allocate_tensor(element_type=cutlass.Int32, layout=cute.make_ordered_layout((5,), order=(0,)), byte_alignment=16)
+        # iter13: +2 slots ([5]/[6] = log-falsi bracket counts)
+        s_iscalars = smem.allocate_tensor(element_type=cutlass.Int32, layout=cute.make_ordered_layout((7,), order=(0,)), byte_alignment=16)
         smem_ptcnt_multi = smem.allocate_tensor(element_type=cutlass.Int32, layout=cute.make_ordered_layout((M * num_threads,), order=(0,)), byte_alignment=128)
         smem_wcnt_multi = smem.allocate_tensor(element_type=cutlass.Int32, layout=cute.make_ordered_layout((M * num_warps,), order=(0,)), byte_alignment=64)
         s_mt_thr = smem.allocate_tensor(element_type=cutlass.Float32, layout=cute.make_ordered_layout((M,), order=(0,)), byte_alignment=16)
@@ -1771,6 +1861,30 @@ class GvrSandwichKernel(GvrMultiThreshKernel):
                         s_thr[1] = s_mstf[2]
                         s_thr[2] = s_mstf[1]
                         s_swi[0] = cutlass.Int32(0)  # no sandwich on fallback
+                        if cutlass.const_expr(self.fb_logfalsi):
+                            # iter13 (HLS): stash the ladder-known bracket
+                            # counts for the log-falsi fallback. [5] = count
+                            # at s_thr[1] (tracked together with s_mstf[2]
+                            # across rounds — always consistent). [6] = count
+                            # at s_thr[2]: s_mstf[1] comes from the LAST
+                            # round (thr[bm+1], or thr[0] when that round had
+                            # no >=K column), so its count is still resident
+                            # in s_mt_cnt; bm == M-1 leaves s_mstf[1] stale
+                            # from an earlier round -> unknown (-1).
+                            c_lo_s = cutlass.Int32(-1)
+                            if s_msti[0] != cutlass.Int32(_INT_MAX):
+                                c_lo_s = s_msti[0]
+                            s_iscalars[5] = c_lo_s
+                            bm2 = cutlass.Int32(-1)
+                            for m2 in cutlass.range_constexpr(M):
+                                if s_mt_cnt[m2] >= cutlass.Int32(top_k):
+                                    bm2 = cutlass.Int32(m2)
+                            c_hi_s = cutlass.Int32(-1)
+                            if bm2 == cutlass.Int32(-1):
+                                c_hi_s = s_mt_cnt[0]
+                            elif bm2 < cutlass.Int32(M - 1):
+                                c_hi_s = s_mt_cnt[bm2 + cutlass.Int32(1)]
+                            s_iscalars[6] = c_hi_s
                 cute.arch.barrier()
 
                 if s_iscalars[1] == cutlass.Int32(1) and s_swi[0] > cutlass.Int32(0):
@@ -1874,9 +1988,13 @@ def _compile(dtype, bs, n, K, cr_val, M, R, band_acc, place_mode, kC, threads, u
     p4_fast = os.environ.get("OP21_P4_FAST", "1") == "1"
     # iter9 A/B: OP21_P2_NATIVE=0 restores the cvt->fp32 ladder (16-bit only)
     p2_nat = os.environ.get("OP21_P2_NATIVE", "1") == "1"
+    # iter13 A/B: OP21_FB_LOGFALSI=0 restores the blind-bisection fallback;
+    # OP21_FB_ALPHA probes the interior aim exponent (default 0.2)
+    fb_lf = os.environ.get("OP21_FB_LOGFALSI", "1") == "1"
+    fb_al = float(os.environ.get("OP21_FB_ALPHA", "0.2"))
     # key on DERIVED compile inputs (t/use256/min_bpm), not raw bs — one
     # binary serves every BS in the same bucket (n stays: per-N fracs)
-    key = (dtype, t, use256, min_bpm, n, K, cr_val, M, R, band_acc, place_mode, kC, unroll, fuse, smem, p4_rs, qbins, p4_fast, p2_nat)
+    key = (dtype, t, use256, min_bpm, n, K, cr_val, M, R, band_acc, place_mode, kC, unroll, fuse, smem, p4_rs, qbins, p4_fast, p2_nat, fb_lf, fb_al)
     if key in _compiled:
         return _compiled[key]
     _dtn = {torch.float32: "fp32", torch.bfloat16: "bf16",
@@ -1897,7 +2015,8 @@ def _compile(dtype, bs, n, K, cr_val, M, R, band_acc, place_mode, kC, threads, u
                              kC_override=kC, fracs=fracs, fuse_collect=fuse,
                              smem_row_elems=(n if smem else 0),
                              p4_rank_scatter=p4_rs, qbins=qbins,
-                             p4_smallbin=p4_fast, p2_native=p2_nat)
+                             p4_smallbin=p4_fast, p2_native=p2_nat,
+                             fb_logfalsi=fb_lf, fb_alpha=fb_al)
     nr, nc, nb = cute.sym_int(), cute.sym_int(), cute.sym_int()
     ia = 32 if use256 else 16
     in_f = cr.make_fake_compact_tensor(_DT[dtype], (nr, nc), stride_order=(1, 0), assumed_align=ia)
