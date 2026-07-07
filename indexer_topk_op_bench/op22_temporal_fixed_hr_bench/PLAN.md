@@ -1,5 +1,12 @@
 # op22 — GVR op21 vs rivals on temporal-synth FIXED-hit-rate data (B200)
 
+> **STATUS: CLOSED (iter2, 2026-07-07).** Full grid 81/81 batches, 3834
+> recs × 3 scenarios, 0 errors. Deliverable REPORT.html final. Verdict:
+> op21 wins only on real-scenario data (radix/op21 1.089/0.873/0.827
+> fp32/bf16/fp16); loses both stress scenarios via msc refine +
+> slot-overflow fallbacks (§7 of REPORT.html, MECH_FINDINGS.md).
+> See RESUME_PROMPT.md for the final state block.
+
 > Campaign start plan, authored 2026-07-07 on umbriel-b200-027 at op21 HEAD
 > f51f50f4da (branch `omni/op21-gvr-prod`). The previous node timed out; this
 > file + RESUME_PROMPT.md are the complete pickup context for a fresh B200

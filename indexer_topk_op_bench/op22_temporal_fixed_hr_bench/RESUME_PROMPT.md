@@ -20,13 +20,15 @@ order:
 3. `indexer_topk_op_bench/report/report.html` + `report/gen_report.py` —
    the report style/data-method to mirror (§1 seqlen BS=1, §2 BS-scaling).
 
-## State (2026-07-07 ~13:4xZ, iter2-pre MIGRATION CHECKPOINT off umbriel-b200-049)
+## State: CLOSED (2026-07-07 ~14:2xZ, iter2 final on umbriel-b200-019)
+- CAMPAIGN CLOSED at iter2. Full grid 81/81 batches DONE (main 54 +
+  bs_hugeN 27), parsed (3834 recs × 3 scenarios, 0 errors), REPORT.html
+  final (5.42 MB, 0 <script>). No measurement ran on b200-019 — the
+  b200-049 session finished all worst-hugeN batches at 13:49Z before
+  handoff (the "worst 5/9" note below was stale at write time).
 - W1–W4 DONE (iter1 @2dac88d7f7); iter1.5 checkpoint @78e40c6945.
-- W5 MEASUREMENT: MAIN GRID 54/54 DONE + PARSED (results.jsonl fresh for
-  all 3 scenarios). Node split: b200-040 = real 18 + best 16;
-  b200-049 = best bs_K2048_{bf16,fp16} + worst 18 (+hugeN below).
-  bs_hugeN: real 9/9, best 9/9 DONE; worst 5/9 at checkpoint (driver
-  auto-redoes the in-flight batch on resume).
+- W5 MEASUREMENT: ALL DONE. Node split: b200-040 = real 18 + best 16;
+  b200-049 = best bs_K2048_{bf16,fp16} + worst 18 + ALL bs_hugeN 27/27.
 - ✅ MECHANISM RESOLVED (was the ⚠️ headline signal; full detail
   MECH_FINDINGS.md, artifacts mech_check_iters.py/.jsonl,
   mech_crossover.py): tie-density/non-convergence FALSIFIED (replay 162/162
@@ -53,22 +55,15 @@ order:
 - op21 kernel object unchanged: gvr_ms_auto @f51f50f4da; upstream PR-1
   integration remains PAUSED — bench-only.
 
-## Next (on the NEW B200 node, same NFS — nothing to copy, /tmp loses only
-## disposable task logs)
-1. Preflight: temps <50C idle (019/035 GPU0 broken-cooling → GPU1 there);
-   co-tenancy by output-file growth; python3 -c "import torch, cutlass".
-2. Finish stretch grid (auto-skips 23 done batches, redoes in-flight):
-   `cd indexer_topk_op_bench/op22_temporal_fixed_hr_bench && OUT=results_b200_op22
-   GPU=0 SWEEPS=bs_hugeN ./drive_nsys_op22.sh 2>&1 | tee -a
-   ../results_b200_op22/drive_hugeN.log`  (~4 batches ≈ 30-40 min)
-3. `python3 parse_op22.py` → `python3 gen_report_op22.py` (REPORT.html;
-   verify prints 0 <script>) → review TL;DR/§6/§7 text, check the §7
-   build-time worst-prediction line reads sensibly.
-4. If worst hugeN absolute µs matter for a figure: worst is all b200-049 +
-   the 4 remaining hugeN batches from the NEWEST node — add that hostname
-   to the report meta line (edit gen_report_op22.py meta string).
-5. W7 commit `[op22 iter2]` (`git commit -s`, trailers Made-with +
-   Co-Authored-By Claude Fable 5); update PLAN/RESUME State to CLOSED.
+## Next: NONE — campaign closed. Deliverable = REPORT.html (bilingual,
+## CSS-only). Final TL;DR (cold geomean, rival/op21, >1 ⇒ op21 faster,
+## now INCLUDES hugeN cells): real cutedsl 1.244/1.151/1.128 + radix
+## 1.089/0.873/0.827 (fp32/bf16/fp16); best radix 0.721/0.531/0.508;
+## worst radix 0.977/0.757/0.724. op21 wins only on real-scenario data;
+## §7 mechanism (msc refine + slot-overflow fallbacks) explains both
+## stress losses; build-time worst-prediction confirmed (t_worst/t_real:
+## 1-CTA 0.769 / multi-CTA 0.791 <1, ms_auto 1.142 >1). Follow-on levers
+## live in op13 (cheaper-P2) and op21 RESUME (PR-1 integration, PAUSED).
 
 ## Environment / recovery (NFS-shared; a node timeout loses only /tmp)
 1. `cd` this checkout; `git log --oneline -1` should show f51f50f4da or a
