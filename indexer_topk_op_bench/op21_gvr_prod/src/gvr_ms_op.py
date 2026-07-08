@@ -196,9 +196,17 @@ class GvrSandwichKernel(GvrMultiThreshKernel):
     def __init__(self, *a, band_accept=64, fuse_collect=False, smem_row_elems=0,
                  qfracs=(0.75, 0.5, 0.25), p4_rank_scatter=True, qbins=256,
                  p4_smallbin=True, p2_native=True, fb_logfalsi=True,
-                 fb_alpha=0.2, **kw):
+                 fb_alpha=0.2, slot_scale=1, **kw):
         super().__init__(*a, **kw)
         self.band_accept = int(band_accept)
+        # op25 S1a: fused-collect slot-capacity scale. The deep collect
+        # column (qfracs[0] ~0.92) that fixes the h>0.75 pair01 cliff pays a
+        # mid-h overflow at the stock per-thread cap (host replay: Pro-real
+        # h<0.5 bucket fast 0.07 at cap-model 4096 vs 0.94 at 8192); x2
+        # doubles the slot smem (num_threads*slot_cap*8B, +40-64KB) which is
+        # only allocated on the fused path (bs <= NUM_SMS) so high-BS
+        # residency is untouched.
+        self.slot_scale = max(1, int(slot_scale))
         # op21 iter13 (HLS): log-count regula-falsi fallback refine. The
         # fallback bracket [s_thr[1], s_thr[2]] arrives with ladder-KNOWN
         # counts (s_iscalars[5]/[6]); CCDF tails are ~exponential so log
@@ -283,8 +291,8 @@ class GvrSandwichKernel(GvrMultiThreshKernel):
         self.pred_col = 1 if self.M_thr >= 3 else 0
         # slot_cap needs headroom over the per-thread mean lambda=cand/threads
         # (lambda + ~4*sqrt(lambda)); at t=1024 kC/nt=5 overflows constantly
-        # (measured N65536 BS64 -7%), so floor at 8.
-        self.slot_cap = max(8, self.kC // self.num_threads)
+        # (measured N65536 BS64 -7%), so floor at 8. op25: x slot_scale.
+        self.slot_cap = max(8, self.kC // self.num_threads) * self.slot_scale
         # deferred direct-write stores values nowhere; indices-only op
         assert not self.return_output_values, "sandwich is indices-only"
 
@@ -1964,6 +1972,41 @@ def _load_straddle(K, n, M, dtype_name="fp32"):
     return tuple(fr[:M])
 
 
+# ---------------------------------------------------------------------------
+# op25 S1a: per-K static ladder ship table. Host-replay screened 4 rounds
+# (op25_hls_expand/screen_qfracs.py + screen_r4_m4.py, 30290 rows/round:
+# op22rr fp32 grid + op24 392-combo hr sweep + 29.8k REAL Pro multi-turn
+# transitions), then silicon-decomposed (ab_decomp.py):
+#   w3a = (0.92, 0.45, 0.048), M_thr=4  ==  ZERO fast-path tax vs stock
+#     - 0.92 col fixes the h>0.75 pair01 cliff (Pro real fast 0.31->0.96;
+#       the cliff is 67% of real Pro decode steps)
+#     - 0.048 tail covers the adversarial all_ge pole (op22rr worst 0->0.78)
+#     - M=5 variants (wide4b) were admission-equal but pay +7..19% on fast
+#       rows (count-loop column not divided by C) -> rejected on silicon
+#   K2048 keeps the stock ladder (deep cols regress the v32 band geometry:
+#   real 0.75 -> 0.375 in replay, three independent screens).
+# slot_scale=2 rides along N-gated (<65536): free at t=512, +12..21% at
+# t=1024 (decomp) — it unlocks the Pro low-h collect overflow (N~9.4K).
+# OP25_QFRACS overrides ("base" = stock triple); OP25_SLOTCAP scales slots.
+# ---------------------------------------------------------------------------
+_QFRACS_STOCK = (0.75, 0.5, 0.25)
+_QFRACS_SHIP = {512: (0.92, 0.45, 0.048),
+                1024: (0.92, 0.45, 0.048)}
+
+
+def _qfracs_for(K):
+    env = os.environ.get("OP25_QFRACS")
+    if env == "base":
+        return _QFRACS_STOCK
+    if env:
+        return tuple(float(x) for x in env.split(","))
+    return _QFRACS_SHIP.get(int(K), _QFRACS_STOCK)
+
+
+def _slot_scale():
+    return int(os.environ.get("OP25_SLOTCAP", "2"))
+
+
 def _config(bs, n):
     t = 1024 if (bs <= NUM_SMS and n >= 65536) else 512
     use256 = (n >= 16384)
@@ -1977,8 +2020,14 @@ def _config(bs, n):
 
 
 def _compile(dtype, bs, n, K, cr_val, M, R, band_acc, place_mode, kC, threads, unroll=4,
-             fuse=False, smem=False):
+             fuse=False, smem=False, qfracs=None, slot_scale=1):
     t, use256, min_bpm, qbins = _config(bs, n)
+    # op25 decomp (b200-027): slot_scale=2 is FREE at n<65536 (t=512, slot
+    # smem 80KB) and a +12..21% systematic tax at n>=65536 (t=1024, 131KB)
+    # -> N-gate it to the small-N ms regime, which is also where the real
+    # Pro overflow rows live (N~9.4K).
+    if n >= 65536:
+        slot_scale = 1
     if threads is not None:
         t = threads
     qbins = min(qbins, t)
@@ -1994,7 +2043,8 @@ def _compile(dtype, bs, n, K, cr_val, M, R, band_acc, place_mode, kC, threads, u
     fb_al = float(os.environ.get("OP21_FB_ALPHA", "0.2"))
     # key on DERIVED compile inputs (t/use256/min_bpm), not raw bs — one
     # binary serves every BS in the same bucket (n stays: per-N fracs)
-    key = (dtype, t, use256, min_bpm, n, K, cr_val, M, R, band_acc, place_mode, kC, unroll, fuse, smem, p4_rs, qbins, p4_fast, p2_nat, fb_lf, fb_al)
+    qfracs = tuple(qfracs) if qfracs else (0.75, 0.5, 0.25)
+    key = (dtype, t, use256, min_bpm, n, K, cr_val, M, R, band_acc, place_mode, kC, unroll, fuse, smem, p4_rs, qbins, p4_fast, p2_nat, fb_lf, fb_al, qfracs, slot_scale)
     if key in _compiled:
         return _compiled[key]
     _dtn = {torch.float32: "fp32", torch.bfloat16: "bf16",
@@ -2016,7 +2066,8 @@ def _compile(dtype, bs, n, K, cr_val, M, R, band_acc, place_mode, kC, threads, u
                              smem_row_elems=(n if smem else 0),
                              p4_rank_scatter=p4_rs, qbins=qbins,
                              p4_smallbin=p4_fast, p2_native=p2_nat,
-                             fb_logfalsi=fb_lf, fb_alpha=fb_al)
+                             fb_logfalsi=fb_lf, fb_alpha=fb_al,
+                             qfracs=qfracs, slot_scale=slot_scale)
     nr, nc, nb = cute.sym_int(), cute.sym_int(), cute.sym_int()
     ia = 32 if use256 else 16
     in_f = cr.make_fake_compact_tensor(_DT[dtype], (nr, nc), stride_order=(1, 0), assumed_align=ia)
@@ -2031,7 +2082,7 @@ def _compile(dtype, bs, n, K, cr_val, M, R, band_acc, place_mode, kC, threads, u
 
 def gvr_sw(logits, pre_idx, seq_lens, index_topk, compress_ratio=1, out=None,
            M=4, R=2, band_acc=64, place_mode=3, kC=None, threads=None, fuse=None,
-           smem=None):
+           smem=None, qfracs=None, slot_scale=1):
     bs, n = logits.shape
     if out is None:
         out = torch.empty(bs, index_topk, dtype=torch.int32, device="cuda")
@@ -2048,7 +2099,7 @@ def gvr_sw(logits, pre_idx, seq_lens, index_topk, compress_ratio=1, out=None,
     smem = bool(smem) and bool(fuse) and logits.dtype == torch.float32 and n <= 8192
     compiled = _compile(logits.dtype, bs, n, index_topk, compress_ratio, int(M), int(R),
                         int(band_acc), int(place_mode), kC, threads, fuse=bool(fuse),
-                        smem=smem)
+                        smem=smem, qfracs=qfracs, slot_scale=int(slot_scale))
     compiled(logits, pre_idx, seq_lens, None, out)
     return out
 
@@ -2165,7 +2216,10 @@ def gvr_ms(logits, pre_idx, seq_lens, index_topk, compress_ratio=1, out=None,
     # where slot overflow makes fused collect a measured 13% loss at large N).
     bs = logits.shape[0]
     fuse = bool(bs <= NUM_SMS and 4 * int(index_topk) <= 5120)
+    # op25 S1a: per-K screened ladder + slot-capacity scale (see table above)
+    qf = _qfracs_for(index_topk)
     return gvr_sw(logits, pre_idx, seq_lens, index_topk,
                   compress_ratio=compress_ratio, out=out,
-                  M=4, R=int(R), band_acc=64, place_mode=5, threads=threads,
-                  fuse=fuse)
+                  M=len(qf) + 1, R=int(R), band_acc=64, place_mode=5,
+                  threads=threads, fuse=fuse, qfracs=qf,
+                  slot_scale=_slot_scale())

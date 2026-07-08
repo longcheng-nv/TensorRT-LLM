@@ -39,6 +39,7 @@ _BENCH = _HERE.parents[1]
 sys.path.insert(0, str(_BENCH / "ops"))
 sys.path.insert(0, str(_BENCH / "harness"))
 sys.path.insert(0, str(_HERE))
+from gvr_ms_op import _qfracs_for, _slot_scale  # noqa: E402
 from gvr_ms_op import (  # noqa: E402
     GvrSandwichKernel, gvr_ms, NUM_SMS, _DT, _INT_MAX, pack2_16_from_f32,
     setge_add2_16, setge_mask2_16, pair_half_f32_16, pair_sum_i32_16,
@@ -1586,8 +1587,13 @@ def _compile(dtype, n, K, cr_val, C, threads, dist_p1=False, dist_p4=False):
         fb_ds = fb_env == "1"
     else:
         fb_ds = n >= 65536
+    # op25 S1a: per-K screened ladder + slot-capacity scale (table +
+    # OP25_QFRACS / OP25_SLOTCAP knobs live in gvr_ms_op). msc always runs
+    # n>=65536/t=1024 where slot_scale=2 measured +12..21% (decomp) -> 1.
+    qfracs = _qfracs_for(K)
+    slot_scale = 1
     key = (dtype, n, K, cr_val, C, threads, dist_p1, dist_p4, p4_rs, p4_fast,
-           p3_push, p2_nat, fb_lf, fb_al, fb_ds)
+           p3_push, p2_nat, fb_lf, fb_al, fb_ds, qfracs, slot_scale)
     if key in _compiled:
         return _compiled[key]
     use256 = (n >= 16384)
@@ -1595,12 +1601,14 @@ def _compile(dtype, n, K, cr_val, C, threads, dist_p1=False, dist_p4=False):
                               compress_ratio=cr_val, use_256bit_load=use256,
                               enable_unroll_4=True, enable_phase3_unroll=True,
                               min_blocks_per_mp=1, return_output_values=False,
-                              M_thr=4, R_rounds=1, band_accept=64, place_mode=5,
+                              M_thr=len(qfracs) + 1, R_rounds=1, band_accept=64,
+                              place_mode=5,
                               fuse_collect=True, C_cta=C, dist_p1=dist_p1,
                               dist_p4=dist_p4, p4_rank_scatter=p4_rs,
                               p4_smallbin=p4_fast, p3_push=p3_push,
                               p2_native=p2_nat, fb_logfalsi=fb_lf,
-                              fb_alpha=fb_al, fb_dist=fb_ds)
+                              fb_alpha=fb_al, fb_dist=fb_ds,
+                              qfracs=qfracs, slot_scale=slot_scale)
     nr, nc, nb = cute.sym_int(), cute.sym_int(), cute.sym_int()
     ia = 32 if use256 else 16
     in_f = cr.make_fake_compact_tensor(_DT[dtype], (nr, nc), stride_order=(1, 0), assumed_align=ia)
@@ -1644,6 +1652,18 @@ def gvr_ms_auto(logits, pre_idx, seq_lens, index_topk, compress_ratio=1,
         return gvr_msc(logits, pre_idx, seq_lens, index_topk, compress_ratio,
                        out=out, C=8)
     if index_topk >= 2048 and n >= 196608 and bs <= 4:
+        return gvr_msc(logits, pre_idx, seq_lens, index_topk, compress_ratio,
+                       out=out, C=8)
+    # op25 Step-4 probe (b200-027, op22rr real/best/worst, 72 cells): fp32
+    # C=8 vs C=4 gm 1.07-1.09, up to 1.19x at K1024 262K, and it flips most
+    # R2 radix losses (radix/c8 >= 1 in 17-19/24). Only K512 65K prefers
+    # C=4 (0.90-0.98). The old fp32-C8 falsification predates iter16 dist
+    # fallback + the op25 ladder (both changed what the extra CTAs amortize).
+    # bs <= 8 is the MEASURED domain: at bs=16 (128 CTAs in 8-wide clusters)
+    # the P0 grid regressed 0.80-0.98 vs C=4 — the known GPC wave_cap
+    # contention wall — so the rule stops where the data stops.
+    if (not dt16 and index_topk < 2048 and bs <= 8
+            and (n >= 131072 or (n >= 65536 and index_topk >= 1024))):
         return gvr_msc(logits, pre_idx, seq_lens, index_topk, compress_ratio,
                        out=out, C=8)
     if n >= 65536 and bs * 4 <= NUM_SMS:
