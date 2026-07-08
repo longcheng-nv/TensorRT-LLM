@@ -11,7 +11,9 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OP21="$(cd "$HERE/.." && pwd)"
 GPU="${GPU:-0}"
 SCENARIOS="${SCENARIOS:-best worst real}"
-# SUFFIX distinguishes probe variants (e.g. SUFFIX=_a01 + OP21_FB_ALPHA=0.1)
+# KNOB selects the A/B arm env var (iter13 OP21_FB_LOGFALSI, iter14
+# OP21_FB_DIST); SUFFIX names the output dir variant.
+KNOB="${KNOB:-OP21_FB_LOGFALSI}"
 OUT="$OP21/results/nsys/iter13_ab_hls${SUFFIX:-}"
 mkdir -p "$OUT"
 cd "$OP21"
@@ -42,7 +44,7 @@ for scen in $SCENARIOS; do
     nsys profile -t cuda,nvtx -c cudaProfilerApi --capture-range-end=stop \
     -f true -o "$rep" \
     python3 scripts/ab_hls_logfalsi.py --scenario "$scen" \
-    --out "$rep.jsonl" --reps 30 > "$rep.out" 2>&1
+    --env-knob "$KNOB" --out "$rep.jsonl" --reps 30 > "$rep.out" 2>&1
   if grep -q "AB BATCH DONE" "$rep.out"; then
     touch "$rep.done"; echo "OK $scen"
   else

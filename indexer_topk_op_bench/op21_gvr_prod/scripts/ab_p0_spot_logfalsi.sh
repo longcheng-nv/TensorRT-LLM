@@ -5,7 +5,9 @@
 # Usage: GPU=1 ./scripts/ab_p0_spot_logfalsi.sh
 set -u
 cd "$(dirname "$0")/.."
-OUT=results/nsys/iter13_p0_spot
+# KNOB selects the arm env (iter13 OP21_FB_LOGFALSI / iter14 OP21_FB_DIST)
+KNOB="${KNOB:-OP21_FB_LOGFALSI}"
+OUT="${OUT:-results/nsys/iter13_p0_spot}"
 mkdir -p "$OUT"
 CELLS="512:fp32:262144:1 1024:fp32:65536:1 1024:fp32:262144:1 \
 2048:fp32:262144:1 1024:bf16:262144:1"
@@ -15,7 +17,7 @@ for cell in $CELLS; do
     [ "$arm" = old ] && LF=0 || LF=1
     rep="$OUT/${arm}_k${K}_${DT}_n${N}_bs${BS}"
     [ -f "${rep}.nsys-rep" ] && { echo "skip $rep"; continue; }
-    OP21_FB_LOGFALSI=$LF env -u GITHUB_TOKEN -u HF_TOKEN \
+    env -u GITHUB_TOKEN -u HF_TOKEN "$KNOB=$LF" \
       CUDA_VISIBLE_DEVICES=${GPU:-0} \
       nsys profile -c cudaProfilerApi --capture-range-end=stop -f true \
       -o "$rep" python3 scripts/nsys_run_auto.py "$K" "$DT" "$N" "$BS" 60 \

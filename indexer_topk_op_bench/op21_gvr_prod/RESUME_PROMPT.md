@@ -14,6 +14,27 @@ Continue the op21 GVR production-kernel campaign in
    tables (canonical numbers live here).
 3. `op21_gvr_prod/LEARNINGS.md` — falsified levers + mechanisms.
 
+## State after iter14 (2026-07-08, HLS Step 2 SHIPPED, N-gated)
+- **Distributed msc fallback SHIPPED** (`src/gvr_msc_op.py` _fb_dist:
+  slice passes + cluster count-merge + push-collect + leader P4; vendored
+  phase3 prefix contract BYPASSED). **Default = N-gated `n >= 524288`**
+  (OP21_FB_DIST=1/0 forces): N<=262144 binaries bit-identical to iter13
+  (P0 verdict untouched); hugeN gets the tail.
+- **nsys A/B (dist everywhere, iter13_ab_hls_dist/)**: best gm 1.250 /
+  **worst gm 1.250** (the all_ge scenario falsi couldn't touch) / real
+  1.059; K2048 1M 1.99x both stress scenarios; real hugeN net-positive
+  (K512 1M 1.756) — the radix-wins-at-hugeN region.
+- **Why gated**: _fb_dist code mass taxes the msc FAST path ~4%
+  SYSTEMATIC (P0 spot 3/5 one-signed; threatens thin 262K P0 wins).
+  LEARNINGS iter14: code mass is a currency; gate COMPILATION via the
+  n dispatch key, not runtime branches.
+- Gates all green incl. op22 stress 456/456 with dist forced AND with the
+  final N-gated default; OFF-arm smoke green.
+- HLS campaign state: Step 0 (tau3) + Step 1 (log-falsi) + Step 2
+  (distributed fallback) ALL validated on silicon. Remaining HLS items:
+  Step 3 rho-aware placement (deferred, 5-7% trim, needs cross-step
+  state); worst-case residual now ~56-70us at 1M (was 245).
+
 ## State after iter13 (2026-07-07, HLS Step 0 + Step 1 SHIPPED)
 - **HLS log-falsi fallback SHIPPED default-ON** (src/gvr_ms_op.py +
   gvr_msc_op.py; `OP21_FB_LOGFALSI=0` = exact legacy arm, `OP21_FB_ALPHA`

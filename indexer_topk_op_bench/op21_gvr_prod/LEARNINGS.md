@@ -293,3 +293,23 @@
   The proto's known blind spot (leader-bound msc recount) is untouched —
   Step 2 (cluster-parallel recount via the iter7 st.shared::cluster
   primitives) is where the remaining 116us-at-1M tail lives.
+
+## Iter 14 (distributed fallback) — mechanisms
+- **Slice passes + count merge work because counts are ADDITIVE across
+  slices** — the only cross-CTA state is one Int32 per pass. The collect
+  bypasses the vendored full-row prefix contract entirely (slice compact
+  + push at global prefix): never half-use a contract you can't satisfy
+  (iter2 lesson applied in reverse).
+- **Cluster-barrier cost did NOT kill it** (unlike dist-P1/P4, iters 3/4):
+  those distributed FIXED us-scale serial work; here each barrier pair
+  buys (1-1/C) of a FULL-ROW pass. The red line is about the ratio of
+  saved-work to barrier, not about distribution per se.
+- **Code mass is a real currency**: ~300 lines of fallback code taxed the
+  msc fast path a systematic ~4% (P0 spot 3/5 cells one-signed) even
+  though the fast path never executes it. iter13's pocket was lottery
+  (mixed signs); iter14's was systematic — the distinction is sign
+  consistency across independent binaries. Mitigation = dispatch-gate the
+  COMPILATION (fb_dist keys on n), not runtime branches.
+- **worst-scenario all_ge misses are distributed-fallback's best case**:
+  hi-end + expansion passes (which log-falsi could not remove) all become
+  P/C. iter13+iter14 together cover both miss geometries.

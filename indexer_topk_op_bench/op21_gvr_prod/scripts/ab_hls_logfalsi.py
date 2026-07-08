@@ -65,6 +65,9 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--reps", type=int, default=30)
     ap.add_argument("--warmup", type=int, default=10)
+    ap.add_argument("--env-knob", default="OP21_FB_LOGFALSI",
+                    help="arm-selecting env var: old=0, new=1 "
+                         "(iter13 OP21_FB_LOGFALSI; iter14 OP21_FB_DIST)")
     args = ap.parse_args()
     dtype = DTYPES[args.dtype]
 
@@ -86,11 +89,11 @@ def main():
                         "gvr_ms_auto", K, dtype, N, BS, cr,
                         logits_row, preidx_row)
 
-                    # gvr_ms_auto re-reads OP21_FB_LOGFALSI at EVERY
-                    # invocation (_compile is lazy + env-keyed), so the env
-                    # must be pinned per-call, not per-build.
-                    def wrapped(_c=call, _e=env):
-                        os.environ["OP21_FB_LOGFALSI"] = _e
+                    # gvr_ms_auto re-reads the knob env at EVERY invocation
+                    # (_compile is lazy + env-keyed), so the env must be
+                    # pinned per-call, not per-build.
+                    def wrapped(_c=call, _e=env, _k=args.env_knob):
+                        os.environ[_k] = _e
                         _c()
                     arms[arm] = (wrapped, keep)
                     rec.setdefault("ms_path", extra.get("ms_path"))

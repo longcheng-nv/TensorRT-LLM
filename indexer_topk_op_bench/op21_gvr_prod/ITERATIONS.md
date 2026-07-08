@@ -793,3 +793,57 @@ run_m3_sweep.sh,results_m3.csv}. NOTE: port/ (PR-1 artifact) untouched and
 FROZEN at iter11 semantics — port/assemble_ms.py now fails loudly on the
 shifted src/ line ranges by design; log-falsi is a post-PR-1 candidate,
 not part of PR-1.
+
+## Iter 14 — 2026-07-08 — HLS Step 2: distributed msc fallback (N-gated)
+
+**Lever**: the msc fallback's leader-only full-row passes (the remaining
+HLS tail) become slice passes on ALL C CTAs + one cluster count-merge per
+pass; the collect is a slice stream-compact pushed into the leader's smem
+at global prefix offsets (iter7 st.shared::cluster pattern); the leader
+runs phase4_histogram_snap directly on the gathered candidates. The
+vendored phase3 full-row prefix contract (iter2 646/1024-hole lesson) is
+BYPASSED entirely — never half-used. All cross-CTA loop trips derive from
+replicated values (merged global counts + replicated bracket) so cluster
+barrier pairs always match. done=1 (collect-all) pays ONE distributed
+count to fill smem_ptcnt (leader path paid a FULL-row recount).
+`src/gvr_msc_op.py`: _fb_slice_count_ge / _fb_dist_count / _fb_dist +
+fb_dist ctor flag; ms single-CTA path untouched.
+
+**Gates (all green, b200-028)**: msc C{2,4,8} smokes + real x C 180/180 +
+adversarial preIdx 36/36 + adversarial-band 72/72 x2 + real 16-bit
+360/360 + synth 54 + real 60 + **op22 stress 456/456** + OFF-arm
+(OP21_FB_DIST=0) smoke; re-ran gate_op22 + real x C on the FINAL N-gated
+default (below).
+
+**nsys paired A/B (op22 bundles, arms = OP21_FB_DIST 0/1, both arms carry
+iter13 log-falsi; results/nsys/iter13_ab_hls_dist/)**:
+| scenario | gm old/new | headline |
+|---|---|---|
+| best | 1.250 (14/15) | K2048 1M 114.5->57.4us (**1.993x**); K512/K1024 1M ~1.7x; 262K column ~1.25x |
+| worst | **1.250** (13/15) | the scenario iter13 could NOT touch (all_ge misses: hi-end+expansion passes are now P/C too): K2048 1M 1.989x |
+| real | 1.059 (9/15) | K512 1M 1.756; light-fallback pockets 0.941-0.957 |
+| ALL | **1.183** | exactness ok/ok 45/45 |
+Cumulative HLS effect within the iter14 run: best K2048 1M = 244.7us
+(pre-iter13 axis) -> 57.4us. Note a cross-RUN absolute drift on the
+ms_1cta 16K cells (iter13 A/B ran ~26us, iter14 ~17us — iter13's run had
+GPU0 gate co-tenancy); the paired-ratio protocol is immune, per-run
+ratios are the verdict.
+
+**P0 spot (KNOB=OP21_FB_DIST, results/nsys/iter14_p0_spot/)**: dist-ON
+taxes the msc FAST path consistently: K512 262K -4.2%, K1024 65K -3.6%,
+K1024 262K -4.2%, K2048 262K +0.8%, bf16 flat — ~300 lines of _fb_dist
+code mass (register/I-cache) in every msc binary. This is SYSTEMATIC
+(3/5 one-signed), unlike iter13's mixed-sign lottery, and threatens the
+thin P0 wins (1.038-1.064 at 262K).
+
+**SHIPPED RULE — N-gated default** (`fb_dist = n >= 524288` unless
+OP21_FB_DIST forces): every N<=262144 msc binary stays BIT-IDENTICAL to
+iter13 (P0 verdict tables untouched by construction); hugeN keeps the
+1.7-2.0x stress collapse AND the real-data net win (K512 1M 1.756, hugeN
+gm ~1.20) — exactly the region where radix rivals currently beat op21 on
+real data (op22: radix 0.873/0.827 at hugeN). Same compile-time dispatch
+class as the C8 rules (CUDA-graph identity by construction).
+
+**Trade recorded**: 262K stress cells forgo the dist ~1.25x (keep iter13
+falsi wins); the alternative (default ON everywhere) risked flipping thin
+P0 262K cells. Revisit only with a code-mass diet for _fb_dist.
