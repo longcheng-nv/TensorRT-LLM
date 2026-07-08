@@ -77,9 +77,30 @@ memory tier) + this kc50 wash (work-reduction insensitivity) triangulate
 the same floor. R1 BS=1 small-N stays structural (radix/sglang 2-3x);
 product answer remains dispatch.
 
-## Iter 6 — final config re-validation (v2)
+## Iter 6 — final config re-validation (v2) — DONE
 
 Config: w3a ladder (K512/K1024) + stock (K2048) + slot_scale 2@n<65536 +
-C8 rule. Gates: full suite rerun. nsys: ab_qfracs _v2 3 scenarios + P0
-17-cell no-regress grid (nsys_verdict msa fp32, iter16 anchor 1.298
-17/17). Results below when green.
+C8 rule (bs<=8 after the P0 catch below).
+
+- Gates (final config): synth 54 + real 60 + realxC 180 + adversarial 36
+  + band 72 + op22 stress 456 + 16-bit 360 — ALL GREEN (1218 asserts).
+- ab_qfracs _v2 (base=iter16-equiv / ship / radix, 24 cells x 3 scen):
+  * real : gm base/ship 1.184, radix/ship 1.005 (16/24), 7 flips->WIN.
+    K1024 262K BS1 2.105x, K512 65K 1.891x, 131K BS16 1.70-1.80x.
+  * worst: gm 1.404 (K512/K1024 half = 1.54; K2048 rows falsified as
+    measurement spread by micro-check — arms bit-identical there,
+    wall med 40.2 vs 40.3us), radix flips 7 (65-262K BS1 + 8K BS512).
+  * best : gm 0.968 — M=4 killed the v1 tax (was 0.880); residual
+    small-N BS1 pocket 0.86-0.89 = wider band (0.92->0.45 gap) doubles
+    P4 cand where P4 dominates; flips NO rival outcome (R1 both-lose).
+- P0 grid: first pass 1.178 14/17 — REAL regression at K1024xBS16
+  (0.80-0.98): C8 rule at bs<=18 put 16x8=128 CTAs into GPC wave_cap
+  contention (the known cluster-8 wall). Rule tightened to the measured
+  domain bs<=8, 3 cells re-run: **1.274, 17/17** (iter16 anchor band
+  1.276-1.298, cross-GPU noise). LESSON: dispatch rules stop where the
+  data stops; the P0 gate caught exactly the extrapolated region.
+- Session /cost at wrap: ~$172.85 (406 msgs; 116M cache-read tokens).
+
+Remote branch op25-hls-topk: c91fd02071 (baseline) -> d5455ed1ca (ship).
+Follow-up (not this campaign): op22rr full-grid rescan incl. sglang arm
++ 16-bit perf probe of the new ladder + K2048-worst falsi economics.
