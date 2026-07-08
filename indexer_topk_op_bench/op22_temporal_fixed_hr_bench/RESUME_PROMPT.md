@@ -83,7 +83,7 @@ order:
    canonical metric; `real`-scenario ratios should roughly reproduce
    report.html's aggregate columns (sanity anchor).
 
-## ADDENDUM 2026-07-08: GVR-mCTA arm backfill IN FLIGHT (umbriel-b200-074)
+## ADDENDUM 2026-07-08: GVR-mCTA arm backfill — DONE (see final UPDATE below)
 - Goal: add "GVR multi-CTA (cuteDSL, PR#15198)" (`gvr_multicta_cutedsl`) to
   the re-tested §1/§2 dataset (all op22rr cases, same conditions).
 - sweep_op22rr.py now has ARMS_EXTRA + OP22RR_ARMS env filter (committed?
@@ -109,3 +109,20 @@ order:
   real-scenario + best seqlen K512/K1024 markers (≤14:06:38) are CLEAN.
 - Kill recipe: pkill -f drive_nsys_op22rr; pkill -f sweep_op22rr;
   pkill -f "nsys profile"; then re-check ps for respawns (kill -9 -PGID).
+
+### UPDATE 2026-07-08 ~16:05Z — BACKFILL COMPLETE (074 single-node; no node B)
+- NODEB_MC_PROMPT.md was pasted on 074 itself; fp16 was folded into this
+  node: GPU0 chained fp32→fp16(best), GPU1 waiter bf16-exit→fp16(real,worst).
+  All 81 batches done 15:55Z, before the 16:50Z node expiry.
+- SECOND INCIDENT (14:12Z): the ~14:10 recovery relaunched TWICE (14:12:07 +
+  14:12:37) → two fp32 drivers co-ran on GPU0 again, cross-deleting jsonl and
+  clobbering the same .nsys-rep. Both trees killed; best/{seqlen_K2048,
+  bs_K512}_fp32 purged + re-run. bf16/GPU1 stayed single-tenant (K2048 rerun
+  75s ≈ clean 71s reference) — bf16 kept. NOTE: .done marker mtime = LAST
+  toucher (all drivers touch the same file); it cannot identify the first
+  finisher — judge validity from log batch headers, not marker mtimes.
+- Finalize shipped @ 2c783d7d15: parse 81/81 reps (first pass had 4
+  transient ranges=0 parses; uncached by design, clean on re-run),
+  anchor drift base074/baseorig median 1.0053 p10 0.998 p90 1.033 (n=2718),
+  REPORT D=14220 rows (2718 mc), exactness 0 FAIL. Headline gm
+  t(1CTA)/t(mc): seqlen BS=1 1.36-1.41, bs grids 1.15-1.18.
