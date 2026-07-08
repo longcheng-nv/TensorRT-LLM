@@ -11,3 +11,15 @@ data/real_v2_*_laststep.pt
 op22_temporal_fixed_hr_bench/bundles/
 results_b200_op22/
 results_b300_op22/
+# op24 synth favorability sweep: generated bundles + replay/nsys results
+op24_synth_favorability/bundles/
+op24_synth_favorability/results/
+# op22rr radix-relative re-test: bundles + per-machine nsys results
+op22_temporal_fixed_hr_bench/bundles_rr/
+results_b200_op22rr/
+results_b300_op22rr/
+op22_temporal_fixed_hr_bench/_dryrun_rr/
+results_b200_op22rr_mc074/
+op22_temporal_fixed_hr_bench/REPORT.html.bak_pre_rr_20260708
+op22_temporal_fixed_hr_bench/mc074_gpu*.log
+_smoke_mc074/

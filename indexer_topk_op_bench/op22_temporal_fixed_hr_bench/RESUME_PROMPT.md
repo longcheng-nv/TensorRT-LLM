@@ -82,3 +82,19 @@ order:
 6. Absolute µs don't transfer across nodes — per-cell rival RATIOS are the
    canonical metric; `real`-scenario ratios should roughly reproduce
    report.html's aggregate columns (sanity anchor).
+
+## ADDENDUM 2026-07-08: GVR-mCTA arm backfill IN FLIGHT (umbriel-b200-074)
+- Goal: add "GVR multi-CTA (cuteDSL, PR#15198)" (`gvr_multicta_cutedsl`) to
+  the re-tested §1/§2 dataset (all op22rr cases, same conditions).
+- sweep_op22rr.py now has ARMS_EXTRA + OP22RR_ARMS env filter (committed?
+  check git log). Runs = 2 arms (mc + co-located gvr_cutedsl ANCHOR).
+- Launch (both resumable via .done markers, OUT=results_b200_op22rr_mc074):
+  GPU0: DTYPES=fp32 all scen, then DTYPES=fp16 SCENARIOS=worst  (36 batches)
+  GPU1: DTYPES=bf16 all scen, then DTYPES=fp16 SCENARIOS="real best" (45)
+  env: OP22RR_ARMS="gvr_cutedsl,gvr_multicta_cutedsl"; logs mc074_gpu{0,1}.log
+- After: python3 parse_op22_cached.py ../results_b200_op22rr_mc074
+  then python3 update_report_mc.py  (anchor-transfer onto orig baseline scale,
+  patches REPORT.html D blob/COL/SHORT/checkboxes/note, rewrites op22rr_*.csv
+  + new op22rr_mc_raw074.csv). Label GVR-mCTA, color #2ec4b6 (matches §3).
+- Smoke-validated end-to-end (K512 fp32 real seqlen): exact 18/18 ok,
+  cs dispatch 1/4 per PR heuristic, mc 1M BS=1 cold 43 vs 120 µs 1CTA.

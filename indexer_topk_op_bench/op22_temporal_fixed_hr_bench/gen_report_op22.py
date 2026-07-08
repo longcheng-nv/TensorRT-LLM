@@ -7,11 +7,13 @@ Mirrors the table design and report organization of
 ``indexer_topk_op_bench/report/report.html`` (dark NVIDIA theme, header
 card stack, latency+speedup chart pairs per section, Full-data section
 with CSV export + scrollable table, right-aligned numeric tables, KPI
-chips) — while staying a bilingual (zh default / en) CSS-only report with
-ZERO <script> tags: language and cold/warm-L2 toggles are radio +
-`:checked ~` CSS (op19 pattern); all charts are server-rendered inline
-matplotlib SVG (the reference report's Plotly/JS interactivity is
-replaced by pre-rendered per-(K,dtype) figures).
+chips). Bilingual (zh default / en); language and cold/warm-L2 toggles
+stay radio + `:checked ~` CSS (op19 pattern) for the prose/tables, and the
+CHARTS are the reference report's Plotly/JS pattern: one embedded JSON of
+all cells + checkbox/radio-driven redraw (scenario x op x K x dtype [x N]),
+replacing the former flat pre-rendered matplotlib SVG stack (~7 MB -> two
+panels). Section 7 integrates the op23 deterministic UB/LB bounds
+scenarios (loaded from --op23-root when present, selectable in the panel).
 
 Also emits op22_seqlen_data.csv / op22_bs_data.csv next to the report
 (reference §3 convention: per-op cold/warm µs + op21 cold speedups;
@@ -23,15 +25,10 @@ Usage: python3 gen_report_op22.py [--out-root ../results_b200_op22]
 """
 import argparse
 import csv
-import io
 import json
 import math
 import statistics as st
 from pathlib import Path
-
-import matplotlib
-matplotlib.use("svg")
-import matplotlib.pyplot as plt  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 
@@ -57,22 +54,22 @@ SCENARIOS = ["best", "worst", "real"]
 SCEN_LABEL = {"best": "BEST (beta_deep, hr=0.90)",
               "worst": "WORST (beta_shallow, hr=0.05)",
               "real": "REAL (aggregate, sampled hr)"}
+# op23 deterministic bounds scenarios (seqlen sweep only); loaded from
+# ../results_b200_op23 when present — see op23_op21_bounds/RESULTS_SUMMARY.md
+BOUNDS_SCENARIOS = ["ub", "lb"]
+ALL_SCEN = SCENARIOS + BOUNDS_SCENARIOS
+SCEN_LABEL.update({"ub": "UB (op23 hint-optimal construction)",
+                   "lb": "LB (op23 adversarial construction)"})
+SCEN_DASH = {"real": "solid", "best": "dash", "worst": "dot",
+             "ub": "dashdot", "lb": "longdash"}
 KS = [512, 1024, 2048]
 DTS = ["fp32", "bf16", "fp16"]
 K_MODEL = {512: "V4-Flash", 1024: "V4-Pro", 2048: "V3.2"}
 BS_ANCHOR_N = 131072  # latency-vs-BS panel anchor (mid-grid N)
 
-# ---- dark theme matching report/report.html ----
+# ---- dark theme tokens (shared with the Plotly layout in interactive_panels)
 BG, CARD, LINE, INK, GRN, GRN2 = ("#0f1419", "#161b22", "#2a3340",
                                   "#e6e6e6", "#76b900", "#9ecb3a")
-plt.rcParams.update({
-    "figure.facecolor": CARD, "axes.facecolor": BG,
-    "axes.edgecolor": LINE, "grid.color": LINE,
-    "text.color": INK, "axes.labelcolor": INK,
-    "xtick.color": INK, "ytick.color": INK,
-    "legend.facecolor": CARD, "legend.edgecolor": LINE,
-    "legend.labelcolor": INK,
-})
 
 
 # ---------------- data ----------------
@@ -128,122 +125,9 @@ def ratio_cells(cells, rival, metric):
     return out
 
 
-# ---------------- figures ----------------
+# (matplotlib figure emitters removed — superseded by the
+#  checkbox-driven Plotly panels in interactive_panels())
 
-def svg_of(fig):
-    buf = io.StringIO()
-    fig.savefig(buf, format="svg", bbox_inches="tight")
-    plt.close(fig)
-    s = buf.getvalue()
-    return s[s.find("<svg"):]
-
-
-def fig_seqlen(data, K, dt, metric):
-    """Reference §1 pairing: latency (top row) + speedup-vs-op21 (bottom
-    row), 3 scenario columns."""
-    fig, axes = plt.subplots(2, 3, figsize=(13.2, 6.6), sharex=True)
-    reg = metric.replace("us_", "")
-    for ci, scen in enumerate(SCENARIOS):
-        cells = data.get(scen, {}).get("seqlen", {})
-        ax = axes[0][ci]
-        for op in OPS:
-            pts = sorted((N, ops[op][metric]) for (k, d, N, BS), ops
-                         in cells.items()
-                         if k == K and d == dt and BS == 1 and op in ops
-                         and ops[op].get(metric))
-            if pts:
-                ax.plot([p[0] for p in pts], [p[1] for p in pts],
-                        marker="o", ms=3, lw=1.4, color=COL[op],
-                        label=OP_SHORT[op])
-        ax.set_xscale("log", base=2)
-        ax.set_yscale("log")
-        ax.set_title(SCEN_LABEL[scen], fontsize=9)
-        ax.grid(alpha=0.45, lw=0.5)
-        ax.tick_params(labelsize=7)
-
-        ax = axes[1][ci]
-        rat = {r: ratio_cells({k: v for k, v in cells.items()
-                               if k[0] == K and k[1] == dt and k[3] == 1},
-                              r, metric) for r in RIVALS}
-        for rival in RIVALS:
-            pts = sorted((key[2], v) for key, v in rat[rival].items())
-            if pts:
-                ax.plot([p[0] for p in pts], [p[1] for p in pts],
-                        marker="o", ms=3, lw=1.4, color=COL[rival],
-                        label=f"vs {OP_SHORT[rival]}")
-        ax.axhline(1.0, color=GRN, lw=0.9, ls="--", alpha=0.8)
-        ax.set_xscale("log", base=2)
-        ax.set_xlabel("N (post-compress)", fontsize=8)
-        ax.grid(alpha=0.45, lw=0.5)
-        ax.tick_params(labelsize=7)
-    axes[0][0].set_ylabel(f"{reg}-L2 kernel µs", fontsize=8)
-    axes[1][0].set_ylabel("speedup rival/op21 (×)", fontsize=8)
-    axes[0][-1].legend(fontsize=6.5, loc="upper left")
-    axes[1][-1].legend(fontsize=6.5, loc="upper left")
-    fig.suptitle(f"K={K} ({K_MODEL[K]})  {dt}  —  seq-len sweep BS=1: "
-                 f"latency (top) + op21 speedup (bottom, >1 ⇒ op21 "
-                 f"faster), {reg}-L2", fontsize=10, y=1.01)
-    return svg_of(fig)
-
-
-def fig_bs(data, K, dt, metric):
-    """Reference §2 pairing: latency vs BS at anchor N (top row) + speedup
-    rows (vs Radix, vs GVR-1CTA; lines = N), 3 scenario columns."""
-    rivals = ["radix_cutedsl", "gvr_cutedsl"]
-    fig, axes = plt.subplots(3, 3, figsize=(13.2, 9.0), sharex=True)
-    reg = metric.replace("us_", "")
-    ns = sorted({N for scen in SCENARIOS
-                 for (k, d, N, BS) in data.get(scen, {}).get("bs", {})
-                 if k == K and d == dt})
-    anchor = BS_ANCHOR_N if BS_ANCHOR_N in ns else (ns[len(ns) // 2] if ns else None)
-    cmap = plt.get_cmap("viridis")
-    for ci, scen in enumerate(SCENARIOS):
-        cells = data.get(scen, {}).get("bs", {})
-        ax = axes[0][ci]
-        for op in OPS:
-            pts = sorted((BS, ops[op][metric]) for (k, d, N, BS), ops
-                         in cells.items()
-                         if k == K and d == dt and N == anchor and op in ops
-                         and ops[op].get(metric))
-            if pts:
-                ax.plot([p[0] for p in pts], [p[1] for p in pts],
-                        marker="o", ms=2.5, lw=1.2, color=COL[op],
-                        label=OP_SHORT[op])
-        ax.set_xscale("log", base=2)
-        ax.set_yscale("log")
-        ax.set_title(SCEN_LABEL[scen], fontsize=9)
-        ax.grid(alpha=0.45, lw=0.5)
-        ax.tick_params(labelsize=7)
-        for ri, rival in enumerate(rivals, start=1):
-            ax = axes[ri][ci]
-            rat = ratio_cells({k: v for k, v in cells.items()
-                               if k[0] == K and k[1] == dt}, rival, metric)
-            for ni, N in enumerate(ns):
-                pts = sorted((BS, r) for (k, d, n, BS), r in rat.items()
-                             if n == N)
-                if pts:
-                    ax.plot([p[0] for p in pts], [p[1] for p in pts],
-                            marker="o", ms=2.5, lw=1.1,
-                            color=cmap(ni / max(len(ns) - 1, 1)),
-                            label=f"N={N//1024}K")
-            ax.axhline(1.0, color=GRN, lw=0.9, ls="--", alpha=0.8)
-            ax.set_xscale("log", base=2)
-            ax.grid(alpha=0.45, lw=0.5)
-            ax.tick_params(labelsize=7)
-            if ri == len(rivals):
-                ax.set_xlabel("BS", fontsize=8)
-    axes[0][0].set_ylabel(f"{reg}-L2 µs @N={anchor//1024}K", fontsize=7.5)
-    axes[1][0].set_ylabel("Radix / op21 (×)", fontsize=7.5)
-    axes[2][0].set_ylabel("GVR-1CTA / op21 (×)", fontsize=7.5)
-    axes[0][-1].legend(fontsize=6, loc="upper left")
-    axes[1][-1].legend(fontsize=5.5, ncol=2, loc="upper right")
-    fig.suptitle(f"K={K} ({K_MODEL[K]})  {dt}  —  BS-scaling: latency "
-                 f"@N={anchor//1024}K (top) + speedup rival/op21 (>1 ⇒ "
-                 f"op21 faster; lines = N), {reg}-L2", fontsize=10, y=1.0)
-    return svg_of(fig)
-
-
-# ---------------- tables ----------------
 
 def fmt_r(r):
     if r is None:
@@ -430,7 +314,11 @@ pre{background:#1c2530;padding:10px 12px;border-radius:6px;overflow-x:auto;font-
 .fig{background:#161b22;border:1px solid #2a3340;border-radius:10px;padding:10px;margin:16px 0;overflow-x:auto}
 .fig svg{max-width:100%;height:auto}
 .scrolltbl{max-height:520px;overflow:auto}
-/* --- CSS-only toggles (radio + :checked ~), zero JavaScript --- */
+.plt{height:430px;min-width:480px}
+.ctl{margin:2px 0 10px 0;line-height:2.1}
+.ck{background:#1c2530;border:1px solid #2a3340;border-radius:6px;padding:3px 8px;margin-right:4px;cursor:pointer;font-size:12.5px;white-space:nowrap}
+.ck input{accent-color:#76b900;vertical-align:-2px;margin-right:4px}
+/* --- CSS-only toggles for prose/tables (radio + :checked ~) --- */
 input[name=lang],input[name=metric]{position:absolute;left:-9999px}
 .langbar{position:fixed;top:14px;right:16px;z-index:99}
 .langbar label,.regbar label{display:inline-block;background:#1c2530;color:#e6e6e6;border:1px solid #2a3340;font-weight:bold;padding:8px 14px;border-radius:8px;cursor:pointer;font-size:14px;margin-left:6px;user-select:none}
@@ -726,9 +614,312 @@ fully deterministic from base 42. Realised hr verified ±0.03 per bundle (G5).</
     return bi(en, zh)
 
 
+# ---------------- op23 bounds section ----------------
+
+def bounds_tables(data_all, metric):
+    """Bounds verdict table on the like-for-like subset (seqlen BS=1)."""
+    def seq_cells(scen):
+        return {k: v for k, v in data_all.get(scen, {}).get("seqlen", {}).items()}
+
+    cells = {s: seq_cells(s) for s in ("ub", "real", "lb")}
+
+    def four_cols(rv, keep=None):
+        """{ub, real, lb, eff} geomeans, optionally restricted to keep(key)."""
+        cols = {}
+        for s in ("ub", "real", "lb"):
+            rc = ratio_cells(cells[s], rv, metric)
+            cols[s] = gm([v for k, v in rc.items()
+                          if keep is None or keep(k)])
+        effs = []
+        for key, ops in cells["lb"].items():
+            if keep is not None and not keep(key):
+                continue
+            a_lb = ops.get(MAIN)
+            r_ops = cells["real"].get(key, {})
+            a_re = r_ops.get(MAIN)
+            if not (a_lb and a_re and a_lb.get(metric) and a_re.get(metric)):
+                continue
+            # effective LB: per-cell worst op21 time of {lb, real}, ratio
+            # from the same scenario as that worst cell
+            src = ops if a_lb[metric] >= a_re[metric] else r_ops
+            b = src.get(rv)
+            if b and b.get(metric):
+                effs.append(b[metric] / src[MAIN][metric])
+        cols["eff"] = gm(effs)
+        return cols
+
+    hdr = ("<th>UB</th><th>real</th><th>LB constr.</th>"
+           "<th>LB_eff (worst{lb,real})</th>")
+    tbl = [f"<table><tr><th></th>{hdr}</tr>"]
+    for rv in RIVALS:
+        c = four_cols(rv)
+        tds = "".join(fmt_r(c[s]) for s in ("ub", "real", "lb", "eff"))
+        tbl.append(f"<tr><td>{OP_SHORT[rv]}</td>{tds}</tr>")
+    tbl.append("</table>")
+
+    # full per-(K, dtype, rival) breakdown
+    det = [f"<table><tr><th>K</th><th>dtype</th><th>rival</th>{hdr}"
+           "<th>cells</th></tr>"]
+    for K in KS:
+        for dt in DTS:
+            def keep(key, K=K, dt=dt):
+                return key[0] == K and key[1] == dt
+            for rv in RIVALS:
+                c = four_cols(rv, keep)
+                if c["ub"] is None and c["real"] is None:
+                    continue  # sglang outside fp32 x K<=1024
+                n = len([1 for k in cells["ub"] if keep(k)])
+                tds = "".join(fmt_r(c[s])
+                              for s in ("ub", "real", "lb", "eff"))
+                det.append(f"<tr><td>{K}</td><td>{dt}</td>"
+                           f"<td>{OP_SHORT[rv]}</td>{tds}<td>{n}</td></tr>")
+    det.append("</table>")
+    tbl.append('<div class="scrolltbl" style="margin-top:10px">'
+               + "".join(det) + "</div>")
+
+    # absolute op21 envelope
+    env = ["<table><tr><th>K</th><th>dtype</th><th>real/UB</th><th>LB/UB</th>"
+           "<th>UB@1M µs</th><th>LB@1M µs</th><th>real@1M µs</th></tr>"]
+    for K in KS:
+        for dt in DTS:
+            r_ru, r_lu, spot = [], [], {}
+            for (k2, d2, N, BS), ops in cells["ub"].items():
+                if k2 != K or d2 != dt:
+                    continue
+                a = ops.get(MAIN)
+                al = cells["lb"].get((k2, d2, N, BS), {}).get(MAIN)
+                ar = cells["real"].get((k2, d2, N, BS), {}).get(MAIN)
+                if not (a and al and ar and a.get(metric)):
+                    continue
+                r_ru.append(ar[metric] / a[metric])
+                r_lu.append(al[metric] / a[metric])
+                if N == 1048576:
+                    spot = {"ub": a[metric], "lb": al[metric],
+                            "re": ar[metric]}
+            if r_ru:
+                env.append(
+                    f"<tr><td>{K}</td><td>{dt}</td>"
+                    f"<td>{gm(r_ru):.3f}</td><td>{gm(r_lu):.3f}</td>"
+                    f"<td>{spot.get('ub', 0):.1f}</td>"
+                    f"<td>{spot.get('lb', 0):.1f}</td>"
+                    f"<td>{spot.get('re', 0):.1f}</td></tr>")
+    env.append("</table>")
+    return "".join(tbl), "".join(env)
+
+
+def bounds_html(data_all):
+    if not all(s in data_all for s in ("ub", "lb")):
+        return ""
+    t_c, e_c = bounds_tables(data_all, "us_cold")
+    t_w, e_w = bounds_tables(data_all, "us_warm")
+    ctor_tbl = (
+        "<table><tr><th>scenario</th><th>stash (preIdx)</th><th>verified</th></tr>"
+        "<tr><td><b>UB</b></td><td>4-block sandwich: K/4 top-spread (argmax in) + "
+        "K/4 [0.7K,K) + K/4 [K,1.3K) + K/4 geomspace deep tail; depth d "
+        "binary-searched for first-pass count ∈ [K+8, kC−64]</td>"
+        "<td>replay 78/78 <b>ev1</b>; host msc ok-gate PASS 78/78 "
+        "(band 0.14–0.66K, slots ≤ 8/8)</td></tr>"
+        "<tr><td><b>LB</b></td><td>ranks 0..K−2 + rank N−1 — «near-perfect "
+        "hint + one stale deep entry», hr=(K−1)/K</td>"
+        "<td>pmean = max possible ⇒ ev 5–8; pmin = v_min ⇒ m1g = N &gt; kC "
+        "defeats the msc fallback short-circuit</td></tr>"
+        "<tr><td>lb2 (replay-only)</td><td>exact top-K (hr = 1.0)</td>"
+        "<td>ev16 nonconverged 78/78 — adversarial for the RIVAL single-CTA "
+        "GVRs but short-circuits op21's msc fallback ⇒ invalid as op21 LB</td>"
+        "</tr></table>")
+    return ('<div class="card">'
+            + bi(
+        "<h3>Geomean rival/op21, seqlen BS=1 subset (&gt;1 ⇒ op21 faster)</h3>"
+        "<p class='small'>Like-for-like: ub/lb have no BS sweep, so the real "
+        "column here is the seqlen-BS=1 subset — NOT comparable to the pooled "
+        "table in §4 (op21's pooled radix win comes from high-BS cells). "
+        "First table = pooled over all K × dtype; scrollable table below = "
+        "full per-(K, dtype, rival) breakdown.</p>",
+        "<h3>几何均值 rival/op21，seqlen BS=1 子集（&gt;1 ⇒ op21 更快）</h3>"
+        "<p class='small'>同口径对比：ub/lb 无 BS 扫描，故本表 real 列为 "
+        "seqlen-BS=1 子集 —— 与 §4 的池化表不可比（op21 对 radix 的池化"
+        "胜利来自高 BS cell）。首表 = 全 K × dtype 池化；"
+        "下方可滚动明细表 = 完整 per-(K, dtype, rival) 分解。</p>")
+            + f'<div class="cold">{t_c}</div><div class="warm">{t_w}</div>'
+            + "</div><div class='card'>"
+            + bi("<h3>op21 absolute-time envelope (data sensitivity)</h3>",
+                 "<h3>op21 绝对时间包络（数据敏感度）</h3>")
+            + f'<div class="cold">{e_c}</div><div class="warm">{e_w}</div>'
+            + "</div><div class='card'>"
+            + bi("<h3>Deterministic constructions (no RNG; "
+                 "op23_op21_bounds/build_bounds_bundles.py)</h3>",
+                 "<h3>确定性构造（零随机；op23_op21_bounds/"
+                 "build_bounds_bundles.py）</h3>")
+            + ctor_tbl
+            + bi(
+        "<p><b>Reading.</b> UB pins the P2 seed pmean into the acceptance band "
+        "(single pass, ev1) AND satisfies the msc cluster fast-path gate "
+        "(<code>gvr_msc_op.py:993-996</code>) at every cell — op21's analytic "
+        "optimum on this grid. LB maximizes the stash mean (deepest undershoot) "
+        "while defeating the fallback done-short-circuit "
+        "(<code>gvr_msc_op.py:1104-1116</code>) — the leader CTA re-scans the "
+        "full row 5–8×. <b>LB is mechanism-specific, not a global input "
+        "minimum</b>: at 19/78 cells (K512 N≥32K, some K1024/K2048) REAL data "
+        "is slower than the LB construction via the band/slot-overflow "
+        "mechanism (§6, real-K512 cand≈4500 fallback) — hence the LB_eff "
+        "column (per-cell worst of {lb, real}). Exactness gate 456/456; "
+        "logits are byte-identical to the REAL bundles (only preIdx differs, "
+        "backed by the §6 crossover). Full dossier: "
+        "<code>op23_op21_bounds/RESULTS_SUMMARY.md</code>.</p>",
+        "<p><b>解读。</b>UB 把 P2 种子 pmean 精确钉入接受带（单遍扫描 ev1），"
+        "且每个 cell 都满足 msc 集群快路径门（<code>gvr_msc_op.py:993-996"
+        "</code>）—— 是 op21 在该网格上的解析最优。LB 最大化 stash 均值"
+        "（最深 undershoot），同时击破 fallback 短路种子（<code>"
+        "gvr_msc_op.py:1104-1116</code>）—— leader CTA 全行重扫 5–8 遍。"
+        "<b>LB 是机理特定下界，不是全输入空间最小值</b>：19/78 个 cell"
+        "（K512 N≥32K 及部分 K1024/K2048）上 REAL 数据经 band/slot-溢出"
+        "机理（§6，real-K512 cand≈4500 fallback）比 LB 构造更慢 —— 因此"
+        "增设 LB_eff 列（按 cell 取 {lb, real} 中更差者）。精确性门 "
+        "456/456；logits 与 REAL bundle 字节一致（仅 preIdx 不同，依据 §6 "
+        "crossover）。完整卷宗：<code>op23_op21_bounds/RESULTS_SUMMARY.md"
+        "</code>。</p>") + "</div>")
+
+
+# ---------------- interactive charts (report/report.html style) ----------
+
+def chart_records(data_all):
+    """Flatten every loaded cell into compact JS records.
+
+    Fields: s scenario, w sweep ('seq'|'bs'), K, d dtype, N, B BS, o op,
+    c cold-µs, h warm-µs. ~13k records ≈ 1 MB JSON — replaces ~7 MB of
+    pre-rendered SVG.
+    """
+    recs = []
+    for scen, sweeps in data_all.items():
+        for sweep, cells in sweeps.items():
+            w = "seq" if sweep == "seqlen" else "bs"
+            for (K, dt, N, BS), ops in cells.items():
+                for op, r in ops.items():
+                    recs.append({"s": scen, "w": w, "K": K, "d": dt, "N": N,
+                                 "B": BS, "o": op,
+                                 "c": round(r.get("us_cold", 0), 3),
+                                 "h": round(r.get("us_warm", 0), 3)})
+    return recs
+
+
+def checks(cls, items, checked):
+    return " ".join(
+        f'<label class="ck"><input type="checkbox" class="{cls}" '
+        f'value="{v}"{" checked" if v in checked else ""}>{lab}</label>'
+        for v, lab in items)
+
+
+def radios(name, items, sel):
+    return " ".join(
+        f'<label class="ck"><input type="radio" name="{name}" '
+        f'value="{v}"{" checked" if v == sel else ""}>{lab}</label>'
+        for v, lab in items)
+
+
+def interactive_panels(data_all):
+    """Two checkbox-driven Plotly panels (seqlen + BS) + one <script>."""
+    import json as _json
+    scen_items = [(s, SCEN_LABEL[s].split(" ")[0]) for s in ALL_SCEN
+                  if s in data_all]
+    op_items = [(o, OP_SHORT[o]) for o in OPS]
+    k_items = [(str(k), f"K={k} ({K_MODEL[k]})") for k in KS]
+    dt_items = [(d, d) for d in DTS]
+    bs_ns = sorted({N for s in data_all.values() if "bs" in s
+                    for (_, _, N, _) in s["bs"]})
+    n_items = [(str(n), f"{n // 1024}K") for n in bs_ns]
+
+    ctrl_seq = ('<div class="ctl">'
+                + bi("<b>scenarios</b>", "<b>场景</b>", "span") + " "
+                + checks("sck1", scen_items, {"real", "ub", "lb"})
+                + '<br>' + bi("<b>operators</b>", "<b>算子</b>", "span") + " "
+                + checks("ock1", op_items, set(OPS))
+                + '<br>' + radios("kk1", k_items, "2048") + " · "
+                + radios("dd1", dt_items, "fp32") + "</div>")
+    ctrl_bs = ('<div class="ctl">'
+               + bi("<b>scenarios</b>", "<b>场景</b>", "span") + " "
+               + checks("sck2", [i for i in scen_items
+                                 if i[0] in SCENARIOS], {"real"})
+               + bi("<span class='small'> (ub/lb: seqlen only)</span>",
+                    "<span class='small'>（ub/lb 仅有 seqlen 数据）</span>",
+                    "span")
+               + '<br>' + bi("<b>operators</b>", "<b>算子</b>", "span") + " "
+               + checks("ock2", op_items, set(OPS))
+               + '<br>' + radios("kk2", k_items, "2048") + " · "
+               + radios("dd2", dt_items, "fp32") + " · N: "
+               + radios("nn2", n_items, "131072") + "</div>")
+
+    js_data = _json.dumps(chart_records(data_all), separators=(",", ":"))
+    js = """
+<script>
+const D=%s;
+const COL=%s,DASH=%s,SHORT=%s,MAIN=%s;
+const T={en:{lat:'Latency vs N',spd:'Speedup rival/op21 (>1 = op21 faster)',
+latb:'Latency vs BS',spdb:'Speedup rival/op21 vs BS',us:'µs (log)',
+n:'N (post-compress, log)',bs:'batch size (log)',r:'ratio ×'},
+zh:{lat:'延迟 对 N',spd:'加速比 rival/op21（>1 = op21 更快）',
+latb:'延迟 对 BS',spdb:'加速比 rival/op21 对 BS',us:'µs（对数）',
+n:'N（压缩后，对数）',bs:'batch size（对数）',r:'比值 ×'}};
+function lang(){return document.getElementById('lang-zh').checked?'zh':'en'}
+function reg(){return document.getElementById('m-cold').checked?'c':'h'}
+function vals(cls){return [...document.querySelectorAll('.'+cls+':checked')].map(x=>x.value)}
+function rad(n){const e=document.querySelector('input[name='+n+']:checked');return e?e.value:null}
+function LAY(t,xt,yt,xlog){return {title:{text:t,font:{size:15}},
+paper_bgcolor:'#161b22',plot_bgcolor:'#0f1419',font:{color:'#e6e6e6',size:12},
+margin:{t:42,r:10,b:48,l:56},showlegend:true,
+legend:{orientation:'h',y:-0.22,font:{size:10.5}},
+xaxis:{title:xt,type:'log',gridcolor:'#2a3340'},
+yaxis:{title:yt,type:xlog?'log':'linear',gridcolor:'#2a3340'}}}
+function pick(w,scens,K,d){const m={};
+D.filter(r=>r.w==w&&scens.includes(r.s)&&r.K==K&&r.d==d).forEach(r=>{
+(m[r.s]=m[r.s]||{});(m[r.s][r.o]=m[r.s][r.o]||{});m[r.s][r.o][w=='seq'?r.N:r.B+'|'+r.N]=r});
+return m}
+function seqDraw(){const L=T[lang()],rg=reg(),scens=vals('sck1'),ops=vals('ock1'),
+K=rad('kk1'),d=rad('dd1'),m=pick('seq',scens,K,d),lat=[],spd=[];
+for(const s of scens){if(!m[s])continue;
+for(const o of ops){const c=m[s][o];if(!c)continue;
+const xs=Object.keys(c).map(Number).sort((a,b)=>a-b);
+lat.push({x:xs,y:xs.map(N=>c[N][rg]),name:s+'·'+SHORT[o],mode:'lines+markers',
+marker:{size:5},line:{color:COL[o],dash:DASH[s]}});
+if(o!=MAIN&&m[s][MAIN]){const t21=m[s][MAIN];
+const xs2=xs.filter(N=>t21[N]);
+spd.push({x:xs2,y:xs2.map(N=>c[N][rg]/t21[N][rg]),name:s+'·'+SHORT[o]+'/op21',
+mode:'lines+markers',marker:{size:5},line:{color:COL[o],dash:DASH[s]}});}}}
+spd.push({x:[4096,1048576],y:[1,1],mode:'lines',showlegend:false,
+line:{color:'#888',width:1}});
+Plotly.newPlot('p_slat',lat,LAY(L.lat+' (K='+K+', '+d+', BS=1, '+(rg=='c'?'cold':'warm')+'-L2)',L.n,L.us,true),{responsive:true});
+Plotly.newPlot('p_sspd',spd,LAY(L.spd,L.n,L.r,false),{responsive:true});}
+function bsDraw(){const L=T[lang()],rg=reg(),scens=vals('sck2'),ops=vals('ock2'),
+K=rad('kk2'),d=rad('dd2'),N=rad('nn2'),m=pick('bs',scens,K,d),lat=[],spd=[];
+for(const s of scens){if(!m[s])continue;
+for(const o of ops){const c=m[s][o];if(!c)continue;
+const bs=Object.keys(c).filter(k=>k.split('|')[1]==N).map(k=>Number(k.split('|')[0])).sort((a,b)=>a-b);
+if(!bs.length)continue;
+lat.push({x:bs,y:bs.map(B=>c[B+'|'+N][rg]),name:s+'·'+SHORT[o],mode:'lines+markers',
+marker:{size:5},line:{color:COL[o],dash:DASH[s]}});
+if(o!=MAIN&&m[s][MAIN]){const t21=m[s][MAIN];
+const bs2=bs.filter(B=>t21[B+'|'+N]);
+spd.push({x:bs2,y:bs2.map(B=>c[B+'|'+N][rg]/t21[B+'|'+N][rg]),
+name:s+'·'+SHORT[o]+'/op21',mode:'lines+markers',marker:{size:5},
+line:{color:COL[o],dash:DASH[s]}});}}}
+spd.push({x:[1,2048],y:[1,1],mode:'lines',showlegend:false,line:{color:'#888',width:1}});
+Plotly.newPlot('p_blat',lat,LAY(L.latb+' (K='+K+', '+d+', N='+(N/1024)+'K, '+(rg=='c'?'cold':'warm')+'-L2)',L.bs,L.us,true),{responsive:true});
+Plotly.newPlot('p_bspd',spd,LAY(L.spdb,L.bs,L.r,false),{responsive:true});}
+function drawAll(){seqDraw();bsDraw()}
+document.querySelectorAll('.sck1,.ock1,input[name=kk1],input[name=dd1],.sck2,.ock2,input[name=kk2],input[name=dd2],input[name=nn2]')
+.forEach(e=>e.onchange=drawAll);
+['lang-zh','lang-en','m-cold','m-warm'].forEach(id=>{const e=document.getElementById(id);
+if(e)e.addEventListener('change',()=>setTimeout(drawAll,0));});
+drawAll();
+</script>""" % (js_data,
+                _json.dumps(COL), _json.dumps(SCEN_DASH),
+                _json.dumps(OP_SHORT), _json.dumps(MAIN))
+    return ctrl_seq, ctrl_bs, js
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out-root", default=str(HERE.parent / "results_b200_op22"))
+    ap.add_argument("--op23-root", default=str(HERE.parent / "results_b200_op23"))
     ap.add_argument("--out", default=str(HERE / "REPORT.html"))
     args = ap.parse_args()
     root = Path(args.out_root)
@@ -737,23 +928,26 @@ def main():
     have = {s: sorted(data[s]) for s in SCENARIOS}
     print("loaded:", {s: v for s, v in have.items()})
 
+    # op23 bounds scenarios (seqlen only, optional)
+    op23_root = Path(args.op23_root)
+    data_all = dict(data)
+    for s in BOUNDS_SCENARIOS:
+        d = load_scenario(op23_root, s)
+        if d:
+            data_all[s] = d
+    print("bounds loaded:", {s: sorted(data_all[s])
+                             for s in BOUNDS_SCENARIOS if s in data_all})
+
     csv_outs = write_csvs(data)
     print("csv:", csv_outs)
 
-    # ---- figures (cold + warm sets) ----
-    figs = {"us_cold": {"seq": {}, "bs": {}}, "us_warm": {"seq": {}, "bs": {}}}
-    for metric in figs:
-        for K in KS:
-            for dt in DTS:
-                if any("seqlen" in data[s] for s in SCENARIOS):
-                    figs[metric]["seq"][(K, dt)] = fig_seqlen(data, K, dt, metric)
-                if any("bs" in data[s] for s in SCENARIOS):
-                    figs[metric]["bs"][(K, dt)] = fig_bs(data, K, dt, metric)
+    ctrl_seq, ctrl_bs, chart_js = interactive_panels(data_all)
 
     # ---- assemble ----
     B = []
     B.append(f"""<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8">
 <title>op22 — GVR op21 vs rivals on temporal-synth fixed-hit-rate data</title>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <style>{CSS}</style></head><body>
 <input type="radio" name="lang" id="lang-zh" checked>
 <input type="radio" name="lang" id="lang-en">
@@ -782,7 +976,8 @@ def main():
         hr=0.90), <span class="reg">WORST</span> (shallow-layer marginal, hr=0.05) and
         <span class="reg">REAL</span> (aggregate layer mixture, hr sampled from the real per-step
         distribution — the anchor comparable to <code>report/report.html</code>).
-        <b>Section 6</b> resolves the mechanism behind the stress-scenario losses.</p>""",
+        <b>Section 6</b> resolves the mechanism behind the stress-scenario losses;
+        <b>Section 7</b> brackets op21 with deterministic best/worst-case constructions (op23).</p>""",
         """<p>对生产 dispatch 的 GVR 内核 <b>op#21</b>（<code>gvr_ms_auto</code>，
         iter12 @f51f50f4da）与 4 个对手做同口径对比，数据为
         <b>时序提示质量（hit rate）受控</b>的时序相关合成数据：
@@ -796,10 +991,24 @@ def main():
         <span class="reg">BEST</span>（深层 marginal，hr=0.90）、<span class="reg">WORST</span>
         （浅层 marginal，hr=0.05）、<span class="reg">REAL</span>（aggregate 层混合、
         hr 按真实 per-step 分布采样 —— 与 <code>report/report.html</code> 可比的锚点）。
-        <b>第 6 节</b>收口了应力场景失利的机制。</p>"""))
+        <b>第 6 节</b>收口了应力场景失利的机制；<b>第 7 节</b>用
+        确定性最优/最差构造为 op21 定界（op23）。</p>"""))
 
     # ---- TL;DR verdict card ----
     tl_en, tl_zh = tldr(data)
+    if all(s in data_all for s in BOUNDS_SCENARIOS):
+        bnd = {}
+        for s in ("ub", "real", "lb"):
+            cells = data_all.get(s, {}).get("seqlen", {})
+            bnd[s] = gm(list(ratio_cells(cells, "radix_cutedsl",
+                                         "us_cold").values()))
+        line = (f"UB {fmt_r(bnd['ub'])} / real {fmt_r(bnd['real'])} / "
+                f"LB {fmt_r(bnd['lb'])}")
+        tl_en += (f"<p><b>op23 bounds (§7):</b> vs Radix cold, seqlen-BS=1 "
+                  f"subset — {line}; op21 absolute-time envelope LB/UB "
+                  f"≈ 1.8–2.4×.</p>")
+        tl_zh += (f"<p><b>op23 定界（§7）：</b>对 Radix 冷 L2，seqlen-BS=1 "
+                  f"子集 — {line}；op21 绝对时间包络 LB/UB ≈ 1.8–2.4×。</p>")
     B.append(f'<div class="card" style="border-color:#76b900">{bi(tl_en, tl_zh)}</div>')
 
     # ---- deep-dive link card (reference pattern) ----
@@ -868,7 +1077,11 @@ def main():
                 "<tr><td>WORST</td><td><code>beta_shallow</code> (weak temporal family)</td><td>fixed 0.05</td>"
                 "<td>GVR worst case — hint nearly useless</td></tr>"
                 "<tr><td>REAL</td><td><code>aggregate</code> (layer mixture)</td><td>sampled per-step</td>"
-                "<td>anchor — comparable to report.html</td></tr></table>")
+                "<td>anchor — comparable to report.html</td></tr>"
+                "<tr><td>UB (op23)</td><td>REAL logits byte-identical</td><td>0.50 constructed</td>"
+                "<td>op21 analytic optimum — ev1 + msc fast path (§7)</td></tr>"
+                "<tr><td>LB (op23)</td><td>REAL logits byte-identical</td><td>(K−1)/K + 1 stale deep</td>"
+                "<td>op21 adversarial — leader re-scans 5–8× (§7)</td></tr></table>")
     B.append('<div class="card">' + bi(
         "<h3>Operators &amp; methodology</h3>"
         "<table><tr><th>Operator</th><th>Kind</th><th>exact?</th><th>dtypes×K</th></tr>"
@@ -925,11 +1138,10 @@ def main():
              + bi("<b>L2 regime:</b>", "<b>L2 状态：</b>", "span")
              + ' <label for="m-cold">cold-L2 (flushed)</label>'
              + '<label for="m-warm">warm-L2</label> '
-             + bi("<span class='small'>(switches every chart and table; CSS-only, "
-                  "zero JavaScript — charts are pre-rendered inline SVG)</span>",
-                  "<span class='small'>（切换所有图表；纯 "
-                  "CSS、零 JavaScript —— 图表为预渲染内联 "
-                  "SVG）</span>", "span")
+             + bi("<span class='small'>(switches every table via CSS and every "
+                  "Plotly chart via the panel redraw)</span>",
+                  "<span class='small'>（表格经 CSS 切换，Plotly "
+                  "图表由面板联动重绘）</span>", "span")
              + "</div>")
 
     # ---- 1. seqlen ----
@@ -945,14 +1157,9 @@ def main():
         "速比成对版式。REAL 场景每个 N cell 独立抽层与 "
         "hr（设计使然），N 趋势有锯齿 —— 看每 cell "
         "的比值，不看曲线平滑度。</p>"))
-    for metric, cls in (("us_cold", "cold"), ("us_warm", "warm")):
-        B.append(f'<div class="{cls}">')
-        for K in KS:
-            for dt in DTS:
-                svg = figs[metric]["seq"].get((K, dt))
-                if svg:
-                    B.append(f'<div class="fig">{svg}</div>')
-        B.append("</div>")
+    B.append('<div class="card">' + ctrl_seq
+             + '<div class="row"><div id="p_slat" class="plt"></div>'
+               '<div id="p_sspd" class="plt"></div></div></div>')
 
     # ---- 2. BS scaling ----
     B.append("<h2>" + bi("2. BS-scaling (BS 1→2048, N 4K→256K; stretch N 512K/1M at BS≤64)",
@@ -968,14 +1175,9 @@ def main():
         "N —— 512K/1M 两条线来自 bs_hugeN 补充档，BS 2–64）。"
         "加速比两行：对 Radix（提示盲对手）、对 GVR 单 "
         "CTA（op21 的代码起点）。</p>"))
-    for metric, cls in (("us_cold", "cold"), ("us_warm", "warm")):
-        B.append(f'<div class="{cls}">')
-        for K in KS:
-            for dt in DTS:
-                svg = figs[metric]["bs"].get((K, dt))
-                if svg:
-                    B.append(f'<div class="fig">{svg}</div>')
-        B.append("</div>")
+    B.append('<div class="card">' + ctrl_bs
+             + '<div class="row"><div id="p_blat" class="plt"></div>'
+               '<div id="p_bspd" class="plt"></div></div></div>')
 
     # ---- 3. full data (reference §3: CSV download + scrollable table) ----
     B.append("<h2>" + bi("3. Full data", "3. 完整数据", "span") + "</h2>")
@@ -1041,13 +1243,34 @@ def main():
                          "GVR 家族", "span") + "</h2>")
     B.append(mech_html(data))
 
+    # ---- 7. op23 deterministic bounds ----
+    bh = bounds_html(data_all)
+    if bh:
+        B.append("<h2>" + bi(
+            "7. op23 — deterministic UB/LB bounds on op21 (best/worst-case "
+            "speedup)", "7. op23 — op21 的确定性上/下界（最优/最差加速比）",
+            "span") + "</h2>")
+        B.append(bi(
+            "<p>Two DETERMINISTIC preIdx constructions derived from the §6 "
+            "mechanism bracket op21's data sensitivity; logits stay "
+            "byte-identical to REAL. Select the <b>ub</b>/<b>lb</b> scenarios "
+            "in the §1 interactive panel to see the per-N curves. Measured "
+            "2026-07-07 on umbriel-b200-037 GPU0 (ratios are node-internal).</p>",
+            "<p>由 §6 机理推导的两个<b>确定性</b> preIdx 构造为 op21 的数据"
+            "敏感度定界；logits 与 REAL 字节一致。在 §1 交互面板勾选 "
+            "<b>ub</b>/<b>lb</b> 场景即可查看各 N 曲线。测量于 2026-07-07 "
+            "umbriel-b200-037 GPU0（比值为节点内部口径）。</p>"))
+        B.append(bh)
+
+    B.append(chart_js)
     B.append("</div></body></html>")
     out = Path(args.out)
     html = "\n".join(B)
     out.write_text(html)
     n_script = html.count("<script")
-    print(f"wrote {out} ({out.stat().st_size/1e6:.2f} MB, <script> tags: {n_script})")
-    assert n_script == 0
+    print(f"wrote {out} ({out.stat().st_size/1e6:.2f} MB, <script> tags: "
+          f"{n_script})")
+    assert n_script == 2, n_script  # plotly CDN + chart driver
 
 
 if __name__ == "__main__":
