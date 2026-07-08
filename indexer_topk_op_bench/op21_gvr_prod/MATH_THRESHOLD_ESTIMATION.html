@@ -803,10 +803,14 @@ replay (<code>replay_fallback_rate.py</code>, 29,820 transitions through the ker
 column ⇒ h &gt; 0.75 necessarily lands pair-(0,1)), so the real static fallback rate is 75.4% / 65.0% —
 the h-space simplification is tight. HLS placement measures 14.1% / 17.3% at value level (~5× holds exactly);
 the residual is dominated by <em>all_ge</em> (downward h jumps escaping below the band) ⇒ an adaptive band
-should widen asymmetrically on the low side, not Gaussian ±2σ̂. E[T]-converted with the shipped cheap-fallback
-prices, the placement lever is N-gated: 0.3% at compressed N≈9.4K (ISL 37K), 9.8% at N=262K (ISL 1M),
-19.4% at N=1M — Step 3 is dead at small N but a live msc-hugeN candidate, same N-territory and side-tensor
-cost as the iter14 dist fallback.</p>
+should widen asymmetrically on the low side, not Gaussian ±2σ̂. Deployment envelope: no ISL ≥ 1M exists;
+indexer length ≤ 1M with the working range N ≤ 256K — so the N=262K row is the envelope's upper edge, and the
+key in-envelope fact is that 65K–262K runs with the dist fallback GATED OFF (leader-only full-price recount).
+E[T]-converted at the measured 75% real fallback rate, the in-envelope lever stack is: <em>_fb_dist code-mass
+diet un-gating 65K–262K</em> first (−7.2% / −12.8% / −20.9% at N = 65K / 131K / 262K; the 262K figure = 1.264×
+matches the iter14-recorded forgone ~1.25×), then ĥ placement stacks a further 5–10 points on top
+(−12.1% / −18.9% / −28.6% combined). Step 3 therefore stays deferred behind the diet; ≤ 32K is already at the
+floor (warm log-falsi ≈ free, placement ≤ 1.1%).</p>
 </div>
 <div class="zh">
 <pre class="code">
@@ -865,9 +869,12 @@ collect 覆盖条件。<strong>该 caveat 已于同日由值级 replay 关闭</s
 此几何下 rung-0 吸收为<em>零</em>(fused 路径 collect 列固定 0.75 ⇒ h &gt; 0.75 必落 pair-(0,1)),
 真实 static fallback 率 75.4% / 65.0% —— h 空间化简就是紧的。HLS 放置值级实测 14.1% / 17.3%
 (~5× 精确成立);残余以 <em>all_ge</em>(h 向下跳变穿透带下沿)为主 ⇒ 自适应带应低侧非对称加宽,
-而非高斯 ±2σ̂。按已上硅便宜 fallback 价格换算 E[T],放置杠杆 N-gated:压缩域 N≈9.4K(ISL 37K)仅
-0.3%,N=262K(ISL 1M)9.8%,N=1M 达 19.4% —— Step 3 在小 N 已死,但是 msc-hugeN 的活候选,
-与 iter14 dist fallback 同一 N 域、同一 side-tensor 工程成本。</p>
+而非高斯 ±2σ̂。部署包络:不存在 ISL ≥ 1M;indexer 长度 ≤ 1M、工作重点 N ≤ 256K —— N=262K 即包络
+上沿,而包络内的关键事实是 **65K–262K 段今天 dist fallback 处于关闭态**(leader-only 全价重数)。
+按实测 75% 真实 fallback 率换算 E[T],包络内杠杆栈:先做 <em>_fb_dist 代码量瘦身解锁 65K–262K</em>
+(N = 65K / 131K / 262K 处 −7.2% / −12.8% / −20.9%;262K 的 1.264× 与 iter14 记录的放弃 ~1.25×
+硅实测吻合),ĥ 放置在其上再叠 5–10 个点(合计 −12.1% / −18.9% / −28.6%)。故 Step 3 继续排在
+瘦身之后 deferred;≤32K 已在地板上(温 log-falsi 近零价,放置 ≤1.1%)。</p>
 </div>
 
 <h2><span class="no">11</span><span class="en">Parameter inventory &amp; sensitivity: what must be retuned per model?</span><span class="zh">参数清单与敏感性分类:换模型要不要逐个调参?</span></h2>
