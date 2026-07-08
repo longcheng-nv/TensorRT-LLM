@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>op21 GVR 生产化战役 iter0.5–12 | op21 GVR productionization progress</title>
+<title>op21 GVR 生产化战役 iter0.5–14 | op21 GVR productionization progress</title>
 <style>
   .viz-root {
     --surface-1: #fcfcfb;
@@ -132,6 +132,7 @@
   #p4:hover  ~ .tips #t4,  #p5:hover  ~ .tips #t5,  #p6:hover  ~ .tips #t6,
   #p7:hover  ~ .tips #t7,  #p8:hover  ~ .tips #t8,  #p9:hover  ~ .tips #t9,
   #p10:hover ~ .tips #t10, #p11:hover ~ .tips #t11, #p12:hover ~ .tips #t12,
+  #p13:hover ~ .tips #t13, #p14:hover ~ .tips #t14,
   #pb8:hover ~ .tips #tb8, #pb9:hover ~ .tips #tb9,
   #pf8:hover ~ .tips #tf8, #pf9:hover ~ .tips #tf9,
   #pg3:hover ~ .tips #tg3, #pg4:hover ~ .tips #tg4,
@@ -141,13 +142,15 @@
   #it1:checked  ~ .card #t1,  #it2:checked  ~ .card #t2,  #it3:checked ~ .card #t3,
   #it4:checked  ~ .card #t4,  #it5:checked  ~ .card #t5,  #it6:checked ~ .card #t6,
   #it7:checked  ~ .card #t7,  #it8:checked  ~ .card #t8,  #it9:checked ~ .card #t9,
-  #it10:checked ~ .card #t10, #it11:checked ~ .card #t11, #it12:checked ~ .card #t12 { opacity: 1; }
+  #it10:checked ~ .card #t10, #it11:checked ~ .card #t11, #it12:checked ~ .card #t12,
+  #it13:checked ~ .card #t13, #it14:checked ~ .card #t14 { opacity: 1; }
   #it1:checked  ~ .card #p1 .selring,  #it2:checked  ~ .card #p2 .selring,
   #it3:checked  ~ .card #p3 .selring,  #it4:checked  ~ .card #p4 .selring,
   #it5:checked  ~ .card #p5 .selring,  #it6:checked  ~ .card #p6 .selring,
   #it7:checked  ~ .card #p7 .selring,  #it8:checked  ~ .card #p8 .selring,
   #it9:checked  ~ .card #p9 .selring,  #it10:checked ~ .card #p10 .selring,
-  #it11:checked ~ .card #p11 .selring, #it12:checked ~ .card #p12 .selring { opacity: 1; }
+  #it11:checked ~ .card #p11 .selring, #it12:checked ~ .card #p12 .selring,
+  #it13:checked ~ .card #p13 .selring, #it14:checked ~ .card #p14 .selring { opacity: 1; }
 
   /* ---------- segmented iteration selector ---------- */
   .seg {
@@ -167,7 +170,9 @@
   #it6:checked  ~ .seg label[for="it6"],  #it7:checked ~ .seg label[for="it7"],
   #it8:checked  ~ .seg label[for="it8"],  #it9:checked ~ .seg label[for="it9"],
   #it10:checked ~ .seg label[for="it10"], #it11:checked ~ .seg label[for="it11"],
-  #it12:checked ~ .seg label[for="it12"] {
+  #it12:checked ~ .seg label[for="it12"], #it129:checked ~ .seg label[for="it129"],
+  #it13:checked ~ .seg label[for="it13"], #it14:checked ~ .seg label[for="it14"],
+  #it15:checked ~ .seg label[for="it15"] {
     background: var(--sel); border-color: var(--sel); color: #fff; font-weight: 600;
   }
 
@@ -179,7 +184,9 @@
   #it6:checked  ~ .details .d6,  #it7:checked ~ .details .d7,
   #it8:checked  ~ .details .d8,  #it9:checked ~ .details .d9,
   #it10:checked ~ .details .d10, #it11:checked ~ .details .d11,
-  #it12:checked ~ .details .d12 { display: block; }
+  #it12:checked ~ .details .d12, #it129:checked ~ .details .d129,
+  #it13:checked ~ .details .d13, #it14:checked ~ .details .d14,
+  #it15:checked ~ .details .d15 { display: block; }
   .dcard {
     background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px;
     padding: 16px 20px; margin-bottom: 16px;
@@ -248,6 +255,10 @@
   <input type="radio" name="it" id="it10">
   <input type="radio" name="it" id="it11">
   <input type="radio" name="it" id="it12">
+  <input type="radio" name="it" id="it129">
+  <input type="radio" name="it" id="it13">
+  <input type="radio" name="it" id="it14">
+  <input type="radio" name="it" id="it15">
 
   <nav class="langbar">
     <label for="lang-zh">中文</label>
@@ -259,13 +270,15 @@
     <span class="en">op21 GVR productionization campaign — iteration progress (autoresearch view)</span>
   </h1>
   <p class="sub">
-    <span class="zh">12 次迭代 + 1 次 host 原型 · <b>8 个保留性能杠杆 · 5 项证伪 · 1 项正确性修复 · 1 个上游移植产物</b> ·
+    <span class="zh">14 次迭代 + 2 次 host 原型 · <b>10 个保留性能杠杆 · 6 项证伪 · 1 项正确性修复 · 1 个上游移植产物 · HLS 三步全部上硅</b> ·
     fp32 P0 geomean <b>0.830 → 1.249</b>(vs 每-cell 最强对手,nsys 纯核 cold-L2,B200 轴)·
-    全程由 <b>Claude Fable 5</b>(<code>claude-fable-5</code>)在 Claude Code 内自主执行,总花费估 <b>≈$573</b>(详见下方成本卡)。
+    HLS fallback 数学层(iter13/14)把 op22 <b>1M 最坏尾部 245 → 57 µs</b>(P0 二进制按设计不变)·
+    全程由 <b>Claude Fable 5</b>(<code>claude-fable-5</code>)在 Claude Code 内自主执行,总花费估 <b>≈$797</b>(详见下方成本卡)。
     悬停图中任意点看该步的手段与机制;点击下方迭代号(或用 Tab/方向键)固定选择并展开完整详情。</span>
-    <span class="en">12 iterations + 1 host prototype · <b>8 kept perf levers · 5 falsifications · 1 exactness fix · 1 upstream-port artifact</b> ·
+    <span class="en">14 iterations + 2 host prototypes · <b>10 kept perf levers · 6 falsifications · 1 exactness fix · 1 upstream-port artifact · all 3 HLS steps on silicon</b> ·
     fp32 P0 geomean <b>0.830 → 1.249</b> (vs per-cell best rival, nsys pure-kernel cold-L2, B200 axis) ·
-    executed end-to-end by <b>Claude Fable 5</b> (<code>claude-fable-5</code>) inside Claude Code, total est. cost <b>≈$573</b> (see the cost card below).
+    the HLS fallback math layer (iter13/14) collapses the op22 <b>1M worst-case tail 245 → 57 µs</b> (P0 binaries untouched by design) ·
+    executed end-to-end by <b>Claude Fable 5</b> (<code>claude-fable-5</code>) inside Claude Code, total est. cost <b>≈$797</b> (see the cost card below).
     Hover any point for that step's lever and mechanism; click an iteration number below (or Tab/arrow keys) to pin the selection and expand full details.</span>
   </p>
 
@@ -290,6 +303,11 @@
       <div class="v">HW-inv.</div>
       <div class="d n"><span class="zh">Δgm ≤ 0.02,零胜负翻转 · 上游网格 384/384</span><span class="en">Δgm ≤ 0.02, zero flips · upstream grid 384/384</span></div>
     </div>
+    <div class="tile">
+      <div class="lb"><span class="zh">HLS 1M 最坏尾部(iter13/14)</span><span class="en">HLS 1M worst-case tail (iter13/14)</span></div>
+      <div class="v">245→57µs</div>
+      <div class="d"><span class="zh">best 2.105× · worst 1.99× · op22 门 456/456</span><span class="en">best 2.105× · worst 1.99× · op22 gate 456/456</span></div>
+    </div>
   </div>
 
   <div class="card">
@@ -307,19 +325,19 @@
       <span class="item"><span class="k-par"></span><span class="zh">1.0 = 与最强对手持平</span><span class="en">1.0 = par with best rival</span></span>
     </div>
 
-    <svg viewBox="0 0 1140 522" role="img" aria-label="op21 iteration geomean speedup step chart">
+    <svg viewBox="0 0 1310 522" role="img" aria-label="op21 iteration geomean speedup step chart">
       <!-- gridlines -->
-      <line x1="70" y1="425" x2="1105" y2="425" stroke="var(--grid)" stroke-width="1"/>
-      <line x1="70" y1="351" x2="1105" y2="351" stroke="var(--grid)" stroke-width="1"/>
-      <line x1="70" y1="203" x2="1105" y2="203" stroke="var(--grid)" stroke-width="1"/>
-      <line x1="70" y1="129" x2="1105" y2="129" stroke="var(--grid)" stroke-width="1"/>
-      <line x1="70" y1="55"  x2="1105" y2="55"  stroke="var(--grid)" stroke-width="1"/>
+      <line x1="70" y1="425" x2="1275" y2="425" stroke="var(--grid)" stroke-width="1"/>
+      <line x1="70" y1="351" x2="1275" y2="351" stroke="var(--grid)" stroke-width="1"/>
+      <line x1="70" y1="203" x2="1275" y2="203" stroke="var(--grid)" stroke-width="1"/>
+      <line x1="70" y1="129" x2="1275" y2="129" stroke="var(--grid)" stroke-width="1"/>
+      <line x1="70" y1="55"  x2="1275" y2="55"  stroke="var(--grid)" stroke-width="1"/>
       <!-- parity reference -->
-      <line x1="70" y1="277" x2="1105" y2="277" stroke="var(--baseline)" stroke-width="1.5"/>
-      <text x="1100" y="272" text-anchor="end" class="anno-x zh">1.0 = 与每-cell 最强对手持平</text>
-      <text x="1100" y="272" text-anchor="end" class="anno-x en">1.0 = par with the per-cell best rival</text>
+      <line x1="70" y1="277" x2="1275" y2="277" stroke="var(--baseline)" stroke-width="1.5"/>
+      <text x="1270" y="272" text-anchor="end" class="anno-x zh">1.0 = 与每-cell 最强对手持平</text>
+      <text x="1270" y="272" text-anchor="end" class="anno-x en">1.0 = par with the per-cell best rival</text>
       <!-- baseline axis -->
-      <line x1="70" y1="445" x2="1105" y2="445" stroke="var(--baseline)" stroke-width="1"/>
+      <line x1="70" y1="445" x2="1275" y2="445" stroke="var(--baseline)" stroke-width="1"/>
 
       <!-- y tick labels -->
       <text x="62" y="429" text-anchor="end" class="axis-t">0.8</text>
@@ -342,6 +360,8 @@
       <text x="935"  y="464" text-anchor="middle" class="axis-t">10</text>
       <text x="1020" y="464" text-anchor="middle" class="axis-t">11</text>
       <text x="1105" y="464" text-anchor="middle" class="axis-t">12</text>
+      <text x="1190" y="464" text-anchor="middle" class="axis-t">13</text>
+      <text x="1275" y="464" text-anchor="middle" class="axis-t">14</text>
       <text x="587" y="492" text-anchor="middle" class="axis-t zh">迭代 #(host 原型 = 0.5)</text>
       <text x="587" y="492" text-anchor="middle" class="axis-t en">iteration # (host prototype = 0.5)</text>
       <text x="20" y="250" text-anchor="middle" class="axis-t zh" transform="rotate(-90 20 250)">geomean 加速比(越高越好)</text>
@@ -352,7 +372,7 @@
       <text x="85" y="440" text-anchor="middle" class="anno-x en">host proto GO</text>
 
       <!-- fp32 running-best step line -->
-      <path class="step" d="M170 403 H255 V239 H340 V237 H510 V200 H595 V184 H680 V93 H1105"/>
+      <path class="step" d="M170 403 H255 V239 H340 V237 H510 V200 H595 V184 H680 V93 H1275"/>
       <!-- 16-bit series -->
       <path class="l16b" d="M765 256 L850 210"/>
       <path class="l16f" d="M765 245 L850 236"/>
@@ -409,6 +429,15 @@
       <g class="pt" id="p10"><circle class="hit" cx="935" cy="93" r="16"/><circle class="selring" cx="935" cy="93" r="10"/><circle class="dot open" cx="935" cy="93" r="5.5"/></g>
       <g class="pt" id="p11"><circle class="hit" cx="1020" cy="93" r="16"/><circle class="selring" cx="1020" cy="93" r="10"/><circle class="dot open" cx="1020" cy="93" r="5.5"/></g>
       <g class="pt" id="p12"><circle class="hit" cx="1105" cy="93" r="16"/><circle class="selring" cx="1105" cy="93" r="10"/><circle class="dot open" cx="1105" cy="93" r="5.5"/></g>
+      <g class="pt" id="p13"><circle class="hit" cx="1190" cy="93" r="16"/><circle class="selring" cx="1190" cy="93" r="10"/><circle class="dot open" cx="1190" cy="93" r="5.5"/></g>
+      <g class="pt" id="p14"><circle class="hit" cx="1275" cy="93" r="16"/><circle class="selring" cx="1275" cy="93" r="10"/><circle class="dot open" cx="1275" cy="93" r="5.5"/></g>
+
+      <!-- iter13/14: gains live on the tail axis, not this one -->
+      <path d="M1190 84 V76 H1275 V84 M1232 76 V60" fill="none" stroke="var(--muted)" stroke-width="1"/>
+      <text x="1275" y="38" text-anchor="end" class="anno-x zh">HLS(iter13/14):P0 按设计持平</text>
+      <text x="1275" y="52" text-anchor="end" class="anno-x zh" style="fill:var(--good);font-weight:600;">尾部轴 1M 最坏 245→57µs · 见下方卡片 ↓</text>
+      <text x="1275" y="38" text-anchor="end" class="anno-x en">HLS (iter13/14): P0 flat by design</text>
+      <text x="1275" y="52" text-anchor="end" class="anno-x en" style="fill:var(--good);font-weight:600;">tail axis: 1M worst 245→57µs · card below ↓</text>
 
       <!-- ====== tooltip layer (last siblings: pop above everything) ====== -->
       <g class="tips">
@@ -568,6 +597,32 @@
             <text class="t2" x="818" y="155">port/gvr_topk_decode_ms.py, 3436 lines</text>
             <text class="t2" x="818" y="169">finding: order nondet → compare sorted sets</text>
           </g></g>
+        <g class="tip" id="t13"><rect x="960" y="107" width="292" height="70"/>
+          <g class="zh">
+            <text class="t0" x="972" y="125">iter13 · HLS log-falsi fallback 上线(默认 ON)</text>
+            <text class="t1" x="972" y="141">op22 尾部:best gm 1.265,K2048 1M 2.105×</text>
+            <text class="t2" x="972" y="155">梯子已知计数 + log-域 regula falsi 瞄准</text>
+            <text class="t2" x="972" y="169">P0 二进制不变;op22 门 456/456</text>
+          </g>
+          <g class="en">
+            <text class="t0" x="972" y="125">iter13 · HLS log-falsi fallback SHIPPED (default ON)</text>
+            <text class="t1" x="972" y="141">op22 tail: best gm 1.265, K2048 1M 2.105×</text>
+            <text class="t2" x="972" y="155">ladder-known counts + log-domain regula falsi aim</text>
+            <text class="t2" x="972" y="169">P0 binaries untouched; op22 gate 456/456</text>
+          </g></g>
+        <g class="tip" id="t14"><rect x="960" y="190" width="292" height="70"/>
+          <g class="zh">
+            <text class="t0" x="972" y="208">iter14 · 分布式 msc fallback(N≥524288 门控)</text>
+            <text class="t1" x="972" y="224">worst 尾部 gm 1.250;1M 最坏 245→57µs(累计)</text>
+            <text class="t2" x="972" y="238">slice pass + cluster count-merge + push-collect</text>
+            <text class="t2" x="972" y="252">N≤262K 位相同 iter13;代码质量按 N 编译门控</text>
+          </g>
+          <g class="en">
+            <text class="t0" x="972" y="208">iter14 · distributed msc fallback (N≥524288 gate)</text>
+            <text class="t1" x="972" y="224">worst-tail gm 1.250; 1M worst 245→57µs cumulative</text>
+            <text class="t2" x="972" y="238">slice passes + cluster count-merge + push-collect</text>
+            <text class="t2" x="972" y="252">N≤262K bit-identical to iter13; code mass N-gated</text>
+          </g></g>
         <g class="tip" id="tb8"><rect x="779" y="185" width="264" height="56"/>
           <g class="zh">
             <text class="t0" x="791" y="203">bf16 @ iter8</text>
@@ -666,7 +721,9 @@
     <label for="it3">3</label><label for="it4">4</label><label for="it5">5</label>
     <label for="it6">6</label><label for="it7">7 ★</label><label for="it8">8</label>
     <label for="it9">9</label><label for="it10">10</label><label for="it11">11</label>
-    <label for="it12">12</label>
+    <label for="it12">12</label><label for="it129">12.9</label><label for="it13">13 ★</label>
+    <label for="it14">14</label>
+    <label for="it15">15</label>
   </nav>
 
   <section class="details">
@@ -958,21 +1015,129 @@
         </dl>
       </div>
     </div></div>
+    <div class="d129"><div class="dcard">
+      <div class="zh">
+        <h3>iter 12.9 — HOST 原型:HLS 数学层(定理 1–3 在 op22 三场景 bundle 上验证)</h3>
+        <div class="date">2026-07-07 · <code>scripts/proto_hls.py</code> · 78 个 fp32 行(best/worst/real × K512/1024/2048 × N 4K–1M)· <code>MATH_THRESHOLD_ESTIMATION.html</code> + <code>HLS_VALIDATION_REPORT.html</code></div>
+        <dl>
+          <dt>问题</dt><dd>fallback 尾部(op22 应力场景 1M 最坏 ~245µs)能否用数学层(阈值估计 + 收敛策略)在不动快路径的前提下塌缩?验证→优化循环三轮收敛,产出整个参数族的穷举网格最优策略,leave-one-scenario-out 稳定。</dd>
+          <dt>结果</dt><dd>模型级:best 场景最坏 149.5→27.7µs,real 最坏 83.3→27.7µs;<b>fallback 平均 1.00 遍、最大 1 遍、78 行 0 失败(α=0.2)</b>。两处理论被数据修正:(1) 跟踪不变量 = 边界局部保留率 ρ*(v<sub>K</sub> 的样本秩),而非平均命中率 h̄;(2) <b>✗ 秩空间样本-CCDF 桥被证伪</b> — 值空间 log-count regula falsi(指数尾假设)全面胜出。</dd>
+          <dt>GO/NO-GO</dt><dd>GO:承重改动 = fallback 修复(log-falsi + cluster 并行重计数);ρ-aware placement 只再贡献 ~5–7%(deferred 为 Step 3)。τ(3) 是代价模型唯一未实测输入 → iter13 Step 0 补测。</dd>
+        </dl>
+      </div>
+      <div class="en">
+        <h3>iter 12.9 — HOST prototype: the HLS math layer (theorems 1–3 validated on the op22 three-scenario bundles)</h3>
+        <div class="date">2026-07-07 · <code>scripts/proto_hls.py</code> · 78 fp32 rows (best/worst/real × K512/1024/2048 × N 4K–1M) · <code>MATH_THRESHOLD_ESTIMATION.html</code> + <code>HLS_VALIDATION_REPORT.html</code></div>
+        <dl>
+          <dt>Question</dt><dd>Can a math layer (threshold estimation + convergence policy) collapse the fallback tail (op22 stress 1M worst ~245µs) without touching the fast path? The validate→optimize loop converged in three iterations to the exhaustive-grid optimum of the whole parameter family, stable under leave-one-scenario-out.</dd>
+          <dt>Result</dt><dd>Model-level: best-scenario worst case 149.5→27.7µs, real worst 83.3→27.7µs; <b>fallback mean 1.00 pass, max 1, 0 failures on all 78 rows (α=0.2)</b>. Two theory components corrected by data: (1) the tracking invariant is the boundary-local retention ρ* (sample rank of v<sub>K</sub>), not mean hit-rate h̄; (2) <b>✗ the rank-space sample-CCDF bridge is falsified</b> — value-space log-count regula falsi (exponential-tail assumption) wins across the board.</dd>
+          <dt>GO/NO-GO</dt><dd>GO: the load-bearing change is the fallback fix (log-falsi + cluster-parallel recount); ρ-aware placement adds only ~5–7% (deferred as Step 3). τ(3) was the cost model's only unmeasured input → measured in iter13 Step 0.</dd>
+        </dl>
+      </div>
+    </div></div>
+    <div class="d13"><div class="dcard">
+      <div class="zh">
+        <h3>iter 13 ★ — HLS Step 0 + Step 1:τ(3) 实测 + log-falsi fallback 上线(默认 ON)</h3>
+        <div class="date">2026-07-07 · <code>3203481fb3</code> · <code>src/gvr_ms_op.py</code> + <code>gvr_msc_op.py</code> · nsys A/B @ b200-028 GPU1(锚点 = iter7 轴 −1.3%)</div>
+        <dl>
+          <dt>手段</dt><dd><b>Step 0</b>:τ(3)=1.219 @262K fp32 实测(HLS 模型用 1.2,差 &lt;2%;M=3 加入 <code>count_ge_multi_bench</code>)。<b>Step 1</b>:s_iscalars[5]/[6] 携带梯子已知的括号计数 → entry + hi-end 全行扫描跳过;精修轮按 log-计数 regula falsi 瞄准(<code>lg2.approx.f32</code>,<code>OP21_FB_ALPHA</code>=0.2,探测硅不变 vs 0.1);msc done=2 免预重计数。<code>OP21_FB_LOGFALSI=0</code> = 位等价 legacy 臂。</dd>
+          <dt>判决</dt><dd>op22 bundle 同进程配对 nsys(45 格,每臂 30 冷 rep):<b>best gm 1.265(K2048 1M 2.105×,244.7→116.3µs)· worst 1.003 持平 · real 1.039 · ALL 1.096</b>。K2048 light-fallback 口袋 −3~−6% = kC=6144 顶棚的 codegen 税(α 不变、跨数据复现;v3.2 几何独有,DSv4 K512/K1024 无口袋)。P0 spot 5 格均值 ~+1%,锚点在轴。</dd>
+          <dt>门禁</dt><dd>全绿,含<b>新 op22 应力门 456/456</b>(<code>gate_op22.py</code> 强制走 fallback 路径)+ OFF 臂 legacy smoke。port/ 冻结在 iter11 语义(log-falsi 是 post-PR-1 候选,非 PR-1 一部分)。</dd>
+        </dl>
+      </div>
+      <div class="en">
+        <h3>iter 13 ★ — HLS Step 0 + Step 1: τ(3) measured + log-falsi fallback SHIPPED (default ON)</h3>
+        <div class="date">2026-07-07 · <code>3203481fb3</code> · <code>src/gvr_ms_op.py</code> + <code>gvr_msc_op.py</code> · nsys A/B @ b200-028 GPU1 (anchor = iter7 axis −1.3%)</div>
+        <dl>
+          <dt>Lever</dt><dd><b>Step 0</b>: τ(3)=1.219 @262K fp32 measured (HLS model used 1.2, &lt;2% off; M=3 added to <code>count_ge_multi_bench</code>). <b>Step 1</b>: s_iscalars[5]/[6] carry ladder-known bracket counts → entry + hi-end full-row passes skipped; refine aims by log-count regula falsi (<code>lg2.approx.f32</code>, <code>OP21_FB_ALPHA</code>=0.2, probed silicon-invariant vs 0.1); msc done=2 pre-recount skipped. <code>OP21_FB_LOGFALSI=0</code> = bit-equivalent legacy arm.</dd>
+          <dt>Verdict</dt><dd>Same-process paired nsys on the op22 bundles (45 cells, 30 cold reps/arm): <b>best gm 1.265 (K2048 1M 2.105×, 244.7→116.3µs) · worst 1.003 flat · real 1.039 · ALL 1.096</b>. K2048 light-fallback pocket −3..−6% = codegen tax at the kC=6144 ceiling (alpha-invariant, reproduces across datasets; v3.2 geometry only — DSv4 K512/K1024 pocket-free). P0 spot (5 cells) mean ~+1%, anchor on-axis.</dd>
+          <dt>Gates</dt><dd>All green incl. the <b>NEW op22 stress gate 456/456</b> (<code>gate_op22.py</code> exercises the forced-fallback paths) + OFF-arm legacy smoke. port/ stays FROZEN at iter11 semantics (log-falsi is a post-PR-1 candidate, not part of PR-1).</dd>
+        </dl>
+      </div>
+    </div></div>
+    <div class="d14"><div class="dcard">
+      <div class="zh">
+        <h3>iter 14 — HLS Step 2:分布式 msc fallback(N 门控上线)+ 硅验证报告收口</h3>
+        <div class="date">2026-07-08 · <code>38a1fb79e7</code>(+14.1/14.2 报告提交)· <code>src/gvr_msc_op.py</code> <code>_fb_dist</code></div>
+        <dl>
+          <dt>手段</dt><dd>fallback 的整行 pass 切片到 C 个 CTA:slice passes + cluster count-merge + push-collect + leader P4(绕开 vendored phase3 前缀契约)。<b>默认 N 门控 <code>n ≥ 524288</code></b>(<code>OP21_FB_DIST=1/0</code> 强制):~300 行代码质量对 msc 快路径有 <b>~4% 系统性单向税</b>(P0 spot 3/5 同号)→ 用 dispatch key 门控<b>编译</b>而非运行时分支;N≤262144 二进制与 iter13 位相同,P0 判决不受扰。</dd>
+          <dt>判决</dt><dd>dist 全开 A/B(old = iter13):<b>best gm 1.250 / worst gm 1.250(falsi 碰不到的 all_ge 场景也塌了)/ real 1.059</b>;K2048 1M 两应力场景均 ~1.99×。<b>累计(vs HLS 前):1M 最坏 244.7→57.4µs(best K2048 4.26×),real K512 1M 183.7→69.5µs(2.64×)</b>;real hugeN 净正(radix-wins 区被拉回)。</dd>
+          <dt>教训</dt><dd><b>代码质量是一种货币</b>:从不执行的代码也会通过 I-cache/寄存器压力收系统税;同号一致性(跨独立二进制)区分系统税与 codegen 彩票。cluster-barrier 红线(iter3/4)的精确表述 = 省下工作/屏障成本比:分布全行 pass 赢在 iter3/4 分布 µs 级串行工作输掉的地方。</dd>
+          <dt>状态</dt><dd>HLS Step 0+1+2 全部上硅;剩余:Step 3 ρ-aware placement(deferred,~5–7%)与 <code>_fb_dist</code> 瘦身。1M 最坏尾部残余 ~56–70µs(战役起点 245µs)。</dd>
+        </dl>
+      </div>
+      <div class="en">
+        <h3>iter 14 — HLS Step 2: distributed msc fallback (shipped N-gated) + silicon-validation report closed</h3>
+        <div class="date">2026-07-08 · <code>38a1fb79e7</code> (+14.1/14.2 report commits) · <code>src/gvr_msc_op.py</code> <code>_fb_dist</code></div>
+        <dl>
+          <dt>Lever</dt><dd>Slice the fallback's full-row passes across the C CTAs: slice passes + cluster count-merge + push-collect + leader P4 (bypassing the vendored phase3 prefix contract). <b>Default N-gated <code>n ≥ 524288</code></b> (<code>OP21_FB_DIST=1/0</code> forces): the ~300-line code mass taxes the msc fast path <b>~4% SYSTEMATIC one-signed</b> (P0 spot 3/5) → gate COMPILATION via the dispatch key, not runtime branches; N≤262144 binaries stay bit-identical to iter13, P0 verdict untouched.</dd>
+          <dt>Verdict</dt><dd>Dist-everywhere A/B (old = iter13): <b>best gm 1.250 / worst gm 1.250 (the all_ge scenario falsi couldn't touch also collapses) / real 1.059</b>; K2048 1M ~1.99× in both stress scenarios. <b>Cumulative (vs pre-HLS): 1M worst 244.7→57.4µs (best K2048 4.26×), real K512 1M 183.7→69.5µs (2.64×)</b>; real hugeN net-positive (the radix-wins region pulled back).</dd>
+          <dt>Lesson</dt><dd><b>Code mass is a currency</b>: code that never executes still taxes via I-cache/register pressure; sign-consistency across independent binaries separates systematic tax from codegen lottery. The cluster-barrier red line (iter3/4) restated precisely = saved-work/barrier ratio: distributing full-row passes wins where distributing µs-scale serial work lost.</dd>
+          <dt>Status</dt><dd>HLS Steps 0+1+2 all on silicon; remaining: Step 3 ρ-aware placement (deferred, ~5–7%) and <code>_fb_dist</code> slimming. Residual 1M worst tail ~56–70µs (campaign started at 245µs).</dd>
+        </dl>
+      </div>
+    </div></div>
+    <div class="d15"><div class="dcard">
+      <div class="zh">
+        <h3>iter 15 — P0 切换判决:三代 × 三场景 × 三 dtype 三臂直测(测量收口,无 kernel 改动)</h3>
+        <div class="date">2026-07-08 · <code>scripts/ab_p0batch.py</code> · 210 格 × 3 臂,exact 630/630 · 完整数据与图表 = <code>HLS_VALIDATION_REPORT.html</code> <b>§7</b></div>
+        <dl>
+          <dt>问题</dt><dd>HLS-GVR 对<b>原始生产 GVR</b>(<code>gvr_cutedsl</code>)的切换决策此前只有跨轮拼接证据 —— 本轮用同进程三臂配对 nsys A/B(orig / pre-HLS legacy / HLS shipped)直测:tail 15 格 × 3 场景 × {fp32,bf16,fp16} + 高 BS 25 格 × 3 场景(fp32,全 ms_1cta)。</dd>
+          <dt>判决</dt><dd><b>real 轴全 dtype:shipped &gt; legacy &gt; orig(o/s gm fp32 1.667 / fp16 1.801 / bf16 2.040,bf16 15/15)——16-bit 放大 HLS 优势</b>;hugeN msc 全场景全 dtype shipped 通吃;orig 唯一系统性口袋 = worst × ms_1cta(高 BS worst 0/25,gm 0.788);K2048 falsi 税 fp32 real ~5%、16-bit 消失;P0 无回归网格 @HEAD <b>1.276,17/17</b>(iter7 锚 1.249)。</dd>
+          <dt>坑</dt><dd><code>nsys_verdict.py</code> 默认 <code>PREFIX="ms"</code> 会静默读 stale iter1 <code>ms_*</code> reps 并复现 0.830 假判决 —— 必须显式传 <code>msa</code>。</dd>
+          <dt>状态</dt><dd>ship 规则不变(HLS 默认);后续杠杆 = dist fallback 扩到单 CTA ms 路径(或 BS≥64 hugeN dispatch 防御)。测量战役收口。</dd>
+        </dl>
+      </div>
+      <div class="en">
+        <h3>iter 15 — P0 switch verdict: 3-generation × 3-scenario × 3-dtype three-arm direct A/B (measurement close-out, no kernel edits)</h3>
+        <div class="date">2026-07-08 · <code>scripts/ab_p0batch.py</code> · 210 cells × 3 arms, exact 630/630 · full data &amp; charts = <code>HLS_VALIDATION_REPORT.html</code> <b>§7</b></div>
+        <dl>
+          <dt>Question</dt><dd>The switch decision vs the <b>original production GVR</b> (<code>gvr_cutedsl</code>) previously rested on cross-run stitching — this round measures it directly with a same-process three-arm paired nsys A/B (orig / pre-HLS legacy / HLS shipped): tail 15 cells × 3 scenarios × {fp32,bf16,fp16} + high-BS 25 cells × 3 scenarios (fp32, all ms_1cta).</dd>
+          <dt>Verdict</dt><dd><b>Real axis, all dtypes: shipped &gt; legacy &gt; orig (o/s gm fp32 1.667 / fp16 1.801 / bf16 2.040, bf16 15/15) — 16-bit AMPLIFIES the HLS margin</b>; hugeN msc is shipped territory in every scenario × dtype; the one systematic orig pocket = worst × ms_1cta (high-BS worst 0/25, gm 0.788); K2048 falsi tax ~5% fp32-real, vanishes in 16-bit; P0 no-regress grid @HEAD <b>1.276, 17/17</b> (iter7 anchor 1.249).</dd>
+          <dt>Gotcha</dt><dd><code>nsys_verdict.py</code> defaults to <code>PREFIX="ms"</code>, silently reading stale iter1 <code>ms_*</code> reps and reproducing the 0.830 false verdict — always pass <code>msa</code> explicitly.</dd>
+          <dt>Status</dt><dd>Ship rule stands (HLS default); follow-up lever = extend the dist fallback to the single-CTA ms path (or a BS≥64 hugeN dispatch guard). Measurement campaign closed.</dd>
+        </dl>
+      </div>
+    </div></div>
   </section>
+
+  <div class="card">
+    <h2><span class="zh">HLS fallback 尾部塌缩(iter13/14 · 新维度,P0 轴之外)</span><span class="en">HLS fallback tail collapse (iter13/14 · new dimension, off the P0 axis)</span></h2>
+    <p class="note">
+      <span class="zh">iter13/14 按设计不动 P0(上图持平)— 战果在 op22 v2 修正合成 bundle 的 <b>hugeN fallback 尾部</b>(nsys 纯核 cold-L2,b200-028 同进程配对 A/B,每臂 30 冷 rep)。柱 = 1M BS1 格的实测 µs:灰 = HLS 前(legacy 臂),蓝 = iter13 log-falsi,绿 = +iter14 分布式 fallback(两次配对 A/B 组合;iter14 A/B 的 old 臂 = iter13)。</span>
+      <span class="en">iter13/14 leave P0 untouched by design (flat in the chart above) — the win lives in the <b>hugeN fallback tail</b> on the op22 v2 corrected-synth bundles (nsys pure-kernel cold-L2, same-process paired A/B on b200-028, 30 cold reps/arm). Bars = measured µs of the 1M BS1 cells: gray = pre-HLS (legacy arm), blue = iter13 log-falsi, green = +iter14 distributed fallback (composed across the two paired A/Bs; the iter14 A/B's old arm = iter13).</span>
+    </p>
+    <div class="cbars" style="max-width:860px;grid-template-columns:170px 1fr 150px;">
+      <div class="clb"><span class="zh">best K2048 · HLS 前</span><span class="en">best K2048 · pre-HLS</span></div><div class="track"><div class="fill" style="width:100%;background:var(--discard);"></div></div><div class="cval">244.7 µs</div>
+      <div class="clb">· iter13</div><div class="track"><div class="fill" style="width:47.5%"></div></div><div class="cval">116.3 µs</div>
+      <div class="clb">· +iter14</div><div class="track"><div class="fill" style="width:23.5%;background:var(--good);"></div></div><div class="cval">57.4 µs · <b>4.26×</b></div>
+      <div class="clb"><span class="zh">real K512 · HLS 前</span><span class="en">real K512 · pre-HLS</span></div><div class="track"><div class="fill" style="width:75.1%;background:var(--discard);"></div></div><div class="cval">183.7 µs</div>
+      <div class="clb">· iter13</div><div class="track"><div class="fill" style="width:49.2%"></div></div><div class="cval">120.4 µs</div>
+      <div class="clb">· +iter14</div><div class="track"><div class="fill" style="width:28.4%;background:var(--good);"></div></div><div class="cval">69.5 µs · <b>2.64×</b></div>
+      <div class="clb"><span class="zh">worst K2048 · HLS 前</span><span class="en">worst K2048 · pre-HLS</span></div><div class="track"><div class="fill" style="width:46.9%;background:var(--discard);"></div></div><div class="cval">114.8 µs</div>
+      <div class="clb">· iter13</div><div class="track"><div class="fill" style="width:46.5%"></div></div><div class="cval">113.8 µs</div>
+      <div class="clb">· +iter14</div><div class="track"><div class="fill" style="width:23.0%;background:var(--good);"></div></div><div class="cval">56.2 µs · <b>2.04×</b></div>
+    </div>
+    <p class="note">
+      <span class="zh">场景 gm(45 格):iter13 vs 前 = best 1.265 / worst 1.003 / real 1.039;iter14(dist 全开)vs iter13 = best 1.250 / <b>worst 1.250</b>(falsi 碰不到的 all_ge 场景)/ real 1.059。worst 尾部只有分布式算力能塌 — 数学瞄准(falsi)与算力切片(dist)互补。原始数据 <code>results/nsys/iter13_ab_hls{,_dist}/</code>;逐格全表 <code>ITERATIONS.md</code> iter13/14 + <code>HLS_VALIDATION_REPORT.html</code> §6。</span>
+      <span class="en">Scenario gms (45 cells): iter13 vs pre = best 1.265 / worst 1.003 / real 1.039; iter14 (dist everywhere) vs iter13 = best 1.250 / <b>worst 1.250</b> (the all_ge scenario falsi couldn't touch) / real 1.059. Only distributed compute collapses the worst tail — math aiming (falsi) and compute slicing (dist) are complementary. Raw data <code>results/nsys/iter13_ab_hls{,_dist}/</code>; full per-cell tables in <code>ITERATIONS.md</code> iter13/14 + <code>HLS_VALIDATION_REPORT.html</code> §6.</span>
+    </p>
+  </div>
 
   <div class="card">
     <h2><span class="zh">执行模型与花费(/cost 估算)</span><span class="en">Executing model &amp; cost (/cost estimate)</span></h2>
     <p class="note">
-      <span class="zh">全部 13 次迭代(含 host 原型)由 <b>Claude Fable 5</b>(<code>claude-fable-5</code>,Anthropic Mythos 级旗舰模型,1M 上下文)在 Claude Code 代理框架内自主执行:读代码、写 CUDA/cuteDSL kernel、跑 nsys/门禁、写报告与提交,全部出自同一模型 —— 时间窗内 <b>1,382 条 assistant API 消息 100% 为 claude-fable-5</b>,无 subagent 降级到 Sonnet/Haiku。花费按本地会话转录(<code>~/.claude/projects/…/*.jsonl</code>)逐消息 usage 汇总,以标准 API 牌价折算:输入 $10 / 输出 $50 / cache 5m 写 $12.5 / cache 读 $1(每 MTok)。</span>
-      <span class="en">All 13 iterations (incl. the host prototype) were executed autonomously by <b>Claude Fable 5</b> (<code>claude-fable-5</code>, Anthropic's Mythos-class flagship, 1M context) inside the Claude Code agent harness — reading code, writing the CUDA/cuteDSL kernels, driving nsys/gates, writing reports and commits. <b>1,382 assistant API messages in the window are 100% claude-fable-5</b>; no subagent downgrades to Sonnet/Haiku. Costs are aggregated per-message from the local session transcripts (<code>~/.claude/projects/…/*.jsonl</code>) at standard API list prices: $10 in / $50 out / $12.5 cache-write-5m / $1 cache-read per MTok.</span>
+      <span class="zh">全部 16 次迭代(含 2 次 host 原型)由 <b>Claude Fable 5</b>(<code>claude-fable-5</code>,Anthropic Mythos 级旗舰模型,1M 上下文)在 Claude Code 代理框架内自主执行:读代码、写 CUDA/cuteDSL kernel、跑 nsys/门禁、写报告与提交,全部出自同一模型 —— 时间窗内 <b>1,949 条 assistant API 消息 100% 为 claude-fable-5</b>,无 subagent 降级到 Sonnet/Haiku。花费按本地会话转录(<code>~/.claude/projects/…/*.jsonl</code>)逐消息 usage 汇总(requestId 去重),以标准 API 牌价折算:输入 $10 / 输出 $50 / cache 5m 写 $12.5 / cache 读 $1(每 MTok)。</span>
+      <span class="en">All 16 iterations (incl. two host prototypes) were executed autonomously by <b>Claude Fable 5</b> (<code>claude-fable-5</code>, Anthropic's Mythos-class flagship, 1M context) inside the Claude Code agent harness — reading code, writing the CUDA/cuteDSL kernels, driving nsys/gates, writing reports and commits. <b>1,949 assistant API messages in the window are 100% claude-fable-5</b>; no subagent downgrades to Sonnet/Haiku. Costs are aggregated per-message from the local session transcripts (<code>~/.claude/projects/…/*.jsonl</code>, requestId-deduped) at standard API list prices: $10 in / $50 out / $12.5 cache-write-5m / $1 cache-read per MTok.</span>
     </p>
     <div class="costrow">
-      <div><span class="zh">总花费(估)</span><span class="en">Total (est.)</span><br><b>≈ $573</b></div>
+      <div><span class="zh">总花费(估)</span><span class="en">Total (est.)</span><br><b>≈ $797</b></div>
       <div><span class="zh">性能战役 iter0.5–9</span><span class="en">Perf campaign iter0.5–9</span><br><b>≈ $264</b></div>
       <div><span class="zh">收口+移植 iter10–12</span><span class="en">Ship+port iter10–12</span><br><b>≈ $310</b></div>
-      <div><span class="zh">输出 token</span><span class="en">Output tokens</span><br><b>1.53M</b></div>
-      <div><span class="zh">cache 读 / 写</span><span class="en">Cache read / write</span><br><b>293.9M / 15.9M</b></div>
-      <div><span class="zh">成本构成</span><span class="en">Cost split</span><br><b><span class="zh">读51% 写35% 出13%</span><span class="en">rd 51% · wr 35% · out 13%</span></b></div>
+      <div><span class="zh">HLS 战役 iter12.9–14</span><span class="en">HLS campaign iter12.9–14</span><br><b>≈ $224</b></div>
+      <div><span class="zh">输出 token</span><span class="en">Output tokens</span><br><b>2.26M</b></div>
+      <div><span class="zh">cache 读 / 写</span><span class="en">Cache read / write</span><br><b>404.3M / 22.0M</b></div>
+      <div><span class="zh">成本构成</span><span class="en">Cost split</span><br><b><span class="zh">读51% 写34% 出14%</span><span class="en">rd 51% · wr 34% · out 14%</span></b></div>
     </div>
     <div class="cbars">
       <div class="clb">0.5</div><div class="track"><div class="fill" style="width:21.1%"></div></div><div class="cval">$23.9 · 68 <span class="zh">条</span><span class="en">msgs</span></div>
@@ -988,14 +1153,19 @@
       <div class="clb">10</div><div class="track"><div class="fill" style="width:93.3%"></div></div><div class="cval">$105.6 · 208</div>
       <div class="clb">11</div><div class="track"><div class="fill" style="width:100%"></div></div><div class="cval">$113.2 · 211</div>
       <div class="clb">12</div><div class="track"><div class="fill" style="width:80.3%"></div></div><div class="cval">$90.9 · 252</div>
+      <div class="clb">12.9</div><div class="track"><div class="fill" style="width:68.9%"></div></div><div class="cval">$78.0 · 223</div>
+      <div class="clb">13 ★</div><div class="track"><div class="fill" style="width:66.4%"></div></div><div class="cval">$75.2 · 234</div>
+      <div class="clb">14</div><div class="track"><div class="fill" style="width:62.7%"></div></div><div class="cval">$71.0 · 110</div>
     </div>
     <p class="foot">
       <span class="zh"><b>归因方法</b>:iter 窗口 = 上一 <code>[op21 iter N]</code> 提交时刻 → 本 iter 提交时刻(git 时间戳,UTC);窗口内本项目全部 Claude Code 会话的 assistant 消息按时间戳归入(含 B300 远端节点会话 —— NFS 共享 home,转录同目录;按 requestId 去重)。
       <b>为何 iter10–12 偏高</b>:iter10 含 B300 51-cell 交叉验证长程看护 + SHIP_REVIEW/UPSTREAM_ASSESSMENT 两份收口文档 + 16-bit 尾巴消融;iter11 含对抗门从零编写与 72 用例证伪-修复循环;iter12 含 3436 行 artifact 确定性组装 + 7 组门禁(含上游 384 用例网格)。
-      <b>注意</b>:此为按 API 牌价的折算估计 —— 订阅制(Max plan)下实际现金支出不同;cache 读占 token 量 95% 但只占成本 51%,是 agent 长会话的典型形态;iter7(全战役最大性能收益 +11% gm)只花了 $22.9 —— 花费与收益无相关性,证伪迭代(iter3/4 合计 $17)同样是必要开支。</span>
+      <b>注意</b>:此为按 API 牌价的折算估计 —— 订阅制(Max plan)下实际现金支出不同;cache 读占 token 量 95% 但只占成本 51%,是 agent 长会话的典型形态;iter7(全战役最大性能收益 +11% gm)只花了 $22.9 —— 花费与收益无相关性,证伪迭代(iter3/4 合计 $17)同样是必要开支。
+      <b>iter12.9–14 窗口修正</b>:iter12.9 与 iter13 提交仅隔 32 秒(同一晚间会话先补交上一会话的数学验证工件),严格提交窗口会把 iter13 的工作误归给 12.9 —— 故此三行改按实际会话边界切分:12.9 = 07-07 午间数学验证会话(与 op22 收口会话部分重叠,取上界);13 = 晚间会话至 iter13 提交;14 = 其后至 handoff 提交(含 14.1/14.2 两次报告提交)。</span>
       <span class="en"><b>Attribution</b>: each iteration window = previous <code>[op21 iter N]</code> commit → this iteration's commit (git timestamps, UTC); all assistant messages of this project's Claude Code sessions inside the window are attributed by timestamp (incl. remote B300-node sessions — NFS-shared home, same transcript dir; deduped by requestId).
       <b>Why iter10–12 cost more</b>: iter10 includes babysitting the 51-cell B300 cross-check + the SHIP_REVIEW/UPSTREAM_ASSESSMENT documents + the 16-bit tail ablation; iter11 includes authoring the adversarial gate from scratch and the 72-case falsify-fix loop; iter12 includes the 3436-line deterministic artifact assembly + 7 gate suites (incl. the 384-case upstream grid).
-      <b>Caveats</b>: this is an API-list-price conversion — actual cash spend differs on subscription (Max) plans; cache reads are 95% of tokens but only 51% of cost, the typical shape of long agent sessions; iter7 (the campaign's biggest perf win, +11% gm) cost only $22.9 — spend does not correlate with gain, and the falsification iterations (iter3/4, $17 combined) were equally necessary spend.</span>
+      <b>Caveats</b>: this is an API-list-price conversion — actual cash spend differs on subscription (Max) plans; cache reads are 95% of tokens but only 51% of cost, the typical shape of long agent sessions; iter7 (the campaign's biggest perf win, +11% gm) cost only $22.9 — spend does not correlate with gain, and the falsification iterations (iter3/4, $17 combined) were equally necessary spend.
+      <b>iter12.9–14 window correction</b>: the iter12.9 and iter13 commits are 32 s apart (the evening session first committed the prior session's math-validation artifacts), so strict commit windows would misattribute iter13's work to 12.9 — these three rows are instead cut at actual session boundaries: 12.9 = the 07-07 midday math-validation sessions (partially overlapping the op22 close-out session; upper bound); 13 = the evening session up to the iter13 commit; 14 = the remainder through the handoff commit (incl. the 14.1/14.2 report commits).</span>
     </p>
   </div>
 
@@ -1021,6 +1191,9 @@
           <tr><td>10</td><td>07-06</td><td>SHIP_REVIEW + UPSTREAM_ASSESSMENT + B300 51-cell 交叉验证</td><td class="num">1.249</td><td class="num">17/17</td><td class="num">1.091</td><td class="num">1.055</td><td class="num">$106</td><td>B300 1.268/1.089/1.053 HW-invariant;发现 P4 path-C blocker;K2048 16-bit 尾 = 结构墙(接受)</td></tr>
           <tr><td>11</td><td>07-06</td><td>P4 path-C exact 回退(删固定深度 fine-scatter → value-edge snap)</td><td class="num">1.249(A/B 0.996)</td><td class="num">17/17</td><td class="num">1.091</td><td class="num">1.055</td><td class="num">$113</td><td>对抗 band 门 0/72 → 72/72;上游 blocker 解除;新红线</td></tr>
           <tr><td>12</td><td>07-07</td><td>PR-1 kernel artifact(3436 行,确定性组装)+ runner 粘贴稿</td><td class="num">1.249</td><td class="num">17/17</td><td class="num">1.091</td><td class="num">1.055</td><td class="num">$91</td><td>全门禁绿 + 上游网格 384/384;发现输出顺序非确定 → A/B 比排序集合</td></tr>
+<tr><td>12.9</td><td>07-07</td><td>host 原型:HLS 数学层定理 1–3(op22 v2 bundle 78 行)</td><td class="num">1.249</td><td class="num">17/17</td><td class="num">1.091</td><td class="num">1.055</td><td class="num">$78</td><td>GO:fallback 平均 1.00 遍 / 0 失败;✗ 秩空间 CCDF 桥证伪;跟踪不变量 = ρ* 非 h̄</td></tr>
+<tr><td>13 ★</td><td>07-07</td><td>HLS Step 0+1:τ(3)=1.219 实测 + log-falsi fallback(默认 ON)</td><td class="num">1.249</td><td class="num">17/17</td><td class="num">1.091</td><td class="num">1.055</td><td class="num">$75</td><td>op22 尾部 A/B:best gm 1.265(K2048 1M 2.105×)/ worst 1.003 / real 1.039;新 op22 门 456/456;K2048 codegen 税口袋(v3.2 独有)</td></tr>
+<tr><td>14</td><td>07-08</td><td>HLS Step 2:分布式 msc fallback(N≥524288 编译门控)</td><td class="num">1.249</td><td class="num">17/17</td><td class="num">1.091</td><td class="num">1.055</td><td class="num">$71</td><td>dist A/B:worst gm 1.250 也塌;1M 最坏累计 245→57µs;~4% 代码质量税 → N-gate;N≤262K 位相同 iter13</td></tr>
         </tbody>
       </table>
       <p class="foot">
@@ -1051,6 +1224,9 @@
           <tr><td>10</td><td>07-06</td><td>SHIP_REVIEW + UPSTREAM_ASSESSMENT + B300 51-cell cross-check</td><td class="num">1.249</td><td class="num">17/17</td><td class="num">1.091</td><td class="num">1.055</td><td class="num">$106</td><td>B300 1.268/1.089/1.053 HW-invariant; found the P4 path-C blocker; K2048 16-bit tail = structural wall (accepted)</td></tr>
           <tr><td>11</td><td>07-06</td><td>P4 path-C exact fallback (fixed-depth fine-scatter deleted → value-edge snap)</td><td class="num">1.249 (A/B 0.996)</td><td class="num">17/17</td><td class="num">1.091</td><td class="num">1.055</td><td class="num">$113</td><td>adversarial band gate 0/72 → 72/72; upstream blocker resolved; new red line</td></tr>
           <tr><td>12</td><td>07-07</td><td>PR-1 kernel artifact (3436 lines, deterministic assembly) + runner paste-in</td><td class="num">1.249</td><td class="num">17/17</td><td class="num">1.091</td><td class="num">1.055</td><td class="num">$91</td><td>all gates green + upstream grid 384/384; output order nondeterministic → compare sorted sets</td></tr>
+<tr><td>12.9</td><td>07-07</td><td>host prototype: HLS math-layer theorems 1–3 (78 rows, op22 v2 bundles)</td><td class="num">1.249</td><td class="num">17/17</td><td class="num">1.091</td><td class="num">1.055</td><td class="num">$78</td><td>GO: fallback mean 1.00 pass / 0 failures; ✗ rank-space CCDF bridge falsified; tracking invariant = ρ* not h̄</td></tr>
+<tr><td>13 ★</td><td>07-07</td><td>HLS Step 0+1: τ(3)=1.219 measured + log-falsi fallback (default ON)</td><td class="num">1.249</td><td class="num">17/17</td><td class="num">1.091</td><td class="num">1.055</td><td class="num">$75</td><td>op22 tail A/B: best gm 1.265 (K2048 1M 2.105×) / worst 1.003 / real 1.039; NEW op22 gate 456/456; K2048 codegen-tax pocket (v3.2 only)</td></tr>
+<tr><td>14</td><td>07-08</td><td>HLS Step 2: distributed msc fallback (N≥524288 compile gate)</td><td class="num">1.249</td><td class="num">17/17</td><td class="num">1.091</td><td class="num">1.055</td><td class="num">$71</td><td>dist A/B: worst gm 1.250 collapses too; 1M worst cumulative 245→57µs; ~4% code-mass tax → N-gate; N≤262K bit-identical to iter13</td></tr>
         </tbody>
       </table>
       <p class="foot">

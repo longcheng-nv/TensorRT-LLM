@@ -847,3 +847,78 @@ class as the C8 rules (CUDA-graph identity by construction).
 **Trade recorded**: 262K stress cells forgo the dist ~1.25x (keep iter13
 falsi wins); the alternative (default ON everywhere) risked flipping thin
 P0 262K cells. Revisit only with a code-mass diet for _fb_dist.
+
+## Iter 15 — 2026-07-08 — P0 batch: 3-generation x 3-scenario x 3-dtype switch verdict
+
+**Question**: the HLS-GVR switch decision, settled by DIRECT same-process
+3-arm paired nsys A/B (no cross-run stitching): orig = gvr_cutedsl (the
+original single-CTA production GVR), legacy = gvr_ms_auto with
+OP21_FB_LOGFALSI=0 + OP21_FB_DIST=0 (pre-HLS op21), shipped = gvr_ms_auto
+with FALSI=1 + DIST N-rule (the HLS ship config). op22 bundles, cold-L2,
+arms interleaved per rep (throttle-immune). scripts/ab_p0batch.py +
+drive_p0_gpu{0,1}.sh + parse_p0batch.py; results/nsys/p0batch/.
+
+**Coverage**: tail set (15 cells: BS=1 seqlen tail 16K/65K/262K/1M +
+262K BS16, x3 K) x {best,worst,real} x {fp32,bf16,fp16} on GPU1; highbs
+set (25 cells, BS 64/256/1024 incl 1M BS64 — all ms_1cta) x 3 scenarios
+fp32 on GPU0. **210 records x 3 arms: exact ok 630/630, 0 errors.**
+
+**MASTER TABLE — gm orig/shipped (>1 = HLS faster than original GVR)**:
+| scenario | fp32 tail | bf16 tail | fp16 tail | fp32 highbs |
+|---|---|---|---|---|
+| best  | 0.991 (4/15) | 1.099 (4/15) | 1.115 (4/15) | 0.962 (11/25) |
+| worst | 0.822 (3/15) | 0.946 (3/15) | 0.943 (3/15) | **0.788 (0/25)** |
+| real  | **1.667 (13/15)** | **2.040 (15/15)** | **1.801 (13/15)** | 1.166 (21/25) |
+
+**gm legacy/shipped (HLS lever effect within op21)**:
+| scenario | fp32 | bf16 | fp16 | fp32 highbs |
+|---|---|---|---|---|
+| best  | 1.429 | 1.568 | 1.548 | 1.136 |
+| worst | 1.133 | 1.195 | 1.188 | 1.003 |
+| real  | 1.082 | 1.124 | 1.120 | 1.029 |
+
+**gm orig/legacy (pre-HLS op21 vs original)**: stress all-lose (best
+0.69-0.72, worst 0.73-0.79, highbs worst 0/25) but real-axis win
+(1.54/1.82/1.61 tail, 1.13 highbs) — i.e. WITHOUT HLS, op21 was a
+real-only bet; HLS moves stress from "all-lose" to parity-or-win on the
+msc paths.
+
+**Verdict lines (direct-measure grade)**:
+1. **real-axis ranking FINAL, all dtypes: HLS(shipped) > legacy > orig.**
+   16-bit AMPLIFIES the HLS margin (o/s bf16 2.040, fp16 1.801 vs fp32
+   1.667; bf16 sweeps 15/15).
+2. **hugeN msc = HLS territory in every scenario x dtype**: shipped takes
+   ALL 1M msc-path cells (o/s 1.35-2.18 worst, 1.68-2.76 best,
+   1.79-5.39 real); the dist fallback closes the worst-case collapse as
+   designed (K2048 1M worst 95->54us vs orig).
+3. **The one systematic orig pocket = worst x ms_1cta (mid-N tail +
+   ALL of highbs)**: highbs worst 0/25 for shipped (gm o/s 0.788).
+   dist fallback does not exist on the single-CTA ms path -> next lever
+   = extend dist to ms (or dispatch-to-orig guard) for BS>=64 hugeN.
+4. **K2048 falsi tax, direct-measured**: fp32 real msc pocket l/s
+   0.944-0.965 (~5%, at the low end of the earlier ~8% read); 16-bit tax
+   ~VANISHES (l/s 0.94-1.07 mixed-sign, gm ~1.0). DSv4 (K512/K1024)
+   stays zero-tax (real l/s >= 0.98).
+5. **best-axis 16-bit flips to shipped-win** (o/s 1.10-1.12 tail; fp32
+   was 0.99 neutral) — driven by the 1M msc cells (2.57-2.76x).
+
+**P0-4 no-regress grid @HLS HEAD (msa_*, GPU0, drive_nsys_iter2.sh +
+nsys_verdict.py msa fp32)**: gm rival/ms **1.276**, win **17/17**;
+gvrbest/ms 1.163 (beats the best GVR-family op on all 17). iter7 anchor
+was 1.249 17/17 -> no regression from iter13+14 (N-gate kept <=262K
+binaries bit-identical by construction; the delta is run-to-run).
+GOTCHA: `nsys_verdict.py` defaults to PREFIX="ms" which silently reads
+STALE iter1 ms_* reps from results/nsys/ (reproduces iter1's 0.830) —
+always pass `msa` explicitly.
+
+**Switch decision**: ship rule stands — HLS op21 as default; original
+GVR remains preferable only in adversarial worst x single-CTA territory
+(mid-N BS1 and BS>=64), which op22 already showed is not
+production-representative. No dispatch change shipped now; the ms-path
+dist extension is the recorded follow-up lever.
+
+**Deliverables**: HLS_VALIDATION_REPORT.html **section 7** (P0 switch
+verdict: 3 gm matrices + P0-grid snapshot + interactive pair/dtype/K
+charts + 12 per-cell detail tables; regenerated data-driven by
+scripts/gen_hls_report_charts.py from results/nsys/p0batch/);
+PROGRESS_REPORT.html iter15 ledger card (d15).
