@@ -84,12 +84,12 @@
     <div class="en">
       <h1>HLS Host-Prototype Validation: Theorems 1–3 on the op22 Three-Scenario Bundles</h1>
       <div class="sub">scripts/proto_hls.py · 78 fp32 rows (best / worst / real × K512/1024/2048 × N 4K–1M) ·
-      validate→optimize cycles to the in-family global optimum · 2026-07-07</div>
+      validate→optimize cycles to the in-family global optimum · 2026-07-07 · §6 silicon verdict 2026-07-08</div>
     </div>
     <div class="zh">
       <h1>HLS 宿主原型验证:op22 三场景 bundle 上的定理 1–3</h1>
       <div class="sub">scripts/proto_hls.py · 78 个 fp32 行(best / worst / real × K512/1024/2048 × N 4K–1M)·
-      验证→优化循环直至族内全局最优 · 2026-07-07</div>
+      验证→优化循环直至族内全局最优 · 2026-07-07 · §6 硅判决 2026-07-08</div>
     </div>
   </div>
 </header>
@@ -110,6 +110,10 @@ dominates every alternative: <strong>mean 1.00 fallback passes, max 1, 0 failure
 21.6 µs (tracking upper bound); real worst case 83.3 → 27.7 µs. The load-bearing change is the fallback fix
 (log-falsi + cluster-parallel recount); ρ-aware placement adds the last ~5–7% and makes the system insensitive to
 estimator error.
+<br><br><strong>UPDATE 2026-07-08 — the §5 silicon obligation is FULFILLED.</strong> All three HLS steps landed
+in the op21 kernels and were verdicted on the nsys cold-L2 axis (op21 iter13 + iter14): τ(3)=1.219 measured
+(the interpolated 1.2 confirmed), the log-falsi fallback shipped (best-tail 2.105×), the distributed msc
+fallback shipped N-gated (worst-tail 1.99×). Measured 1M worst case ~245 → ~57 µs. See <strong>§6</strong>.
 </div>
 </div>
 <div class="zh">
@@ -121,6 +125,10 @@ estimator error.
 <strong>78 行全部:fallback 平均 1.00 遍、最大 1 遍、0 次失败</strong>。最终模型级结果:op22 尾部塌缩 ——
 best 场景最坏情形 149.5 → 27.7 µs(可部署)/ 21.6 µs(跟踪上界);real 最坏 83.3 → 27.7 µs。承重的改动是
 fallback 修复(log-falsi + cluster 并行重数);ρ-感知放置贡献最后 ~5–7%,并使系统对估计误差不敏感。
+<br><br><strong>更新 2026-07-08 —— §5 的硅验证义务已履行。</strong>HLS 三步全部落进 op21 内核并在 nsys 冷 L2
+轴上完成判决(op21 iter13 + iter14):τ(3)=1.219 实测(插值 1.2 证实)、log-falsi fallback 上线(best 尾部
+2.105×)、分布式 msc fallback 上线(N 门控,worst 尾部 1.99×)。1M 最坏情形实测 ~245 → ~57 µs。见
+<strong>§6</strong>。
 </div>
 </div>
 
@@ -351,7 +359,9 @@ msc 回退   : cluster 并行重数(P/C + 1 个 cluster barrier)—— 永不 le
 <li><strong>All µs are cost-model outputs</strong>, not nsys measurements. Pass counts and outcome modes are
 host-exact; prices are the Part-II constants. The historical red line stands: host projections have collapsed on
 contact with silicon before (op16: −40..−60% projected → 0.72–0.87× measured). Kernel A/B on the nsys cold-L2
-canonical axis + the full exactness gates is mandatory before any adoption claim.</li>
+canonical axis + the full exactness gates is mandatory before any adoption claim.
+<em>→ RESOLVED 2026-07-08 (§6): op21 iter13/iter14 ran exactly this A/B — the tail collapse held on
+silicon (best 2.105×, worst 1.99×), with one model correction (the code-mass tax, §6.4).</em></li>
 <li><strong>78 rows, one row per cell</strong>; the two stress scenarios are synthetic constructions. Statistical
 power for "multi-σ" claims is limited; the real-scenario column is the production-relevant one.</li>
 <li><strong>est_r0 is a stationarity proxy</strong> for cross-step tracking (the estimate a previous step's counts
@@ -361,7 +371,9 @@ is the natural next experiment; MTP (next_n&gt;1) row-adjacency is untested.</li
 overflow boundary is shape-dependent.</li>
 <li>Cluster-parallel fallback recount requires a real DSMEM merge implementation in <code>gvr_msc_op.py</code>
 (the current leader-recount exists precisely because the vendored P3 prefix contract made it the easy exact
-choice — iter2's 646/1024-hole lesson).</li>
+choice — iter2's 646/1024-hole lesson).
+<em>→ RESOLVED 2026-07-08 (§6.3): implemented in op21 iter14 (slice passes + cluster count merge +
+push-collect; the vendored prefix contract is bypassed, not half-used).</em></li>
 </ol>
 </div>
 </div>
@@ -370,15 +382,156 @@ choice — iter2's 646/1024-hole lesson).</li>
 <ol>
 <li><strong>所有 µs 都是代价模型输出</strong>,不是 nsys 实测。遍数与判定模式是宿主精确的;价格是 Part II 常数。
 历史红线仍然有效:host 投影曾在硅上塌过(op16:投影 −40..−60% → 实测 0.72–0.87×)。任何采纳结论之前,必须过
-nsys 冷 L2 canonical 轴的内核 A/B + 全套 exactness 门。</li>
+nsys 冷 L2 canonical 轴的内核 A/B + 全套 exactness 门。
+<em>→ 已解决 2026-07-08(§6):op21 iter13/iter14 跑的正是这个 A/B —— 尾部塌缩在硅上成立
+(best 2.105×、worst 1.99×),另有一处模型修正(代码质量税,§6.4)。</em></li>
 <li><strong>78 行、每 cell 一行</strong>;两个压力场景是合成构造。"多 σ"论断的统计功效有限;real 列才是生产相关的。</li>
 <li><strong>est_r0 是跨步跟踪的平稳性代理</strong>(上一步 counts 会交出的估计),不是重放的多步链。链式验证
 (temporal-synth 多步模式,lag-1 ρ)是自然的下一个实验;MTP(next_n&gt;1)行相邻性未测。</li>
 <li><strong>collect 容量是标量模型</strong>(4096),真实溢出边界依赖 per-thread slot 形状。</li>
 <li>cluster 并行 fallback 重数需要在 <code>gvr_msc_op.py</code> 里实现真正的 DSMEM 合并(现在的 leader 重数正是
-因为 vendored P3 前缀契约使它成为容易的精确选择 —— iter2 的 646/1024 空洞教训)。</li>
+因为 vendored P3 前缀契约使它成为容易的精确选择 —— iter2 的 646/1024 空洞教训)。
+<em>→ 已解决 2026-07-08(§6.3):op21 iter14 已实现(slice 遍 + cluster count 合并 + push-collect;
+vendored 前缀契约被整体绕开,而非半用)。</em></li>
 </ol>
 </div>
+</div>
+
+<!-- ================= 6 silicon verdict (added 2026-07-08) ================= -->
+<h2><span class="no">6</span><span class="en">Silicon verdict — op21 iter13 / iter14 (added 2026-07-08)</span><span class="zh">硅判决 —— op21 iter13 / iter14(2026-07-08 增补)</span></h2>
+
+<div class="en">
+<div class="goodbox">
+<strong>All three HLS steps landed and were verdicted on the canonical nsys cold-L2 axis</strong>
+(umbriel-b200-028, paired same-process A/B on the op22 bundles, 30 cold reps/arm, sorted-set exactness per
+cell; commits <code>3203481fb3</code> iter13, <code>38a1fb79e7</code> iter14). Full per-cell tables:
+<code>ITERATIONS.md</code> iter13/14; raw: <code>results/nsys/iter13_ab_hls*/</code>.
+</div>
+
+<h3>6.1 Step 0 — τ(3) measured: the Theorem-1 constant holds</h3>
+<p>The only unmeasured cost-model input (τ(3) was interpolated 1.2) was re-measured same-silicon
+(<code>count_ge_multi_bench/results_m3.csv</code>, M∈{1,2,3,4}, nsys cold-L2 median-of-3): fp32 262K
+<strong>τ(3)=1.219</strong> / 131K 1.196 — within 2% of the interpolation; τ(4)=1.496 consistent with the old
+axis (1.464). fp16 spot: τ(3)≈1.45–1.55 (steeper 16-bit width tax) but M3&lt;M4 ordering holds in both dtypes.
+The M=3-both-regimes revision of Theorem 1 stands.</p>
+
+<h3>6.2 Step 1 — log-falsi fallback (iter13): the best-tail collapses</h3>
+<p>Kernel change (<code>OP21_FB_LOGFALSI=0</code> restores legacy): the fallback bracket arrives with
+ladder-KNOWN counts (s_iscalars[5]/[6]) — the entry and hi-end full-row passes are <em>skipped outright</em>,
+and the refine step aims by log-count regula falsi (<code>lg2.approx.f32</code>, m* = K·(kC/K)<sup>0.2</sup>).
+The common ladder-seeded miss drops from 4–8 leader passes to ~1, reproducing the prototype's headline.</p>
+<table>
+<tr><th>scenario</th><th>gm old/new</th><th>win</th><th>headline cells</th></tr>
+<tr><td>best (hr .90)</td><td class="hl-good"><strong>1.265</strong></td><td>13/15</td>
+<td>K2048 1M BS1 <strong>2.105×</strong> (244.7→116.3 µs); K1024 1M 1.514×; K2048 262K 1.533×</td></tr>
+<tr><td>worst (hr .05)</td><td>1.003</td><td>8/15</td><td>flat — all_ge-mode misses keep the hi-end +
+expansion passes (falsi has no bracket-hi count to exploit)</td></tr>
+<tr><td>real</td><td>1.039</td><td>7/15</td><td>K512 1M 1.526×; K2048 light-fallback pocket −3..−7%</td></tr>
+</table>
+<p>Two silicon corrections to the prototype: (a) <strong>the aim exponent α is silicon-invariant</strong> —
+a full α=0.1 re-run is identical within jitter (the K2048 pocket unchanged 0.925 vs 0.927), so the
+accepted-count size does not move P4 cost at these shapes; (b) the K2048 pocket is <strong>codegen</strong>
+(register pressure at the kC=6144 ceiling), not algorithmic — fast-path cells never execute the new code yet
+show per-binary deltas of both signs (P0 spot: +4.4/+5.5/+4.5/−5.4/−0.6%). K2048 is v3.2 legacy geometry;
+DSv4 production (K512/K1024) is pocket-free.</p>
+
+<h3>6.3 Step 2 — distributed msc fallback (iter14): the worst-tail collapses too</h3>
+<p>Every leader full-row fallback pass becomes a slice pass on all C CTAs + one cluster count-merge; the
+collect is a slice stream-compact pushed into the leader's smem at global prefix offsets (iter7
+<code>st.shared::cluster</code> pattern); the leader snaps directly on the gathered ≤kC candidates — the
+vendored phase3 full-row prefix contract is <em>bypassed, never half-used</em> (the iter2 646/1024 lesson).</p>
+<table>
+<tr><th>scenario</th><th>gm old/new</th><th>win</th><th>headline cells</th></tr>
+<tr><td>best</td><td class="hl-good"><strong>1.250</strong></td><td>14/15</td>
+<td>K2048 1M 114.5→57.4 µs (<strong>1.993×</strong>); K512/K1024 1M ~1.7×; 262K column ~1.25×</td></tr>
+<tr><td>worst</td><td class="hl-good"><strong>1.250</strong></td><td>13/15</td>
+<td>the geometry Step 1 could not touch: hi-end + expansion passes are now P/C — K2048 1M 1.989×</td></tr>
+<tr><td>real</td><td>1.059</td><td>9/15</td><td>K512 1M 1.756× (the radix-wins-at-hugeN region);
+light-fallback pockets 0.941–0.957</td></tr>
+</table>
+<p><strong>Cumulative measured tail: best K2048 1M ≈ 245 µs (pre-HLS) → 57.4 µs.</strong> The prototype's
+"cluster-parallel recount, never leader-only" prescription is confirmed as the second load-bearing fix.</p>
+
+<h3>6.4 The one genuinely new silicon lesson: code mass is a currency</h3>
+<p>The ~300-line <code>_fb_dist</code> body taxes the msc <em>fast path</em> a systematic ~4% (P0 spot: 3/5
+cells one-signed −3.6..−4.2%) even though that path never executes it — register/I-cache pressure. Unlike
+iter13's mixed-sign lottery, sign-consistency across independent binaries marks it systematic. The prototype's
+cost model has no term for this. <strong>Shipped rule: N-gated compilation</strong> —
+<code>fb_dist = n ≥ 524288</code> (env-forceable): every N≤262144 binary stays bit-identical to iter13 (the P0
+verdict tables untouched by construction) while hugeN keeps the 1.7–2.0× stress collapse and the real-data
+net win. Same compile-time dispatch class as the C8 rules (CUDA-graph identity by construction).</p>
+
+<h3>6.5 Standing after silicon</h3>
+<p>Step 3 (ρ-aware placement) stays <em>deferred</em> — the silicon data re-confirms the prototype's own
+finding that once the fallback is ~1 cheap pass the system is insensitive to placement quality, and it would
+require cross-step per-row state (a production-contract change). Open: a code-mass diet for
+<code>_fb_dist</code> would unlock un-gating the 65K–262K range (~1.25× stress there); the multi-step chained
+ρ̂ validation and MTP row-adjacency checks remain untouched. Caveats 2–4 of §5 still apply to the prototype's
+statistical scope.</p>
+</div>
+
+<div class="zh">
+<div class="goodbox">
+<strong>HLS 三步全部落地,并在 canonical nsys 冷 L2 轴上完成判决</strong>
+(umbriel-b200-028,op22 bundle 上同进程配对 A/B,每臂 30 冷 rep,逐格排序集合精确性;提交
+<code>3203481fb3</code> iter13、<code>38a1fb79e7</code> iter14)。逐格全表见
+<code>ITERATIONS.md</code> iter13/14;原始数据 <code>results/nsys/iter13_ab_hls*/</code>。
+</div>
+
+<h3>6.1 Step 0 —— τ(3) 实测:定理 1 常数成立</h3>
+<p>代价模型唯一未实测的输入(τ(3) 插值 1.2)已同硅重测(<code>count_ge_multi_bench/results_m3.csv</code>,
+M∈{1,2,3,4},nsys 冷 L2 三次取中):fp32 262K <strong>τ(3)=1.219</strong> / 131K 1.196 —— 与插值差 2% 以内;
+τ(4)=1.496 与旧轴(1.464)一致。fp16 抽测:τ(3)≈1.45–1.55(16-bit 宽度税更陡)但两种 dtype 下 M3&lt;M4
+排序不变。定理 1 的 M=3 双 regime 修订成立。</p>
+
+<h3>6.2 Step 1 —— log-falsi fallback(iter13):best 尾部塌缩</h3>
+<p>内核改动(<code>OP21_FB_LOGFALSI=0</code> 恢复旧路径):fallback 括号到达时携带 ladder 已知的两端
+counts(s_iscalars[5]/[6])—— entry 与 hi-end 两遍全行<em>直接跳过</em>,refine 用 log-count regula falsi
+瞄准(<code>lg2.approx.f32</code>,m* = K·(kC/K)<sup>0.2</sup>)。常见 ladder 播种 miss 从 4–8 遍 leader
+全行降到 ~1 遍,复现原型头条。</p>
+<table>
+<tr><th>场景</th><th>gm 旧/新</th><th>胜</th><th>头条格</th></tr>
+<tr><td>best (hr .90)</td><td class="hl-good"><strong>1.265</strong></td><td>13/15</td>
+<td>K2048 1M BS1 <strong>2.105×</strong>(244.7→116.3 µs);K1024 1M 1.514×;K2048 262K 1.533×</td></tr>
+<tr><td>worst (hr .05)</td><td>1.003</td><td>8/15</td><td>持平 —— all_ge 型 miss 仍需 hi-end + expansion 遍
+(falsi 没有括号上端 count 可利用)</td></tr>
+<tr><td>real</td><td>1.039</td><td>7/15</td><td>K512 1M 1.526×;K2048 轻 fallback 口袋 −3..−7%</td></tr>
+</table>
+<p>硅对原型的两处修正:(a) <strong>瞄准指数 α 硅上不变</strong> —— α=0.1 全量重跑抖动内一致(K2048 口袋
+0.925 对 0.927 不变),即在这些形状上接受 count 的大小不影响 P4 成本;(b) K2048 口袋是<strong>代码生成</strong>
+(kC=6144 顶格处的寄存器压力)而非算法 —— fast path 格根本不执行新代码,却出现双向 per-binary 偏差
+(P0 spot:+4.4/+5.5/+4.5/−5.4/−0.6%)。K2048 是 v3.2 遗留几何;DSv4 生产(K512/K1024)无口袋。</p>
+
+<h3>6.3 Step 2 —— 分布式 msc fallback(iter14):worst 尾部也塌了</h3>
+<p>leader 的每遍全行 fallback 扫描变为 C 个 CTA 的 slice 遍 + 一次 cluster count 合并;collect 改为 slice
+stream-compact 并以 iter7 的 <code>st.shared::cluster</code> 模式推入 leader smem 的全局前缀位;leader 直接
+对收齐的 ≤kC 候选做 snap —— vendored phase3 的全行前缀契约被<em>整体绕开,而非半用</em>(iter2 646/1024
+教训)。</p>
+<table>
+<tr><th>场景</th><th>gm 旧/新</th><th>胜</th><th>头条格</th></tr>
+<tr><td>best</td><td class="hl-good"><strong>1.250</strong></td><td>14/15</td>
+<td>K2048 1M 114.5→57.4 µs(<strong>1.993×</strong>);K512/K1024 1M ~1.7×;262K 列 ~1.25×</td></tr>
+<tr><td>worst</td><td class="hl-good"><strong>1.250</strong></td><td>13/15</td>
+<td>Step 1 打不动的几何:hi-end + expansion 遍现在也是 P/C —— K2048 1M 1.989×</td></tr>
+<tr><td>real</td><td>1.059</td><td>9/15</td><td>K512 1M 1.756×(radix 在 real hugeN 赢 op21 的区间);
+轻 fallback 口袋 0.941–0.957</td></tr>
+</table>
+<p><strong>累计实测尾部:best K2048 1M ≈ 245 µs(HLS 前)→ 57.4 µs。</strong>原型"cluster 并行重数、永不
+leader 单干"的处方被证实为第二个承重修复。</p>
+
+<h3>6.4 硅带来的唯一全新教训:代码质量是货币</h3>
+<p>~300 行的 <code>_fb_dist</code> 使 msc <em>fast path</em> 付出系统性 ~4% 税(P0 spot:3/5 格同号
+−3.6..−4.2%)—— 尽管该路径从不执行它(寄存器/I-cache 压力)。与 iter13 的双向抽签不同,跨独立 binary 的
+符号一致性标志它是系统性的。原型代价模型没有这一项。<strong>上线规则:N 门控编译</strong> ——
+<code>fb_dist = n ≥ 524288</code>(env 可强制):所有 N≤262144 的 binary 按位保持 iter13 状态(P0 判决表
+构造性不受影响),hugeN 保留 1.7–2.0× 应力塌缩与 real 数据净赢。与 C8 规则同属编译期 dispatch
+(CUDA-graph 恒等性构造成立)。</p>
+
+<h3>6.5 硅验证后的现状</h3>
+<p>Step 3(ρ-感知放置)维持<em>推迟</em> —— 硅数据再次确认原型自己的发现:fallback 降到 ~1 遍便宜 pass
+之后,系统对放置质量不敏感;且它需要跨步 per-row 状态(生产契约变更)。未结:<code>_fb_dist</code>
+代码瘦身可解锁 65K–262K 区间的 un-gating(该区应力收益 ~1.25×);多步链式 ρ̂ 验证与 MTP 行相邻性检查
+仍未做。§5 的告诫 2–4 对原型统计范围仍然适用。</p>
 </div>
 
 <footer>
@@ -387,14 +540,14 @@ Prototype: <code>op21_gvr_prod/scripts/proto_hls.py</code> (5 cycles, ~5 s/run o
 <code>op21_gvr_prod/results/proto_hls/{summary.json, records.jsonl}</code>. Data:
 <code>op22_temporal_fixed_hr_bench/bundles/</code> (fp32, seed per meta.json). Baseline replay:
 <code>harness/count_gvr_iters.py</code>. Theory: <code>MATH_THRESHOLD_ESTIMATION.html</code> Parts I–II (this
-report supersedes its §9 bridge claim and refines Theorem 1's constants). Generated 2026-07-07.
+report supersedes its §9 bridge claim and refines Theorem 1's constants). Generated 2026-07-07; §6 silicon verdict added 2026-07-08 (op21 iter13/iter14).
 </div>
 <div class="zh">
 原型:<code>op21_gvr_prod/scripts/proto_hls.py</code>(5 个循环,单 GPU ~5 s/次)。原始输出:
 <code>op21_gvr_prod/results/proto_hls/{summary.json, records.jsonl}</code>。数据:
 <code>op22_temporal_fixed_hr_bench/bundles/</code>(fp32,seed 见 meta.json)。基线重放:
 <code>harness/count_gvr_iters.py</code>。理论:<code>MATH_THRESHOLD_ESTIMATION.html</code> Part I–II(本报告
-取代其 §9 的桥式论断,并修订定理 1 的常数)。生成于 2026-07-07。
+取代其 §9 的桥式论断,并修订定理 1 的常数)。生成于 2026-07-07;§6 硅判决增补于 2026-07-08(op21 iter13/iter14)。
 </div>
 </footer>
 
