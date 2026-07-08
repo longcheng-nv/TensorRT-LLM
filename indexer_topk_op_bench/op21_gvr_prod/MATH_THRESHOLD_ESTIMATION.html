@@ -797,9 +797,16 @@ ISL≈37–38K, SWE-bench):
 <code>multi_turn_indexer_studies/pro/analysis/hls_assumption_check/REPORT.md</code>, per-layer numbers in
 <code>hls_assumption_results.json</code>. Methodological caveat: the miss rates use this document's own h-space
 simplification Pr(miss) = π(h ≤ f<sub>min</sub>) + π(h &gt; f<sub>max</sub>); the real kernel's straddle also has
-the band ≤ kC and collect-coverage conditions (rung 0 tightens as h → 1, so pair-(0,1) does not always fall
-back), making 74% a within-formalization baseline — absolute fallback rates require a stash value-level replay
-(the op22 mechanism). The ~5× static-vs-adaptive relative conclusion is robust within the formalization.</p>
+the band ≤ kC and collect-coverage conditions. <strong>Caveat closed same day</strong> by the stash value-level
+replay (<code>replay_fallback_rate.py</code>, 29,820 transitions through the kernel-exact
+<code>simulate_r0</code>): rung-0 absorption is <em>zero</em> at this geometry (fused path, fixed 0.75 collect
+column ⇒ h &gt; 0.75 necessarily lands pair-(0,1)), so the real static fallback rate is 75.4% / 65.0% —
+the h-space simplification is tight. HLS placement measures 14.1% / 17.3% at value level (~5× holds exactly);
+the residual is dominated by <em>all_ge</em> (downward h jumps escaping below the band) ⇒ an adaptive band
+should widen asymmetrically on the low side, not Gaussian ±2σ̂. E[T]-converted with the shipped cheap-fallback
+prices, the placement lever is N-gated: 0.3% at compressed N≈9.4K (ISL 37K), 9.8% at N=262K (ISL 1M),
+19.4% at N=1M — Step 3 is dead at small N but a live msc-hugeN candidate, same N-territory and side-tensor
+cost as the iter14 dist fallback.</p>
 </div>
 <div class="zh">
 <pre class="code">
@@ -853,8 +860,14 @@ HLS 假设验证(30 个 GVR-active 层 × ~499 decode 步,K=1024,ISL≈37–38K,
 <code>multi_turn_indexer_studies/pro/analysis/hls_assumption_check/REPORT.md</code>,逐层数值见
 <code>hls_assumption_results.json</code>。方法学 caveat:miss 率用的是本文自己的 h 空间化简
 Pr(miss) = π(h ≤ f<sub>min</sub>) + π(h &gt; f<sub>max</sub>);真实 kernel 的 straddle 还有 band ≤ kC 与
-collect 覆盖条件(h → 1 时 rung 0 收紧,pair-(0,1) 未必 fallback),故 74% 是同一形式化内的对照基准 ——
-绝对 fallback 率需 stash 值级 replay(op22 机制)。静态 vs 自适应的 ~5× 相对结论在形式化内稳健。</p>
+collect 覆盖条件。<strong>该 caveat 已于同日由值级 replay 关闭</strong>
+(<code>replay_fallback_rate.py</code>,29,820 个 transition 过内核精确 <code>simulate_r0</code>):
+此几何下 rung-0 吸收为<em>零</em>(fused 路径 collect 列固定 0.75 ⇒ h &gt; 0.75 必落 pair-(0,1)),
+真实 static fallback 率 75.4% / 65.0% —— h 空间化简就是紧的。HLS 放置值级实测 14.1% / 17.3%
+(~5× 精确成立);残余以 <em>all_ge</em>(h 向下跳变穿透带下沿)为主 ⇒ 自适应带应低侧非对称加宽,
+而非高斯 ±2σ̂。按已上硅便宜 fallback 价格换算 E[T],放置杠杆 N-gated:压缩域 N≈9.4K(ISL 37K)仅
+0.3%,N=262K(ISL 1M)9.8%,N=1M 达 19.4% —— Step 3 在小 N 已死,但是 msc-hugeN 的活候选,
+与 iter14 dist fallback 同一 N 域、同一 side-tensor 工程成本。</p>
 </div>
 
 <h2><span class="no">11</span><span class="en">Parameter inventory &amp; sensitivity: what must be retuned per model?</span><span class="zh">参数清单与敏感性分类:换模型要不要逐个调参?</span></h2>
