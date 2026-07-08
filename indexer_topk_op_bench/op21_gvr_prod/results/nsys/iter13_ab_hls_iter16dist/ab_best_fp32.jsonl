@@ -1,0 +1,15 @@
+{"scenario": "best", "K": 512, "dtype": "fp32", "N": 16384, "BS": 1, "cr": 4, "hit_rate": 0.900390625, "seed": 306951, "reps": 30, "ms_path": "ms_1cta", "exact_old": "ok", "exact_new": "ok"}
+{"scenario": "best", "K": 512, "dtype": "fp32", "N": 65536, "BS": 1, "cr": 4, "hit_rate": 0.900390625, "seed": 487840, "reps": 30, "ms_path": "msc_C4", "exact_old": "ok", "exact_new": "ok"}
+{"scenario": "best", "K": 512, "dtype": "fp32", "N": 262144, "BS": 1, "cr": 4, "hit_rate": 0.900390625, "seed": 612213, "reps": 30, "ms_path": "msc_C4", "exact_old": "ok", "exact_new": "ok"}
+{"scenario": "best", "K": 512, "dtype": "fp32", "N": 1048576, "BS": 1, "cr": 4, "hit_rate": 0.900390625, "seed": 83860, "reps": 30, "ms_path": "msc_C4", "exact_old": "ok", "exact_new": "ok"}
+{"scenario": "best", "K": 512, "dtype": "fp32", "N": 262144, "BS": 16, "cr": 4, "hit_rate": 0.900390625, "seed": 612213, "reps": 30, "ms_path": "msc_C4", "exact_old": "ok", "exact_new": "ok"}
+{"scenario": "best", "K": 1024, "dtype": "fp32", "N": 16384, "BS": 1, "cr": 4, "hit_rate": 0.900390625, "seed": 748223, "reps": 30, "ms_path": "ms_1cta", "exact_old": "ok", "exact_new": "ok"}
+{"scenario": "best", "K": 1024, "dtype": "fp32", "N": 65536, "BS": 1, "cr": 4, "hit_rate": 0.900390625, "seed": 248360, "reps": 30, "ms_path": "msc_C4", "exact_old": "ok", "exact_new": "ok"}
+{"scenario": "best", "K": 1024, "dtype": "fp32", "N": 262144, "BS": 1, "cr": 4, "hit_rate": 0.900390625, "seed": 909749, "reps": 30, "ms_path": "msc_C4", "exact_old": "ok", "exact_new": "ok"}
+{"scenario": "best", "K": 1024, "dtype": "fp32", "N": 1048576, "BS": 1, "cr": 4, "hit_rate": 0.900390625, "seed": 700787, "reps": 30, "ms_path": "msc_C4", "exact_old": "ok", "exact_new": "ok"}
+{"scenario": "best", "K": 1024, "dtype": "fp32", "N": 262144, "BS": 16, "cr": 4, "hit_rate": 0.900390625, "seed": 909749, "reps": 30, "ms_path": "msc_C4", "exact_old": "ok", "exact_new": "ok"}
+{"scenario": "best", "K": 2048, "dtype": "fp32", "N": 16384, "BS": 1, "cr": 1, "hit_rate": 0.89990234375, "seed": 667023, "reps": 30, "ms_path": "ms_1cta", "exact_old": "ok", "exact_new": "ok"}
+{"scenario": "best", "K": 2048, "dtype": "fp32", "N": 65536, "BS": 1, "cr": 1, "hit_rate": 0.89990234375, "seed": 966584, "reps": 30, "ms_path": "msc_C4", "exact_old": "ok", "exact_new": "ok"}
+{"scenario": "best", "K": 2048, "dtype": "fp32", "N": 262144, "BS": 1, "cr": 1, "hit_rate": 0.89990234375, "seed": 230265, "reps": 30, "ms_path": "msc_C8", "exact_old": "ok", "exact_new": "ok"}
+{"scenario": "best", "K": 2048, "dtype": "fp32", "N": 1048576, "BS": 1, "cr": 1, "hit_rate": 0.89990234375, "seed": 979988, "reps": 30, "ms_path": "msc_C8", "exact_old": "ok", "exact_new": "ok"}
+{"scenario": "best", "K": 2048, "dtype": "fp32", "N": 262144, "BS": 16, "cr": 1, "hit_rate": 0.89990234375, "seed": 230265, "reps": 30, "ms_path": "msc_C4", "exact_old": "ok", "exact_new": "ok"}

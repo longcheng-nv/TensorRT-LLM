@@ -922,3 +922,84 @@ verdict: 3 gm matrices + P0-grid snapshot + interactive pair/dtype/K
 charts + 12 per-cell detail tables; regenerated data-driven by
 scripts/gen_hls_report_charts.py from results/nsys/p0batch/);
 PROGRESS_REPORT.html iter15 ledger card (d15).
+
+## Iter 16 — 2026-07-08 — _fb_dist code-mass diet: single-count-site driver loop, gate lowered to n >= 65536
+
+**Question**: can the iter14 distributed fallback be un-gated into
+65K-262K (the deployment envelope's expensive band — no ISL >= 1M
+exists, focus N <= 256K, and the Pro multi-turn value-level replay
+measured 65-75% of real decode steps falling back) without re-paying
+the ~4% systematic fast-path code-mass tax that forced the n >= 524288
+gate?
+
+**Diagnosis**: the tax source was INLINING MULTIPLICITY, not the
+algorithm — `_fb_dist_count` (vectorized slice count + cluster merge,
+~55 source lines expanding to the dominant instruction mass) was
+inlined at SIX static call sites (done1 / entry / hi-end / expand /
+refine / exhaust). cuteDSL fully inlines @cute.jit functions.
+
+**Fix**: restructured `_fb_dist` into a phase-machine driver loop with
+ONE `_fb_dist_count` call site. Phase decisions use only replicated
+values (kernel args best_m/m1g + the merged global count read after
+each pass's trailing barrier) so loop trips stay identical across CTAs
+and cluster-barrier pairs always match; bracket smem writes stay
+tidx0-only behind the pre-count barrier. Semantics preserved verbatim,
+including the expansion loop's continue-while->=kK quirk, the 30-count
+refine budget, and the fail-soft exhaust. Source delta +122/-97; the
+compiled count machinery inlines once instead of six times.
+
+**P0 fast-path spot (KNOB=OP21_FB_DIST, results/nsys/iter16_p0_spot/,
+b200-027 GPU2)** — old = dist compiled OUT (iter13-identical binary),
+new = dieted dist compiled IN:
+| cell | iter14 tax | iter16 |
+|---|---|---|
+| K512 fp32 262K | +4.4% | **+0.3%** |
+| K1024 fp32 65K | +5.5% | **-0.7%** |
+| K1024 fp32 262K | (one-signed ~4%) | **-0.7%** |
+| K2048 fp32 262K | — | **-4.7%** (win) |
+| K1024 bf16 262K | — | **0.0%** |
+Mixed-sign <=1% (one favorable outlier) = lottery band; the iter14
+one-signed systematic tax is GONE (sign-consistency criterion,
+LEARNINGS iter14).
+
+**Win-side A/B (drive_ab_hls KNOB=OP21_FB_DIST SUFFIX=_iter16dist,
+GPU1, 15 cells x 3 scenarios, paired same-process, 30 reps)** — old =
+leader-only fallback, new = dieted dist:
+| scenario | gm old/new | wins | 65K | 262K | 1M |
+|---|---|---|---|---|---|
+| best  | **1.279** | 15/15 | 1.03-1.15 | 1.24-1.38 | 1.68-2.05 |
+| worst | **1.253** | 14/15 | 1.03-1.06 | 1.24-1.33 | 1.70-2.03 |
+| real  | **1.091** | 12/15 | 1.01-1.15 | 1.00-1.23 (K1024 1.22) | 1.01-1.75 |
+ALL 45 cells gm 1.205; every arm-cell exact ok/ok. The 262K stress
+1.24-1.38 matches both the iter14-recorded forgone ~1.25x and the
+replay-driven E[T] model (-20.9% = 1.264x) — model cross-validated on
+silicon a second time. 1M keeps iter14's level: the driver-loop
+restructure costs the fallback path nothing measurable. 16K ms_1cta
+cells are arm-identical binaries (ratio noise band +-5%).
+
+**Gates**: op22 exactness 456/456 x TWO configs (OP21_FB_DIST=1 forced
+everywhere AND the new default rule), 0 mismatches 0 errors.
+**P0-4 no-regress grid @new default (msa_*, GPU1; prior msa_* archived
+to results/nsys/msa_archive_pre_iter16/)**: gm rival/ms **1.298**, win
+**17/17**; gvrbest/ms 1.184 (17/17). iter15 @HLS-HEAD was 1.276 / 17/17
+and the iter7 anchor 1.249 — no regression from the un-gating (the
+65K-262K binaries now differ from iter13 by the compiled-in dieted
+fallback; delta is run-to-run + occasional synth-cell fallback wins).
+
+**Ship**: default `fb_ds = n >= 65536` (== the msc C>=2 dispatch
+floor). 65K-262K msc binaries now carry the dieted dist fallback by
+default; single-CTA ms path (n < 65536) untouched — the ms-path dist
+extension for the iter15 highbs pocket remains a separate recorded
+lever. Axis note: GPU1 anchor 17.17us sits at the low edge of the
+17.8+-0.5 axis (GPU2 17.58 in-band); all iter16 verdicts are
+within-run paired ratios.
+
+**Envelope context (why this is the primary lever)**: user-stated
+deployment envelope = no ISL >= 1M, indexer N <= 1M, focus N <= 256K;
+the Pro multi-turn stash value-level replay (multi_turn_indexer_studies/
+pro/analysis/hls_assumption_check/) measured real static fallback rate
+75.4%/65.0% (turn1/turn2) with rung-0 absorption ZERO — fallback is the
+majority-step path on Pro-class traffic, so its price in the 65K-262K
+band was the largest in-envelope recoverable term. h-hat placement
+(Step 3) stacks a further ~5-10 points on top of this and stays
+deferred behind it.

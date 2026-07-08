@@ -952,110 +952,135 @@ class GvrMsClusterKernel(GvrSandwichKernel):
                 s_iscalars[6] = s_mt_cnt[0]
         cute.arch.barrier()
 
-        conv = cutlass.Int32(0)
-        # ---- done=1 (collect-all: best_m >= 0 and m1g in [K, kC]): thr_c
-        # is ALREADY valid — one distributed count fills smem_ptcnt for the
-        # collect (the leader path pays a FULL-row recount here) ----
-        if s_iscalars[5] >= cutlass.Int32(kK) and s_iscalars[5] <= cutlass.Int32(kCC):
-            self._fb_dist_count(input_row, sl_start, Ns, s_thr[0], smem_ptcnt,
-                                smem_wcnt, s_iscalars, s_cluster, tidx,
-                                warp_id, lane)
-            conv = cutlass.Int32(1)
-        # ---- entry (only when c_lo unknown; classify like the ms path) ----
-        elif s_iscalars[5] <= cutlass.Int32(0):
-            self._fb_dist_count(input_row, sl_start, Ns, s_thr[0], smem_ptcnt,
-                                smem_wcnt, s_iscalars, s_cluster, tidx,
-                                warp_id, lane)
-            c0 = s_iscalars[0]
-            if c0 >= cutlass.Int32(kK) and c0 <= cutlass.Int32(kCC):
-                conv = cutlass.Int32(1)
-            else:
-                if tidx == 0:
-                    if c0 > cutlass.Int32(kCC):
-                        s_thr[1] = s_thr[0]
-                        s_iscalars[5] = c0
-                    else:
-                        s_thr[2] = s_thr[0]
-                        s_iscalars[6] = c0
-                cute.arch.barrier()
-        # ---- hi-end guarantee + expansion (skip when c_hi known < kK) ----
-        if conv == cutlass.Int32(0) and s_iscalars[6] < cutlass.Int32(0):
-            self._fb_dist_count(input_row, sl_start, Ns, s_thr[2], smem_ptcnt,
-                                smem_wcnt, s_iscalars, s_cluster, tidx,
-                                warp_id, lane)
-            ch = s_iscalars[0]
-            if ch >= cutlass.Int32(kK) and ch <= cutlass.Int32(kCC):
-                if tidx == 0:
-                    s_thr[0] = s_thr[2]
-                cute.arch.barrier()
-                conv = cutlass.Int32(1)
-            else:
-                ex = cutlass.Int32(0)
-                while ex < cutlass.Int32(12) and s_iscalars[0] >= cutlass.Int32(kK):
-                    if tidx == 0:
-                        rngx = s_thr[2] - s_thr[1]
-                        if rngx <= cutlass.Float32(0.0):
-                            rngx = cutlass.Float32(1e-3)
-                        s_thr[2] = s_thr[2] + rngx
-                    cute.arch.barrier()
-                    self._fb_dist_count(input_row, sl_start, Ns, s_thr[2],
-                                        smem_ptcnt, smem_wcnt, s_iscalars,
-                                        s_cluster, tidx, warp_id, lane)
-                    ex = ex + cutlass.Int32(1)
-                if tidx == 0:
-                    if s_iscalars[0] < cutlass.Int32(kK):
-                        s_iscalars[6] = s_iscalars[0]
-                cute.arch.barrier()
-        # ---- refine loop (log-falsi aim, midpoint safeguard) ----
+        # ---- iter16 diet: SINGLE-count-site driver loop. The iter14 form
+        # inlined _fb_dist_count (vectorized slice count + cluster merge,
+        # the dominant code mass) at SIX static sites; here the same
+        # control flow runs as a phase machine with ONE call site. Phase
+        # decisions use only replicated values (kernel args best_m/m1g +
+        # the merged global count read after the pass's trailing barrier),
+        # so loop trips stay identical across CTAs and the cluster-barrier
+        # pairs always match. Bracket smem writes stay tidx0-only, guarded
+        # by the pre-count barrier. Semantics (incl. the expansion loop's
+        # continue-while->=kK quirk and the fail-soft exhaust) are the
+        # iter14 six-site form, verbatim.
+        # phases: 1 count@thr0 then done (done=1 recount)   6 exhaust
+        #         2 entry   3 hi-end   4 expand   5 refine  0 finished
+        kK_i = cutlass.Int32(kK)
+        kCC_i = cutlass.Int32(kCC)
+        hi_known = cutlass.Int32(0)
+        if best_m >= cutlass.Int32(0):
+            if best_m < cutlass.Int32(M - 1):
+                hi_known = cutlass.Int32(1)
+        else:
+            hi_known = cutlass.Int32(1)
+        ph = cutlass.Int32(2)
+        if best_m >= cutlass.Int32(0) and m1g >= kK_i and m1g <= kCC_i:
+            ph = cutlass.Int32(1)          # done=1: thr_c already valid
+        elif best_m >= cutlass.Int32(0) and m1g > cutlass.Int32(0):
+            ph = cutlass.Int32(3)          # lo bracket known: skip entry
+            if hi_known == cutlass.Int32(1):
+                ph = cutlass.Int32(5)
+        ex = cutlass.Int32(0)
         rs = cutlass.Int32(0)
-        while rs < cutlass.Int32(30) and conv == cutlass.Int32(0):
+        it_fb = cutlass.Int32(0)
+        while ph != cutlass.Int32(0) and it_fb < cutlass.Int32(64):
+            it_fb = it_fb + cutlass.Int32(1)
+            # -- pre-count scalar block: stage this pass's threshold --
             if tidx == 0:
-                lo3 = s_thr[1]
-                hi3 = s_thr[2]
-                mid3 = (lo3 + hi3) * cutlass.Float32(0.5)
-                if cutlass.const_expr(self.fb_logfalsi):
-                    clo3 = s_iscalars[5]
-                    chi3 = s_iscalars[6]
-                    if clo3 > cutlass.Int32(0) and chi3 >= cutlass.Int32(0):
-                        chic = chi3
-                        if chic < cutlass.Int32(1):
-                            chic = cutlass.Int32(1)
-                        l_lo = lg2_f32(cutlass.Float32(clo3))
-                        l_hi = lg2_f32(cutlass.Float32(chic))
-                        den3 = l_lo - l_hi
-                        if den3 > cutlass.Float32(0.0):
-                            t3 = (cutlass.Float32(self.log2_mstar) - l_hi) / den3
-                            cnd3 = hi3 + t3 * (lo3 - hi3)
-                            if cnd3 > lo3 and cnd3 < hi3:
-                                mid3 = cnd3
-                if mid3 <= lo3:
-                    mid3 = hi3
-                s_thr[0] = mid3
+                if ph == cutlass.Int32(3) or ph == cutlass.Int32(6):
+                    s_thr[0] = s_thr[2]
+                elif ph == cutlass.Int32(4):
+                    rngx = s_thr[2] - s_thr[1]
+                    if rngx <= cutlass.Float32(0.0):
+                        rngx = cutlass.Float32(1e-3)
+                    s_thr[2] = s_thr[2] + rngx
+                    s_thr[0] = s_thr[2]
+                elif ph == cutlass.Int32(5):
+                    lo3 = s_thr[1]
+                    hi3 = s_thr[2]
+                    mid3 = (lo3 + hi3) * cutlass.Float32(0.5)
+                    if cutlass.const_expr(self.fb_logfalsi):
+                        clo3 = s_iscalars[5]
+                        chi3 = s_iscalars[6]
+                        if clo3 > cutlass.Int32(0) and chi3 >= cutlass.Int32(0):
+                            chic = chi3
+                            if chic < cutlass.Int32(1):
+                                chic = cutlass.Int32(1)
+                            l_lo = lg2_f32(cutlass.Float32(clo3))
+                            l_hi = lg2_f32(cutlass.Float32(chic))
+                            den3 = l_lo - l_hi
+                            if den3 > cutlass.Float32(0.0):
+                                t3 = (cutlass.Float32(self.log2_mstar) - l_hi) / den3
+                                cnd3 = hi3 + t3 * (lo3 - hi3)
+                                if cnd3 > lo3 and cnd3 < hi3:
+                                    mid3 = cnd3
+                    if mid3 <= lo3:
+                        mid3 = hi3
+                    s_thr[0] = mid3
             cute.arch.barrier()
             self._fb_dist_count(input_row, sl_start, Ns, s_thr[0], smem_ptcnt,
                                 smem_wcnt, s_iscalars, s_cluster, tidx,
                                 warp_id, lane)
-            c3 = s_iscalars[0]
-            if c3 >= cutlass.Int32(kK) and c3 <= cutlass.Int32(kCC):
-                conv = cutlass.Int32(1)
-            if tidx == 0:
-                if c3 > cutlass.Int32(kCC):
-                    s_thr[1] = s_thr[0]
-                    s_iscalars[5] = c3
-                elif c3 < cutlass.Int32(kK):
-                    s_thr[2] = s_thr[0]
-                    s_iscalars[6] = c3
+            c_g = s_iscalars[0]
+            in_rng = cutlass.Int32(0)
+            if c_g >= kK_i and c_g <= kCC_i:
+                in_rng = cutlass.Int32(1)
+            # -- phase transitions (replicated) + tidx0 bracket updates --
+            if ph == cutlass.Int32(1) or ph == cutlass.Int32(6):
+                ph = cutlass.Int32(0)
+            elif ph == cutlass.Int32(2):                     # entry
+                if in_rng == cutlass.Int32(1):
+                    ph = cutlass.Int32(0)
+                else:
+                    if tidx == 0:
+                        if c_g > kCC_i:
+                            s_thr[1] = s_thr[0]
+                            s_iscalars[5] = c_g
+                        else:
+                            s_thr[2] = s_thr[0]
+                            s_iscalars[6] = c_g
+                    if c_g > kCC_i:
+                        ph = cutlass.Int32(3)
+                        if hi_known == cutlass.Int32(1):
+                            ph = cutlass.Int32(5)
+                    else:
+                        hi_known = cutlass.Int32(1)
+                        ph = cutlass.Int32(5)
+            elif ph == cutlass.Int32(3):                     # hi-end
+                if in_rng == cutlass.Int32(1):
+                    ph = cutlass.Int32(0)                    # thr0 == thr2
+                elif c_g < kK_i:
+                    if tidx == 0:
+                        s_iscalars[6] = c_g
+                    hi_known = cutlass.Int32(1)
+                    ph = cutlass.Int32(5)
+                else:
+                    ph = cutlass.Int32(4)
+                    ex = cutlass.Int32(0)
+            elif ph == cutlass.Int32(4):                     # expand
+                ex = ex + cutlass.Int32(1)
+                if c_g < kK_i:
+                    if tidx == 0:
+                        s_iscalars[6] = c_g
+                    hi_known = cutlass.Int32(1)
+                    ph = cutlass.Int32(5)
+                elif ex >= cutlass.Int32(12):
+                    ph = cutlass.Int32(5)
+            elif ph == cutlass.Int32(5):                     # refine
+                if in_rng == cutlass.Int32(1):
+                    ph = cutlass.Int32(0)
+                else:
+                    if tidx == 0:
+                        if c_g > kCC_i:
+                            s_thr[1] = s_thr[0]
+                            s_iscalars[5] = c_g
+                        elif c_g < kK_i:
+                            s_thr[2] = s_thr[0]
+                            s_iscalars[6] = c_g
+                    rs = rs + cutlass.Int32(1)
+                    if rs >= cutlass.Int32(30):
+                        ph = cutlass.Int32(6)                # exhaust
             cute.arch.barrier()
-            rs = rs + cutlass.Int32(1)
-        if conv == cutlass.Int32(0):
-            # tie-block exhaust: land on the undershoot (fail-soft) side —
-            # same semantics as the leader path
-            if tidx == 0:
-                s_thr[0] = s_thr[2]
-            cute.arch.barrier()
-            self._fb_dist_count(input_row, sl_start, Ns, s_thr[0], smem_ptcnt,
-                                smem_wcnt, s_iscalars, s_cluster, tidx,
-                                warp_id, lane)
 
         # ---- distributed collect at the final threshold. smem_ptcnt holds
         # MY slice's per-thread counts from the LAST count above. ----
@@ -1543,18 +1568,24 @@ def _compile(dtype, n, K, cr_val, C, threads, dist_p1=False, dist_p4=False):
     fb_lf = os.environ.get("OP21_FB_LOGFALSI", "1") == "1"
     fb_al = float(os.environ.get("OP21_FB_ALPHA", "0.2"))
     # iter14 A/B: OP21_FB_DIST=0 restores the leader-only fallback.
-    # Default rule is N-GATED (n >= 524288): the _fb_dist code mass taxes
-    # the msc fast path ~4% (P0-spot 3/5 cells; light-fallback real cells
-    # 0.94-0.96) while its stress wins at N<=262144 are ~1.25x; at hugeN
-    # the win is 1.7-2.0x (stress) and real-data net-positive (K512 1M
-    # 1.756) exactly where radix rivals currently win. Gating keeps every
-    # N<=262144 binary BIT-IDENTICAL to iter13 (P0 verdict untouched).
+    # iter14 gated the default at n >= 524288 because the six-site inlined
+    # _fb_dist code mass taxed the msc fast path ~4% systematic. iter16
+    # restructured _fb_dist into a SINGLE-count-site driver loop (the
+    # vectorized slice count + cluster merge inlines once, not six times):
+    # P0-spot tax collapsed to mixed-sign <=1% (K2048 262K even -4.7%),
+    # while the un-gated 65K-262K band wins gm ~1.25-1.28x stress and up
+    # to 1.23x real (b200-027, 2026-07-08), and hugeN keeps iter14's
+    # 1.7-2.05x. Default therefore extends to the whole msc regime
+    # (n >= 65536 == the C>=2 dispatch floor); deployment envelope focus
+    # is N <= 256K where the leader-only fallback tax was the largest
+    # in-envelope recoverable term (multi-turn Pro replay: 65-75% of real
+    # decode steps fall back).
     # OP21_FB_DIST=1 forces it everywhere (A/B), =0 disables everywhere.
     fb_env = os.environ.get("OP21_FB_DIST")
     if fb_env is not None:
         fb_ds = fb_env == "1"
     else:
-        fb_ds = n >= 524288
+        fb_ds = n >= 65536
     key = (dtype, n, K, cr_val, C, threads, dist_p1, dist_p4, p4_rs, p4_fast,
            p3_push, p2_nat, fb_lf, fb_al, fb_ds)
     if key in _compiled:
