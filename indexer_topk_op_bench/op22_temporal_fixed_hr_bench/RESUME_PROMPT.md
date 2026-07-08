@@ -98,3 +98,14 @@ order:
   + new op22rr_mc_raw074.csv). Label GVR-mCTA, color #2ec4b6 (matches §3).
 - Smoke-validated end-to-end (K512 fp32 real seqlen): exact 18/18 ok,
   cs dispatch 1/4 per PR heuristic, mc 1M BS=1 cold 43 vs 120 µs 1CTA.
+
+### UPDATE 2026-07-08 ~14:20Z — two-node split (A expires ~16:50Z)
+- Machine A b200-074: GPU0 fp32 / GPU1 bf16 (setsid drivers, logs
+  mc074_gpu{0,1}.log). Node B: ALL fp16 + A-leftover takeover — paste
+  NODEB_MC_PROMPT.md into node B's Claude Code.
+- INCIDENT: TaskStop didn't kill driver children → old+new drivers
+  overlapped 14:07:59-14:09:30 on both GPUs; best/seqlen_K2048 fp32+bf16
+  batches were polluted → markers+jsonl+reps deleted, re-running. All
+  real-scenario + best seqlen K512/K1024 markers (≤14:06:38) are CLEAN.
+- Kill recipe: pkill -f drive_nsys_op22rr; pkill -f sweep_op22rr;
+  pkill -f "nsys profile"; then re-check ps for respawns (kill -9 -PGID).

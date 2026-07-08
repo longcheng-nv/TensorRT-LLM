@@ -45,7 +45,20 @@ MC = "gvr_multicta_cutedsl"
 BASE = "gvr_cutedsl"
 MC_COL = "#2ec4b6"
 MC_SHORT = "GVR-mCTA"
-MC_NODE = "umbriel-b200-074"
+
+
+def _detect_nodes():
+    """Union of hosts from all mc driver logs (A + node-B helpers)."""
+    import re
+    nodes = []
+    for log in sorted(HERE.glob("mc074*gpu*.log")):
+        for m in re.finditer(r"host=([\w.-]+)", log.read_text()):
+            if m.group(1) not in nodes:
+                nodes.append(m.group(1))
+    return " + ".join(nodes) if nodes else "umbriel-b200-074"
+
+
+MC_NODE = _detect_nodes()
 
 
 def load(root, want_ops):
