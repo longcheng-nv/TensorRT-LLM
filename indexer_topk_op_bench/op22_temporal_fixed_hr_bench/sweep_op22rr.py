@@ -67,6 +67,11 @@ ARMS_EXTRA = [
     # rows in the original rr dataset were measured PRE-op25, so this arm
     # captures the op25 delta on byte-identical bundles.
     ("op25_hls", "gvr_ms_auto", "1", None),
+    # report.html "Radix single-CTA (CUDA)" / "Radix multi-CTA (CUDA)" —
+    # the raw CUDA radix ops (cr-aware, seq=N*cr), harness _build_inputs
+    # names. multi-CTA uses default_blocks_per_row + aux split/merge bufs.
+    ("radix_single_cuda", "radix_single_cuda", None, None),
+    ("radix_multi_cuda", "radix_multi_cuda", None, None),
 ]
 # OP22RR_ARMS="gvr_cutedsl,gvr_multicta_cutedsl" -> run only those arms
 # (order preserved from ARMS + ARMS_EXTRA). Unset -> original 5 arms.

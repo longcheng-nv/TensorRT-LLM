@@ -150,3 +150,29 @@ order:
   vs op21 HLS: op25 wins real+worst axes, ~3-5% behind on best (ladder tax).
 - Gotcha (new): pkill -f matches heredoc text embedded in a wrapper shell's
   cmdline — write kill/relaunch scripts to a file first, then exec the file.
+
+## ADDENDUM 2026-07-09: Radix-CUDA arms backfill — DONE (b200-027, 8-GPU)
+- Goal: add report.html's "Radix single-CTA (CUDA)" + "Radix multi-CTA
+  (CUDA)" (`radix_single_cuda` / `radix_multi_cuda`, standalone harness
+  ops, cr-aware, NOT trtllm) to the re-tested §1/§2 dataset — same
+  bundles byte-for-byte, co-located gvr_cutedsl anchor, anchor-transfer.
+- Run: umbriel-b200-027, ALL 8 GPUs idle → 8-chain shard (fp32 chains
+  alone on GPU0/3/6; worst-fp16 K-sharded onto the lighter bf16/fp16
+  GPUs). 81/81 batches in 41 min (02:42–03:23Z), 0 FAILED, 0 errors.
+  Launcher = launch_radix027.sh (setsid chains, .done-marker idempotent);
+  logs radix027_gpu{0..7}.log; results ../results_b200_op22rr_radix027.
+- QA gates: exactness ok=414+414 FAIL=0; anchor drift radix027/baseorig
+  median=1.0013 p10=0.9919 p90=1.0178 (n=5436); REPORT D=22374 rows
+  (2718 × 8 arms + 630 sglang); <script> count = 2; notes/checkboxes ×1.
+- Finalizer = update_report_radix.py — SELF-CONTAINED & LAST-WRITER-WINS:
+  re-derives mc + op25 + radix rows from their own roots, rewrites full
+  COL/SHORT consts and inserts any missing checkbox/note, so it must be
+  re-run after ANY other update_report_*.py touches REPORT.html.
+- Headline (cold-L2 gm, t(GVR-1CTA)/t(arm), >1 ⇒ arm faster):
+  radix_single_cuda: seqlen BS=1 0.53/0.53/0.42, bs 0.61/0.60/0.47;
+  radix_multi_cuda:  seqlen BS=1 0.62/0.63/0.49, bs 0.48/0.47/0.37
+  (real/best/worst) — GVR-1CTA baseline beats BOTH CUDA radix ops
+  everywhere (1.6–2.7×), gaps widest on worst (GVR gets faster, radix
+  hr-flat). radix_cutedsl remains the only competitive radix arm
+  (2–4× faster than its CUDA siblings on real). bs grid
+  t(best-radix-CUDA)/t(op25_hls) = 1.82/1.80/1.70.
