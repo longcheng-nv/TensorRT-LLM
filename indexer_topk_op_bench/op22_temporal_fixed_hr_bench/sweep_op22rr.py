@@ -61,6 +61,12 @@ ARMS = [
 # records the picked cluster_size per cell).
 ARMS_EXTRA = [
     ("gvr_multicta_cutedsl", "gvr_multicta_cutedsl", None, None),
+    # op25_hls = gvr_ms_auto at the op25 ship HEAD (w3a ladder + N-gated
+    # slot_scale=2 + fp32 C=8 dispatch rule; OP25_QFRACS/OP25_SLOTCAP left
+    # unset -> ship defaults). Same knob pinning as op21_hls; the op21_hls
+    # rows in the original rr dataset were measured PRE-op25, so this arm
+    # captures the op25 delta on byte-identical bundles.
+    ("op25_hls", "gvr_ms_auto", "1", None),
 ]
 # OP22RR_ARMS="gvr_cutedsl,gvr_multicta_cutedsl" -> run only those arms
 # (order preserved from ARMS + ARMS_EXTRA). Unset -> original 5 arms.
