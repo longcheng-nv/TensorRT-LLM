@@ -126,3 +126,27 @@ order:
   anchor drift base074/baseorig median 1.0053 p10 0.998 p90 1.033 (n=2718),
   REPORT D=14220 rows (2718 mc), exactness 0 FAIL. Headline gm
   t(1CTA)/t(mc): seqlen BS=1 1.36-1.41, bs grids 1.15-1.18.
+
+## ADDENDUM 2026-07-09: op25_hls arm backfill — DONE
+- Goal: add "op25 HLS" (`op25_hls` = gvr_ms_auto @ HEAD ship default: w3a
+  ladder K512/K1024 + slot×2 N<65536 + fp32 C8 bs≤8) to the re-tested §1/§2
+  dataset, co-located gvr_cutedsl anchor, anchor-transfer onto orig scale.
+- Run history: 028 GPU0/1 (30/81, node reclaimed 01:26:33Z mid-hugeN-batch;
+  the two in-flight batches had no markers → clean rerun) → 036 GPU0 takeover
+  01:46Z (GPU1 82C broken cooling, banned) → 02:17Z three-card split:
+  036 GPU0 = fp32 all + bf16 real/best (done 02:37Z), 038 GPU0 = fp16
+  real/best, 038 GPU1 = worst bf16+fp16 (both done 03:44:46Z). 81/81, 0 FAILED.
+  Logs op25hls028_gpu{0,1}.log (028), _gpu0_node036.log, _gpu[AB]_split.log.
+  Split recipe = NODEC_OP25_SPLIT_PROMPT.md (shard-aware co-tenancy check).
+- QA gates: exactness ok=414 FAIL=0; anchor drift op25local/baseorig
+  median=1.0001 p10=0.9823 p90=1.0219 (n=2718); REPORT.html D=16938 rows;
+  <script count = 2. CSVs: op22rr_{seqlen,bs}_data.csv + op22rr_op25_raw028.csv.
+- Headline (cold-L2, gm over cells, t(arm)/t(op25) unless noted):
+  seqlen BS=1: base/op25 1.80/1.81/1.29 (real/best/worst);
+    radix/op25 0.82/0.82/0.76 — radix still wins seqlen but the old ~2.2×
+    HLS gap narrows to ~1.2-1.3×; op21_hls/op25 1.10/0.97/1.25.
+  bs grid: base/op25 1.40/1.37/1.01; radix/op25 1.16/1.15/1.10 — op25 now
+    beats radix on the whole bs grid incl. worst; op21_hls/op25 1.05/0.95/1.13.
+  vs op21 HLS: op25 wins real+worst axes, ~3-5% behind on best (ladder tax).
+- Gotcha (new): pkill -f matches heredoc text embedded in a wrapper shell's
+  cmdline — write kill/relaunch scripts to a file first, then exec the file.
