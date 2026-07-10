@@ -1,6 +1,20 @@
 # op27 RESUME — CAMPAIGN SHIPPED 2026-07-10 ~05:3xZ (b200-027)
 
-FINAL: op27_hls backfilled into op22 REPORT.html (update_report_op27.py,
+ITER3 IN FLIGHT (post-ship regression fixes, user: run to completion):
+- Confirmed regressions vs op25: (A) worst bf16 K2048 65K BS64-2048 +262K
+  BS1024, tail 8-13% slower same-node (mechanism: 16-bit quantization widens
+  the tail-column band; wide-band sandwich > stock all_ge->dist fallback);
+  (B) real 16-bit 65K BS1 -6% (msc; rank-space coverage hole (0.048,0.45)).
+  Noise class: ALL K512/K1024 cells (bit-identical, pooled med 1.0002);
+  worst fp32 512K BS2/4 refuted same-node (0.998/1.005).
+- OP27_R2 knob in gvr_ms (R=2 + bAcc=4096, K2048-only, ms path; msc asserts
+  R==1). 5-arm matrix ab_iter3.py on GPU1: notail/tail/tail_r2/mid/mid_r2
+  (mid = OP25_QFRACS=0.75,0.5,0.048). Parse = same NVTX c|arm|cell pattern.
+- After verdict: ship config -> gates (gate_exact_k2048 + replay) -> re-sweep
+  arm via launch_op27_027.sh with NEW OUT root op27027b (edit script OUT= and
+  updater OP27_ROOT default) -> rerun update_report_op27.py -> verify -> commit.
+
+PREVIOUS SHIP STATE: op27_hls backfilled into op22 REPORT.html (update_report_op27.py,
 last-writer over mc/op25/radix/op26/op27; anchor drift med 1.0022 p90 1.0403;
 exactness 414/414). K2048 vs base (seqlen BS=1 gm): worst 1.146->1.437 fp32 /
 1.085->1.243 bf16 / 1.140->1.377 fp16; real/best unchanged (bs-grid op25/op27

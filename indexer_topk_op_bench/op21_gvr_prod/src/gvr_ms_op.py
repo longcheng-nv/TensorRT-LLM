@@ -2227,8 +2227,19 @@ def gvr_ms(logits, pre_idx, seq_lens, index_topk, compress_ratio=1, out=None,
     fuse = bool(bs <= NUM_SMS and 4 * int(index_topk) <= 5120)
     # op25 S1a: per-K screened ladder + slot-capacity scale (see table above)
     qf = _qfracs_for(index_topk)
+    R_eff, b_acc = int(R), 64
+    # op27 iter3: K2048 wide-band self-heal — one extra in-bracket ladder
+    # round ONLY when the R0 band exceeds ~kC-scale width (bf16 worst pocket:
+    # 16-bit quantization widens the tail-column band; the wide-band sandwich
+    # path is then slower than the stock all_ge->dist fallback it replaced).
+    # bAcc=4096 keeps normal fast rows (band <= 4096) on the single-pass
+    # path; only pathological rows pay the extra tau(M) scan. ms path only
+    # (GvrMsClusterKernel asserts R_rounds==1).
+    if int(index_topk) == 2048 and os.environ.get("OP27_R2", "0") == "1" \
+            and os.environ.get("OP27_K2048_TAIL", "1") == "1":
+        R_eff, b_acc = 2, 4096
     return gvr_sw(logits, pre_idx, seq_lens, index_topk,
                   compress_ratio=compress_ratio, out=out,
-                  M=len(qf) + 1, R=int(R), band_acc=64, place_mode=5,
+                  M=len(qf) + 1, R=R_eff, band_acc=b_acc, place_mode=5,
                   threads=threads, fuse=fuse, qfracs=qf,
                   slot_scale=_slot_scale())
