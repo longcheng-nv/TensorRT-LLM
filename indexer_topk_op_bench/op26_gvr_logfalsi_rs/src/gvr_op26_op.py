@@ -12,7 +12,11 @@ op26_1cta — GvrOp26Kernel ⊂ p4_recursive_digit's GvrTopKKernel (the op#7
   * P2: gated log-count secant interpolation (op13 iter8 formula) + optional
     kC/kFTarget window override; dispatched per (dtype, K, N) by the op13
     iter8c ship table `dispatch_p2c_v2` (fp32 only; 16-bit keeps baseline P2
-    per op13's no-evidence rule).
+    per op13's no-evidence rule). iter5 (ROOTCAUSE_P2 V3): wherever the log
+    path is on, the aim moves to the window's geometric center and the
+    iteration upgrades to a log-secant through the last two measured points
+    (p2_secant2), fixing the K1024@131K edge-aim rejection creep (R1) and
+    the K2048 16-bit seed/body geometric creep (R2).
   * P3 fallback (fb_fix, always on): replaces the vendored one-sided
     retry-shrink (exits on the FIRST count<=kCC INCLUDING count<kK ⇒ the
     report.html §5 real-data red card: -1 slots) with a correct bounded
@@ -62,31 +66,42 @@ _DT = {torch.float32: cutlass.Float32, torch.bfloat16: cutlass.BFloat16,
 
 
 # ---------------------------------------------------------------------------
-# op13 iter8c ship table (dispatch_p2c_v2, @390c99c3e4) — fp32 only.
-# -> (use_log, kCC_override, kFTarget_override); (False, None, None) = stock.
+# op13 iter8c ship table (dispatch_p2c_v2, @390c99c3e4), iter5-V3 revision.
+# -> (use_log, kCC_override, kFTarget_override, secant2).
+# (False, None, None, False) = stock.
+#
+# iter5 (ROOTCAUSE_P2.md fix A): everywhere log-interp is on, (a) the aim
+# point moves from the acceptance-band EDGE (kFT=kK, R1: ~half the exact
+# shots land below kK and get rejected -> one-sided falsi creep) to the
+# GEOMETRIC CENTER sqrt(kK*kCC) of the EFFECTIVE window, and (b) the
+# iteration switches to a log-secant through the last two MEASURED points
+# (secant2, R2: immune to the chi=1 unmeasured P1 seed and to regula-falsi
+# endpoint freezing across the distribution body). K512 fp32 keeps the
+# iter7 linear-narrow entry unchanged (no regression there; log falsified).
 # ---------------------------------------------------------------------------
 def dispatch_p2_op26(dtype, K, n):
     if dtype != torch.float32:
-        # 16-bit: op13 shipped nothing for lack of independent nsys evidence
-        # — this campaign IS that evidence run. Enable log-interp with STOCK
-        # windows on K1024/K2048 only; K512 keeps the baseline P2 (the K512
-        # log variant is the one hard op13 falsification).
-        if K in (1024, 2048):
-            return True, None, None
-        return False, None, None
+        # 16-bit: stock windows on K1024/K2048 (kCC=5120), center aim +
+        # secant2; K512 keeps the baseline P2 (the K512 log variant is the
+        # one hard op13 falsification).
+        if K == 1024:
+            return True, None, 2289, True     # sqrt(1024*5120)
+        if K == 2048:
+            return True, None, 3238, True     # sqrt(2048*5120)
+        return False, None, None, False
     if K == 512:
         if n <= 65536:
-            return False, 1536, 1280          # iter7 lin-narrow (log falsified)
-        return False, None, None
+            return False, 1536, 1280, False   # iter7 lin-narrow (log falsified)
+        return False, None, None, False
     if K == 1024:
         if n <= 32768 or n == 131072:
-            return True, 2048, 1024           # log-narrow
-        return False, None, None
+            return True, 2048, 1448, True     # narrow; sqrt(1024*2048)
+        return False, None, None, False
     if K == 2048:
         if n >= 8192:
-            return True, 4096, 2048           # log-narrow, all measured N
-        return False, None, None
-    return False, None, None
+            return True, 4096, 2896, True     # narrow; sqrt(2048*4096)
+        return False, None, None, False
+    return False, None, None, False
 
 
 def dispatch_rs_op26(dtype, bs):
@@ -98,13 +113,18 @@ class GvrOp26Kernel(_P4Kernel):
     """Single-CTA GVR + gated log-P2 + corrected fallback + rank-scatter P4."""
 
     def __init__(self, *a, p2_log=False, kC_override=None,
-                 kFTarget_override=None, fb_fix=True, fb_alpha=0.2, **kw):
+                 kFTarget_override=None, p2_secant2=False, fb_fix=True,
+                 fb_alpha=0.2, **kw):
         super().__init__(*a, **kw)
         self.p2_log = bool(p2_log)
         if kC_override is not None:
             self.kC = int(kC_override)
         if kFTarget_override is not None:
             self.kFTarget = int(kFTarget_override)
+        self.p2_secant2 = bool(p2_secant2)
+        # secant aim target in log2-count space (kFTarget_override already
+        # applied above, so this is the dispatched center for iter5 cells)
+        self.log2_kft = math.log2(max(self.kFTarget, 1))
         self.fb_fix = bool(fb_fix)
         # interior aim for the corrected fallback (HLS Theorem 3 grid optimum)
         self.log2_mstar = math.log2(
@@ -114,8 +134,14 @@ class GvrOp26Kernel(_P4Kernel):
     # P2 — verbatim vendored phase2_secant_search except the interpolation
     # block: const_expr(p2_log) selects log-count interpolation
     # f = log2(clo/kFT) / log2(clo/chi) (op13 iter8), else the vendored
-    # linear formula. Bracket/window/fallback logic, clamps (f in
-    # [0.05,0.95], iter0 cap 0.5) and barriers are unchanged, so the
+    # linear formula. const_expr(p2_secant2) (iter5, ROOTCAUSE_P2 V3)
+    # additionally replaces the bracket-endpoint interpolant with a
+    # log-secant through the last two MEASURED (thr,count) points — immune
+    # to the chi=1 unmeasured P1 seed and to regula-falsi endpoint
+    # freezing; degenerate pairs fall back to the bracket path. The secant
+    # proposal still passes the vendored bracket clamps (5% margins +
+    # midpoint safeguard), and bracket/window/fallback logic, f clamps
+    # (f in [0.05,0.95], iter0 cap 0.5) and barriers are unchanged, so the
     # exactness guard (done==1 <=> count in [kK,kCC]) is untouched.
     # ------------------------------------------------------------------
     @cute.jit
@@ -142,6 +168,16 @@ class GvrOp26Kernel(_P4Kernel):
                 s_iscalars[3] = c0
         cute.arch.barrier()
 
+        # iter5-V3 loop-carried registers: the last two MEASURED (thr,count)
+        # points. Maintained UNIFORMLY by every thread — s_thr[0] and
+        # s_iscalars[0] reads after the barriers are block-uniform — so no
+        # extra smem slot is needed and thread 0's interpolant sees them
+        # as plain registers. c_prev = -1 flags "<2 measured points yet".
+        v_last = thr_init
+        c_last = s_iscalars[0]
+        v_prev = thr_init
+        c_prev = cutlass.Int32(-1)
+
         it = cutlass.Int32(0)
         while it < cutlass.Int32(self.MAX_REFINE_ITERS) and s_iscalars[1] == cutlass.Int32(0):
             if tidx == 0:
@@ -151,30 +187,53 @@ class GvrOp26Kernel(_P4Kernel):
                 chi = s_iscalars[3]
                 rng = vhi - vlo
                 nv = cutlass.Float32(0.0)
-                if clo > chi and rng > cutlass.Float32(1e-10):
-                    f = cutlass.Float32(0.0)
-                    if cutlass.const_expr(self.p2_log):
-                        # log-count interpolation: count(v) ~ exp(a - b*v)
-                        clo_f = cutlass.Float32(clo)
-                        chi_f = cute.arch.fmax(cutlass.Float32(chi),
-                                               cutlass.Float32(1.0))
-                        den = cmath.log2(clo_f / chi_f, fastmath=True)
-                        if den > cutlass.Float32(0.0):
-                            f = cmath.log2(clo_f / cutlass.Float32(kFTarget),
-                                           fastmath=True) / den
+                use_sec = cutlass.Int32(0)
+                if cutlass.const_expr(self.p2_secant2):
+                    # log-secant through the last two measured points,
+                    # aimed at log2(kFTarget) (= the window's geometric
+                    # center under the iter5 dispatch table).
+                    if c_prev >= cutlass.Int32(0):
+                        l1 = cmath.log2(
+                            cute.arch.fmax(cutlass.Float32(c_prev),
+                                           cutlass.Float32(1.0)),
+                            fastmath=True)
+                        l2 = cmath.log2(
+                            cute.arch.fmax(cutlass.Float32(c_last),
+                                           cutlass.Float32(1.0)),
+                            fastmath=True)
+                        dl = l1 - l2
+                        dv = v_prev - v_last
+                        adl = cute.arch.fmax(dl, cutlass.Float32(0.0) - dl)
+                        adv = cute.arch.fmax(dv, cutlass.Float32(0.0) - dv)
+                        if adl > cutlass.Float32(1e-6) and adv > cutlass.Float32(1e-10):
+                            t = (cutlass.Float32(self.log2_kft) - l2) / dl
+                            nv = v_last + t * dv
+                            use_sec = cutlass.Int32(1)
+                if use_sec == cutlass.Int32(0):
+                    if clo > chi and rng > cutlass.Float32(1e-10):
+                        f = cutlass.Float32(0.0)
+                        if cutlass.const_expr(self.p2_log):
+                            # log-count interpolation: count(v) ~ exp(a - b*v)
+                            clo_f = cutlass.Float32(clo)
+                            chi_f = cute.arch.fmax(cutlass.Float32(chi),
+                                                   cutlass.Float32(1.0))
+                            den = cmath.log2(clo_f / chi_f, fastmath=True)
+                            if den > cutlass.Float32(0.0):
+                                f = cmath.log2(clo_f / cutlass.Float32(kFTarget),
+                                               fastmath=True) / den
+                            else:
+                                f = (cutlass.Float32(clo - cutlass.Int32(kFTarget))
+                                     / cutlass.Float32(clo - chi))
                         else:
                             f = (cutlass.Float32(clo - cutlass.Int32(kFTarget))
                                  / cutlass.Float32(clo - chi))
+                        f = cute.arch.fmax(cutlass.Float32(0.05), f)
+                        f = _fmin_f32_inline(f, cutlass.Float32(0.95))
+                        if it == cutlass.Int32(0):
+                            f = _fmin_f32_inline(f, cutlass.Float32(0.5))
+                        nv = vlo + rng * f
                     else:
-                        f = (cutlass.Float32(clo - cutlass.Int32(kFTarget))
-                             / cutlass.Float32(clo - chi))
-                    f = cute.arch.fmax(cutlass.Float32(0.05), f)
-                    f = _fmin_f32_inline(f, cutlass.Float32(0.95))
-                    if it == cutlass.Int32(0):
-                        f = _fmin_f32_inline(f, cutlass.Float32(0.5))
-                    nv = vlo + rng * f
-                else:
-                    nv = (vlo + vhi) * cutlass.Float32(0.5)
+                        nv = (vlo + vhi) * cutlass.Float32(0.5)
 
                 if nv <= vlo:
                     nv = vlo + rng * cutlass.Float32(0.05)
@@ -208,6 +267,10 @@ class GvrOp26Kernel(_P4Kernel):
                         s_thr[2] = t_new
                         s_iscalars[3] = c_new
                 cute.arch.barrier()
+                v_prev = v_last
+                c_prev = c_last
+                v_last = new_thr
+                c_last = s_iscalars[0]
             it = it + cutlass.Int32(1)
 
         # ---- Post-loop fallback: if still not done, force threshold ----
@@ -464,9 +527,10 @@ def gvr_cutedsl_op26(logits, pre_idx, seq_lens, index_topk, compress_ratio=1,
                      out=None):
     bs, n = logits.shape
     dt = logits.dtype
-    use_log, kcc, kft = dispatch_p2_op26(dt, index_topk, n)
+    use_log, kcc, kft, sec2 = dispatch_p2_op26(dt, index_topk, n)
     rs_on = dispatch_rs_op26(dt, bs)
-    key = (dt, bs, n, index_topk, compress_ratio, use_log, kcc, kft, rs_on)
+    key = (dt, bs, n, index_topk, compress_ratio, use_log, kcc, kft, sec2,
+           rs_on)
     compiled = _compiled_1cta.get(key)
     if compiled is None:
         t, use256, min_bpm = _config_1cta(bs, n)
@@ -477,7 +541,7 @@ def gvr_cutedsl_op26(logits, pre_idx, seq_lens, index_topk, compress_ratio=1,
             min_blocks_per_mp=min_bpm, return_output_values=False,
             enable_p4_rank_scatter=rs_on, enable_p4_rank_scatter_exact=rs_on,
             p2_log=use_log, kC_override=kcc, kFTarget_override=kft,
-            fb_fix=True,
+            p2_secant2=sec2, fb_fix=True,
         )
         n_rows, n_cols, n_batch = cute.sym_int(), cute.sym_int(), cute.sym_int()
         in_align = 32 if use256 else 16
@@ -611,9 +675,9 @@ if __name__ == "__main__":
             ref = torch.topk(logits[0].float(), K).values
             d = (v - ref).abs().max().item()
             nuniq = len(set(out[0].tolist()))
-            ul, kcc, kft = dispatch_p2_op26(dt, K, N)
+            ul, kcc, kft, sec2 = dispatch_p2_op26(dt, K, N)
             print(f"  {str(dt):14s} K={K:4d} N={N:6d} log={int(ul)} kCC={kcc} "
-                  f"kFT={kft}: uniq={nuniq}/{K} valdiff={d:.2e}")
+                  f"kFT={kft} sec2={int(sec2)}: uniq={nuniq}/{K} valdiff={d:.2e}")
             assert d == 0.0 and nuniq == K, "op26_1cta NOT exact"
     print("== op26_mc smoke ==")
     for dt in (torch.float32, torch.bfloat16, torch.float16):
