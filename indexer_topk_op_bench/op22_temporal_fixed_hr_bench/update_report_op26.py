@@ -60,6 +60,11 @@ COL_MAP = {MC: "#2ec4b6", OP25: "#ff7f0e", RD1: "#ff8c42", RDM: "#e84855",
            O26A: "#9b5de5", O26M: "#f15bb5"}
 SHORT_MAP = {MC: "GVR-mCTA", OP25: "HLS-op25", RD1: "Radix-1CTA",
              RDM: "Radix-mCTA", O26A: "op26-1CTA", O26M: "op26-mCTA"}
+# checkbox display names follow the report's long-label convention
+# ("Radix single-CTA (CUDA)", "GVR op#21 ms_auto (HLS)", ...); SHORT_MAP
+# stays terse for the plot legend.
+LABEL_MAP = {O26A: "GVR op#26 logP2+RS (single-CTA)",
+             O26M: "GVR op#26 logP2 (multi-CTA, PR#15198)"}
 
 
 def _detect_nodes(glob_pat, default):
@@ -270,7 +275,7 @@ def patch_report(all_rows):
         def lbl(op):
             return (f'<label class="ck"><input type="checkbox" '
                     f'class="{cls}" value="{op}" checked>'
-                    f'{SHORT_MAP[op]}</label>')
+                    f'{LABEL_MAP[op]}</label>')
         for op in (MC, OP25, RD1, RDM):
             assert f'class="{cls}" value="{op}"' in t, \
                 f"expected existing {cls} checkbox for {op}"

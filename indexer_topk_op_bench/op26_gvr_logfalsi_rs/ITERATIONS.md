@@ -85,5 +85,13 @@
 - **花费记录**(本战役全周期):GPU ≈ **15 GPU-h**
   (036 门禁+4 批 ~1;027 op26a 3卡×2h + op26b 3卡×0.5h ≈ 7.5;
   069 三轮 r0 0.4 + r1 错臂 4.0 + r2 1.2 ≈ 5.6,其中错臂返工浪费 ~4 GPU-h);
-  069 收尾 session 墙钟 ~1.3h(01:47-03:05Z)。Claude token 花费:
-  见下方 /cost 记录(由用户 session 提供)。
+  069 收尾 session 墙钟 ~1.3h(01:47-03:05Z)。
+- **Claude token 花费**(从 session transcript usage 实测,Fable 5 定价
+  $10/$50 in/out、$12.5 cache-write(全部 5-min TTL)、$1 cache-read /MTok):
+  - 确定归属 op26 的 session:设计+实现+门禁(f72976b5,038/036)$23 +
+    027 战役三 session(327729b8/10234912/840e34e8)$29 + 069 收尾
+    (79dce2d2,含 8 卡重切与错臂返工)$56 ≈ **$108**。
+  - 口径说明:07-09 凌晨另有 6 个 session 共 ~$317(含 op22rr/op25 等
+    并行战役,无法按臂拆分)+ 07-10 并行 session da924869 $70,归属不明,
+    未计入。成本大头是 cache-read(op26 相关 ~50M tok cache-read/session
+    级),output 仅 ~0.5M tok。
