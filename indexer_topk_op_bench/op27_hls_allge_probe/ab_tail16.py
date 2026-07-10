@@ -30,6 +30,7 @@ from sweep_nsys import build_call, _EVICT  # noqa: E402
 import bundle_data_rr  # noqa: E402
 
 CELLS = [(2048, N, 1) for N in (65536, 131072, 262144, 524288, 1048576)]
+# --cells "N:BS,N:BS" overrides (K fixed 2048)
 ARMS = (("notail", {"OP27_K2048_TAIL": "0"}),
         ("tail", {"OP27_K2048_TAIL": "1"}))
 
@@ -41,7 +42,12 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--reps", type=int, default=30)
     ap.add_argument("--warmup", type=int, default=10)
+    ap.add_argument("--cells", default=None)
     args = ap.parse_args()
+    global CELLS
+    if args.cells:
+        CELLS = [(2048, int(nb.split(":")[0]), int(nb.split(":")[1]))
+                 for nb in args.cells.split(",")]
     dtype = DTYPES[args.dtype]
 
     f = open(args.out, "a")
