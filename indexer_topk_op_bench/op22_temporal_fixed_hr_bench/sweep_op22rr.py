@@ -78,6 +78,11 @@ ARMS_EXTRA = [
     # op26_mc = PR#15198 cluster GVR + log-count P2 interpolation (fp32).
     ("op26_1cta", "op26_1cta", None, None),
     ("op26_mc", "op26_mc", None, None),
+    # op27_hls = gvr_ms_auto at the op27 HEAD: op25 ship config + the K2048
+    # TAIL ladder (0.75, 0.45, 0.048; OP27_K2048_TAIL default-ON). K512/K1024
+    # binaries are bit-identical to op25_hls; the arm re-measures all K so
+    # the REPORT backfill is self-consistent.
+    ("op27_hls", "gvr_ms_auto", "1", None),
 ]
 # OP22RR_ARMS="gvr_cutedsl,gvr_multicta_cutedsl" -> run only those arms
 # (order preserved from ARMS + ARMS_EXTRA). Unset -> original 5 arms.
