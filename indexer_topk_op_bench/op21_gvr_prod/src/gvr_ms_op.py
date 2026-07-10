@@ -1988,10 +1988,17 @@ def _load_straddle(K, n, M, dtype_name="fp32"):
 # slot_scale=2 rides along N-gated (<65536): free at t=512, +12..21% at
 # t=1024 (decomp) — it unlocks the Pro low-h collect overflow (N~9.4K).
 # OP25_QFRACS overrides ("base" = stock triple); OP25_SLOTCAP scales slots.
+# op27 (2026-07-10, b200-027 ab_decomp same-node paired): K2048 gains a TAIL
+# ladder (0.75, 0.45, 0.048) — keeps the stock 0.75 top column (the op25
+# rejection above targeted 0.92-top w3a variants), swaps the two lower
+# columns for the all_ge tail. Silicon: worst gm 1.96x vs stock (per-cell
+# 1.55-2.39; every op22rr K2048 worst loss cell was mode all_ge), best -1.2%
+# / real -0.7% (noise-level). OP27_K2048_TAIL=0 restores stock.
 # ---------------------------------------------------------------------------
 _QFRACS_STOCK = (0.75, 0.5, 0.25)
 _QFRACS_SHIP = {512: (0.92, 0.45, 0.048),
                 1024: (0.92, 0.45, 0.048)}
+_QFRACS_K2048_TAIL = (0.75, 0.45, 0.048)
 
 
 def _qfracs_for(K):
@@ -2000,6 +2007,8 @@ def _qfracs_for(K):
         return _QFRACS_STOCK
     if env:
         return tuple(float(x) for x in env.split(","))
+    if int(K) == 2048 and os.environ.get("OP27_K2048_TAIL", "1") == "1":
+        return _QFRACS_K2048_TAIL
     return _QFRACS_SHIP.get(int(K), _QFRACS_STOCK)
 
 
