@@ -1,7 +1,14 @@
 # op26 性能回退根因分析 — P2 host-exact 重放 (2026-07-10, CHECKPOINT)
 
-> 状态:根因已定位并被 bundle 行级重放证实;修复变体 V1-V3 已在重放中量化;
-> **尚未上硅**。复现:`python3 diag_p2_replay.py`(逐语义重放 + trace)、
+> **上硅判决 (iter5/iter5b, b200-037)**:V1(中心瞄准)= 全部收益
+> (K1024@131K 38.98→32.77us);V2/V3 的 secant2 **硅上默认证伪**——趟数
+> 节省真实但循环开销更大(K2048 fp16 65536 iter4 28.67 = V1 28.67 <
+> V3 32.90us),唯 K2048 16-bit n≥262144 实测翻盘(0.996→1.15)保留。
+> 教训:趟数不是硅上时延的完备代理;方向 B 已否决(P1 只扫 K 个 preIdx
+> 元素,免费端点计数需动 vendored)。详见 ITERATIONS.md iter5。
+
+> 状态(重放期原文):根因已定位并被 bundle 行级重放证实;修复变体 V1-V3
+> 已在重放中量化。复现:`python3 diag_p2_replay.py`(逐语义重放 + trace)、
 > `python3 diag_p2_variants.py`(修复变体矩阵)。两脚本读取与 nsys 战役
 > 逐字节相同的 op22rr bundles,BS>1 = 同行 expand ⇒ 大 BS 下 kernel 带宽
 > 受限、耗时 ∝ count_ge 趟数,趟数比 = 大 BS 回退比的直接预测。

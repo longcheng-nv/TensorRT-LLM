@@ -12,11 +12,13 @@ op26_1cta — GvrOp26Kernel ⊂ p4_recursive_digit's GvrTopKKernel (the op#7
   * P2: gated log-count secant interpolation (op13 iter8 formula) + optional
     kC/kFTarget window override; dispatched per (dtype, K, N) by the op13
     iter8c ship table `dispatch_p2c_v2` (fp32 only; 16-bit keeps baseline P2
-    per op13's no-evidence rule). iter5 (ROOTCAUSE_P2 V3): wherever the log
-    path is on, the aim moves to the window's geometric center and the
-    iteration upgrades to a log-secant through the last two measured points
-    (p2_secant2), fixing the K1024@131K edge-aim rejection creep (R1) and
-    the K2048 16-bit seed/body geometric creep (R2).
+    per op13's no-evidence rule). iter5: wherever the log path is on, the
+    aim moves to the window's geometric center (fixes the K1024@131K
+    edge-aim rejection creep, R1). iter5b: the log-secant through the last
+    two measured points (p2_secant2, R2 fix) is silicon-falsified as a
+    default (pass savings < loop overhead) and survives only on K2048
+    16-bit n>=262144; N bands where the log path still lost to the linear
+    anchor are pruned back to stock P2 (see dispatch_p2_op26).
   * P3 fallback (fb_fix, always on): replaces the vendored one-sided
     retry-shrink (exits on the FIRST count<=kCC INCLUDING count<kK ⇒ the
     report.html §5 real-data red card: -1 slots) with a correct bounded
@@ -66,40 +68,74 @@ _DT = {torch.float32: cutlass.Float32, torch.bfloat16: cutlass.BFloat16,
 
 
 # ---------------------------------------------------------------------------
-# op13 iter8c ship table (dispatch_p2c_v2, @390c99c3e4), iter5-V3 revision.
+# op13 iter8c ship table (dispatch_p2c_v2, @390c99c3e4), iter5b revision.
 # -> (use_log, kCC_override, kFTarget_override, secant2).
 # (False, None, None, False) = stock.
 #
-# iter5 (ROOTCAUSE_P2.md fix A): everywhere log-interp is on, (a) the aim
-# point moves from the acceptance-band EDGE (kFT=kK, R1: ~half the exact
-# shots land below kK and get rejected -> one-sided falsi creep) to the
-# GEOMETRIC CENTER sqrt(kK*kCC) of the EFFECTIVE window, and (b) the
-# iteration switches to a log-secant through the last two MEASURED points
-# (secant2, R2: immune to the chi=1 unmeasured P1 seed and to regula-falsi
-# endpoint freezing across the distribution body). K512 fp32 keeps the
-# iter7 linear-narrow entry unchanged (no regression there; log falsified).
+# iter5 (ROOTCAUSE_P2.md fix A): everywhere log-interp is on, the aim point
+# moves from the acceptance-band EDGE (kFT=kK, R1: ~half the exact shots
+# land below kK and get rejected -> one-sided falsi creep) to the GEOMETRIC
+# CENTER sqrt(kK*kCC) of the EFFECTIVE window. K512 fp32 keeps the iter7
+# linear-narrow entry unchanged (no regression there; log falsified).
+#
+# iter5b (silicon ablation, diag_iter5_silicon.py + iter5 single-cell nsys):
+# secant2 is silicon-FALSIFIED as a default — the host replay's pass savings
+# are real, but the loop-carried secant costs more than it saves on silicon
+# (K2048 fp16 65536: iter4 28.7us == V1 28.7us < V3 32.9us; K1024 fp32
+# 131072 BS256: V1 112.6us < V3 114.7us) and the ENTIRE K1024@131K recovery
+# comes from the center aim alone (38.98 -> 32.77us). The one place secant2
+# stays on is K2048 16-bit large N, where iter5 nsys flipped 262144 from
+# 0.996 (iter4) to 1.11-1.21 and the V3 effect is monotone-improving in N
+# (65536 0.71 -> 131072 0.97 -> 262144 1.15). Cells where the log path
+# still lost to the linear anchor with the fix in (K1024@131K all dtypes
+# 0.83-0.91; K2048 16-bit 16K-131K 0.84-0.94; K1024 16-bit 131K+/4096)
+# are pruned back to stock P2.
 # ---------------------------------------------------------------------------
 def dispatch_p2_op26(dtype, K, n):
     if dtype != torch.float32:
-        # 16-bit: stock windows on K1024/K2048 (kCC=5120), center aim +
-        # secant2; K512 keeps the baseline P2 (the K512 log variant is the
-        # one hard op13 falsification).
+        # 16-bit: stock windows (kCC=5120), center aim; K512 keeps the
+        # baseline P2 (the K512 log variant is the one hard op13
+        # falsification).
         if K == 1024:
-            return True, None, 2289, True     # sqrt(1024*5120)
+            # iter4 real: wins 8K-64K (up to 1.46), loses 4096 (fp16 0.92),
+            # 131072 (0.69-0.74, R1 edge-aim) and 1M (0.71) -> band-gate.
+            # iter5c: aim is N-split — at 8192 the stock edge aim (kFT=1024)
+            # beats center by 15-30% (iter4 1.26/1.46 vs iter5b 1.09/1.12);
+            # at 16K-64K center wins (bf16 16384 0.92 -> 0.98, 65536
+            # 1.15 -> 1.23). The interp bias direction flips with N.
+            if n == 8192:
+                return True, None, None, False    # stock edge aim
+            if 16384 <= n <= 65536:
+                return True, None, 2289, False    # sqrt(1024*5120)
+            return False, None, None, False
         if K == 2048:
-            return True, None, 3238, True     # sqrt(2048*5120)
+            # 8192: iter4 1.01-1.04 / iter5 high-BS 1.17-1.18; 16K-131K
+            # loss band both iterations -> stock; >=262144 the V3
+            # (center+secant2) arm is the measured win (1.11-1.21 @262144).
+            if n == 8192:
+                return True, None, 3238, False    # sqrt(2048*5120)
+            if n >= 262144:
+                return True, None, 3238, True
+            return False, None, None, False
         return False, None, None, False
     if K == 512:
         if n <= 65536:
             return False, 1536, 1280, False   # iter7 lin-narrow (log falsified)
         return False, None, None, False
     if K == 1024:
-        if n <= 32768 or n == 131072:
-            return True, 2048, 1448, True     # narrow; sqrt(1024*2048)
+        # 131072 pruned (iter4 0.69 real; still 0.83-0.91 with center aim —
+        # the narrow window's pass/cand exchange rate stays inverted there).
+        if n <= 32768:
+            return True, 2048, 1448, False    # narrow; sqrt(1024*2048)
         return False, None, None, False
     if K == 2048:
+        # iter4 real: log wins the whole 8K-512K band (1.03-1.28); 1M wash.
+        # iter5c: the iter4 edge aim (kFT=2048=kK) beats the geometric
+        # center at EVERY N here (iter5b center: 32768 0.93 vs 1.03,
+        # 65536 0.95 vs 1.10, ties at >=131K) — K2048 fp32's linear-tail
+        # overshoot lands center-band when aimed at the edge. Keep iter4.
         if n >= 8192:
-            return True, 4096, 2896, True     # narrow; sqrt(2048*4096)
+            return True, 4096, 2048, False    # narrow; iter4 edge aim
         return False, None, None, False
     return False, None, None, False
 
