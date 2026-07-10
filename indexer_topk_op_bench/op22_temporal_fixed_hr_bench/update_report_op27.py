@@ -211,7 +211,7 @@ def _op27_note():
         '(op27_hls_allge_probe/ab_decomp.py): worst gm 1.96&times; vs '
         'the stock ladder (per-cell 1.55&ndash;2.39), best &minus;1.2% / '
         'real &minus;0.7% (noise-level); full-grid host replay shows an '
-        'unchanged best/real mode mix. Measured on ' + OP27_NODE + ' '
+        'unchanged best/real mode mix; a same-node 16-bit re-check on the real BS=1 large-N cells confirms parity (bf16 gm 0.993 / fp16 0.997). Measured on ' + OP27_NODE + ' '
         '(same B200 SKU, same bundles byte-for-byte, same nsys cold-L2 '
         'protocol, 20 cold / 50 warm reps, 8-GPU shard) TOGETHER with a '
         'co-located GVR (cuteDSL) anchor re-run; plotted µs are '
@@ -230,7 +230,7 @@ def _op27_note():
         '（op27_hls_allge_probe/ab_decomp.py）：worst 几何均值对原梯 '
         '1.96&times;（逐 cell 1.55&ndash;2.39），best &minus;1.2% / '
         'real &minus;0.7%（噪声级）；全网格 host 重放显示 best/real '
-        '模式分布不变。采集于 ' + OP27_NODE + '（同 B200 SKU、bundle '
+        '模式分布不变；16-bit real BS=1 大 N cell 同机复核持平（bf16 gm 0.993 / fp16 0.997）。采集于 ' + OP27_NODE + '（同 B200 SKU、bundle '
         '逐字节相同、nsys cold-L2 协议不变、20 cold / 50 warm reps、'
         '8 卡分片），并与 GVR (cuteDSL) 锚点臂同机复测；图中 µs 已按 '
         'cell 锚点迁移到原基线刻度（us_op27 &times; '
@@ -326,14 +326,17 @@ def patch_report(all_rows):
     # style prefix + trailing cell), located as the 2-occurrence literal.
     op25_row_prefix = f"<tr><td style='color:{COL_MAP[OP25]}'>"
     assert t.count(op25_row_prefix) == 2, "op25 methodology rows not found"
+    # anchor = the FULL methodology radix row (the bare color prefix also
+    # appears in the section-4 sensitivity tables)
+    rad_row = ("<tr><td style='color:#4ea8de'>Radix (cuteDSL)</td>"
+               "<td>CuTe DSL</td><td>exact (hint-blind)</td>"
+               "<td>full — strongest hint-blind rival</td></tr>")
     for row, tag in ((M_ROW_26A, O26A), (M_ROW_26M, O26M), (M_ROW_27, O27)):
-        if f"<tr><td style='color:{COL_MAP[tag]}'>" in t:
+        if f"<tr><td style='color:{COL_MAP[tag]}'>{row.split('>', 2)[2][:24]}" \
+                in t:
             continue
-        # append right before the Radix (cuteDSL) row in both tables
-        rad_row_prefix = "<tr><td style='color:#4ea8de'>"
-        assert t.count(rad_row_prefix) == 2, "radix cuteDSL rows not found"
-        t = subn(t, rad_row_prefix, row + rad_row_prefix, 2,
-                 f"methodology row {tag}")
+        assert t.count(rad_row) == 2, "methodology radix rows not found"
+        t = subn(t, rad_row, row + rad_row, 2, f"methodology row {tag}")
 
     REPORT.write_text(t)
     counts = {o: sum(1 for r in all_rows if r["o"] == o)

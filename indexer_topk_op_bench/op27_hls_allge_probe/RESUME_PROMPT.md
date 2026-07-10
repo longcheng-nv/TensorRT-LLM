@@ -1,4 +1,13 @@
-# op27 RESUME (checkpoint 2026-07-10 ~03:5xZ, node umbriel-b200-027)
+# op27 RESUME — CAMPAIGN SHIPPED 2026-07-10 ~05:3xZ (b200-027)
+
+FINAL: op27_hls backfilled into op22 REPORT.html (update_report_op27.py,
+last-writer over mc/op25/radix/op26/op27; anchor drift med 1.0022 p90 1.0403;
+exactness 414/414). K2048 vs base (seqlen BS=1 gm): worst 1.146->1.437 fp32 /
+1.085->1.243 bf16 / 1.140->1.377 fp16; real/best unchanged (bs-grid op25/op27
+0.991-0.996); K512/K1024 bit-identical (op25/op27 gm 1.0028). 16-bit real
+BS=1 large-N same-node re-check: bf16 0.993 / fp16 0.997 (CSV per-cell dips
+= double-anchor-transfer noise). Ship config: OP27_K2048_TAIL default-ON in
+gvr_ms_op.py. Historical checkpoint below.
 
 READ FIRST: PLAN.md (campaign design + ITER0 falsification), COST.md (token/$
 per phase). User directives: (a) NO data-dependent dispatch — algorithm/param
