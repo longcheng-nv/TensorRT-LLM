@@ -72,6 +72,12 @@ ARMS_EXTRA = [
     # names. multi-CTA uses default_blocks_per_row + aux split/merge bufs.
     ("radix_single_cuda", "radix_single_cuda", None, None),
     ("radix_multi_cuda", "radix_multi_cuda", None, None),
+    # op26 = HLS-op25 ideas ported back to the classic GVR kernels
+    # (op26_gvr_logfalsi_rs/): op26_1cta = single-CTA GVR + op13 log/narrow
+    # P2 dispatch + corrected fallback + op#7 exact rank-scatter P4 (gated);
+    # op26_mc = PR#15198 cluster GVR + log-count P2 interpolation (fp32).
+    ("op26_1cta", "op26_1cta", None, None),
+    ("op26_mc", "op26_mc", None, None),
 ]
 # OP22RR_ARMS="gvr_cutedsl,gvr_multicta_cutedsl" -> run only those arms
 # (order preserved from ARMS + ARMS_EXTRA). Unset -> original 5 arms.
