@@ -144,3 +144,43 @@
   edge 瞄准是在借线性尾 overshoot 偏置把落点推回带中。
 - iter5c = 仅上述两处 kFT 回退;re-verify 3 段(K2048 fp32、K1024 bf16/fp16,
   OUT=results_b200_op26_iter5c)+ 1cta gate 重跑。
+
+### iter5d — 全网格首轮判读 + 两处尾部剪枝 (同日, 037)
+
+- 全网格 81 批(8 卡 dtype×K 分片,~70min)首轮:**overall gm 1.0602 /
+  胜率 68%**(iter4 战役 1.032);fp32 1.1272 胜率 90%(1.100/80%);
+  16-bit 转正 bf16 1.0237 / fp16 1.0329(0.994/1.005);
+  real 1.0721 / best 1.0573 / worst 1.0515。
+- 两处残余损失 → iter5d 剪回 stock:
+  1. **K2048 16-bit @524288 = 0.878/0.880**:262144 的 secant2 win 不向上
+     外推(iter4 stock-aim log 在 512K 是 ~0.96-1.01)→ secant2 门改
+     n==262144 精确匹配;
+  2. (1024,bf16,16384) 0.928 混合场景持续损失(两种瞄准都输)→ 16-bit
+     center 带收窄为 [32768,65536]。
+- 重跑受影响 24 批(K2048 16-bit seqlen/bs_hugeN ×3 scen、K1024 16-bit
+  bs/seqlen ×3 scen)。发车两次事故均为 shell `&&…&`/循环后台化优先级坑:
+  一次 GPU1-7 OUT 为空(driver failsafe 拒跑),一次 for-loop 变串行 +
+  前条命令超时连坐杀了 GPU0 driver(seqlen K2048 bf16 real/best 已完,
+  worst 由 marker 幂等补发)。教训:**多卡发车 = 每分片独立一条
+  `setsid bash -c "cd …; env … ./drive.sh" > log &`,不用变量/循环/前置 cd**。
+
+### iter5 收口 — 049 接管补尾批 + 最终判决 (2026-07-12, umbriel-b200-049)
+
+- 037 被回收时 gpu6 分片(worst/bs K1024 fp16)死在 52/84,marker 80/81;
+  049 接管后 marker 幂等补发单批(GPU0,13min,arms 头行核验过)+
+  iter5d 调度码 gate 重跑 **291/291**(此前 gate 只盖到 iter5c)。
+- **最终全网格(2718 配对格,nsys cold 同卡配对 gm)**:
+  overall **1.0648 / 胜率 69%**(iter4 战役 1.032/—);
+  fp32 **1.1272 / 90%**、bf16 1.0334 / 67%、fp16 1.0365 / 50%;
+  real 1.0759 / best 1.0674 / worst 1.0513;
+  K512 1.0465 / K1024 1.0941 / K2048 1.0530。
+- **iter5d 剪枝区全部复位**:K2048 16-bit @524288 0.878/0.880 → 1.006;
+  K1024 bf16 @16384 0.928 → 1.011;secant2 存留格 @262144 gm 1.047;
+  K1024 fp32 @131K(iter5b 剪回 stock)1.038。
+- **仅存损失簇 = K2048 fp32 @N=1048576 gm 0.942**(21 格)——部署包络外
+  (应力探针,主战场 N≤256K),记档不再追。
+- 报告:`update_report_op26_iter5.py`(op27 last-writer 之上的薄 wrapper,
+  已扩展为同时把 `op22rr_op26_raw.csv` 重指 iter5 根)全绿:
+  exactness 全臂 414/414;锚漂移 op26a(iter5 根)med **1.0006**
+  p10/p90 0.987/1.015;REPORT.html D=30528、script=2、`const D=[`×1、
+  iter5 双语注记入卡(幂等 mark)。判读工具固化 = `analyze_iter5_grid.py`。

@@ -105,7 +105,10 @@ def dispatch_p2_op26(dtype, K, n):
             # 1.15 -> 1.23). The interp bias direction flips with N.
             if n == 8192:
                 return True, None, None, False    # stock edge aim
-            if 16384 <= n <= 65536:
+            # iter5d: 16384 pruned — persistent loss cell under BOTH aims
+            # (iter4 edge 0.92-1.00, iter5c center real 0.96-0.98 but
+            # mixed-scenario 0.928 in the full grid).
+            if 32768 <= n <= 65536:
                 return True, None, 2289, False    # sqrt(1024*5120)
             return False, None, None, False
         if K == 2048:
@@ -114,7 +117,10 @@ def dispatch_p2_op26(dtype, K, n):
             # (center+secant2) arm is the measured win (1.11-1.21 @262144).
             if n == 8192:
                 return True, None, 3238, False    # sqrt(2048*5120)
-            if n >= 262144:
+            # iter5d: the 262144 secant2 win (1.14, both dtypes) does NOT
+            # extrapolate upward — full grid measured 524288 at 0.878/0.880
+            # (iter4 stock-aim log was ~0.96-1.01 there) -> exact-N gate.
+            if n == 262144:
                 return True, None, 3238, True
             return False, None, None, False
         return False, None, None, False
