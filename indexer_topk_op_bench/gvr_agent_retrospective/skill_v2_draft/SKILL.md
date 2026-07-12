@@ -40,8 +40,8 @@ under a zero-regression ship rule.
 
 ## When this skill applies
 
-- "optimize this kernel" / "beat &lt;incumbent&gt; by X%" / "make this faster on B200/H100"
-- "write a high-performance kernel for &lt;op&gt;" with a shape specification
+- "optimize this kernel" / "beat <incumbent> by X%" / "make this faster on B200/H100"
+- "write a high-performance kernel for <op>" with a shape specification
 - "autonomous kernel optimization until converged"
 
 **Does NOT apply when:** conceptual explanation only; model-level training
@@ -99,7 +99,7 @@ unattended inside its self-decide domain.
   negative results and moving on, checkpointing, spending within budget.
 - **Must stop for a human:** shipping to production, changing baseline
   semantics, exceeding the cost budget, changing the objective/envelope.
-- **Pre-authorized negative conclusion:** "if &lt;incumbent&gt; remains best, say so
+- **Pre-authorized negative conclusion:** "if <incumbent> remains best, say so
   plainly with numbers" — written down so the agent never has to force a win.
 
 ### 0.4 Present the resolved plan
