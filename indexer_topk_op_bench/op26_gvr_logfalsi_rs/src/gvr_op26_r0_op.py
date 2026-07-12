@@ -185,9 +185,10 @@ class GvrOp26R0Kernel(GvrOp26Kernel):
     @cute.jit
     def phase1b_hspace_rungs(self, input_row, N, pre_idx_row, pre_idx_count,
                              pre_idx_offset, smem_hist, s_thr, s_mt_thr,
-                             tidx):
+                             tidx, warp_id, lane):
         M = cutlass.const_expr(self.M_thr)
         NB = cutlass.const_expr(256)
+        SEG = cutlass.const_expr(8)          # NB / WARP_SIZE bins per lane
         num_threads = cutlass.const_expr(self.num_threads)
 
         jz = tidx
@@ -216,26 +217,45 @@ class GvrOp26R0Kernel(GvrOp26Kernel):
             ig = ig + cutlass.Int32(num_threads)
         cute.arch.barrier()
 
-        # tid0: single descending walk over 256 bins; rung m fires when the
-        # from-the-top cumulative count first reaches qneeds[m]. qfracs are
-        # descending h => needs descending in m => rung m fires LAST for
-        # m=0 => thresholds come out ascending in m automatically.
-        if tidx == 0:
-            cum = cutlass.Int32(0)
-            done_mask = cutlass.Int32(0)
-            b2 = cutlass.Int32(NB - 1)
-            while b2 >= cutlass.Int32(0) and done_mask != cutlass.Int32((1 << M) - 1):
-                cum = cum + smem_hist[b2]
+        # Warp-0-parallel rung extraction (v0's tid0 256-bin serial walk was
+        # a ~10-15us per-CTA dependency chain — the dominant tax in the first
+        # silicon A/B). Lane l owns the SEG consecutive bins descending from
+        # bin NB-1-l*SEG; segment sums -> 5-step shfl_up inclusive scan gives
+        # each lane the cumulative count of all higher-value bins; each lane
+        # then walks its SEG bins once and fires rung m at the unique
+        # crossing bin (cum_before < qneeds[m] <= cum_at). Rung m fires when
+        # the from-the-top cumulative first reaches qneeds[m]; qfracs are
+        # descending h => thresholds come out ascending in m automatically.
+        if warp_id == cutlass.Int32(0):
+            top = cutlass.Int32(NB - 1) - lane * cutlass.Int32(SEG)
+            seg_frag = cute.make_fragment((SEG,), cutlass.Int32)
+            part = cutlass.Int32(0)
+            for j in cutlass.range_constexpr(SEG):
+                v8 = smem_hist[top - cutlass.Int32(j)]
+                seg_frag[j] = v8
+                part = part + v8
+            tp = part
+            for off_i in cutlass.range_constexpr(5):
+                off_v = cutlass.const_expr(1 << off_i)
+                other = cute.arch.shuffle_sync_up(tp, off_v, mask_and_clamp=0)
+                if lane >= cutlass.Int32(off_v):
+                    tp = tp + other
+            excl = tp - part                 # cum of all bins above my segment
+            total = cute.arch.shuffle_sync(tp, cutlass.Int32(self.WARP_SIZE - 1))
+            run = cutlass.Int32(0)
+            for j in cutlass.range_constexpr(SEG):
+                run = run + seg_frag[j]
+                cum_at = excl + run
+                cum_before = cum_at - seg_frag[j]
                 for m in cutlass.range_constexpr(M):
-                    if (done_mask & cutlass.Int32(1 << m)) == cutlass.Int32(0):
-                        if cum >= cutlass.Int32(self.qneeds[m]):
-                            s_mt_thr[m] = v_lo + cutlass.Float32(b2) * width
-                            done_mask = done_mask | cutlass.Int32(1 << m)
-                b2 = b2 - cutlass.Int32(1)
-            # unfired rungs (heavy invalid-preIdx rows): park at v_lo
-            for m in cutlass.range_constexpr(M):
-                if (done_mask & cutlass.Int32(1 << m)) == cutlass.Int32(0):
-                    s_mt_thr[m] = v_lo
+                    if (cum_at >= cutlass.Int32(self.qneeds[m])
+                            and cum_before < cutlass.Int32(self.qneeds[m])):
+                        s_mt_thr[m] = v_lo + cutlass.Float32(top - cutlass.Int32(j)) * width
+            # unfired rungs (heavy invalid-preIdx rows: total < need): v_lo
+            if lane == 0:
+                for m in cutlass.range_constexpr(M):
+                    if total < cutlass.Int32(self.qneeds[m]):
+                        s_mt_thr[m] = v_lo
         cute.arch.barrier()
 
     # ------------------------------------------------------------------
@@ -325,7 +345,8 @@ class GvrOp26R0Kernel(GvrOp26Kernel):
                 # ---- P1b: h-space quantile rungs from the prev-topK hist ----
                 self.phase1b_hspace_rungs(input_row, N, pre_idx_row,
                                           pre_idx_count, pre_idx_offset,
-                                          smem_hist, s_thr, s_mt_thr, tidx)
+                                          smem_hist, s_thr, s_mt_thr, tidx,
+                                          warp_id, lane)
 
                 # ---- R0: ONE M-ary pass ----
                 self.block_count_ge_multi(input_row, N, s_mt_thr,

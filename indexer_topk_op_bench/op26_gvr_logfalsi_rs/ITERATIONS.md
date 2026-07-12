@@ -213,3 +213,22 @@
 - **smoke 108/108 exact**(3 dtype × 6 (K,N) × hr∈{1,~0.5,0} × BS16)。
 - 门禁 + 8 卡 nsys A/B(gvr_cutedsl + op26_r0 + radix_cutedsl 同批三臂,
   代表格 = 缺口区 + win 保持区)进行中 —— 结果见下方追记。
+
+### iter6 v0 首硅判决 (8 批 nsys, 049) — 准入机理成立,但 tid0 串行游走是致命税
+
+- 门禁 291/291 绿(gate_iter6_r0.log)。8 批 A/B(real/best/worst × K × dt,
+  三/四臂同批)判决呈**清晰的二分**:
+  - **带宽主导域大赢**(K1024 fp32 real):65536 BS2048 **1.649×** vs anchor、
+    131072 BS256/2048 1.01/1.10、262144 BS256/2048 **1.15/1.23**;
+    vs radix @256K 1.045-1.08 —— 趟数账(R0 一趟 ×1.25-1.4 替代 2-2.4 趟)
+    在聚合带宽域如模型成立。
+  - **latency 域塌方**(BS=1-16 全 N、小 N 全 BS):r0/anchor 0.37-0.72,
+    **绝对差 +10-19µs 且 BS 平坦** → per-CTA 固定串行链。
+- **根因 = P1b 的 tid0 256-bin 降序游走**:深 rung q=0.90 需走完 ~全部 bin,
+  256 次 smem 依赖链 ≈ 10-15µs(op20 相位链墙的重演)。v0.1 修复 =
+  warp-0 并行提取(lane 分段 8 bin + 5 步 shfl_up 前缀 + 段内 crossing
+  定位,串行 256→8 迭代)。
+- 结构判断:即使修复,BS=1 中 N 对 radix 的差距属单 CTA 占用墙
+  (op8 ROOT,anchor 第二趟 L2 热使趟数账在 BS=1 打折——op18 L2 trap),
+  1cta 臂的可赢集 = 高 BS 全 N + 大 N 高 BS;低 BS 大 N 需 iter6b
+  (R0 → PR#15198 cluster)接棒。
