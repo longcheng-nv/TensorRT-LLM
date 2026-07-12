@@ -232,3 +232,31 @@
   (op8 ROOT,anchor 第二趟 L2 热使趟数账在 BS=1 打折——op18 L2 trap),
   1cta 臂的可赢集 = 高 BS 全 N + 大 N 高 BS;低 BS 大 N 需 iter6b
   (R0 → PR#15198 cluster)接棒。
+
+### iter6 v0.1/v0.2 硅上判决 (8 批 ×2 轮, 049) — real 轴对 radix 转正
+
+- **v0.1(warp 并行提取)**:latency 域塌方修复大半;real K512 fp32
+  vs radix 1.197(64-128K 1.68)、best K1024 1.096;但 **worst 轴自家
+  回归 0.901**——worst 的 pmean seed 本来首趟即中(基线筛 72/72),
+  M=4 趟税(×1.25-1.4)纯亏。
+- **v0.2 = M2D (0.85,0.35) M=2 梯(税 ×1.02)+ R1 inline 双实测点
+  log-falsi 一发**(筛选:96.8% 准入,miss 全括号型;期望趟数
+  real ≈1.1 / worst ≈1.02)。门禁 291/291。8 批判决(ALL gm):
+  | 批 | vs anchor | vs radix | vs sglang | vs iter5-1cta |
+  |---|---|---|---|---|
+  | real K512 fp32 | **1.342** | **1.295** | **1.155** | 1.157 |
+  | real K1024 fp32 | **1.214** | **1.087** | **1.073** | 1.022 |
+  | real K1024 bf16 | 1.153 | 1.041 | — | 1.078 |
+  | real K2048 fp32 | 1.118 | 1.088 | — | 0.962 |
+  | real K2048 fp16 | 1.097 | 0.907 | — | 1.057 |
+  | best K1024 fp32 | 1.192 | 1.096 | 0.997 | 1.004 |
+  | worst K1024 fp32 | 0.938 | **1.169** | 1.049 | 0.792 |
+  64K-256K 带对两个对手全面 1.1-1.8×(real K512 64-128K vs radix 1.843)。
+- **残余缺口三类**:(a) worst 对自家 anchor 0.938 = P1b 固定开销 ~6%
+  (P1b 并入 P1 gather 是消融项;pmean 混合梯已筛证伪——worst 上
+  pmean rung cand 反而更大 1730 vs 1353);(b) 8K-32K 相位链带
+  (radix 0.76-1.11);(c) **低 BS ≥131K + 16-bit 大 N = 行内多 CTA
+  结构墙**(radix 4-32 SM/行;K2048 fp16 262K 低 BS ~0.5)→ iter6b
+  mc 港主战。
+- 全网格 81 批(4 臂,OUT=results_b200_op26_iter6grid,8 卡 dtype×K
+  分片)在飞 —— 完整 scoreboard 见追记。
