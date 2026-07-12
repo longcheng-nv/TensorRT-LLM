@@ -43,6 +43,7 @@ from pathlib import Path
 import torch
 import cutlass
 import cutlass.cute as cute
+import cutlass.cute.math as cmath
 from cutlass.cute import runtime as cr
 from cutlass.utils.distributed import atomicAdd
 from cutlass.utils.smem_allocator import SmemAllocator
@@ -63,15 +64,22 @@ _DT = {torch.float32: cutlass.Float32, torch.bfloat16: cutlass.BFloat16,
 
 # host-screen verdict (screen_r0_qfracs.py, 2026-07-12): descending h-fracs
 # (=> ascending threshold values). uh4 = 216/216 static admission across
-# real/best/worst x K x dtype x N on the classic [K, kC] window.
+# real/best/worst x K x dtype x N on the classic [K, kC] window — but the
+# M=4 pass tax (x1.25-1.40) is a pure loss on worst-like rows where the
+# baseline seed already lands first-pass (silicon iter6 v0.1: worst
+# anchor-ratio 0.901). M2D (0.85, 0.35) at M=2 is ~free (x1.02), admits
+# 96.8% overall (real 93.1%, worst/best ~100%, misses ALL bracket-type),
+# and the R1 inline log-falsi shot between the two MEASURED rungs covers
+# the rest — expected passes ~1.09 real / ~1.02 worst, dominating M4.
 UH4 = (0.90, 0.65, 0.40, 0.15)
-M3A = (0.90, 0.55, 0.20)     # 97.7% admission, cheaper pass at large N
+M3A = (0.90, 0.55, 0.20)     # 97.7% admission, mid ground
+M2D = (0.85, 0.35)           # v0.2 default
 
 
 class GvrOp26R0Kernel(GvrOp26Kernel):
     """R0 h-space ladder + cached-column P3 + fb_fix safety + gated RS P4."""
 
-    def __init__(self, *a, qfracs=UH4, mt_unroll=4, **kw):
+    def __init__(self, *a, qfracs=M2D, mt_unroll=4, **kw):
         super().__init__(*a, **kw)
         assert all(0.0 < q < 1.0 for q in qfracs), qfracs
         assert list(qfracs) == sorted(qfracs, reverse=True), \
@@ -82,6 +90,10 @@ class GvrOp26R0Kernel(GvrOp26Kernel):
         # rung rank targets: need[m] = ceil(q_m * K) prev-topK values >= rung
         self.qneeds = tuple(max(1, int(math.ceil(q * self.top_k)))
                             for q in self.qfracs)
+        # R1 inline shot aim in log2-count space: geometric center of the
+        # acceptance window (iter5 verdict; K2048-fp32 edge preference is an
+        # ablation knob for later)
+        self.log2_r1aim = math.log2(math.sqrt(self.top_k * self.kC))
 
     # ------------------------------------------------------------------
     # block_count_ge_multi<M> — VERBATIM copy of op18 gvr_mt_op.py (same
@@ -368,27 +380,74 @@ class GvrOp26R0Kernel(GvrOp26Kernel):
                         s_iscalars[1] = cutlass.Int32(1)   # done=1: admitted
                         s_iscalars[4] = best_m             # column to reuse
                     else:
-                        # miss -> measured bracket for fb_fix (done=2).
-                        # lo end = deepest rung with count > kC (overshoot),
-                        # else P1's pmin; hi end = shallowest rung with
-                        # count < K (undershoot), else P1's pmax.
+                        # miss -> measured bracket. lo end = deepest rung with
+                        # count > kC (overshoot), else P1's pmin (UNMEASURED,
+                        # count flagged -1); hi end = shallowest rung with
+                        # count < K, else P1's pmax (unmeasured, -1).
                         blo = v_lo
                         bhi = v_hi
+                        clo = cutlass.Int32(-1)
+                        chi = cutlass.Int32(-1)
                         for m in cutlass.range_constexpr(M):
                             if s_mt_cnt[m] > cutlass.Int32(kC):
                                 blo = s_mt_thr[m]          # ends at deepest >kC
+                                clo = s_mt_cnt[m]
                         for m in cutlass.range_constexpr(M):
                             mm = cutlass.const_expr(M - 1 - m)
                             if s_mt_cnt[mm] < cutlass.Int32(top_k):
                                 bhi = s_mt_thr[mm]         # ends at shallowest <K
+                                chi = s_mt_cnt[mm]
                         s_thr[0] = blo
                         s_thr[1] = blo
                         s_thr[2] = bhi
-                        s_iscalars[1] = cutlass.Int32(2)   # done=2 -> fb_fix
+                        s_iscalars[1] = cutlass.Int32(2)   # done=2 (-> R1/fb)
                         s_iscalars[4] = cutlass.Int32(-1)
+                        # R1 inline shot only when BOTH ends are measured
+                        # (screen: all m2_d misses are this bracket type):
+                        # log-count falsi aimed at the window's geometric
+                        # center, clamped to (blo, bhi) with 5% margins.
+                        if clo > cutlass.Int32(0) and chi >= cutlass.Int32(0):
+                            chic = chi
+                            if chic < cutlass.Int32(1):
+                                chic = cutlass.Int32(1)
+                            l_lo = cmath.log2(cutlass.Float32(clo), fastmath=True)
+                            l_hi = cmath.log2(cutlass.Float32(chic), fastmath=True)
+                            den = l_lo - l_hi
+                            if den > cutlass.Float32(0.0):
+                                f = (l_lo - cutlass.Float32(self.log2_r1aim)) / den
+                                if f < cutlass.Float32(0.05):
+                                    f = cutlass.Float32(0.05)
+                                if f > cutlass.Float32(0.95):
+                                    f = cutlass.Float32(0.95)
+                                nv = blo + (bhi - blo) * f
+                                if nv > blo and nv < bhi:
+                                    s_thr[0] = nv
+                                    s_iscalars[1] = cutlass.Int32(3)  # R1 shot
                 cute.arch.barrier()
 
-                # admitted: seed P3 with the cached column (zero recount)
+                # R1 inline shot: ONE extra single-threshold pass; smem_ptcnt
+                # comes out fresh for P3 on acceptance.
+                if s_iscalars[1] == cutlass.Int32(3):
+                    self.block_count_ge(input_row, N, s_thr[0], smem_ptcnt,
+                                        smem_wcnt, s_iscalars, tidx, warp_id,
+                                        lane)
+                    cute.arch.barrier()
+                    if tidx == 0:
+                        c1 = s_iscalars[0]
+                        t1 = s_thr[0]
+                        if c1 >= cutlass.Int32(top_k) and c1 <= cutlass.Int32(kC):
+                            s_iscalars[1] = cutlass.Int32(1)   # accepted
+                        else:
+                            # tighten the measured bracket, hand to fb_fix
+                            if c1 > cutlass.Int32(kC):
+                                s_thr[1] = t1
+                            else:
+                                s_thr[2] = t1
+                            s_thr[0] = s_thr[1]
+                            s_iscalars[1] = cutlass.Int32(2)
+                    cute.arch.barrier()
+
+                # admitted at R0: seed P3 with the cached column (zero recount)
                 bc = s_iscalars[4]
                 if bc >= cutlass.Int32(0):
                     smem_ptcnt[tidx] = smem_ptcnt_multi[bc * cutlass.Int32(num_threads) + tidx]
@@ -428,9 +487,11 @@ _compiled_r0 = {}
 
 
 def dispatch_r0_op26(dtype, K, n):
-    """Ladder per (dtype, K, N). v0: uh4 everywhere (100% static admission);
-    m3_a reserved as the large-N cheaper-pass alternative for silicon A/B."""
-    return UH4
+    """Ladder per (dtype, K, N). v0.2: M2D everywhere — the M=2 pass is
+    ~free (x1.02) so worst-like already-admitted rows pay no tax, and the
+    R1 inline falsi shot covers the 3-7% bracket misses. UH4/M3A remain
+    ablation alternatives via the qfracs wrapper arg."""
+    return M2D
 
 
 def _config_1cta(bs, n):
