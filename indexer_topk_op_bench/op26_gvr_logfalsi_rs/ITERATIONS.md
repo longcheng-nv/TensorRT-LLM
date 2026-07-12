@@ -323,3 +323,15 @@
   stock);N≥131K 低 BS → op26_r0mc;worst 轴税待 P1b 并入 P1 gather
   消融。工具 = m4_verdict.py;结果根 = results_b200_op26_iter6b_mcab
   (不入库)。
+
+### op26_r0f(P1b 并入 P1 gather)消融判决 (074, 24 批 fp32+bf16) — 主假设证伪,16-bit 门控小赚
+
+- **"二次 gather 是 P1b 税主体"证伪**:r0f/r0 整体 gm 仅 1.0045 (worst) /
+  1.0046 (real);worst-vs-anchor 洞主体不动(K2048 bf16 8-32K 0.879→0.903)。
+  税的主体 = hist 原子加 + warp0 提取 + 额外 barrier + R0 count 趟本身。
+- **dtype 结构干净**:bf16 全 K 双轴一致 +1.5~2.8%(16-bit 随机 gather 更贵,
+  缓存有效);fp32 K2048 回归 -3.3~-4.4%(+top_k*4B smem 在 kC=6144 处
+  掉 occupancy,8-32K 带最痛);fp32 K512/K1024 持平。
+- **裁决:不做统一默认;p1b_cache 按 dtype 门控(16-bit 开 / fp32 关)**,
+  fp16 确认批在跑(同根 results_b200_op26_r0f_ab)。确认后把默认写进
+  gvr_r0_op26 dispatch(r0f 臂保留为显式对照)。
