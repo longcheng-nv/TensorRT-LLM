@@ -288,3 +288,22 @@
   跑,热路径零税。修后 K2048 复现 8/8 过(cs=1/2/4 × hr1/hr~/hr0),
   且 bottom-K hr0 也进包络(fb_fix expand-upward 守卫)→ smoke 恢复
   bottom-K(hr0bk)+ 保留随机不相交 hr0,包络 = 1cta 平价 > 锚。
+
+### iter6 全网格 81 批终判 (074, 2718 cells) — M3 部分达标
+
+- **核心域 8K-262K(部署主战场)**:op26_r0 vs radix gm real 1.068 /
+  best 1.065 / worst 1.096(win10 ≈40-41%);vs anchor real 1.200 /
+  best 1.180 / **worst 0.928(P1b 固定税洞,比 8 批时的 0.938 实测更宽:
+  worst 各 K/dtype 带 0.87-0.94,14 个 <0.9 (scen,K,dtype,band) 洞里
+  13 个在 worst 轴)**。
+- **全网格 gm vs radix 0.936 < 1.0 ✗** —— 被 hugeN 512K-1M 结构墙拖累
+  (该带 gm 0.521,radix 行内 4-32 SM vs 单 CTA;iter6c 预研标的实证)。
+- win10 率 8K-262K:40.6% vs iter5-1cta(锚转移隐含)42.0% —— **未抬升**
+  (gm 1.055→1.076 抬了,但赢格分布迁移:real/best 大N 更深,worst 轴
+  8-32K 回吐)。
+- M3 判据逐条:核心域 radix gm≥1.0 ✓(三场景);全网格 ≥1.0 ✗;
+  win10 显著抬升 ✗;anchor 无 <0.9 新洞 ✗(worst 带加宽 + best K1024
+  fp32 @4K 0.848,后者在 8K 界外)。
+- **方向判决:1cta R0 v0.2 的可赢集 = real/best 全域 + worst vs radix;
+  worst-vs-anchor 洞与 hugeN 墙 都指向已排program 的后续**(P1b 并入 P1
+  gather 消融 → worst 税;mc 港/iter6c → hugeN)。工具 = m3_verdict.py。
