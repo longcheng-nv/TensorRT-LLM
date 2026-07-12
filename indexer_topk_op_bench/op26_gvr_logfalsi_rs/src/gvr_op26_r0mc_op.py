@@ -729,6 +729,28 @@ def picked_cluster_size_r0mc(logits, index_topk, compress_ratio=1):
     return _resolve_config_mc(logits, NUM_SMS)["cluster_size"]
 
 
+def dispatch_r0_arm_op26(bs, n):
+    """1cta-vs-mc arm dispatch (074 mcab grid, r0mc/r0 gm pooled over
+    scenario x K x dtype): mc wins N>=65536 at BS<=64 (1.07-2.6x, growing
+    with N), washes at BS>=128 (rows saturate the SMs, cluster splits hurt),
+    and slightly loses at N<=8192 (cluster tax). 1cta additionally keeps the
+    op#7 rank-scatter P4."""
+    return "mc" if (n >= 65536 and bs <= 64) else "1cta"
+
+
+def gvr_r0_auto_op26(logits, pre_idx, seq_lens, index_topk, compress_ratio=1,
+                     out=None, qfracs=None):
+    """Production-facing R0 arm: routes to op26_r0 (1cta) or op26_r0mc."""
+    from gvr_op26_r0_op import gvr_r0_op26  # local import avoids cycle
+    bs, n = logits.shape
+    if dispatch_r0_arm_op26(bs, n) == "mc":
+        return gvr_r0_mc_op26(logits, pre_idx, seq_lens, index_topk,
+                              compress_ratio=compress_ratio, out=out,
+                              qfracs=qfracs)
+    return gvr_r0_op26(logits, pre_idx, seq_lens, index_topk,
+                       compress_ratio=compress_ratio, out=out, qfracs=qfracs)
+
+
 if __name__ == "__main__":
     torch.manual_seed(0)
     print("== op26_r0mc smoke (cluster R0 ladder; exactness vs torch.topk) ==")

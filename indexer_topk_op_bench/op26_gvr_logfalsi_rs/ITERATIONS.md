@@ -339,3 +339,13 @@
   复现 bf16 方向 → `dispatch_p1bc_op26(dt) = dt != fp32` 写入 gvr_r0_op26
   默认(op26_r0f 臂保留为 force-True 对照);dispatch 默认 smoke 0 FAIL、
   gate 291/291 重验通过。16-bit 白捡 ~1.5-2.8%,fp32 维持原路径。
+
+### op26_r0auto 生产臂落地 (074) — 臂间 dispatch
+
+- mcab 网格 (N×BS) 边界(r0mc/r0 gm,scenario×K×dtype 汇总):N≤8192 mc
+  微亏(BS≥128 亏 4-9%);16-32K 持平;65536 起 BS≤64 全胜(1.07 →
+  131K 1.14-1.38 → 262K 1.24-1.68 → 1M 1.4-2.6);BS≥128 大 N 持平。
+- **dispatch_r0_arm_op26: mc iff (N≥65536 且 BS≤64),否则 1cta**(1cta
+  同时保留 op#7 rank-scatter P4)。gvr_r0_auto_op26 wrapper + 臂
+  `op26_r0auto` 四处注册;gate 291/291。
+- 报告回填时 headline 臂 = op26_r0auto(sweep_nsys extra 记 r0_arm)。

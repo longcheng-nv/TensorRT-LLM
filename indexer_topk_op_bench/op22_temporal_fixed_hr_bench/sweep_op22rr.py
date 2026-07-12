@@ -90,6 +90,9 @@ ARMS_EXTRA = [
     # (per-CTA redundant P1b rungs, slice M-ary count + one DSMEM merge,
     # R1 inline falsi; double-miss falls to the vendored cluster fallback).
     ("op26_r0mc", "op26_r0mc", None, None),
+    # op26_r0auto = production-facing R0: dispatch_r0_arm_op26 routes to
+    # op26_r0 (1cta, N<64K or BS>=128) / op26_r0mc (N>=65536 & BS<=64).
+    ("op26_r0auto", "op26_r0auto", None, None),
     ("op26_mc", "op26_mc", None, None),
     # op27_hls = gvr_ms_auto at the op27 HEAD: op25 ship config + the K2048
     # TAIL ladder (0.75, 0.45, 0.048; OP27_K2048_TAIL default-ON). K512/K1024
