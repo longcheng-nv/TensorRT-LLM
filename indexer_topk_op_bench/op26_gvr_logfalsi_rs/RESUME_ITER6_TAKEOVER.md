@@ -77,6 +77,10 @@ cd ../op26_gvr_logfalsi_rs && python3 analyze_iter6_ab.py ../results_b200_op26_i
    (K512@1536 省 28KB smem)、K2048 fp32 edge-aim R1、qfracs=UH4/M3A 对照;
 4. iter6c hugeN 预研(RESUME_ITER6B_PROMPT.md §4);
 5. 报告回填:扩 update_report_op26_iter5.py 系(last-writer 纪律)。
+6. **花费记账(用户要求)**:战役收口时把你这段的 GPU-h(日志时间戳)
+   + Claude token(解析你自己 session 的 transcript usage,定价见
+   COST.md §2)追加到 **COST.md §5** 并更新顶部汇总——049 段已记
+   14 GPU-h / ~$215,总花费在你处合计。
 
 ## 6 · gotcha(本战役实测)
 
