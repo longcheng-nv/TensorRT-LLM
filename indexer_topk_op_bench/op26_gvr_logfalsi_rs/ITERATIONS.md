@@ -184,3 +184,32 @@
   exactness 全臂 414/414;锚漂移 op26a(iter5 根)med **1.0006**
   p10/p90 0.987/1.015;REPORT.html D=30528、script=2、`const D=[`×1、
   iter5 双语注记入卡(幂等 mark)。判读工具固化 = `analyze_iter5_grid.py`。
+
+## iter6 — R0 h-空间梯准入(HLS w3a → 经典 GVR 统一移植)(2026-07-12, umbriel-b200-049)
+
+- **目标重申(用户)**:GVR cuteDSL base + PR#15198 MC 对 radix_cutedsl 与
+  SGLang 在 N≥8K 全网格胜 10%+;禁 dispatch 到 radix;GVR 阈值法打到 SOL。
+  Scoreboard(iter5 态):op26_1cta vs radix gm **0.919**(win10 1020/2718)、
+  op26_mc **1.005**;vs sglang 1cta 1.237 但 fp32 8K-262K 成片 0.75-1.03。
+  塌方区 = N≥262K 低 BS(0.27-0.45,单 CTA 带宽墙)+ K2048 16-bit 262K
+  0.45 + mc@8192 0.52-0.64。计划 = `PLAN_ITER6.md`。
+- **host 筛选**(`screen_r0_qfracs.py`,216 格 × 梯候选,经典窗 [K,kC]):
+  基线 pmean seed 首趟准入 real 3/72、best 0/72、worst 72/72(worst 的
+  seed 恰落 K 名值 → ev1,与报告注记一致);**uh4 (0.90,0.65,0.40,0.15)
+  M=4 三场景 216/216 静态准入**(w3a 0.894——ms 窄窗刀锋在宽窗下非最优,
+  均匀覆盖胜出);m3_a (0.90,0.55,0.20) M=3 97.7%(miss 全为实测括号型)。
+  接受 cand med 1229 / p90 2597。
+- **kC / f_target 再分析**(用户追加):R0 路径下 f_target 退役(最紧可接受
+  rung 自瞄准);kC 敏感度 = K512@1536 69/72、K1024@3072 72/72、
+  K2048 需 5120 → kC-diet(smem 省 28KB→occupancy)列为二阶消融,
+  v0 保持 stock kC 使 A/B 纯算法差。
+- **v0 实现** `src/gvr_op26_r0_op.py`(GvrOp26R0Kernel ⊂ GvrOp26Kernel):
+  P1b = 256-bin smem hist over prev-topK 值(复用 smem_hist 前 256 bin,
+  K 次 gather L2 热)→ tid0 一次 256-bin 降序游走取 M rung;R0 =
+  op18 block_count_ge_multi **原样拷入**(教训:p4 谱系的 GvrTopKKernel
+  是 vendored 全拷贝而非子类,与 op18 vendored 谱系菱形混入不可行,
+  MT.super 直落 vendored——首次 smoke 证伪);最紧可接受 rung 缓存列
+  直接喂 P3 零重扫;miss → 实测括号进 fb_fix。P4 = rank-scatter 照 op26 门。
+- **smoke 108/108 exact**(3 dtype × 6 (K,N) × hr∈{1,~0.5,0} × BS16)。
+- 门禁 + 8 卡 nsys A/B(gvr_cutedsl + op26_r0 + radix_cutedsl 同批三臂,
+  代表格 = 缺口区 + win 保持区)进行中 —— 结果见下方追记。

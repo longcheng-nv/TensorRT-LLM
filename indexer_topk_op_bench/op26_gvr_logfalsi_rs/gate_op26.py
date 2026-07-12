@@ -36,6 +36,7 @@ from sweep import DTYPES  # noqa: E402
 from sweep_nsys import build_call  # noqa: E402
 import bundle_data_rr  # noqa: E402
 from gvr_op26_op import gvr_cutedsl_op26, gvr_multicta_op26  # noqa: E402
+from gvr_op26_r0_op import gvr_r0_op26  # noqa: E402
 
 DEV = "cuda"
 # anchors (gvr_cutedsl / gvr_multicta_cutedsl) are NOT re-gated here: both
@@ -110,7 +111,8 @@ def run_suite_a():
 def _run_arms_single(logits, pre, N, K, cr, tag):
     seq = torch.full((logits.shape[0],), N * cr, dtype=torch.int32, device=DEV)
     for arm, fn in (("op26_1cta", gvr_cutedsl_op26),
-                    ("op26_mc", gvr_multicta_op26)):
+                    ("op26_mc", gvr_multicta_op26),
+                    ("op26_r0", gvr_r0_op26)):
         if arm not in ARMS:
             continue
         try:
