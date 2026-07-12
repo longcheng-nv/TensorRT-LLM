@@ -335,3 +335,7 @@
 - **裁决:不做统一默认;p1b_cache 按 dtype 门控(16-bit 开 / fp32 关)**,
   fp16 确认批在跑(同根 results_b200_op26_r0f_ab)。确认后把默认写进
   gvr_r0_op26 dispatch(r0f 臂保留为显式对照)。
+- **fp16 确认 + 门控落地**:fp16 全 K 双轴 +0.8~2.3%(ALL +1.45%,532 格)
+  复现 bf16 方向 → `dispatch_p1bc_op26(dt) = dt != fp32` 写入 gvr_r0_op26
+  默认(op26_r0f 臂保留为 force-True 对照);dispatch 默认 smoke 0 FAIL、
+  gate 291/291 重验通过。16-bit 白捡 ~1.5-2.8%,fp32 维持原路径。

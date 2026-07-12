@@ -721,10 +721,20 @@ def _config_1cta(bs, n):
     return t, use256, min_bpm
 
 
+def dispatch_p1bc_op26(dt):
+    """p1b_cache dispatch (074 r0f A/B, 24+12 nsys batches): 16-bit gains
+    +0.8-2.8% on BOTH axes at every K (random half-precision gather is the
+    expensive part); fp32 is flat at K512/K1024 and REGRESSES -3.3-4.4% at
+    K2048 (+top_k*4B smem drops occupancy at kC=6144)."""
+    return dt != torch.float32
+
+
 def gvr_r0_op26(logits, pre_idx, seq_lens, index_topk, compress_ratio=1,
-                out=None, qfracs=None, p1b_cache=False):
+                out=None, qfracs=None, p1b_cache=None):
     bs, n = logits.shape
     dt = logits.dtype
+    if p1b_cache is None:
+        p1b_cache = dispatch_p1bc_op26(dt)
     qf = tuple(qfracs) if qfracs is not None else dispatch_r0_op26(dt, index_topk, n)
     rs_on = dispatch_rs_op26(dt, bs)
     key = (dt, bs, n, index_topk, compress_ratio, qf, rs_on, bool(p1b_cache))
@@ -772,7 +782,9 @@ if __name__ == "__main__":
     torch.manual_seed(0)
     print("== op26_r0 smoke (h-space ladder admission; exactness vs torch.topk) ==")
 
-    P1BC = bool(int(os.environ.get("OP26_R0_SMOKE_P1BC", "0")))
+    # "1" forces the cached path everywhere; unset exercises the dispatch
+    # default (16-bit cached, fp32 uncached).
+    P1BC = True if os.environ.get("OP26_R0_SMOKE_P1BC") == "1" else None
 
     def check(logits, pre_idx, K, crv, tag):
         N = logits.shape[1]
