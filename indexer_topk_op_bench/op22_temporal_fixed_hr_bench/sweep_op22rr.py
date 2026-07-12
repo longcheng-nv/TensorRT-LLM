@@ -82,6 +82,10 @@ ARMS_EXTRA = [
     # M-ary count pass, tightest admissible rung seeds P3 zero-recount;
     # miss -> fb_fix measured-bracket falsi) + op#7 rank-scatter P4 (gated).
     ("op26_r0", "op26_r0", None, None),
+    # op26_r0mc (iter6b) = PR#15198 cluster GVR + the same R0 h-space ladder
+    # (per-CTA redundant P1b rungs, slice M-ary count + one DSMEM merge,
+    # R1 inline falsi; double-miss falls to the vendored cluster fallback).
+    ("op26_r0mc", "op26_r0mc", None, None),
     ("op26_mc", "op26_mc", None, None),
     # op27_hls = gvr_ms_auto at the op27 HEAD: op25 ship config + the K2048
     # TAIL ladder (0.75, 0.45, 0.048; OP27_K2048_TAIL default-ON). K512/K1024

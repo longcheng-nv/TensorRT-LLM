@@ -22,6 +22,7 @@ from gvr_op26_op import (  # noqa: E402
     gvr_cutedsl_op26, gvr_multicta_op26, picked_cluster_size_op26,
 )
 from gvr_op26_r0_op import gvr_r0_op26  # noqa: E402
+from gvr_op26_r0mc_op import gvr_r0_mc_op26, picked_cluster_size_r0mc  # noqa: E402
 
 DEV = "cuda"
 
@@ -46,6 +47,18 @@ def _build_op26_r0_call(K, dtype, N, BS, cr, logits_row, preidx_row):
     gvr_r0_op26(logits, pre, seq_div, K, compress_ratio=cr, out=out)
     return (lambda: gvr_r0_op26(logits, pre, seq_div, K,
                                 compress_ratio=cr, out=out)), keep
+
+
+def _build_op26_r0mc_call(K, dtype, N, BS, cr, logits_row, preidx_row):
+    logits = logits_row.to(dtype).expand(BS, -1).contiguous()
+    seq_div = torch.full((BS,), N * cr, dtype=torch.int32, device=DEV)
+    pre = preidx_row.expand(BS, -1).contiguous()
+    out = torch.empty((BS, K), dtype=torch.int32, device=DEV)
+    keep = [logits, seq_div, pre, out]
+    cs = picked_cluster_size_r0mc(logits, K, cr)
+    gvr_r0_mc_op26(logits, pre, seq_div, K, compress_ratio=cr, out=out)
+    return (lambda: gvr_r0_mc_op26(logits, pre, seq_div, K,
+                                   compress_ratio=cr, out=out)), keep, cs
 
 
 def _build_op26_mc_call(K, dtype, N, BS, cr, logits_row, preidx_row):
