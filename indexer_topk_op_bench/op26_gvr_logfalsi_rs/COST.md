@@ -98,3 +98,28 @@ $12.5 cache-write(实测全部 5-min TTL)/ $1.0 cache-read,单位每 MTok。
   output 577K(本 session 写了两个内核 + 5 份文档)。
 - 口径:snapshot 时刻 09:25Z,之后本 session 的少量收尾 token 未计
   (量级 ~$5-10,接管方无需追补)。
+
+## 6 · iter6 收尾段 — 074 段(未记账)+ 069 报告回填接力(2026-07-12)
+
+> 074 段(M3/M4 判决、r0f 消融、fp16 confirm、r0auto 落地、fin 发车)
+> 的 token 花费**未采集**(机器 13:20Z 回收,session 无 snapshot);
+> 其 GPU 花费大部分在网格/mcab/r0f 批次日志里,此处只记 fin 部分与
+> 069 接力段。
+
+### GPU 花费
+
+| 内容 | GPU-h |
+|---|---|
+| fin sweep 074 段(13:06-13:20Z 节点回收,8 卡,17/81 marker 有效) | ~1.9 |
+| fin sweep 069 接力(13:43-15:00Z,8 分片 0.46-1.28h,81/81) | ~5.3 |
+| 069 smoke 预检 | ~0.2 |
+| **小计(本段)** | **≈ 7.4** |
+
+### Claude token 花费(transcript usage 实测 @15:03Z,同 §2 定价)
+
+| Session | 日期/节点 | 内容 | output | cache-wr | cache-rd | 花费 |
+|---|---|---|---|---|---|---|
+| 825ef7e2 | 07-12 069 | fin 死亡诊断+接力发车+updater 编写/dry-run/终跑+QA+收口 | 165K | 0.82M | 20.4M | ≈$39 |
+
+- 069 段特点:长等待用 Monitor 事件驱动,cache-read 只有 20M
+  (049 段的 1/5)——挂机监控不烧上下文。

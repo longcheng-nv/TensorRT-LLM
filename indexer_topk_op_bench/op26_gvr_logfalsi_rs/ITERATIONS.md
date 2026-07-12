@@ -366,3 +366,20 @@
   partial 数据数字固化)。partial dry-run(26/81)全链路通过:
   exactness 199/199,锚漂移 med 1.0006,real vs radix core 1.23
   (含 mc 路由抬升,收齐后重derive)。
+
+### 报告回填终判 — op26_r0auto 臂入库 (2026-07-12 069, 81/81)
+
+- **同机 vs radix_cutedsl(cold gm)**:核心域 8K-262K real **1.169** /
+  best **1.165** / worst **1.206** 三场景全正(1cta 单臂 m3 时代
+  1.065-1.096 → dispatch 后大幅抬升);hugeN ≥512K real 1.042 /
+  best 1.052 / worst 1.089 —— **hugeN 对 radix 的结构墙(1cta gm
+  0.52)被 mc 路由击穿并转正**。
+- **同机 vs gvr_cutedsl 锚**:core real 1.313 / best 1.287 / worst
+  1.016(worst 轴聚合首次转正;P1b 税洞仍在逐格 0.87-0.94 带);
+  hugeN real 2.277 / best 2.389 / worst 1.825。
+- QA:exactness 414/414 全 FAIL=0;锚漂移 med 1.0014 (p10 0.992 /
+  p90 1.023);r0_arm 分布 mc 1026 / 1cta 1692 格。
+- REPORT.html 补丁:D +2718 行、图例/复选框/双语 note 卡(数字运行时
+  实算,refresh-if-present)/方法学表 ×2、两 csv +3 列、
+  op22rr_op26r_raw.csv(含逐格 r0_arm)。**last-writer 现为
+  update_report_op26_iter6.py**(其内部先跑 iter5 wrapper 全量重导)。
