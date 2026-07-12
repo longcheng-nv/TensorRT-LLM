@@ -55,7 +55,8 @@ from sweep_cluster import _build_cluster_call
 from sweep_op8 import _build_op8_call
 from sweep_op21 import _build_op21_call
 from sweep_op26 import (_build_op26_1cta_call, _build_op26_mc_call,
-                        _build_op26_r0_call, _build_op26_r0mc_call)
+                        _build_op26_r0_call, _build_op26_r0f_call,
+                        _build_op26_r0mc_call)
 
 DEV = "cuda"
 
@@ -65,7 +66,8 @@ FULL_OPS = ["gvr_cuda", "gvr_cutedsl", "gvr_cutedsl_rs",
             "radix_single_cuda", "radix_multi_cuda", "radix_cutedsl",
             "radix_cutedsl_single", "radix_cutedsl_multi"]
 KNOWN_OPS = (set(FULL_OPS) | set(ALL_OPS)
-             | {"gvr_ms_auto", "op26_1cta", "op26_mc", "op26_r0", "op26_r0mc"})
+             | {"gvr_ms_auto", "op26_1cta", "op26_mc", "op26_r0", "op26_r0f",
+                "op26_r0mc"})
 
 
 def build_call(op, K, dtype, N, BS, cr, logits_row, preidx_row):
@@ -89,6 +91,10 @@ def build_call(op, K, dtype, N, BS, cr, logits_row, preidx_row):
     if op == "op26_r0":
         call, keep = _build_op26_r0_call(K, dtype, N, BS, cr,
                                          logits_row, preidx_row)
+        return call, keep, {}
+    if op == "op26_r0f":
+        call, keep = _build_op26_r0f_call(K, dtype, N, BS, cr,
+                                          logits_row, preidx_row)
         return call, keep, {}
     if op == "op26_r0mc":
         call, keep, cs = _build_op26_r0mc_call(K, dtype, N, BS, cr,

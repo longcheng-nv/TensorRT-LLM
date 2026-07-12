@@ -82,6 +82,10 @@ ARMS_EXTRA = [
     # M-ary count pass, tightest admissible rung seeds P3 zero-recount;
     # miss -> fb_fix measured-bracket falsi) + op#7 rank-scatter P4 (gated).
     ("op26_r0", "op26_r0", None, None),
+    # op26_r0f = op26_r0 + p1b_cache (P1 stores the K gathered values in
+    # SMEM; P1b hist skips the second GMEM gather — worst-axis P1b-tax
+    # ablation arm).
+    ("op26_r0f", "op26_r0f", None, None),
     # op26_r0mc (iter6b) = PR#15198 cluster GVR + the same R0 h-space ladder
     # (per-CTA redundant P1b rungs, slice M-ary count + one DSMEM merge,
     # R1 inline falsi; double-miss falls to the vendored cluster fallback).
