@@ -113,7 +113,8 @@ $12.5 cache-write(实测全部 5-min TTL)/ $1.0 cache-read,单位每 MTok。
 | fin sweep 074 段(13:06-13:20Z 节点回收,8 卡,17/81 marker 有效) | ~1.9 |
 | fin sweep 069 接力(13:43-15:00Z,8 分片 0.46-1.28h,81/81) | ~5.3 |
 | 069 smoke 预检 | ~0.2 |
-| **小计(本段)** | **≈ 7.4** |
+| r0mcc A/B 54 批(15:21-15:35Z,8 卡 ×~0.2h)+ smoke/gate ×3 | ~1.7 |
+| **小计(本段)** | **≈ 9.1** |
 
 ### Claude token 花费(transcript usage 实测 @15:03Z,同 §2 定价)
 

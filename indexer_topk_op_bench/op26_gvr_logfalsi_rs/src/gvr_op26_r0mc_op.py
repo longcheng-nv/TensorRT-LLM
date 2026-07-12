@@ -75,9 +75,8 @@ class GvrOp26R0ClusterKernel(GvrTopKClusterKernel):
         self.dbg = bool(int(os.environ.get("OP26_R0MC_DEBUG", "0")))
         # p1b_cache (1cta r0f port): P1 stores the K gathered preIdx values
         # into SMEM so the per-CTA-redundant P1b hist skips its second GMEM
-        # random gather. Costs top_k*4B extra SMEM per CTA of the cluster;
-        # occupancy tradeoff differs from the 1cta kernel, so the dtype gate
-        # needs its own mc A/B (default OFF pending that verdict).
+        # random gather. Costs top_k*4B extra SMEM per CTA of the cluster.
+        # Wrapper default = dispatch_p1bc_mc_op26 (069 A/B: ON all dtypes).
         self.p1b_cache = bool(p1b_cache)
         assert not self.enable_smem_cache, \
             "op26_r0mc v0 supports the production enable_smem_cache=False only"
@@ -900,13 +899,23 @@ class GvrOp26R0ClusterKernel(GvrTopKClusterKernel):
 _compiled_r0mc = {}
 
 
+def dispatch_p1bc_mc_op26(dt):
+    """p1b_cache dispatch for the mc port (069 r0mcc A/B, 54 nsys batches,
+    1812 paired cells): ALL dtypes positive in the mc dispatch region —
+    gm 1.003 (K512) -> 1.017 (K1024) -> 1.02-1.034 (K2048), zero loss
+    cells <0.98; the 1cta fp32-K2048 occupancy regression does NOT
+    reproduce in the cluster kernel (different SMEM budget, and the mc
+    region is latency-bound where occupancy is not the limiter). So the
+    gate is unconditional ON, unlike the 1cta dtype split."""
+    return True
+
+
 def gvr_r0_mc_op26(logits, pre_idx, seq_lens, index_topk, compress_ratio=1,
                    next_n=1, out=None, cluster_size=None, qfracs=None,
-                   p1b_cache=False):
-    # p1b_cache default OFF pending the mc-port dtype A/B (the 1cta 16-bit
-    # gate does NOT transfer: the cluster kernel's SMEM/occupancy budget
-    # differs and the cache is paid per CTA of the cluster).
+                   p1b_cache=None):
     dt = logits.dtype
+    if p1b_cache is None:
+        p1b_cache = dispatch_p1bc_mc_op26(dt)
     qf = tuple(qfracs) if qfracs is not None else M2D
     cfg = _resolve_config_mc(logits, NUM_SMS, cluster_size)
     key = (dt, index_topk, next_n, compress_ratio, qf,
@@ -989,9 +998,10 @@ if __name__ == "__main__":
     torch.manual_seed(0)
     print("== op26_r0mc smoke (cluster R0 ladder; exactness vs torch.topk) ==")
 
-    # "1" forces the p1b_cache path everywhere (op26_r0mcc ablation arm);
-    # unset exercises the production default (OFF pending the mc A/B).
-    P1BC = os.environ.get("OP26_R0MC_SMOKE_P1BC") == "1"
+    # "1" forces the p1b_cache path, "0" forces it off; unset exercises the
+    # production default (dispatch_p1bc_mc_op26: ON all dtypes).
+    _env_p1bc = os.environ.get("OP26_R0MC_SMOKE_P1BC")
+    P1BC = None if _env_p1bc is None else _env_p1bc == "1"
 
     def check(logits, pre_idx, K, crv, tag):
         N = logits.shape[1]

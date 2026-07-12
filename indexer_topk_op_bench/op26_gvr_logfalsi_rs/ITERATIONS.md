@@ -407,3 +407,22 @@
 - 下一步优先序更新:① mc 臂 P1b cache 移植(16-bit,直接削低 BS 带的
   P1b 延迟税,与上面判决同向);② core 低 BS 每行延迟微优化预研;
   ③ iter6c 多 CTA 不立项(判决记档)。
+
+### mc 港 p1b_cache 移植 + A/B 判决 (2026-07-12 069, 臂 op26_r0mcc)
+
+- 移植 = 1cta r0f 的 cached P1/P1b verbatim 进 GvrOp26R0ClusterKernel
+  (每 cluster CTA +top_k*4B SMEM;`_fmin_f32_inline` 改从 vendored
+  cluster 文件 import);wrapper `p1b_cache` 入编译 key;消融臂
+  `op26_r0mcc` 四处注册。smoke 首跑全绿(含 hr0/bottom-K),gate 291/291。
+- **A/B(54 批,1812 配对格,worst+real × 3 sweep × 9 K/dtype)**:
+  mc 调度域(N≥65536 & BS≤64)**全 dtype 全 K 转正** —— gm 按 K 递增
+  1.003 (K512) → 1.010-1.017 (K1024) → 1.020-1.034 (K2048),
+  **损失格 <0.98 = 0**;worst 轴同构;全格上下文 gm 1.014 无系统性
+  损失带。**1cta 的 fp32-K2048 occupancy 回归在 cluster 港不复现**
+  (SMEM 预算不同 + mc 域 latency-bound,occupancy 非瓶颈)。
+- **落默认:`dispatch_p1bc_mc_op26 = True(无条件,全 dtype)`**,
+  与 1cta 的 dtype 门控(fp32 关)形成对照;op26_r0mcc 保留为
+  force-True 对照臂。默认 smoke OK,gate 582/582(r0mc+r0auto)。
+- 注:REPORT 里 op26_r0auto 的 mc 域行采于本默认之前(少 ~1-3.4%),
+  下次 backfill 自动收编,不为此重跑 81 批。
+- 工具 = analyze_r0mcc_ab.py;根 = results_b200_op26_r0mcc_ab(不入库)。
