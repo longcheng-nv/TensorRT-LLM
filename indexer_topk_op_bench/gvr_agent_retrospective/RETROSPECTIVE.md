@@ -228,4 +228,7 @@ Q18 uniform(baseline 被扭曲 2.2×)→ Q19 分布拟合(Radix 恢复不变性�
 
 ## 8. 对 /omni-kernel 的升级建议
 见同目录 `OMNI_KERNEL_UPGRADE.md`(基于本复盘的逐条差距分析与改造方案)。
-可视化轨迹见 `trajectory.png` / `gen_trajectory.py`(autoresearch progress-plot 范式)。
+可视化轨迹见 `trajectory.png` / `gen_trajectory.py`(autoresearch progress-plot 范式);
+op21 战役放大图 = `progress_op21.png` / `gen_progress_op21.py`(数据源
+`op21_gvr_prod/PROGRESS_REPORT.html`,证伪点 y=A/B 实测比估算,沿源报告口径)。
+双语单页交付 = `RETROSPECTIVE.html`(两图均已 base64 内嵌)。
