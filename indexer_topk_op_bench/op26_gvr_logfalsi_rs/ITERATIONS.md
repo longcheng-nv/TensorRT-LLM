@@ -260,3 +260,31 @@
   mc 港主战。
 - 全网格 81 批(4 臂,OUT=results_b200_op26_iter6grid,8 卡 dtype×K
   分片)在飞 —— 完整 scoreboard 见追记。
+
+### iter6b mc 臂首硅 (074 接管) — smoke hr0 修正 + 包络判定
+
+- 049 回收后 074 接管;grid 61/81 起步幂等续跑(8 分片原样)。
+- **op26_r0mc 首跑 smoke 在 hr0 失败(K512 N32768 fp32 cs=1,
+  valdiff 8.56e-01, uniq 512/512)——判定为 out-of-envelope,非移植 bug**:
+  smoke 的 hr0 抄了 1cta R0 smoke 的 bottom-K preIdx(topk(-row)),
+  P1 括号 [pmin,pmax] 整体低于真第 K 值,任何括号内 bisect 都不可达;
+  1cta 靠 fb_fix 修括号才过。三臂复现(debug_r0mc_hr0.py):
+  **vendored cluster 锚同 case 同样截断,valdiff 完全一致 8.56e-01**;
+  op26_r0 (fb_fix) 0.0。=> mc 港与锚异常包络一致,符合设计
+  (RESUME_ITER6B_PROMPT §1.3: fb_fix 不移植,op26_mc 先例 smoke 只测 hr1)。
+- 修正:smoke hr0 改 gate Suite B 同款随机不相交 preIdx(包络内,
+  必须精确);bottom-K 记录为已知包络边界(锚平价)。
+- **第二硅上 bug 推翻"fb_fix 不移植"设计决定**:K2048(cr=1,+1 offset
+  → gathered 近随机)N=262144 全 hr 档重复索引失败,**cs=1 也失败**
+  (iter5 op26_mc / 锚 / 1cta 同数据全过 → iter6b 新 glue)。printf 实锤
+  (debug_r0mc_k2048_dbg.py):梯子两级全 overshoot(89k/222k ≫ kC)→
+  chi=-1 跳过 R1 → status2 交给 vendored retry-shrink 的括号宽达 6 个
+  count 十倍程;**vendored shrink 只修 overshoot(`while count>kCC`),
+  一步 bisect 跨过 [kK,kCC] 窗即 undershoot 退出**(cand 1654<2048,
+  P4 Branch C 补 -1)。N=131072 过 = mid 恰落窗内的运气。锚不踩坑 =
+  它的 P2 secant 交接前已有 ~10 次实测迭代;1cta 不踩 = fb_fix。
+  **根修 = fb_fix 整体移植进 mc phase3 override(cluster 聚合计数,
+  决策输入全 CTA 一致故轨迹一致;fb_alpha=0.2 同参)**,仅 status!=1
+  跑,热路径零税。修后 K2048 复现 8/8 过(cs=1/2/4 × hr1/hr~/hr0),
+  且 bottom-K hr0 也进包络(fb_fix expand-upward 守卫)→ smoke 恢复
+  bottom-K(hr0bk)+ 保留随机不相交 hr0,包络 = 1cta 平价 > 锚。

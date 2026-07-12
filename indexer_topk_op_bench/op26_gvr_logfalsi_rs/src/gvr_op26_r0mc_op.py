@@ -31,6 +31,7 @@ Zero vendored edits; subclass GvrTopKClusterKernel directly (the p4/op18
 cross-lineage mixin is impossible — see gvr_op26_r0_op.py header).
 """
 import math
+import os
 import sys
 from pathlib import Path
 
@@ -69,6 +70,8 @@ class GvrOp26R0ClusterKernel(GvrTopKClusterKernel):
 
     def __init__(self, *a, qfracs=M2D, mt_unroll=4, **kw):
         super().__init__(*a, **kw)
+        # compile-time debug printfs (OP26_R0MC_DEBUG=1, fresh process)
+        self.dbg = bool(int(os.environ.get("OP26_R0MC_DEBUG", "0")))
         assert not self.enable_smem_cache, \
             "op26_r0mc v0 supports the production enable_smem_cache=False only"
         assert all(0.0 < q < 1.0 for q in qfracs), qfracs
@@ -80,6 +83,9 @@ class GvrOp26R0ClusterKernel(GvrTopKClusterKernel):
         self.qneeds = tuple(max(1, int(math.ceil(q * self.top_k)))
                             for q in self.qfracs)
         self.log2_r1aim = math.log2(math.sqrt(self.top_k * self.kC))
+        # fb_fix interior aim (op26 1cta port, fb_alpha=0.2)
+        self.log2_mstar = math.log2(
+            self.top_k * (self.kC / self.top_k) ** 0.2)
 
     # ------------------------------------------------------------------
     # P1b — identical to the 1cta version (full-row preIdx, per-CTA
@@ -270,6 +276,121 @@ class GvrOp26R0ClusterKernel(GvrTopKClusterKernel):
             cute.arch.barrier()
 
     # ------------------------------------------------------------------
+    # P3 — fb_fix port (GvrOp26Kernel.phase3_collect_candidates, cluster-
+    # aggregated counts). WHY (074 first-silicon): the vendored retry-shrink
+    # only fixes overshoot (`while count > kCC`); one bisection step over a
+    # WIDE R0-miss bracket can skip the [kK, kCC] window and exit undershoot
+    # -> P4 Branch C pads -1 (K2048 cr=1 N262144 hr* repro: cand 1654 < 2048,
+    # see debug_r0mc_k2048_dbg.py). The anchor never sees this because its P2
+    # secant hands over a MEASURED tight bracket; R0's miss bracket is
+    # rung-derived and can be 6 decades wide in count space. Cluster-safe:
+    # every decision input (s_iscalars[0] after DSMEM all-reduce, s_thr) is
+    # cluster-identical, so all CTAs run identical trajectories; each
+    # block_count_ge call does its own arrive/wait.
+    # ------------------------------------------------------------------
+    @cute.jit
+    def phase3_collect_candidates(self, input_row, N, slice_start, slice_end,
+                                  smem_keys, smem_vals, smem_ptcnt, smem_wcnt,
+                                  s_thr, s_iscalars, s_cluster_partial, tidx,
+                                  warp_id, lane, smem_input=None):
+        kK = cutlass.const_expr(self.top_k)
+        kCC = cutlass.const_expr(self.kC)
+        if s_iscalars[1] != cutlass.Int32(1):
+            # Bracket counts are NOT trustworthy (rung counts, or R1 partial
+            # measurements). Mark BOTH end counts unknown; only measured
+            # values feed the falsi.
+            if tidx == 0:
+                s_iscalars[1] = cutlass.Int32(0)
+                s_iscalars[2] = cutlass.Int32(-1)  # cnt_lo: unknown
+                s_iscalars[3] = cutlass.Int32(-1)  # cnt_hi: unknown
+            cute.arch.barrier()
+            rs = cutlass.Int32(0)
+            while rs < cutlass.Int32(30) and s_iscalars[1] == cutlass.Int32(0):
+                if rs > cutlass.Int32(0):
+                    if tidx == 0:
+                        lo3 = s_thr[1]
+                        hi3 = s_thr[2]
+                        clo3 = s_iscalars[2]
+                        chi3 = s_iscalars[3]
+                        cand = (lo3 + hi3) * cutlass.Float32(0.5)
+                        if chi3 < cutlass.Int32(0):
+                            cand = hi3          # measure the hi end first
+                        elif clo3 < cutlass.Int32(0):
+                            cand = lo3          # then the lo end
+                        else:
+                            # both ends measured: log-count regula falsi
+                            # aimed at the interior target m*; midpoint
+                            # safeguard on degeneracy
+                            chic = chi3
+                            if chic < cutlass.Int32(1):
+                                chic = cutlass.Int32(1)
+                            l_lo = cmath.log2(cutlass.Float32(clo3),
+                                              fastmath=True)
+                            l_hi = cmath.log2(cutlass.Float32(chic),
+                                              fastmath=True)
+                            den3 = l_lo - l_hi
+                            if den3 > cutlass.Float32(0.0):
+                                t3 = (cutlass.Float32(self.log2_mstar)
+                                      - l_hi) / den3
+                                cnd3 = hi3 + t3 * (lo3 - hi3)
+                                if cnd3 > lo3 and cnd3 < hi3:
+                                    cand = cnd3
+                        s_thr[0] = cand
+                    cute.arch.barrier()
+                self.block_count_ge(
+                    input_row, slice_start, slice_end, s_thr[0], smem_ptcnt,
+                    smem_wcnt, s_iscalars, s_cluster_partial, tidx, warp_id,
+                    lane, smem_input=smem_input)
+                cute.arch.barrier()
+                if tidx == 0:
+                    c3 = s_iscalars[0]
+                    t3v = s_thr[0]
+                    if c3 >= cutlass.Int32(kK) and c3 <= cutlass.Int32(kCC):
+                        s_iscalars[1] = cutlass.Int32(1)  # accept
+                    elif c3 > cutlass.Int32(kCC):
+                        # overshoot: t3v is a measured lo end
+                        s_thr[1] = t3v
+                        s_iscalars[2] = c3
+                        if t3v >= s_thr[2]:
+                            # even the hi end overshoots -> expand upward
+                            rng3 = s_thr[2] - s_thr[1]
+                            if rng3 < cutlass.Float32(1.0):
+                                rng3 = cutlass.Float32(1.0)
+                            s_thr[2] = s_thr[2] + rng3 * cutlass.Float32(8.0)
+                            s_iscalars[3] = cutlass.Int32(-1)
+                    else:
+                        # undershoot: t3v is a measured hi end
+                        s_thr[2] = t3v
+                        s_iscalars[3] = c3
+                        if t3v <= s_thr[1]:
+                            # even the lo end undershoots (possible with
+                            # invalid preIdx entries) -> expand downward
+                            rng3 = s_thr[2] - s_thr[1]
+                            if rng3 < cutlass.Float32(1.0):
+                                rng3 = cutlass.Float32(1.0)
+                            s_thr[1] = s_thr[1] - rng3 * cutlass.Float32(8.0)
+                            s_iscalars[2] = cutlass.Int32(-1)
+                cute.arch.barrier()
+                rs = rs + cutlass.Int32(1)
+            if s_iscalars[1] != cutlass.Int32(1):
+                # exhausted (tie-block): land on the MEASURED undershoot
+                # side — fail-soft semantics, count<=kCC so the collect
+                # buffer cannot overflow.
+                self.block_count_ge(
+                    input_row, slice_start, slice_end, s_thr[2], smem_ptcnt,
+                    smem_wcnt, s_iscalars, s_cluster_partial, tidx, warp_id,
+                    lane, smem_input=smem_input)
+                cute.arch.barrier()
+                if tidx == 0:
+                    s_thr[0] = s_thr[2]
+                    s_iscalars[1] = cutlass.Int32(1)
+                cute.arch.barrier()
+        GvrTopKClusterKernel.phase3_collect_candidates(
+            self, input_row, N, slice_start, slice_end, smem_keys, smem_vals,
+            smem_ptcnt, smem_wcnt, s_thr, s_iscalars, s_cluster_partial,
+            tidx, warp_id, lane, smem_input=smem_input)
+
+    # ------------------------------------------------------------------
     # Entry — vendored cluster entry with Phase 2 replaced by P1b + R0 (+R1).
     # ------------------------------------------------------------------
     @cute.kernel
@@ -448,6 +569,14 @@ class GvrOp26R0ClusterKernel(GvrTopKClusterKernel):
                                     s_iscalars[1] = cutlass.Int32(3)
                 cute.arch.barrier()
 
+                if cutlass.const_expr(self.dbg):
+                    if tidx == 0 and is_leader:
+                        cute.printf(
+                            "DBG ladder: vlo={} vhi={} thr0={} cnt0={} thr1={} cnt1={} st={} bc={} sthr=[{} {} {}]\n",
+                            v_lo, v_hi, s_mt_thr[0], s_mt_cnt[0],
+                            s_mt_thr[1], s_mt_cnt[1], s_iscalars[1],
+                            s_r0col[0], s_thr[0], s_thr[1], s_thr[2])
+
                 # R1 inline shot: vendored cluster count (keeps the Shift-D
                 # [5] snapshot + cluster aggregation + slice ptcnt contract).
                 # All CTAs take the same branch: the decision inputs
@@ -491,6 +620,13 @@ class GvrOp26R0ClusterKernel(GvrTopKClusterKernel):
                 if cutlass.const_expr(cluster_size > 1):
                     cute.arch.cluster_arrive_relaxed()
                     cute.arch.cluster_wait()
+
+                if cutlass.const_expr(self.dbg):
+                    if tidx == 0 and is_leader:
+                        cute.printf(
+                            "DBG postP3: st={} cand={} local5={} thr0={} sthr12=[{} {}]\n",
+                            s_iscalars[1], s_iscalars[0], s_iscalars[5],
+                            s_thr[0], s_thr[1], s_thr[2])
 
                 if cluster_size == 1 or is_leader:
                     if cutlass.const_expr(cluster_size > 1):
@@ -627,6 +763,17 @@ if __name__ == "__main__":
             noisy = row + 0.8 * row.std() * torch.randn_like(row)
             pre_mid = torch.topk(noisy, K).indices.int().view(1, K).contiguous()
             check(logits, pre_mid, K, crv, f"{str(dt):14s} K={K:4d} N={N:6d} hr~")
-            pre_miss = torch.topk(-row, K).indices.int().view(1, K).contiguous()
+            # hr0 in two strengths. Both need the ported fb_fix (the vendored
+            # anchor FAILS bottom-K: its P1 bracket [pmin, pmax] sits entirely
+            # below the true K-th value, valdiff 8.56e-01 — debug_r0mc_hr0.py;
+            # fb_fix's expand-upward guard recovers it, 1cta-parity envelope).
+            topk_idx = torch.topk(row, 2 * K).indices
+            mask = torch.ones(N, dtype=torch.bool)
+            mask[topk_idx.cpu()] = False
+            rest = torch.arange(N)[mask]
+            pre_miss = rest[torch.randperm(rest.numel())[:K]].int().cuda()
+            pre_miss = pre_miss.view(1, K).contiguous()
             check(logits, pre_miss, K, crv, f"{str(dt):14s} K={K:4d} N={N:6d} hr0")
+            pre_bk = torch.topk(-row, K).indices.int().view(1, K).contiguous()
+            check(logits, pre_bk, K, crv, f"{str(dt):14s} K={K:4d} N={N:6d} hr0bk")
     print("op26_r0mc smoke OK")
