@@ -307,3 +307,19 @@
 - **方向判决:1cta R0 v0.2 的可赢集 = real/best 全域 + worst vs radix;
   worst-vs-anchor 洞与 hugeN 墙 都指向已排program 的后续**(P1b 并入 P1
   gather 消融 → worst 税;mc 港/iter6c → hugeN)。工具 = m3_verdict.py。
+
+### iter6b mc 臂 A/B 终判 (074, mcab 18 批: K1024 fp32 + K2048 fp16 × 3 场景 × 3 sweep, 4 臂批内配对) — M4 大体达标
+
+- **缺口格(N 131K-262K, BS≤16)**:op26_r0mc vs 1cta-r0 **1.47-1.54×**,
+  hugeN(≥512K)**1.93-2.04×** —— 行内多 CTA 墙如设计被击穿;
+  vs mc-anchor real/best 1.09-1.14(R0 梯子在 cluster 港成立)。
+- **vs radix**:K1024 fp32 全域转正(核心 1.24-1.34,hugeN 1.28-1.34);
+  K2048 fp16 缺口带 0.78-0.82(radix 仍胜,但 1cta 的 ~0.5 差距近腰斩),
+  worst K2048 fp16 核心域 1.014 首次持平。
+- **洞**:worst 轴 vs mc-anchor 0.87-0.93(P1b 税家族,继承 1cta);
+  real K2048 fp16 @1M 0.749(单深洞);小 N(4-8K)0.65-0.93
+  (dispatch 本就该路由 1cta/单 CTA,非 mc 部署域)。
+- **dispatch 蓝图(数据已齐)**:N<~64K → op26_r0(或按 worst 用
+  stock);N≥131K 低 BS → op26_r0mc;worst 轴税待 P1b 并入 P1 gather
+  消融。工具 = m4_verdict.py;结果根 = results_b200_op26_iter6b_mcab
+  (不入库)。
