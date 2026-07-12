@@ -383,3 +383,27 @@
   实算,refresh-if-present)/方法学表 ×2、两 csv +3 列、
   op22rr_op26r_raw.csv(含逐格 r0_arm)。**last-writer 现为
   update_report_op26_iter6.py**(其内部先跑 iter5 wrapper 全量重导)。
+
+### fin 数据负格地图 + iter6c 可行性判决 (2026-07-12 069, 工具 analyze_fin_negatives.py)
+
+- **聚合 gm 掩盖强双峰**:47.8% 格对 radix 仍负。负格几乎全部集中在
+  **低 BS**:core BS=1 gm 0.844(胜率 30%)→ BS=2048 gm 2.107(胜率
+  91%);hugeN BS1-4 全败(0.51-0.67)、BS16-64 全胜(1.56-2.92);
+  smallN(<8K)BS≤512 基本全败(dispatch 域外,记档)。
+- **机理(scaling 分析)**:低 BS 两边都是 latency-bound(op26r 时间
+  BS 1→16 平坦),缺口 = 每行关键路径延迟比 —— radix 行内 CTA 随 N
+  扩,每行延迟几乎不随 N 涨(65K→1M 仅 13→17µs);GVR cs 封顶 4,
+  每行延迟 15.6→18.9→38.6µs(65K/262K/1M)。缺口 1.20×/1.34×/2.3×。
+  饱和端反之:GVR 每行 0.07µs vs radix 0.16µs(2.3× 更省),故高 BS
+  全胜。
+- **iter6c(行内多 CTA / GMEM-atomic 两段 kernel)可行性判决**:
+  - hugeN(≥512K)BS≤8:缺口 2.3×、内核时长 38µs+,3-5 次全局同步
+    (每次 ~2-3µs)可摊 → **可行,但按部署包络记忆 N≤256K 才是主战场,
+    hugeN 是应力探针 → 不值得单独立项实现**。
+  - core(65K-262K)BS≤8:缺口仅 1.20-1.34×、内核仅 15-19µs,全局
+    同步开销即吃掉大半收益 → **多 CTA 路线判不可行**;该带的正确杠杆
+    是**每行延迟微优化**(P1b 税 ~µs 级、scan 循环 ILP/向量宽度、
+    R0 趟内存级并行),或接受为结构税。
+- 下一步优先序更新:① mc 臂 P1b cache 移植(16-bit,直接削低 BS 带的
+  P1b 延迟税,与上面判决同向);② core 低 BS 每行延迟微优化预研;
+  ③ iter6c 多 CTA 不立项(判决记档)。
