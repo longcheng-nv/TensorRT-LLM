@@ -349,3 +349,20 @@
   同时保留 op#7 rank-scatter P4)。gvr_r0_auto_op26 wrapper + 臂
   `op26_r0auto` 四处注册;gate 291/291。
 - 报告回填时 headline 臂 = op26_r0auto(sweep_nsys extra 记 r0_arm)。
+
+### 报告回填数据采集 — 074 死亡 + 069 marker 接力 (2026-07-12, 069)
+
+- 074 发起的 iter6final 回填 sweep(OUT=results_b200_op26_iter6final,
+  臂 = gvr_cutedsl + **op26_r0auto** + radix_cutedsl + sglang;3 场景 ×
+  3 sweep × 3K × 3dtype = 81 批)在 13:20:25 随节点回收整体死亡
+  (8 分片日志同秒冻结,17/81 marker)。069 按交接配方 marker 幂等重发
+  (smoke 先过、无陈锁、25min 零增长确认无双 driver;日志 fin_gpu*b.log);
+  driver 对无 marker 批 `rm -f` 后全新重测,半批残留无害。
+- **update_report_op26_iter6.py 已就绪**(iter5 wrapper 之上的
+  last-writer):u5.main() 全量重导后追加 op26_r0auto —— exactness 门、
+  逐格锚迁移(borig 刻度)、D blob/COL/SHORT/复选框/双语 note 卡/
+  方法学表行/两 csv 列扩展/含 r0_arm 的 op22rr_op26r_raw.csv。
+  note 卡同机 gm 运行时实算并**重跑刷新**(refresh-if-present,防
+  partial 数据数字固化)。partial dry-run(26/81)全链路通过:
+  exactness 199/199,锚漂移 med 1.0006,real vs radix core 1.23
+  (含 mc 路由抬升,收齐后重derive)。
