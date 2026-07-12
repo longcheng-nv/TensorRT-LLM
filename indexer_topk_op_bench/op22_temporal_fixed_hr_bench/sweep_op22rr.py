@@ -90,6 +90,10 @@ ARMS_EXTRA = [
     # (per-CTA redundant P1b rungs, slice M-ary count + one DSMEM merge,
     # R1 inline falsi; double-miss falls to the vendored cluster fallback).
     ("op26_r0mc", "op26_r0mc", None, None),
+    # op26_r0mcc = op26_r0mc + p1b_cache (mc port of the 1cta r0f ablation:
+    # per-CTA P1 caches the K gathered values in SMEM, P1b hist skips the
+    # second GMEM gather; +top_k*4B SMEM per cluster CTA).
+    ("op26_r0mcc", "op26_r0mcc", None, None),
     # op26_r0auto = production-facing R0: dispatch_r0_arm_op26 routes to
     # op26_r0 (1cta, N<64K or BS>=128) / op26_r0mc (N>=65536 & BS<=64).
     ("op26_r0auto", "op26_r0auto", None, None),
