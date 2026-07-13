@@ -160,3 +160,23 @@ $12.5 cache-write(实测全部 5-min TTL)/ $1.0 cache-read,单位每 MTok。
 
 - 039 接管 session:发车+双 driver 事故处置+判读+落默认+收口,
   事件驱动挂机为主;未做 usage snapshot,估 ≈$15-30(单迭代短战役)。
+
+## 9 · 积压①②③ 消融收口 + fin2 backfill 前半 — 027(2026-07-13)
+
+### GPU 花费(027,12:10-14:25Z,日志时间戳)
+
+| 内容 | GPU-h |
+|---|---|
+| 预检 gate(3 卡)+ post-edit gate 582(3 卡)+ kc3072 gate(3 卡) | ~1.7 |
+| ① qfracs A/B 4 批 4 卡 + smoke | ~0.5 |
+| ② r1aim A/B 2 批 + 60-rep 确认批 2 批 | ~0.4 |
+| ③ kcdiet 1536/bf16-spot/3072 三轮 A/B(6 批)+ host 筛 | ~0.8 |
+| fin2 backfill:36/81 干净批(6 卡 ~1.4h)+ 外部任务两度污染作废段 | ~9.5 |
+| **小计(027 段)** | **≈ 12.9** |
+
+### Claude token 花费
+
+- 本 session(027):三消融全流程(含 kc=1536 gate 证伪→3072 迭代)+
+  fin2 发车/污染处置/跨机交接文档;未做 usage snapshot,
+  估 ≈$40-80(多迭代长战役,事件驱动挂机段占比高)。
+- fin2 后半(45 批)+ 报告收尾记账归新机 session(TAKEOVER_FIN2_8GPU.md §4)。
