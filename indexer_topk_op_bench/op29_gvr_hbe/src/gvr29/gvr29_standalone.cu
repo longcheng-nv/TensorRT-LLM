@@ -212,7 +212,8 @@ using HbeCfg = impl::HbeConfig;
 
 /// op29 HBE kernel: streaming regime only (max_seq_len > 16384, no cluster).
 /// pre_idx: [B, topk] hint indices (per-row). Dynamic smem = candidate bufs.
-template <bool kPDL>
+/// kColB (iter12): tier-B insurance column compile-key (see topk_hbe.cuh).
+template <bool kPDL, bool kColB = true>
 TOPK_KERNEL void gvr29_hbe_kernel(const __grid_constant__ TopKLaunchParams params,
                                   const int32_t* __restrict__ pre_idx,
                                   impl::TieValue* __restrict__ spill) {
@@ -233,11 +234,11 @@ TOPK_KERNEL void gvr29_hbe_kernel(const __grid_constant__ TopKLaunchParams param
     }
   } else {
     const size_t spill_stride =
-        HbeCfg::spill_bytes_per_row(problem.topk) / sizeof(impl::TieValue);
-    HbeStreaming::forward<kPDL>(problem,
-                                pre_idx + blockIdx.x * int64_t(problem.topk),
-                                spill + blockIdx.x * spill_stride,
-                                &smem, dyn_smem);
+        HbeCfg::spill_bytes_per_row(problem.topk, kColB)
+        / sizeof(impl::TieValue);
+    HbeStreaming::forward<kPDL, kColB>(
+        problem, pre_idx + blockIdx.x * int64_t(problem.topk),
+        spill + blockIdx.x * spill_stride, &smem, dyn_smem);
   }
   device::PDLTriggerSecondary<kPDL>();
   __syncthreads();
@@ -388,7 +389,7 @@ void topk_v2_transform(torch::Tensor scores, torch::Tensor seq_lens,
                        torch::Tensor page_table, torch::Tensor out,
                        torch::Tensor metadata, int64_t K, int64_t page_bits,
                        int64_t max_seq_len, torch::Tensor pre_idx,
-                       bool use_hbe, torch::Tensor spill) {
+                       bool use_hbe, torch::Tensor spill, bool col_b) {
   TORCH_CHECK(scores.is_cuda() && scores.scalar_type() == torch::kFloat32,
               "scores must be CUDA float32");
   TORCH_CHECK(seq_lens.scalar_type() == torch::kInt32);
@@ -421,38 +422,50 @@ void topk_v2_transform(torch::Tensor scores, torch::Tensor seq_lens,
   // op29 HBE dispatch: streaming regime only (no cluster, rows > 16384).
   const bool cluster_eligible =
       (static_cast<uint32_t>(max_seq_len) > params.cluster_floor) && (batch_size <= kClusterMaxBatch);
-  // iter10b guard REVERT to the proven domain (iter10 expansion falsified:
-  // 65536x2048 0.63 [fixed per-CTA overheads vs short rows], K2048 0.56-0.88
-  // [unattributed K-proportional cost — NCU next]): K <= 1024 && N >= 131072.
-  // GVR29_FORCE_HBE=1: diagnostic-only guard bypass (iter11 NCU attribution
-  // of guard-excluded cells); default unset = byte-identical dispatch.
+  // iter12 guard: N >= 65536, ALL K (iter11 attributed the K-cost to the
+  // tier-B insurance column [~16 inst per band element, issue-bound pass];
+  // col_b=false removes it: K1024/K2048 flip to 1.33-1.75x and N=65536 turns
+  // positive [fewer fixed phases], nsys 3-scenario pilot 2026-07-13).
+  // N=32768 still loses (0.85-1.0) -> stays out.
+  // GVR29_FORCE_HBE=1: diagnostic-only guard bypass (e.g. N=32768 probes);
+  // default unset = byte-identical dispatch.
   static const bool force_hbe = [] {
     const char* e = std::getenv("GVR29_FORCE_HBE");
     return e != nullptr && e[0] == '1';
   }();
   if (use_hbe && !cluster_eligible &&
-      (force_hbe || (static_cast<int64_t>(K) <= 1024 &&
-                     static_cast<uint32_t>(max_seq_len) >= 131072))) {
+      (force_hbe || static_cast<uint32_t>(max_seq_len) >= 65536)) {
     TORCH_CHECK(pre_idx.scalar_type() == torch::kInt32 &&
                 pre_idx.size(0) == batch_size &&
                 pre_idx.size(1) == static_cast<int64_t>(topk),
                 "pre_idx must be [B, K] int32");
-    const size_t dyn = HbeCfg::dyn_smem_bytes(topk);
-    static size_t configured_dyn = 0;
-    if (dyn > configured_dyn) {
-      cudaFuncSetAttribute(gvr29_hbe_kernel<true>,
+    const size_t dyn = HbeCfg::dyn_smem_bytes(topk, col_b);
+    static size_t configured_dyn[2] = {0, 0};
+    if (dyn > configured_dyn[col_b]) {
+      cudaFuncSetAttribute(col_b ? gvr29_hbe_kernel<true, true>
+                                 : gvr29_hbe_kernel<true, false>,
                            cudaFuncAttributeMaxDynamicSharedMemorySize,
                            static_cast<int>(HbeCfg::dyn_smem_bytes(2048)));
-      configured_dyn = HbeCfg::dyn_smem_bytes(2048);
+      configured_dyn[col_b] = HbeCfg::dyn_smem_bytes(2048);
     }
     TORCH_CHECK(spill.numel() * spill.element_size() >=
                     static_cast<int64_t>(batch_size) *
-                        static_cast<int64_t>(HbeCfg::spill_bytes_per_row(topk)),
+                        static_cast<int64_t>(
+                            HbeCfg::spill_bytes_per_row(topk, col_b)),
                 "spill buffer too small");
-    host::LaunchKernel(batch_size, kBlockSize, stream, dyn)
-        .config({.use_pdl = true})
-        .launch(gvr29_hbe_kernel<true>, params, pre_idx.data_ptr<int32_t>(),
-                reinterpret_cast<impl::TieValue*>(spill.data_ptr()));
+    if (col_b) {
+      host::LaunchKernel(batch_size, kBlockSize, stream, dyn)
+          .config({.use_pdl = true})
+          .launch(gvr29_hbe_kernel<true, true>, params,
+                  pre_idx.data_ptr<int32_t>(),
+                  reinterpret_cast<impl::TieValue*>(spill.data_ptr()));
+    } else {
+      host::LaunchKernel(batch_size, kBlockSize, stream, dyn)
+          .config({.use_pdl = true})
+          .launch(gvr29_hbe_kernel<true, false>, params,
+                  pre_idx.data_ptr<int32_t>(),
+                  reinterpret_cast<impl::TieValue*>(spill.data_ptr()));
+    }
     return;
   }
   const bool use_cluster =

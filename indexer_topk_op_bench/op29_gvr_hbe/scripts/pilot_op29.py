@@ -35,7 +35,11 @@ DEV = "cuda"
 CELLS = [(32768, 4), (32768, 64), (65536, 64),
          (32768, 1024), (65536, 1024), (131072, 1024), (262144, 1024),
          (65536, 2048), (262144, 2048)]
-KS = [512, 2048]
+# iter12: K1024 added (inside the shipped guard but never pilot-measured —
+# iter11 NCU flagged a possible loss there). Run under GVR29_FORCE_HBE=1 so
+# K2048 (and small-N cells) engage HBE in both colB arms.
+KS = [512, 1024, 2048]
+ARMS = ("sglang_v2", "gvr29_hbe", "gvr29_hbe_nob", "gvr29_off")
 
 
 def build(op, K, N, BS, b):
@@ -52,11 +56,12 @@ def build(op, K, N, BS, b):
                                 max_seq_len=N)), keep
     md = g29_plan(sl)
     keep.append(md)
-    hbe = (op == "gvr29_hbe")
+    hbe = op.startswith("gvr29_hbe")
+    cb = (op != "gvr29_hbe_nob")
     gvr29_topk(logits, sl, K, pre, out=out, metadata=md, max_seq_len=N,
-               use_hbe=hbe)
+               use_hbe=hbe, col_b=cb)
     return (lambda: gvr29_topk(logits, sl, K, pre, out=out, metadata=md,
-                               max_seq_len=N, use_hbe=hbe)), keep
+                               max_seq_len=N, use_hbe=hbe, col_b=cb)), keep
 
 
 def main():
@@ -75,7 +80,7 @@ def main():
                     continue
                 b = bundle_data_rr.get_bundle(args.scenario, K,
                                               torch.float32, N, device=DEV)
-                for op in ("sglang_v2", "gvr29_hbe", "gvr29_off"):
+                for op in ARMS:
                     base = f"{op}|{K}|fp32|{N}|{BS}"
                     rec = {"op": op, "K": K, "N": N, "BS": BS,
                            "scenario": args.scenario,

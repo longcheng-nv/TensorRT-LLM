@@ -74,9 +74,10 @@ def plan(seq_lens, metadata=None, static_cluster_threshold=0):
 _SPILL = {}
 
 
-def _spill_buf(R, K, device):
-    """Per-row global spill region: (spillA+spillB)=56*K TieValue (8 B)."""
-    need = R * 56 * K * 8
+def _spill_buf(R, K, device, col_b):
+    """Per-row global spill region: spillA (+spillB when col_b) 28*K
+    TieValue (8 B) each."""
+    need = R * (56 if col_b else 28) * K * 8
     key = device
     buf = _SPILL.get(key)
     if buf is None or buf.numel() < need:
@@ -85,7 +86,12 @@ def _spill_buf(R, K, device):
 
 
 def gvr29_topk(scores, seq_lens, K, pre_idx, out=None, metadata=None,
-               page_table=None, max_seq_len=None, use_hbe=True, spill=None):
+               page_table=None, max_seq_len=None, use_hbe=True, spill=None,
+               col_b=False):
+    # col_b default False (iter12 SHIP): the tier-B insurance column costs
+    # ~16 inst per band element in the issue-bound fused pass and fired 0/18
+    # on real bundles; B-off wins 1.33-1.75x on N>=131072 and turns N=65536
+    # positive. col_b=True kept for A/B reproducibility.
     assert scores.dtype == torch.float32
     R = scores.size(0)
     if out is None:
@@ -97,10 +103,10 @@ def gvr29_topk(scores, seq_lens, K, pre_idx, out=None, metadata=None,
     if max_seq_len is None:
         max_seq_len = int(seq_lens.max().item())
     if spill is None:
-        spill = _spill_buf(R, K, scores.device)
+        spill = _spill_buf(R, K, scores.device, col_b)
     _module().gvr29_transform(scores, seq_lens, page_table, out, metadata,
                               K, PAGE_BITS, max_seq_len, pre_idx, use_hbe,
-                              spill)
+                              spill, col_b)
     return out
 
 
@@ -122,16 +128,17 @@ if __name__ == "__main__":
                                 device="cuda")
             adv = torch.topk(-x, K, dim=1).indices.to(torch.int32)
             for tag, pre in (("good", good), ("bad", bad), ("adv", adv)):
-                idx = gvr29_topk(x, sl, K, pre)
-                ok = True
-                for r in (0, BS // 2, BS - 1):
-                    got = x[r][idx[r].long()].sort(descending=True).values
-                    if not torch.equal(got, ref.values[r]):
-                        ok = False
-                        break
-                print(f"  K={K} N={N} BS={BS} hint={tag} exact={ok}",
-                      flush=True)
-                assert ok
+                for cb in (True, False):
+                    idx = gvr29_topk(x, sl, K, pre, col_b=cb)
+                    ok = True
+                    for r in (0, BS // 2, BS - 1):
+                        got = x[r][idx[r].long()].sort(descending=True).values
+                        if not torch.equal(got, ref.values[r]):
+                            ok = False
+                            break
+                    print(f"  K={K} N={N} BS={BS} hint={tag} colB={cb} "
+                          f"exact={ok}", flush=True)
+                    assert ok
             del x, ref, good, bad, adv
             torch.cuda.empty_cache()
     print("SMOKE EXACT")

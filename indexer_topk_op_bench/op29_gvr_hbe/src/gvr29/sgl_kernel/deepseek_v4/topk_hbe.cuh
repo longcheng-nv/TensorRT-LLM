@@ -33,7 +33,8 @@ struct HbeConfig {
   static constexpr uint32_t kQbMarginBins = 2;
   // capA entries hold {val,idx} (8 B), capB entries hold idx (4 B).
   // Budget: static smem ~52 KB + dyn <= ~60 KB keeps occupancy 2 (B200
-  // 227 KB/SM). Dispatch guards K <= 1024, so 4K*8 + 2K*4 = 40 KB max dyn.
+  // 227 KB/SM). iter12 default col_b=false: max dyn = capA(2048)*8 = 32 KB
+  // (48 KB with the B column at K2048).
   // iter4: capA 2K->4K (worst-scenario cand med 3.4xK overflowed 2K).
   // iter10: per-K caps — K2048 halves capA to keep dyn smem <= 48KB (occ 2);
   // the sample estimator is hint-free so K2048 is back in scope.
@@ -60,12 +61,14 @@ struct HbeConfig {
   // cand~13xK -> ~57KB/row spill vs 1MB/row redo.
   static constexpr uint32_t spillA(uint32_t topk) { return 28 * topk; }
   static constexpr uint32_t spillB(uint32_t topk) { return 28 * topk; }
-  static constexpr size_t spill_bytes_per_row(uint32_t topk) {
-    return size_t(spillA(topk) + spillB(topk)) * sizeof(TieValue);
+  static constexpr size_t spill_bytes_per_row(uint32_t topk,
+                                              bool col_b = true) {
+    return size_t(spillA(topk) + (col_b ? spillB(topk) : 0))
+         * sizeof(TieValue);
   }
-  static constexpr size_t dyn_smem_bytes(uint32_t topk) {
+  static constexpr size_t dyn_smem_bytes(uint32_t topk, bool col_b = true) {
     return size_t(capA(topk)) * sizeof(TieValue)
-         + size_t(capB(topk)) * sizeof(int32_t);
+         + (col_b ? size_t(capB(topk)) * sizeof(int32_t) : 0);
   }
 };
 
@@ -78,7 +81,13 @@ struct TopKHbeStreaming : TopKStreaming {
 
   /// pre_idx: RESERVED (iter7 uses the hint-free row-sample estimator; the
   /// hint may return for sub-131K dispatch tiers). Unused.
-  template <bool kUsePDL>
+  ///
+  /// kColB (iter12): compile-key for the tier-B insurance column. iter11
+  /// attribution: the fused pass is issue-bound (81-84%) and every element in
+  /// the candidate band costs ~16 inst; the B column widens the band to ~8*K
+  /// per row while firing 0/18 on real bundles. kColB=false drops it: 1
+  /// cmp/elem fused pass, ONE find_threshold in H0, tier-A-or-fallback.
+  template <bool kUsePDL, bool kColB = true>
   SGL_DEVICE static void forward(const TopKProblem problem,
                                  const int32_t* __restrict__ /*pre_idx*/,
                                  TieValue* __restrict__ spill_row,
@@ -134,16 +143,20 @@ struct TopKHbeStreaming : TopKStreaming {
     const uint32_t rS_K = max(1u, static_cast<uint32_t>(
         (static_cast<uint64_t>(n_samp) * topk) / problem.seq_len));
     const uint32_t rk_a = min(n_samp, 2 * rS_K);
-    const uint32_t rk_b = min(n_samp, 8 * rS_K);
     find_threshold(rk_a, n_samp, smem);
     __syncthreads();
     if (tx == 0) hc.bin_a = smem->threshold_bin;
     __syncthreads();
-    find_threshold(rk_b, n_samp, smem);
-    __syncthreads();
-    if (tx == 0) {
-      hc.bin_b = smem->threshold_bin;
-      if (hc.bin_b > hc.bin_a) hc.bin_b = hc.bin_a;  // keep B <= A
+    if constexpr (kColB) {
+      const uint32_t rk_b = min(n_samp, 8 * rS_K);
+      find_threshold(rk_b, n_samp, smem);
+      __syncthreads();
+      if (tx == 0) {
+        hc.bin_b = smem->threshold_bin;
+        if (hc.bin_b > hc.bin_a) hc.bin_b = hc.bin_a;  // keep B <= A
+      }
+    } else if (tx == 0) {
+      hc.bin_b = hc.bin_a;
     }
     __syncthreads();
     const uint32_t binA = hc.bin_a, binB = hc.bin_b;
@@ -162,7 +175,8 @@ struct TopKHbeStreaming : TopKStreaming {
     }
     __syncthreads();
 
-    // ---- Phase H1: ONE fused pass: pure dual-column classify (2 cmps) ----
+    // ---- Phase H1: ONE fused pass: pure dual-column classify (2 cmps; 1
+    // cmp when !kColB) ----
     for_each_input(problem.in, problem.seq_len, [&](float val, uint32_t idx) {
       if (val >= vA) {
         const auto p = atomicAdd(&hc.cnt_a, 1);
@@ -171,12 +185,14 @@ struct TopKHbeStreaming : TopKStreaming {
         } else if (p < capA + spA) {
           spillA_g[p - capA] = {val, idx};
         }
-      } else if (val >= vB) {
-        const auto p = atomicAdd(&hc.cnt_b, 1);
-        if (p < capB) {
-          bufB[p] = static_cast<int32_t>(idx);
-        } else if (p < capB + spB) {
-          spillB_g[p - capB] = {val, idx};
+      } else if constexpr (kColB) {
+        if (val >= vB) {
+          const auto p = atomicAdd(&hc.cnt_b, 1);
+          if (p < capB) {
+            bufB[p] = static_cast<int32_t>(idx);
+          } else if (p < capB + spB) {
+            spillB_g[p - capB] = {val, idx};
+          }
         }
       }
     });
@@ -188,7 +204,7 @@ struct TopKHbeStreaming : TopKStreaming {
     // tier A valid iff the top-K provably sits inside bufA: cnt(>=vA) >= K,
     // and nothing was dropped past the spill.
     const bool tierA = (cntA >= topk) && (cntA <= capA + spA);
-    const bool tierB = !tierA && (cntA + cntB >= topk) &&
+    const bool tierB = kColB && !tierA && (cntA + cntB >= topk) &&
                        (cntA <= capA + spA) && (cntB <= capB + spB);
 
     uint32_t bstar = 0;
@@ -205,18 +221,20 @@ struct TopKHbeStreaming : TopKStreaming {
             extract_coarse_bin<kHistBits>(spillA_g[t2 - capA].value)], 1);
       }
       uint32_t histed = cntA;
-      if (tierB) {
-        const uint32_t nB_s = min(cntB, capB);
-        for (uint32_t t2 = tx; t2 < nB_s; t2 += kBlockSize) {
-          const auto i2 = static_cast<uint32_t>(bufB[t2]);
-          atomicAdd(&smem->histogram[
-              extract_coarse_bin<kHistBits>(problem.in[i2])], 1);
+      if constexpr (kColB) {
+        if (tierB) {
+          const uint32_t nB_s = min(cntB, capB);
+          for (uint32_t t2 = tx; t2 < nB_s; t2 += kBlockSize) {
+            const auto i2 = static_cast<uint32_t>(bufB[t2]);
+            atomicAdd(&smem->histogram[
+                extract_coarse_bin<kHistBits>(problem.in[i2])], 1);
+          }
+          for (uint32_t t2 = capB + tx; t2 < cntB; t2 += kBlockSize) {
+            atomicAdd(&smem->histogram[
+                extract_coarse_bin<kHistBits>(spillB_g[t2 - capB].value)], 1);
+          }
+          histed += cntB;
         }
-        for (uint32_t t2 = capB + tx; t2 < cntB; t2 += kBlockSize) {
-          atomicAdd(&smem->histogram[
-              extract_coarse_bin<kHistBits>(spillB_g[t2 - capB].value)], 1);
-        }
-        histed += cntB;
       }
       __syncthreads();
       find_threshold(topk, histed, smem);
@@ -254,15 +272,17 @@ struct TopKHbeStreaming : TopKStreaming {
         const auto e = spillA_g[t - capA];
         classify(e.value, e.idx);
       }
-      if (tierB) {
-        const uint32_t nB_smem = min(cntB, capB);
-        for (uint32_t t = tx; t < nB_smem; t += kBlockSize) {
-          const auto idx = static_cast<uint32_t>(bufB[t]);
-          classify(problem.in[idx], idx);  // <=capB random re-gathers
-        }
-        for (uint32_t t = capB + tx; t < cntB; t += kBlockSize) {
-          const auto e = spillB_g[t - capB];
-          classify(e.value, e.idx);
+      if constexpr (kColB) {
+        if (tierB) {
+          const uint32_t nB_smem = min(cntB, capB);
+          for (uint32_t t = tx; t < nB_smem; t += kBlockSize) {
+            const auto idx = static_cast<uint32_t>(bufB[t]);
+            classify(problem.in[idx], idx);  // <=capB random re-gathers
+          }
+          for (uint32_t t = capB + tx; t < cntB; t += kBlockSize) {
+            const auto e = spillB_g[t - capB];
+            classify(e.value, e.idx);
+          }
         }
       }
     } else {

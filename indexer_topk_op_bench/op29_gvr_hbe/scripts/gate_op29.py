@@ -35,11 +35,13 @@ for scen in ("real", "best", "worst"):
                 pre = b["preIdx"].to(torch.int32).expand(BS, -1).contiguous()
                 sl = torch.full((BS,), N, dtype=torch.int32, device=DEV)
                 md = plan(sl)
-                for hbe in (True, False):
-                    tag = f"{scen} K={K} N={N} BS={BS} hbe={hbe}"
+                # (use_hbe, col_b): col_b only differentiates engaged HBE
+                for hbe, cb in ((True, True), (True, False), (False, True)):
+                    tag = f"{scen} K={K} N={N} BS={BS} hbe={hbe} colB={cb}"
                     try:
                         out = gvr29_topk(logits, sl, K, pre, metadata=md,
-                                         max_seq_len=N, use_hbe=hbe)
+                                         max_seq_len=N, use_hbe=hbe,
+                                         col_b=cb)
                         good = True
                         for r in (0, BS - 1):
                             idx = out[r].long()

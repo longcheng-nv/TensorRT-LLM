@@ -51,9 +51,10 @@ def geo(xs):
 
 
 def main():
-    allr = defaultdict(list)
+    allr, allr_nob = defaultdict(list), defaultdict(list)
     print(f"{'scen':>6} {'K':>5} {'N':>7} {'BS':>5} | {'rival':>8} "
-          f"{'hbe':>8} {'off':>8} | {'hbe/rival':>9} {'off/rival':>9}")
+          f"{'hbe':>8} {'nob':>8} {'off':>8} | {'hbe/rv':>7} {'nob/rv':>7} "
+          f"{'off/rv':>7}")
     for scen in ("real", "best", "worst"):
         rep = PDIR / f"pilot_{scen}.nsys-rep"
         jl = PDIR / f"pilot_{scen}.jsonl"
@@ -66,14 +67,20 @@ def main():
                 continue
             def c(op):
                 return kern.get(f"c|{op}|{r['K']}|fp32|{r['N']}|{r['BS']}")
-            rv, hb, off = c("sglang_v2"), c("gvr29_hbe"), c("gvr29_off")
+            rv, hb = c("sglang_v2"), c("gvr29_hbe")
+            nob, off = c("gvr29_hbe_nob"), c("gvr29_off")
             if rv and hb:
                 allr[scen].append(rv / hb)
+                if nob:
+                    allr_nob[scen].append(rv / nob)
                 print(f"{scen:>6} {r['K']:>5} {r['N']:>7} {r['BS']:>5} | "
-                      f"{rv:8.2f} {hb:8.2f} {off or 0:8.2f} | "
-                      f"{rv / hb:9.3f} {rv / off if off else 0:9.3f}")
+                      f"{rv:8.2f} {hb:8.2f} {nob or 0:8.2f} {off or 0:8.2f} | "
+                      f"{rv / hb:7.3f} {rv / nob if nob else 0:7.3f} "
+                      f"{rv / off if off else 0:7.3f}")
     print("\ngeomean t(rival)/t(hbe):",
           {s: round(geo(v), 3) for s, v in allr.items()})
+    print("geomean t(rival)/t(hbe_nob):",
+          {s: round(geo(v), 3) for s, v in allr_nob.items()})
 
 
 if __name__ == "__main__":

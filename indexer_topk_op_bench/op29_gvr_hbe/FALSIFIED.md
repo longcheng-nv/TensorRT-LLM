@@ -35,10 +35,11 @@
   wall — hint quantile lands ~2000 bins low; always-miss ~0.5x. Revival:
   a better K2048 hint statistic (not quantile-of-values).
 
-- (HBE fused pass at N<=65536, {fp32, even batch*N>=128M}, nsys iter10)
-  complexity-backfire — per-CTA fixed phases (sample+2*find_threshold+resolve)
-  don't amortize on short rows. Revival: cut fixed costs (fewer bins /
-  merged find_threshold / resolve-lite).
+- (HBE fused pass at N<=32768, {fp32}, nsys iter10+iter12) complexity-
+  backfire — per-CTA fixed phases don't amortize on short rows (iter12 B-off:
+  0.85-1.00 at 32768). REVIVED AT N=65536 by iter12 B-off (revival condition
+  "cut fixed costs" met: one find_threshold dropped + 1-cmp pass): 1.03-1.13
+  across K/BS. Residual domain: N<=32768 only.
 - (HBE at K=2048 with capA=2K, {fp32 N>=131072}, nsys iter10; RE-ATTRIBUTED
   iter11 NCU+replay) — the "universal spill" suspicion was WRONG (ovA max 251
   entries = 0.57% pass; occ flat 93-94%; dram_r 1.01 pass at all K). Real
@@ -50,4 +51,6 @@
   real/best/worst bundles}, replay 18/18 + NCU iter11) complexity-backfire —
   never fires, costs ~6*K*16 inst/row in an issue-bound pass. Revival: real
   per-row variance data showing tier-A miss rate >> bench (bench rows are
-  identical per cell).
+  identical per cell). RESOLVED iter12: shipped col_b=false default
+  (kColB compile-key retained for A/B); miss now falls straight to the
+  3-pass stock fallback.

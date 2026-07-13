@@ -11,3 +11,5 @@ Report burn rate to the human at 80% of budget (AUTONOMY must-stop).
 | iters — | | | |
 | verdicts (nsys) | | | |
 | **total** | | | |
+| iter11 attribution (replay + 6 NCU cells) | ~0.4 GPU-h | GPU1 | 2026-07-13 |
+| iter12 impl + gate x2 + 4 nsys pilots | ~1.2 GPU-h | GPU1-3 | 2026-07-13 |

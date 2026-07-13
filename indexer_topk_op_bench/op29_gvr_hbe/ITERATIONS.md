@@ -113,3 +113,38 @@ Ledger write-back: FALSIFIED.md iter10 K2048 entry re-attributed (was
 find_threshold) or B-narrow (rk_b 8->3-4*rS_K, no global spillB).
 Next: iter12 = kColB compile-key A/B (B-on vs B-off), gate, nsys pilot with
 K1024 added to KS (close the guard hole) + K2048 forced.
+
+## iter 12 — 2026-07-13 — SHIP (B-off default; guard widened to N>=65536, all K)
+Hypothesis (ledger check: iter11 tier-B entry cites this as the fix; no
+red-line hit — removes a threshold, does not add one): dropping the tier-B
+insurance column (kColB=false: 1 cmp/elem fused pass, ONE find_threshold,
+tier-A-or-stock-fallback) recovers the K-proportional issue-cost and the
+short-row fixed overheads.
+Probe: rungs merged into implementation (mechanism already silicon-attributed
+in iter11); kColB compile-key, col_b host flag, spill/dyn-smem col_b-aware.
+Result:
+- Gate 324/324 (3 scen x 3 K x 4 N x 3 BS x [hbe-B, hbe-noB, off], forced
+  engagement everywhere incl N=32768).
+- nsys same-batch 4-arm pilot, 27 cells x 3 scenarios (GVR29_FORCE_HBE=1)
+  + no-force real confirmation (results/pilot/iter12/):
+  nob vs rival: 262144x1024 1.71-1.73 (K512/K1024) / 1.62-1.64 (K2048);
+  262144x2048 1.60-1.75; 131072x1024 1.46/1.48/1.33-1.36; 65536 cells ALL
+  positive 1.03-1.13; 32768 still 0.85-1.00 (stays outside guard).
+  vs B-on arm: e.g. 131072x1024 K1024 0.84 -> 1.48; K2048 262144x1024
+  0.87 -> 1.64. Scenario-invariant (real/best/worst within ~1%).
+- K1024 GUARD HOLE (iter11 bonus finding) CONFIRMED on nsys and FIXED:
+  B-on K1024 was 0.84 (131072x1024) / 1.08 (262144x1024) INSIDE the shipped
+  guard; nob 1.48 / 1.72.
+- No-force run: N=32768 hbe/nob/off all 0.99-1.02 (guard exclusion clean);
+  engaged cells match the forced run.
+- RESUME step 2 (131072 residual) resolved as a side effect: 1.09 -> 1.46.
+- Fork parity intact (off/rival 0.99-1.02 median ~1.00).
+Diagnosis: candidate-band width was the K-cost AND most of the short-row
+fixed cost; A column alone (2*rS_K target) keeps one-sided safety via the
+count-validity check, miss falls to stock fallback (never observed in gate).
+Ship shape: guard = !cluster && streaming && N>=65536 (2 rules); col_b=False
+default; kColB=true retained for A/B; spill buffer halved (spillA only).
+Ledger write-back: N<=65536 entry re-scoped to N<=32768 (65536 REVIVED);
+tier-B entry marked RESOLVED-SHIPPED; K2048 entry closed by iter12.
+Next: cluster-path HBE (BS<=512); short rows N<=16K (P5); full-grid sweep +
+REPORT arm; production dispatch-tier decision (user).
