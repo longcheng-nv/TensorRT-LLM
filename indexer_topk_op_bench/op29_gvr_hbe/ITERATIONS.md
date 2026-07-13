@@ -86,3 +86,30 @@ scaling, tie machinery). Guard reverted to K<=1024 && N>=131072.
 Ledger: FALSIFIED += (HBE at N<=65536 even when batch*N>=128M, {fp32}, nsys)
 — fixed overheads; revival = shrink sample/resolve fixed costs.
 Next: NCU-attribute K2048; cluster-path HBE; full-grid sweep + REPORT arm.
+
+## iter 11 — 2026-07-13 — ATTRIBUTED (K-cost = candidate-band inst in issue-bound pass)
+Hypothesis (ledger check: iter10 entry cites spill/resolve suspects): the K2048
++188us is universal spillA r/w (cand 2*K > capA) or resolve/tie scaling.
+Probe: rung-1 host replay (scripts/replay_hbe_cand.py, 18 cells r/b/w x K x N)
++ L3 NCU 2x2+2 grid (scripts/ncu_attrib_iter11.sh + GVR29_FORCE_HBE=1 bypass
+for the guard-excluded K2048; results/iter11/).
+Result — BOTH iter10 suspects FALSIFIED, real mechanism found:
+- Replay: tier A 18/18, one-sided 18/18; spill ovA max 251 entries (0.57% of a
+  pass), ovB never read (tier B never fires). Spill is NOT the cost.
+- NCU (262144, BS=1024, real): dram_r 1.088/1.089/1.089 GB (1.01 pass) at
+  K512/1024/2048-forced — DRAM goal holds at ALL K. occ 93-94% flat. dur
+  423.6/601.2/765.4us, inst 227.9/326.9/427.2M, issue 81-84% (issue-bound).
+- Cross-check vs replay cand counts: +16.3-16.4 inst PER candidate-band
+  element at both K deltas — every element in [vB,vA) or >=vA costs ~16 inst
+  (single-address atomicAdd + bounds + store); band is ~8*K/row BY DESIGN
+  (B insurance col ~6*K + A col ~2*K) => K-proportional issue-cost wall.
+- BONUS FINDING (needs L2): K1024 is INSIDE the shipped guard but was never
+  pilot-measured (KS=[512,2048]); NCU-axis dur 601us vs stock ~460-490us
+  suggests HBE may LOSE at K1024 N=262144. nsys verdict required in iter12.
+Diagnosis: fused pass is issue-bound; the tier-B safety column (rank 8*rS_K)
+buys nothing observed (0/18 fires) and costs ~6*K*16 inst/row.
+Ledger write-back: FALSIFIED.md iter10 K2048 entry re-attributed (was
+"measurement gap"); fix candidates = B-off (1 cmp/elem, single
+find_threshold) or B-narrow (rk_b 8->3-4*rS_K, no global spillB).
+Next: iter12 = kColB compile-key A/B (B-on vs B-off), gate, nsys pilot with
+K1024 added to KS (close the guard hole) + K2048 forced.

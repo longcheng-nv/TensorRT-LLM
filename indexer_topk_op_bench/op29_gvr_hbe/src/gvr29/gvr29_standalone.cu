@@ -424,8 +424,15 @@ void topk_v2_transform(torch::Tensor scores, torch::Tensor seq_lens,
   // iter10b guard REVERT to the proven domain (iter10 expansion falsified:
   // 65536x2048 0.63 [fixed per-CTA overheads vs short rows], K2048 0.56-0.88
   // [unattributed K-proportional cost — NCU next]): K <= 1024 && N >= 131072.
-  if (use_hbe && !cluster_eligible && static_cast<int64_t>(K) <= 1024 &&
-      static_cast<uint32_t>(max_seq_len) >= 131072) {
+  // GVR29_FORCE_HBE=1: diagnostic-only guard bypass (iter11 NCU attribution
+  // of guard-excluded cells); default unset = byte-identical dispatch.
+  static const bool force_hbe = [] {
+    const char* e = std::getenv("GVR29_FORCE_HBE");
+    return e != nullptr && e[0] == '1';
+  }();
+  if (use_hbe && !cluster_eligible &&
+      (force_hbe || (static_cast<int64_t>(K) <= 1024 &&
+                     static_cast<uint32_t>(max_seq_len) >= 131072))) {
     TORCH_CHECK(pre_idx.scalar_type() == torch::kInt32 &&
                 pre_idx.size(0) == batch_size &&
                 pre_idx.size(1) == static_cast<int64_t>(topk),

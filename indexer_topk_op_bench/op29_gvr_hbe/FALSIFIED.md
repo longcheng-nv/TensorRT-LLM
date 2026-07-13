@@ -39,7 +39,15 @@
   complexity-backfire — per-CTA fixed phases (sample+2*find_threshold+resolve)
   don't amortize on short rows. Revival: cut fixed costs (fewer bins /
   merged find_threshold / resolve-lite).
-- (HBE at K=2048 with capA=2K, {fp32 N>=131072}, nsys iter10) measurement gap
-  — cand target 2*K=8192 > capA 4096 forces universal spill; +188us vs
-  rival's +13us K-scaling. Revival: NCU attribution + rank-1.2*rS_K tighter
-  column or capA=4K at occ-1 A/B.
+- (HBE at K=2048 with capA=2K, {fp32 N>=131072}, nsys iter10; RE-ATTRIBUTED
+  iter11 NCU+replay) — the "universal spill" suspicion was WRONG (ovA max 251
+  entries = 0.57% pass; occ flat 93-94%; dram_r 1.01 pass at all K). Real
+  cause: ~16 inst per candidate-band element in the issue-bound (81-84%)
+  fused pass; band ~8*K/row by design (B col 6*K + A col 2*K) => the K-cost
+  is the COLUMN WIDTH, not the caps. Revival: shrink/remove the B column
+  (tier B fired 0/18 on real bundles) — iter12.
+- (tier-B insurance column at rank 8*rS_K, {fp32, 131072<=N<=262144,
+  real/best/worst bundles}, replay 18/18 + NCU iter11) complexity-backfire —
+  never fires, costs ~6*K*16 inst/row in an issue-bound pass. Revival: real
+  per-row variance data showing tier-A miss rate >> bench (bench rows are
+  identical per cell).
