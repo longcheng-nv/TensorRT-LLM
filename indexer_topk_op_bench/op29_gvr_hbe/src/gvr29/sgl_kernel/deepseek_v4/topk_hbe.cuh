@@ -40,6 +40,15 @@ struct HbeConfig {
   // iter4: subsample the hint gather 4x (quantile estimate needs only
   // ~hundreds of samples; the full-K gather was K*BS random reads).
   static constexpr uint32_t kHintStride = 4;
+  // iter5: global spill (flashinfer-style) — candidates past the smem caps
+  // go to a per-row global region instead of forcing a full redo pass.
+  // Spill traffic ~(cand-cap)*8B*2 vs redo N*4B: e.g. worst K512 N=262144
+  // cand~13xK -> ~57KB/row spill vs 1MB/row redo.
+  static constexpr uint32_t spillA(uint32_t topk) { return 28 * topk; }
+  static constexpr uint32_t spillB(uint32_t topk) { return 28 * topk; }
+  static constexpr size_t spill_bytes_per_row(uint32_t topk) {
+    return size_t(spillA(topk) + spillB(topk)) * sizeof(TieValue);
+  }
   static constexpr size_t dyn_smem_bytes(uint32_t topk) {
     return size_t(capA(topk)) * sizeof(TieValue)
          + size_t(capB(topk)) * sizeof(int32_t);
@@ -59,6 +68,7 @@ struct TopKHbeStreaming : TopKStreaming {
   template <bool kUsePDL>
   SGL_DEVICE static void forward(const TopKProblem problem,
                                  const int32_t* __restrict__ pre_idx,
+                                 TieValue* __restrict__ spill_row,
                                  void* _smem, void* _dyn) {
     const auto tx = threadIdx.x;
     const auto smem = static_cast<Smem*>(_smem);
@@ -67,6 +77,10 @@ struct TopKHbeStreaming : TopKStreaming {
     const uint32_t capB = HbeConfig::capB(topk);
     auto* bufA = static_cast<TieValue*>(_dyn);
     auto* bufB = reinterpret_cast<int32_t*>(bufA + capA);
+    const uint32_t spA = HbeConfig::spillA(topk);
+    const uint32_t spB = HbeConfig::spillB(topk);
+    TieValue* __restrict__ spillA_g = spill_row;          // [spA]
+    TieValue* __restrict__ spillB_g = spill_row + spA;    // [spB]
     __shared__ HbeCounters hc;
 
     // ---- Phase H0: hint mini-histogram -> column bins bA >= bB ----------
@@ -126,10 +140,18 @@ struct TopKHbeStreaming : TopKStreaming {
       atomicAdd(&smem->histogram[extract_coarse_bin<kHistBits>(val)], 1);
       if (val >= vA) {
         const auto p = atomicAdd(&hc.cnt_a, 1);
-        if (p < capA) bufA[p] = {val, idx};
+        if (p < capA) {
+          bufA[p] = {val, idx};
+        } else if (p < capA + spA) {
+          spillA_g[p - capA] = {val, idx};
+        }
       } else if (val >= vB) {
         const auto p = atomicAdd(&hc.cnt_b, 1);
-        if (p < capB) bufB[p] = static_cast<int32_t>(idx);
+        if (p < capB) {
+          bufB[p] = static_cast<int32_t>(idx);
+        } else if (p < capB + spB) {
+          spillB_g[p - capB] = {val, idx};
+        }
       }
     });
     __syncthreads();
@@ -142,9 +164,9 @@ struct TopKHbeStreaming : TopKStreaming {
     const float v_hi = coarse_bin_lower_bound<kHistBits>(bstar + 1);
     const float v_lo = coarse_bin_lower_bound<kHistBits>(bstar);
 
-    const bool tierA = (bstar >= binA) && (cntA <= capA);
-    const bool tierB = !tierA && (bstar >= binB) && (cntA <= capA)
-                       && (cntB <= capB);
+    const bool tierA = (bstar >= binA) && (cntA <= capA + spA);
+    const bool tierB = !tierA && (bstar >= binB) && (cntA <= capA + spA)
+                       && (cntB <= capB + spB);
     if (tx == 0) {
       smem->count_gt = 0;
       smem->count_eq = 0;
@@ -164,15 +186,25 @@ struct TopKHbeStreaming : TopKStreaming {
     };
 
     if (tierA || tierB) {
-      // resolve from smem candidates only (no further full pass)
-      for (uint32_t t = tx; t < cntA; t += kBlockSize) {
+      // resolve from smem candidates + global spill (no further full pass)
+      const uint32_t nA_smem = min(cntA, capA);
+      for (uint32_t t = tx; t < nA_smem; t += kBlockSize) {
         const auto e = bufA[t];
         classify(e.value, e.idx);
       }
+      for (uint32_t t = capA + tx; t < cntA; t += kBlockSize) {
+        const auto e = spillA_g[t - capA];
+        classify(e.value, e.idx);
+      }
       if (tierB) {
-        for (uint32_t t = tx; t < cntB; t += kBlockSize) {
+        const uint32_t nB_smem = min(cntB, capB);
+        for (uint32_t t = tx; t < nB_smem; t += kBlockSize) {
           const auto idx = static_cast<uint32_t>(bufB[t]);
           classify(problem.in[idx], idx);  // <=capB random re-gathers
+        }
+        for (uint32_t t = capB + tx; t < cntB; t += kBlockSize) {
+          const auto e = spillB_g[t - capB];
+          classify(e.value, e.idx);
         }
       }
     } else {

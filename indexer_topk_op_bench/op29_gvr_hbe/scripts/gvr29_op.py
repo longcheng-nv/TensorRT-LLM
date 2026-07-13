@@ -71,8 +71,21 @@ def plan(seq_lens, metadata=None, static_cluster_threshold=0):
     return metadata
 
 
+_SPILL = {}
+
+
+def _spill_buf(R, K, device):
+    """Per-row global spill region: (spillA+spillB)=56*K TieValue (8 B)."""
+    need = R * 56 * K * 8
+    key = device
+    buf = _SPILL.get(key)
+    if buf is None or buf.numel() < need:
+        _SPILL[key] = buf = torch.empty(need, dtype=torch.uint8, device=device)
+    return buf
+
+
 def gvr29_topk(scores, seq_lens, K, pre_idx, out=None, metadata=None,
-               page_table=None, max_seq_len=None, use_hbe=True):
+               page_table=None, max_seq_len=None, use_hbe=True, spill=None):
     assert scores.dtype == torch.float32
     R = scores.size(0)
     if out is None:
@@ -83,8 +96,11 @@ def gvr29_topk(scores, seq_lens, K, pre_idx, out=None, metadata=None,
         metadata = plan(seq_lens)
     if max_seq_len is None:
         max_seq_len = int(seq_lens.max().item())
+    if spill is None:
+        spill = _spill_buf(R, K, scores.device)
     _module().gvr29_transform(scores, seq_lens, page_table, out, metadata,
-                              K, PAGE_BITS, max_seq_len, pre_idx, use_hbe)
+                              K, PAGE_BITS, max_seq_len, pre_idx, use_hbe,
+                              spill)
     return out
 
 

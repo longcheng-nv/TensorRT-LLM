@@ -214,7 +214,8 @@ using HbeCfg = impl::HbeConfig;
 /// pre_idx: [B, topk] hint indices (per-row). Dynamic smem = candidate bufs.
 template <bool kPDL>
 TOPK_KERNEL void gvr29_hbe_kernel(const __grid_constant__ TopKLaunchParams params,
-                                  const int32_t* __restrict__ pre_idx) {
+                                  const int32_t* __restrict__ pre_idx,
+                                  impl::TieValue* __restrict__ spill) {
   // NOTE: no enable_smem_spilling() here — ptxas forbids the pragma in
   // kernels with dynamic SMEM (the HBE candidate buffers).
   auto problem = params.problem(blockIdx.x);
@@ -231,8 +232,11 @@ TOPK_KERNEL void gvr29_hbe_kernel(const __grid_constant__ TopKLaunchParams param
       Register4::forward<kPDL>(problem, &smem);
     }
   } else {
+    const size_t spill_stride =
+        HbeCfg::spill_bytes_per_row(problem.topk) / sizeof(impl::TieValue);
     HbeStreaming::forward<kPDL>(problem,
                                 pre_idx + blockIdx.x * int64_t(problem.topk),
+                                spill + blockIdx.x * spill_stride,
                                 &smem, dyn_smem);
   }
   device::PDLTriggerSecondary<kPDL>();
@@ -384,7 +388,7 @@ void topk_v2_transform(torch::Tensor scores, torch::Tensor seq_lens,
                        torch::Tensor page_table, torch::Tensor out,
                        torch::Tensor metadata, int64_t K, int64_t page_bits,
                        int64_t max_seq_len, torch::Tensor pre_idx,
-                       bool use_hbe) {
+                       bool use_hbe, torch::Tensor spill) {
   TORCH_CHECK(scores.is_cuda() && scores.scalar_type() == torch::kFloat32,
               "scores must be CUDA float32");
   TORCH_CHECK(seq_lens.scalar_type() == torch::kInt32);
@@ -434,9 +438,14 @@ void topk_v2_transform(torch::Tensor scores, torch::Tensor seq_lens,
                            static_cast<int>(HbeCfg::dyn_smem_bytes(1024)));
       configured_dyn = HbeCfg::dyn_smem_bytes(1024);
     }
+    TORCH_CHECK(spill.numel() * spill.element_size() >=
+                    static_cast<int64_t>(batch_size) *
+                        static_cast<int64_t>(HbeCfg::spill_bytes_per_row(topk)),
+                "spill buffer too small");
     host::LaunchKernel(batch_size, kBlockSize, stream, dyn)
         .config({.use_pdl = true})
-        .launch(gvr29_hbe_kernel<true>, params, pre_idx.data_ptr<int32_t>());
+        .launch(gvr29_hbe_kernel<true>, params, pre_idx.data_ptr<int32_t>(),
+                reinterpret_cast<impl::TieValue*>(spill.data_ptr()));
     return;
   }
   const bool use_cluster =
