@@ -37,3 +37,8 @@ results_b200_op30_calib/
 op30_gvrbase_extremes/*_gpu*.log
 op30_gvrbase_extremes/gate_op30.log
 results_b200_op30_smoke/
+# op22 REAL-capture chapter: per-machine nsys results + fleet logs
+results_b200_op22real/
+op22_temporal_fixed_hr_bench/realcap_gpu*.log
+op22_temporal_fixed_hr_bench/gate_op22real.log
+op22_temporal_fixed_hr_bench/REPORT.html.bak_pre_realcap_*

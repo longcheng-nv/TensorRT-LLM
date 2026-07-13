@@ -1,5 +1,23 @@
 # op22 — GVR op21 vs rivals on temporal-synth FIXED-hit-rate data (B200)
 
+> **ADDENDUM (2026-07-13, umbriel-b200-072): REPORT.html chapter 9 — REAL
+> captured-data.** The report arm set re-measured on PRODUCTION-captured
+> indexer logits (user spec: K512→V4 Flash ISL=100K, K1024→V4 Pro ISL=64K
+> native-K1024, K2048→V3.2 SWE-64K; per layer LAST decode step, preIdx =
+> prev step top-K, BS = row replication). Pipeline (all in this bucket):
+> `sweep_op22_real.py` (14 arms incl gvr29_hbe supplement) →
+> `gate_op22real.py` (pre-gate 588/588 + gvr29 mini-gate PASS) →
+> `launch_op22real_072.sh` / `drive_nsys_op22real.sh` (9 batches, 8 GPUs,
+> 23,652 cells, 0 err) → `parse_op22real.py` → `sanity_realcap_vs_rr.py`
+> (anchor check vs §2 REAL scenario) → `update_report_realcap.py`
+> (idempotent sentinel-block chapter §9 + op22real_{layer,bs}_data.csv).
+> Key findings: hint-blind arms match synth within ~±20%; synth-tuned GVR
+> arms (op27_hls, op26_r0auto) systematically worse on real rows (Flash/
+> V3.2 op27_hls flips to slower-than-baseline); ONE op26 boundary-precision
+> defect found (V4 Pro L56 fp32, K/K+1 gap 2.7e-6 → 1/1024 index swap,
+> deterministic 3/3) — op26 follow-up. Results root (gitignored):
+> `results_b200_op22real{,_o29}/`.
+
 > **STATUS: CLOSED (iter2, 2026-07-07).** Full grid 81/81 batches, 3834
 > recs × 3 scenarios, 0 errors. Deliverable REPORT.html final. Verdict:
 > op21 wins only on real-scenario data (radix/op21 1.089/0.873/0.827
