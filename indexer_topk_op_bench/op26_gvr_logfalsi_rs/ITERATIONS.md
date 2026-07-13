@@ -426,3 +426,46 @@
 - 注:REPORT 里 op26_r0auto 的 mc 域行采于本默认之前(少 ~1-3.4%),
   下次 backfill 自动收编,不为此重跑 81 批。
 - 工具 = analyze_r0mcc_ab.py;根 = results_b200_op26_r0mcc_ab(不入库)。
+
+## iter7 — core 低 BS leader 尾段攻坚 (2026-07-13, umbriel-b200-092)
+
+### 预研判决 (ncu full-set, 3 负格代表 + radix 对照) — 假设"scan ILP/向量宽度"证伪, 真主税 = leader 串行尾段
+
+- 工具链:prof_lowbs_cell.py(复用 sweep_op22rr.build_call,BS expand/
+  radix_aux/cr 与 nsys 战役逐字节同约定)→ analyze_iter7_ncu.py(SOL/
+  stall 汇总)→ analyze_iter7_segments.py(warp-stall 采样按**执行过的**
+  UCGABAR_WAIT 站点分段;采样对全体常驻 warp 时间均匀 ⇒ 段占比 ≈ 墙钟
+  相位分解)。根 = results_iter7_prof(不入库);ncu 锁基频 1.15GHz,
+  绝对时长勿与 nsys boost 比。
+- **三负格一致(K1024 fp32 131072 BS1 / K2048 fp16 131072 BS1 / K1024
+  fp32 65536 BS8)**:barrier-stall 54-58% 居首,其中 UCGABAR_WAIT
+  (cluster CGA barrier)独占 40-46% 全部采样;DRAM 吞吐 0.25-0.5%
+  (完全非带宽);BS=8 与 BS=1 时长同(38.3 vs 37.9µs)再证
+  latency-bound。radix 同格对照 58% barrier-stall 但无单一热点。
+- **快路恰 4 次 cluster 同步,段分解**:seg0 P1+P1b+R0 扫描+归并 24-27%;
+  seg1 R0 判决/R1 区 0-3.5%;seg2 P3 各 CTA 并行 collect 11-14%;
+  **seg3 leader 串行尾段(3×peer DSMEM 拉取 + 单 CTA vendored snap P4)
+  57-61%,其中 ~70% 采样是 3 个非 leader CTA 堵在最终 UCGABAR** —— 墙钟
+  杠杆 = 缩短/并行化 leader 尾段,非"减同步"本身。
+- 设计序:D3 p4_rs(1cta 已验证 rank-scatter P4 港 leader)→ D1
+  peer-push gather → D2 cluster-cooperative P4(备选)。PLAN_ITER7.md。
+
+### D3 p4_rs 臂 op26_r0mcr + A/B 判决 (092, 54 批 1812 配对格) — mc 域正向, 默认按 (dtype,K) 门控落地
+
+- 移植 = op#7 exact rank-scatter P4(307 行 verbatim,fixed 256-bin fine
+  level,vdiff=0 语义)进 GvrOp26R0ClusterKernel leader 段,const_expr
+  调度 vs vendored snap;`p4_rs` 入编译 key;臂 op26_r0mcr 四处注册。
+  首硅 smoke 全绿(全 dtype/K 含 hr0/bottom-K),gate 291/291。
+- **A/B(worst+real × 3 sweep × 9 K/dtype,us_cold(r0mc)/us_cold(r0mcr))**:
+  mc 调度域 ALL gm **1.038**;fp32 K1024/K2048 **1.093/1.093**(max
+  1.21/1.23),fp16 全 K 1.016-1.052,bf16 K1024/K2048 1.024/1.031;
+  **唯一负带 = (bf16, K512) gm 0.992,18 个 <0.98 损失格全在此**;
+  worst 轴同构(ALL 1.035)。全格上下文 gm 1.096(域外 1cta 区更大,
+  不参与 ship 判据)。
+- **落默认:`dispatch_p4rs_mc_op26(dt, K) = not (bf16 ∧ K512)`**。与
+  1cta 的 dispatch_rs_op26(fp32 ∪ BS≥256)再次分化——mc 域
+  latency-bound,16-bit rank-scatter 也赢(第三个 port-must-rejudge
+  实例,前两个 = fb_fix、p1b_cache)。op26_r0mcr 保留 force-True 对照。
+- 工具 analyze_r0mcr_ab.py;根 = results_b200_op26_r0mcr_ab(不入库)。
+  注:REPORT 的 op26_r0auto mc 域行采于本默认之前,下次 backfill 收编
+  (同 p1bc 先例,不单独重跑 81 批)。

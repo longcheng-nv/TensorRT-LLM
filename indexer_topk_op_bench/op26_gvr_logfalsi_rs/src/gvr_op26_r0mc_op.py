@@ -1245,13 +1245,16 @@ def dispatch_p1bc_mc_op26(dt):
     return True
 
 
-def dispatch_p4rs_mc_op26(dt):
-    """p4_rs (leader rank-scatter P4) dispatch for the mc port.
-    Default OFF pending the iter7 mc-domain A/B (arm op26_r0mcr forces ON).
-    1cta precedent (dispatch_rs_op26) = fp32 anywhere, 16-bit only BS>=256
-    — but iter6 taught that 1cta verdicts must be re-judged in the cluster
-    port before becoming defaults."""
-    return False
+def dispatch_p4rs_mc_op26(dt, top_k):
+    """p4_rs (leader rank-scatter P4) dispatch for the mc port — iter7
+    A/B verdict (092, 54 nsys batches, 1812 paired cells): mc dispatch
+    region gm 1.038 overall; fp32 K1024/K2048 1.093 (max 1.23), fp16 all K
+    1.016-1.052, bf16 K1024/K2048 1.024-1.031. Single loss band =
+    (bf16, K512) gm 0.992 with all 18 <0.98 cells -> gated OFF there.
+    NOTE: differs from the 1cta dispatch_rs_op26 (fp32-anywhere ∪ BS>=256)
+    — in the latency-bound mc domain 16-bit rank-scatter also wins; yet
+    another port-must-rejudge instance (cf. p1b_cache)."""
+    return not (dt == torch.bfloat16 and top_k == 512)
 
 
 def gvr_r0_mc_op26(logits, pre_idx, seq_lens, index_topk, compress_ratio=1,
@@ -1261,7 +1264,7 @@ def gvr_r0_mc_op26(logits, pre_idx, seq_lens, index_topk, compress_ratio=1,
     if p1b_cache is None:
         p1b_cache = dispatch_p1bc_mc_op26(dt)
     if p4_rs is None:
-        p4_rs = dispatch_p4rs_mc_op26(dt)
+        p4_rs = dispatch_p4rs_mc_op26(dt, index_topk)
     qf = tuple(qfracs) if qfracs is not None else M2D
     cfg = _resolve_config_mc(logits, NUM_SMS, cluster_size)
     key = (dt, index_topk, next_n, compress_ratio, qf,
