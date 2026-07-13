@@ -1,0 +1,4 @@
+*.sqlite
+*.nsys-rep
+*.ncu-rep
+results/*.json

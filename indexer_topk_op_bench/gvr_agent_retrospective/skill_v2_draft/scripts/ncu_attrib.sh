@@ -11,9 +11,17 @@
 #
 # Usage: bash scripts/ncu_attrib.sh <runner.py> [args...]
 #        INPUT_BYTES=1048576 bash scripts/ncu_attrib.sh <runner.py>   # enables L2-trap verdict
+#        KERNEL_REGEX=my_kernel bash scripts/ncu_attrib.sh <runner.py>
+#
+# The verdict block reads the FIRST profiled kernel's metrics. If the runner
+# launches anything before the kernel of interest (input generation counts!),
+# set KERNEL_REGEX so ncu -k profiles only the target (validated footgun: a
+# randn setup kernel produced a false L2-TRAP verdict).
 set -euo pipefail
 
 RUNNER=${1:?usage: ncu_attrib.sh <runner.py> [args...]}; shift || true
+KFLAGS=()
+[ -n "${KERNEL_REGEX:-}" ] && KFLAGS=(-k "$KERNEL_REGEX")
 
 METRICS=(
   gpu__time_duration.sum                                   # kernel time
@@ -29,14 +37,19 @@ METRICS=(
 IFS=,; MET="${METRICS[*]}"; unset IFS
 
 # Token hygiene: profiler artifacts embed the process env.
+CSV=/tmp/ncu_attrib_$$.csv
 env -u GITHUB_TOKEN -u HF_TOKEN \
-  ncu --metrics "$MET" --target-processes all --csv \
-  python3 "$RUNNER" "$@" | tee /tmp/ncu_attrib_$$.csv
+  ncu --metrics "$MET" --target-processes all --csv ${KFLAGS[@]+"${KFLAGS[@]}"} \
+  python3 "$RUNNER" "$@" | tee "$CSV"
 
-python3 - "$INPUT_BYTES" </tmp/ncu_attrib_$$.csv <<'EOF' || true
+# NOTE: the csv path is passed as argv — `python3 -` takes its PROGRAM from
+# stdin, so `<file` + heredoc silently starves csv.reader (validated dead-code
+# failure: verdicts never printed). INPUT_BYTES defaulted for `set -u`.
+python3 - "$CSV" "${INPUT_BYTES:-}" <<'EOF' || true
 import csv, os, sys
-input_bytes = int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1] else 0
-rows = [r for r in csv.reader(sys.stdin) if r]
+input_bytes = int(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[2] else 0
+with open(sys.argv[1]) as f:
+    rows = [r for r in csv.reader(f) if r]
 hdr = next((r for r in rows if "Metric Name" in r), None)
 if not hdr:
     sys.exit(0)
@@ -63,4 +76,4 @@ occ = num("sm__warps_active.avg.pct_of_peak_sustained_active")
 print(f"grid={grid}, achieved_occupancy={occ:.1f}% -> if grid << SM count, occupancy "
       f"is STRUCTURAL (register/pipeline levers void; go data-parallel)")
 EOF
-rm -f /tmp/ncu_attrib_$$.csv
+rm -f "$CSV"

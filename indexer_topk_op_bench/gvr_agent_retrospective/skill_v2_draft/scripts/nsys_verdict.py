@@ -22,6 +22,8 @@ Usage:
         [--anchor-impl src/incumbent.py --anchor-expected 17.8 --anchor-tol 0.03]
 """
 import argparse
+import csv
+import io
 import json
 import os
 import re
@@ -65,17 +67,20 @@ def nsys_batch(impl, launches, kernel_regex, workdir, tag):
         ["nsys", "stats", "--report", "cuda_gpu_kern_sum", "--format", "csv", rep],
         check=True, capture_output=True, text=True).stdout
     # csv: Time(%), Total Time(ns), Instances, Avg, Med, Min, Max, StdDev, Name
+    # MUST use the csv module: kernel template names contain commas, and a naive
+    # split makes both the evictor filter and --kernel-regex match against name
+    # fragments (validated failure: evictor inflated every launch by ~180us).
     total_ns = 0.0
     pat = re.compile(kernel_regex)
-    for line in stats.splitlines():
-        cols = [c.strip().strip('"') for c in line.split(",")]
-        if len(cols) < 9 or not cols[1].replace(".", "").isdigit():
+    for cols in csv.reader(io.StringIO(stats)):
+        cols = [c.strip() for c in cols]
+        if len(cols) < 9 or not cols[1].replace(".", "").replace(",", "").isdigit():
             continue
         name = cols[-1]
         if "uniform" in name.lower() or "distribution" in name.lower():
             continue                     # the L2 evictor kernel
         if pat.search(name):
-            total_ns += float(cols[1])
+            total_ns += float(cols[1].replace(",", ""))
     return total_ns / launches / 1e3     # us per launch (all matched kernels)
 
 
