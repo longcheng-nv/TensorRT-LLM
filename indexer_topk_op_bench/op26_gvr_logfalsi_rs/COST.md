@@ -180,3 +180,43 @@ $12.5 cache-write(实测全部 5-min TTL)/ $1.0 cache-read,单位每 MTok。
   fin2 发车/污染处置/跨机交接文档;未做 usage snapshot,
   估 ≈$40-80(多迭代长战役,事件驱动挂机段占比高)。
 - fin2 后半(45 批)+ 报告收尾记账归新机 session(TAKEOVER_FIN2_8GPU.md §4)。
+
+## 10 · fin2 backfill 后半 + 报告收尾 — 047(2026-07-13)
+
+新机(umbriel-b200-047)接管 TAKEOVER_FIN2_8GPU.md §3-§4:027 判死后
+满 8 卡发车 fin2 剩余 45 批 → 81/81 → 报告收尾。
+
+### GPU 花费(047,日志时间戳实算)
+
+| 内容 | GPU-h |
+|---|---|
+| fin2 后半 45 批(8 卡,14:16-14:46,GPU7 串 K2048 双 dtype 至 15:19) | ~4.2 |
+| §4 锚漂移 refix:2 污染 027-tail 批重跑(real/bs + best/seqlen K512 × 3dt,3 卡 15:26-15:39) | ~0.6 |
+| **小计(047 段)** | **≈ 4.8** |
+
+**refix 起因**:§4 step-3 特查发现 027 交接前最后两批(real/bs K512、
+best/seqlen K512,marker 13:50-13:55)在外部 8 卡任务上线时被污染——
+base 锚 gvr_cutedsl cold-us 系统性 +1.68×(p95 real/bs=1.485 vs 干净控制
+≤1.04)。判据 = **base 锚 p95>1.15 = 污染**(区别于小 N cold-L2 噪声,
+后者每批都有、p95≤1.04)。移标重跑后 p95 回落 1.023/1.038,6 批全绿。
+详见 FIN2_REFIX_NOTE.md + check_027tail_drift.py。
+
+### 收尾判据(全绿)
+
+- exactness 全臂 414/414 FAIL=0(含 op26_r0auto);
+- op26_r0auto 锚漂移 median 1.0012 / p90 1.0224;
+- 全 6 个 K512 批污染分类器 p95≤1.08;
+- op26_r0auto K512 16-bit 16-32K 段 vs base ~1.05-1.10×(kc-diet=3072 生效)。
+
+### Claude token 花费
+
+- 本 session(047):判活+8 卡发车+事件驱动监控+§4 污染侦测/refix+
+  报告重导+记账收口;事件驱动挂机为主,未做 usage snapshot,
+  估 ≈$25-45(单迭代收尾战役,含一轮污染排查+重跑)。
+
+### op26 战役累计更新
+
+- GPU:§1-9 累计 + 047 段 ≈ 4.8 → 战役总计 **≈ 60 GPU-h**
+  (iter0-6 主线 43 + 小 N 门 3.4 + 027 段 12.9 + 047 段 4.8,取整)。
+- Claude token:确定归属口径 $433 + 后续接管 session 估算段
+  (039/027/047)未做 snapshot,量级各 $15-80。

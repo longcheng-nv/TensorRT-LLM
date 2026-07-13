@@ -46,7 +46,7 @@ u5.__name__ = "update_report_op26_iter5"
 spec.loader.exec_module(u5)
 u27 = u5.u27
 
-FIN_ROOT = HERE.parents[0] / "results_b200_op26_iter6final"
+FIN_ROOT = HERE.parents[0] / "results_b200_op26_fin2"
 O26R = "op26_r0auto"
 RADIX = "radix_cutedsl"
 BASE = u27.BASE
@@ -54,7 +54,7 @@ O26R_COL = "#00bbf9"
 O26R_CANON = "GVR op#26 R0 (auto 1CTA/MC dispatch)"
 OP26_ITER6_NOTE_ID = "op26-r0auto-note-2026-07-12"
 
-FIN_NODE = u27._detect_nodes("fin_gpu*.log", "umbriel-b200-074 + umbriel-b200-069")
+FIN_NODE = u27._detect_nodes("fin2*_gpu*.log", "umbriel-b200-027 + umbriel-b200-047")
 
 CORE_LO, CORE_HI = 8192, 262144
 HUGE_LO = 524288

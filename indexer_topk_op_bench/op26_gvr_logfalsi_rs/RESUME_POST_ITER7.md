@@ -1,8 +1,10 @@
-# 【已存档 2026-07-13】唯一恢复入口 = TAKEOVER_FIN2_8GPU.md
+# 【全收口 2026-07-13,047 段】op26 二阶积压①②③⑤ 已全部完成
 #
-# 本文件的积压已全部处理:① qfracs 证伪 / ② edge-aim 关闭 /
-# ③ kc=3072 SHIP @16daaf5478 / ⑤ fin2 36/81 干净 marker 待新机续跑
-# (027 外部任务争抢已清场)。判决详情 = ITERATIONS.md 末四段。
+# ① qfracs 证伪 / ② edge-aim 关闭 / ③ kc=3072 SHIP @16daaf5478 /
+# ⑤ fin2 全网格 81/81 DONE(047 续跑后半 45 批 + refix 2 污染 027-tail
+#    批;exactness 全臂 414/414,锚漂移 med 1.001)。
+# 报告收尾详情 = FIN2_REFIX_NOTE.md + COST.md §10;判决 = ITERATIONS.md 末四段。
+# 无在飞任务、无脏 src。TAKEOVER_FIN2_8GPU.md 亦转存档。
 
 # op26 post-iter7 恢复 checkpoint(2026-07-13;092 iter7 收口 → 039 小 N 门收口 @edb9da095d)
 
