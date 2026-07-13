@@ -1,4 +1,4 @@
-# DESIGN — HBE-C: hint-ladder cluster single-pass (op29 next campaign / "op30")
+# DESIGN — HBE-C: hint-ladder cluster single-pass (op29 next campaign / "op31" — NOTE: op30 number already taken by the 10-arm re-test campaign)
 
 > Status: DESIGN (2026-07-13, deep-dive per user request). Ledger-checked.
 > Inputs: gvr_agent_retrospective/RETROSPECTIVE.md · op21 HLS (MATH §10,
