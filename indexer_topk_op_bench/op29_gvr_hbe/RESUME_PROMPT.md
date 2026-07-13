@@ -21,17 +21,26 @@ B200 node (NFS-shared checkout).
   HLS Step-3 lineage; ledger-checked; probe plan inside).
 - NAMING: op30 is TAKEN (parallel 10-arm re-test campaign) — HBE-C = op31.
 
-## Priority queue
-1. HBE-C rung-0 CRUX (host, ~1h): hint-ladder placement replay on 27 op22rr
-   bundles (+ real captures): tightest-rung cand counts / bracket rate /
-   miss rate per (scenario,K,N). GO line: E[passes] <= ~1.2, miss <= ~10%.
-   Extend scripts/replay_hbe_cand.py; spec = DESIGN_HBEC_HINT_LADDER.md §6.
-2. HBE-C rung-2 microbench: DSMEM M×8-scalar reduce vs 4096-bin all-reduce
-   latency at BS=1 (decides small-N BS=1 engagement).
-3. HBE-C rung-3 kernel (tier-5 behind flag in gvr29), gate 3-track, pilot
-   (131072..1048576) × BS {1,16,64,256,512}, nsys same-batch 3 arms.
-4. Short rows N<=16K (P5); sub-65536 hint tier (P3, small stakes).
-5. Production integration decision for tiers 4+5 (USER).
+## HBE-C (op31) campaign — CLOSED 2026-07-13 (node 072): CONDITIONAL WIN, NO-SHIP for envelope
+- rung-0 CRUX GO @8bd8ecfd85 (RUNG0_HBEC_RESULTS.md): ship ladder w3a
+  (0.92,0.45,0.048) ALL K + collect@loosest + cap 32xK; rr-real 0% miss.
+- rung-2 GO+C2-REVISED @42671d220e (RUNG2_HBEC_RESULTS.md): remote-atomic
+  mini-hist FALSIFIED; local build + dense all-reduce 1.4us flat.
+- rung-3 kernel @cf90e929f0 (topk_hbec.cuh, GVR29_HBEC=1 flag): gate 720/720
+  exact, fork parity rv/off=1.001.
+- rung-3 PILOT VERDICT @c5c7f0829f (RUNG3_HBEC_RESULTS.md): win region
+  N>=524288 (geomean 1.10-1.54) is ENTIRELY outside the deployment envelope
+  (N<=256K); inside the envelope net wash-to-loss (geomean 0.991, 19 cells
+  lose >5%). NO-SHIP as production default. Safe conditional guard
+  N>=524288 && !(K2048&&N<1M) = 75 cells geomean 1.258 zero >5% loss —
+  recorded for USER tier decision only.
+
+## Remaining priority queue (all LOWER stakes than HBE-C was)
+1. Short rows N<=16K (P5); sub-65536 hint tier (P3, small stakes) — apply
+   the SAME envelope-value scrutiny before any build (HBE-C lesson: cell
+   count != deployment weight).
+2. P4 HLS Step-3 temporal h-hat (per-row state; production plumbing; USER).
+3. Production integration decision for tiers 4+5 (USER).
 
 ## Preflight on a NEW node (do all before any measurement)
 - cd /home/scratch.loncheng_gpu/workspace/perf/workloads/DSV4/TensorRT-LLM
