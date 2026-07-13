@@ -45,3 +45,5 @@ ls ../results_b200_op28/*/.done_* | wc -l   # 应为 27
 env -u GITHUB_TOKEN -u HF_TOKEN python3 parse_op28.py ../results_b200_op28
 python3 gen_results_op28.py ../results_b200_op28
 ```
+7. DONE — REPORT.html 并入 sglang_v2 + flashinfer_topk 两臂 @92bca18ffd;
+   update_report_op28.py 为新 last-writer (append-on-top, 幂等)。
