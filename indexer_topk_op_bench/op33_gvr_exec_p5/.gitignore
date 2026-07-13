@@ -1,0 +1,7 @@
+results/
+logs/
+*.csv
+*.sqlite
+*.nsys-rep
+*.err
+__pycache__/
