@@ -37,3 +37,19 @@ ALREADY in the incumbent. +30% would require a STRUCTURAL change at BS=1 single-
 established is walled (dram 0.06% / issue 15% / near-optimal barrier chain; F1-F5). Pre-authorized
 negative: op27_hls (+ optional D2 M=3 for a conditional ~10%) remains the best option; +30% infeasible
 by tuning within the HLS-op27 framework. REPORT.html = the temporary deliverable.
+
+## iter5 — 2026-07-13 — D2 DEEP-DIVE → conditional dispatch SHIPPED (exact, +6% overall)
+Full D2 nsys (BS=1 fp32, base vs M=3 qfracs=0.85,0.35):
+  K512  N8192 1.112 / N32768 1.143 / N65536 1.051   (M=3 wins)
+  K1024 N8192 1.118 / N32768 1.104 / N65536 1.026   (M=3 wins)
+  K2048 N8192 0.996 / N32768 0.981 / N65536 0.892   (M=3 LOSES — needs the tail ladder)
+Exactness gate M=3 (scripts/gate_m3.py): **48/48 PASS** incl adversarial hr=0/hr=1 beta rows
+  (sandwich M0==0 fallback keeps it correct even with the deep column removed).
+Dispatch = `gvr_ms_op33.gvr_ms_auto_op33`: **M=3 (0.85,0.35) iff K<2048, else op27_hls default**
+  (ONE rule; K2048 byte-identical). VALIDATED exact 12/12 (val_dispatch.py). Result vs op27_hls:
+  **geomean 1.060 over all K / ~1.093 over K512/1024** (K2048 unchanged). NOT the +30% target, but
+  the ONLY exact positive lever within the HLS-op27 framework.
+Mechanism: M=3 fused count cheaper than M=4 (count_ge_multi_bench M4=1.15-1.46×) + at short-N the
+  ship qfracs' deep 0.048 column doesn't earn keep for K512/1024; K2048's tail column DOES (all_ge).
+FINAL: +30% infeasible by any lever (borrow ideas already in incumbent; structural wall = op32).
+  Shippable deliverable = op33 conditional dispatch, +6% overall / +9% K512/1024, exact 48/48.

@@ -19,6 +19,7 @@ CFG_LABEL = {
     "d4_slot1": "D4: slot_scale=1",
     "d3_qbins128": "D3: qbins=128",
     "d3_qbins64": "D3: qbins=64",
+    "op33_dispatch": "op33 DISPATCH (M=3 for K512/1024, default K2048) — EXACT 48/48",
 }
 
 
@@ -57,15 +58,15 @@ def main():
     base_bl = load_base()  # (K,N)->ns  (the dedicated baseline sweep)
     knobs = load("knobs.csv")
     d3 = load("d3.csv")
-    all_cfg = {**knobs, **d3}
+    disp = load("dispatch.csv")
+    all_cfg = {**knobs, **d3, **disp}
     # base per cell: prefer the 'base' cfg from knobs (same-run), else baseline.log
     def base_ns(K, N):
         return all_cfg.get(("base", K, N)) or base_bl.get((K, N))
 
     Ks = [512, 1024, 2048]
     Ns = sorted({k[2] for k in all_cfg} | {k[1] for k in base_bl})
-    cfgs = ["d1_p4fast0", "d2_qstock", "d2_qm2", "d3_qbins128", "d3_qbins64",
-            "d4_p4rs0", "d4_slot1"]
+    cfgs = ["op33_dispatch", "d2_qm2", "d1_p4fast0", "d2_qstock", "d3_qbins128", "d3_qbins64", "d4_p4rs0", "d4_slot1"]
 
     rows_html = []
     cfg_geo = {}
@@ -102,8 +103,10 @@ def main():
     base_col_hdr = "".join(f"<th>N{N//1024}K</th>" for N in Ns)
 
     best_geo = max(cfg_geo.values()) if cfg_geo else float("nan")
-    verdict = ("TARGET MET" if best_geo >= 1.30 else
-               f"TARGET (+30%) NOT MET by any single knob — best geomean {best_geo:.3f}")
+    dg = cfg_geo.get("op33_dispatch", float("nan"))
+    verdict = ("+30% TARGET MET" if dg >= 1.30 else
+               f"+30% target NOT met — but op33 DISPATCH (M=3 K512/1024, EXACT 48/48) ships a "
+               f"conditional +{(dg-1)*100:.1f}% overall (K512/1024 ~+9%), the only exact positive lever")
 
     html = f"""<!doctype html><html><head><meta charset=utf-8>
 <title>op33 HLS-op27 sandwich optimization — knob sweep</title>
