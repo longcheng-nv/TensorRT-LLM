@@ -40,6 +40,12 @@ struct HbeConfig {
   // iter4: subsample the hint gather 4x (quantile estimate needs only
   // ~hundreds of samples; the full-K gather was K*BS random reads).
   static constexpr uint32_t kHintStride = 4;
+  // iter6: hint-free ROW-SAMPLE estimator (scenario-invariant; rescues the
+  // uncorrelated-hint worst pole). s strided samples -> mini-hist -> bin at
+  // rank ceil(s*K/N); columns take max(hint, sample-guard) per tier.
+  static constexpr uint32_t kSampleTarget = 4096;
+  static constexpr uint32_t kSampleGuardA = 1;
+  static constexpr uint32_t kSampleGuardB = 6;
   // iter5: global spill (flashinfer-style) — candidates past the smem caps
   // go to a per-row global region instead of forcing a full redo pass.
   // Spill traffic ~(cand-cap)*8B*2 vs redo N*4B: e.g. worst K512 N=262144
@@ -123,6 +129,42 @@ struct TopKHbeStreaming : TopKStreaming {
       if (hc.bin_b > hc.bin_a) hc.bin_b = hc.bin_a;  // keep A above B
     }
     __syncthreads();
+
+    // ---- Phase H0b (iter6): row-sample estimator, fused with hint cols ---
+    {
+      const uint32_t stride =
+          max(1u, problem.seq_len / HbeConfig::kSampleTarget);
+      const uint32_t n_samp = (problem.seq_len + stride - 1) / stride;
+      // re-zero hist for the sample mini-hist
+      {
+        typename Smem::kHistVec hist_vec;
+        hist_vec.fill(0);
+        smem->hist_vecs[tx] = hist_vec;
+      }
+      __syncthreads();
+      for (uint32_t t = tx; t < n_samp; t += kBlockSize) {
+        const float sv = problem.in[t * stride];
+        atomicAdd(&smem->histogram[extract_coarse_bin<kHistBits>(sv)], 1);
+      }
+      __syncthreads();
+      // sample-space rank of the row's K-th value
+      const uint32_t rS = max(1u, static_cast<uint32_t>(
+          (static_cast<uint64_t>(n_samp) * problem.topk) / problem.seq_len));
+      find_threshold(rS, n_samp, smem);
+      __syncthreads();
+      if (tx == 0) {
+        const uint32_t bs = smem->threshold_bin;
+        const uint32_t sA =
+            bs > HbeConfig::kSampleGuardA ? bs - HbeConfig::kSampleGuardA : 0u;
+        const uint32_t sB =
+            bs > HbeConfig::kSampleGuardB ? bs - HbeConfig::kSampleGuardB : 0u;
+        // tighter (higher) of hint/sample per column; keep B <= A
+        hc.bin_a = max(hc.bin_a, sA);
+        hc.bin_b = max(hc.bin_b, sB);
+        if (hc.bin_b > hc.bin_a) hc.bin_b = hc.bin_a;
+      }
+      __syncthreads();
+    }
     const uint32_t binA = hc.bin_a, binB = hc.bin_b;
     const float vA = coarse_bin_lower_bound<kHistBits>(binA);
     const float vB = coarse_bin_lower_bound<kHistBits>(binB);
