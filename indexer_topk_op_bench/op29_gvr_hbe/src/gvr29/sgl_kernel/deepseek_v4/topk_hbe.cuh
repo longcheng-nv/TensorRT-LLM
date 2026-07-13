@@ -35,7 +35,11 @@ struct HbeConfig {
   // Budget: static smem ~52 KB + dyn <= ~60 KB keeps occupancy 2 (B200
   // 227 KB/SM). Dispatch guards K <= 1024, so 4K*8 + 2K*4 = 40 KB max dyn.
   // iter4: capA 2K->4K (worst-scenario cand med 3.4xK overflowed 2K).
-  static constexpr uint32_t capA(uint32_t topk) { return 4 * topk; }
+  // iter10: per-K caps — K2048 halves capA to keep dyn smem <= 48KB (occ 2);
+  // the sample estimator is hint-free so K2048 is back in scope.
+  static constexpr uint32_t capA(uint32_t topk) {
+    return topk <= 1024 ? 4 * topk : 2 * topk;
+  }
   static constexpr uint32_t capB(uint32_t topk) { return 2 * topk; }
   // iter4: subsample the hint gather 4x (quantile estimate needs only
   // ~hundreds of samples; the full-K gather was K*BS random reads).

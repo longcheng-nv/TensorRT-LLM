@@ -421,11 +421,13 @@ void topk_v2_transform(torch::Tensor scores, torch::Tensor seq_lens,
   // op29 HBE dispatch: streaming regime only (no cluster, rows > 16384).
   const bool cluster_eligible =
       (static_cast<uint32_t>(max_seq_len) > params.cluster_floor) && (batch_size <= kClusterMaxBatch);
-  // iter4 shape guard: only where the pilot proved wins — K <= 1024 (K2048
-  // hint quantiles unreliable) and rows long enough that the rival's 2nd
-  // pass is DRAM-cold (L2-trap ledger entry): N >= 131072.
-  if (use_hbe && !cluster_eligible && static_cast<int64_t>(K) <= 1024 &&
-      static_cast<uint32_t>(max_seq_len) >= 131072) {
+  // iter10 shape guard: engaged when the rival's 2nd pass is DRAM-cold
+  // (L2-trap ledger): total footprint batch*N >= 128M elems (512MB fp32
+  // ~= 4x L2) and rows in the streaming regime. K2048 re-enabled (sample
+  // estimator is hint-free; per-K caps keep occ 2).
+  if (use_hbe && !cluster_eligible &&
+      static_cast<uint32_t>(max_seq_len) > kReg4MaxSeqLen &&
+      static_cast<uint64_t>(max_seq_len) * batch_size >= (128ull << 20)) {
     TORCH_CHECK(pre_idx.scalar_type() == torch::kInt32 &&
                 pre_idx.size(0) == batch_size &&
                 pre_idx.size(1) == static_cast<int64_t>(topk),
@@ -435,8 +437,8 @@ void topk_v2_transform(torch::Tensor scores, torch::Tensor seq_lens,
     if (dyn > configured_dyn) {
       cudaFuncSetAttribute(gvr29_hbe_kernel<true>,
                            cudaFuncAttributeMaxDynamicSharedMemorySize,
-                           static_cast<int>(HbeCfg::dyn_smem_bytes(1024)));
-      configured_dyn = HbeCfg::dyn_smem_bytes(1024);
+                           static_cast<int>(HbeCfg::dyn_smem_bytes(2048)));
+      configured_dyn = HbeCfg::dyn_smem_bytes(2048);
     }
     TORCH_CHECK(spill.numel() * spill.element_size() >=
                     static_cast<int64_t>(batch_size) *
