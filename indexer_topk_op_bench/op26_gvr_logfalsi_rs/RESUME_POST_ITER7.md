@@ -1,3 +1,9 @@
+# 【已存档 2026-07-13】唯一恢复入口 = TAKEOVER_FIN2_8GPU.md
+#
+# 本文件的积压已全部处理:① qfracs 证伪 / ② edge-aim 关闭 /
+# ③ kc=3072 SHIP @16daaf5478 / ⑤ fin2 36/81 干净 marker 待新机续跑
+# (027 外部任务争抢已清场)。判决详情 = ITERATIONS.md 末四段。
+
 # op26 post-iter7 恢复 checkpoint(2026-07-13;092 iter7 收口 → 039 小 N 门收口 @edb9da095d)
 
 > 任意 B200 节点 `cd` 进来即接管,零拷贝。**iter7 主线 + 小 N R0 门
