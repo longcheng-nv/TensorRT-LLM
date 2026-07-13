@@ -1,7 +1,9 @@
-# op26 post-iter7 恢复 checkpoint(2026-07-13, umbriel-b200-092 收口)
+# op26 post-iter7 恢复 checkpoint(2026-07-13;092 iter7 收口 → 039 小 N 门收口 @edb9da095d)
 
-> 任意 B200 节点 `cd` 进来即接管,零拷贝。**iter7 主线已全部收口并提交,
-> 无在飞任务**;本文档只为二阶积压与统一 backfill 提供续跑配方。
+> 任意 B200 节点 `cd` 进来即接管,零拷贝。**iter7 主线 + 小 N R0 门
+> A/B 均已收口并提交,无在飞任务、无脏 src**;本文档是 op26 唯一恢复
+> 入口,只为二阶积压与统一 backfill 提供续跑配方。
+> (TAKEOVER_SMALLN_8GPU.md 已执行完毕仅存档;039 节点已清场。)
 
 ## 0 · 状态快照(不要重做)
 
