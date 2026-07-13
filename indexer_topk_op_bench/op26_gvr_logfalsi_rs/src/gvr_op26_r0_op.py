@@ -730,14 +730,15 @@ def dispatch_p1bc_op26(dt):
 
 
 def gvr_r0_op26(logits, pre_idx, seq_lens, index_topk, compress_ratio=1,
-                out=None, qfracs=None, p1b_cache=None):
+                out=None, qfracs=None, p1b_cache=None, kc_override=None):
     bs, n = logits.shape
     dt = logits.dtype
     if p1b_cache is None:
         p1b_cache = dispatch_p1bc_op26(dt)
     qf = tuple(qfracs) if qfracs is not None else dispatch_r0_op26(dt, index_topk, n)
     rs_on = dispatch_rs_op26(dt, bs)
-    key = (dt, bs, n, index_topk, compress_ratio, qf, rs_on, bool(p1b_cache))
+    key = (dt, bs, n, index_topk, compress_ratio, qf, rs_on, bool(p1b_cache),
+           kc_override)
     compiled = _compiled_r0.get(key)
     if compiled is None:
         t, use256, min_bpm = _config_1cta(bs, n)
@@ -748,6 +749,7 @@ def gvr_r0_op26(logits, pre_idx, seq_lens, index_topk, compress_ratio=1,
             min_blocks_per_mp=min_bpm, return_output_values=False,
             enable_p4_rank_scatter=rs_on, enable_p4_rank_scatter_exact=rs_on,
             qfracs=qf, fb_fix=True, p1b_cache=p1b_cache,
+            kC_override=kc_override,
         )
         n_rows, n_cols, n_batch = cute.sym_int(), cute.sym_int(), cute.sym_int()
         in_align = 32 if use256 else 16

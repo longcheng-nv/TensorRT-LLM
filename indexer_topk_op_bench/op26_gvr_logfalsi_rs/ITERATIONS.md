@@ -541,3 +541,24 @@
   输出文件)。处置 = 精确 PID 击杀两棵树(不用 pkill -f)→ 显存归零
   复核 → 作废半批单 driver 重发。教训:**兜底分片不能与主分片有
   未完成批次交集**——串行兜底段只该在全部主分片收尾后手动补发。
+
+### 积压① qfracs UH4 上硅对照 — 证伪 (2026-07-13, umbriel-b200-027)
+
+- **动机**:host 筛选(screen_r0_qfracs.py)uh4 (0.90,0.65,0.40,0.15)
+  静态准入 216/216 > M2D;iter5 教训"趟数≠时延"要求上硅。
+- **A/B(sweep_qfracs.py,批内配对,臂 = 同 wrapper qfracs 参数切换,
+  编译 key 含 qfracs;代表格 K1024 fp32 131072 BS1-16 / K2048 fp16
+  65536-262144 BS1-8 + win 保持格 8-32K + 1cta 16-bit 小 N 带;
+  real+worst,4 批 4 卡,66 配对格,metric us_cold(m2d)/us_cold(uh4),
+  >1 = uh4 快)**:
+  - mc ship-gate 域(N≥65536)gm **0.9565**(uh4 慢 4-5%):real fp16
+    K2048 0.9905 / real fp32 K1024 0.9330 / worst fp16 0.9447 /
+    worst fp32 0.9289;
+  - win 保持带(8-32K)gm 0.9583、1cta 16-bit 带 gm 0.9645 —— 全域负;
+  - 损失格 <0.98 共 28+ 个(最深 0.879),正带仅孤立 max 1.138。
+- **判决:FALSIFIED,M2D 保持默认**。M=4 的静态准入优势完全没有
+  转化为时延——多 2 列 smem_ptcnt_multi + tid0 4-rung 游走 + 更深
+  rung 的更大 cand 数扫描成本 > 省下的 falsi 趟。"趟数≠时延" 第 2 例。
+- 工具:sweep_qfracs.py / drive_nsys_qfracs.sh / analyze_qfracs_ab.py;
+  根 = results_b200_op26_qfracs_ab(不入库)。uh4/M3A 候选就此关闭,
+  qfracs 杠杆除非出现新机理证据不再重开。

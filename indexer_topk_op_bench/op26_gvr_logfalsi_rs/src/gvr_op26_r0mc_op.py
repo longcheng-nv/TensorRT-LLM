@@ -122,8 +122,14 @@ class GvrOp26R0ClusterKernel(GvrTopKClusterKernel):
     """Cluster GVR + R0 h-space ladder admission + R1 inline falsi shot."""
 
     def __init__(self, *a, qfracs=M2D, mt_unroll=4, p1b_cache=False,
-                 p4_rs=False, p4_coop=False, **kw):
+                 p4_rs=False, p4_coop=False, r1aim="center",
+                 kC_override=None, **kw):
         super().__init__(*a, **kw)
+        # kC-diet (backlog-3): narrow the classic candidate window; must be
+        # set before the kC-derived aims below. Vendored base has no
+        # override hook, so apply post-ctor (kC is const_expr'd at JIT).
+        if kC_override is not None:
+            self.kC = int(kC_override)
         # compile-time debug printfs (OP26_R0MC_DEBUG=1, fresh process)
         self.dbg = bool(int(os.environ.get("OP26_R0MC_DEBUG", "0")))
         # p4_rs (iter7): leader P4 = op#7 EXACT rank-scatter (verbatim from
@@ -157,7 +163,13 @@ class GvrOp26R0ClusterKernel(GvrTopKClusterKernel):
         self.mt_unroll = int(mt_unroll)
         self.qneeds = tuple(max(1, int(math.ceil(q * self.top_k)))
                             for q in self.qfracs)
-        self.log2_r1aim = math.log2(math.sqrt(self.top_k * self.kC))
+        # R1 inline-shot aim: "center" = geometric center sqrt(kK*kCC)
+        # (shipped); "edge" = log2(kK) (backlog-2 ablation: iter5d 1cta aim
+        # table showed edge/center flips by (K,dtype,N), never mc-checked).
+        assert r1aim in ("center", "edge"), r1aim
+        self.r1aim = r1aim
+        self.log2_r1aim = (math.log2(float(self.top_k)) if r1aim == "edge"
+                           else math.log2(math.sqrt(self.top_k * self.kC)))
         # fb_fix interior aim (op26 1cta port, fb_alpha=0.2)
         self.log2_mstar = math.log2(
             self.top_k * (self.kC / self.top_k) ** 0.2)
@@ -1678,7 +1690,8 @@ def dispatch_p4co_mc_op26(dt, top_k):
 
 def gvr_r0_mc_op26(logits, pre_idx, seq_lens, index_topk, compress_ratio=1,
                    next_n=1, out=None, cluster_size=None, qfracs=None,
-                   p1b_cache=None, p4_rs=None, p4_coop=None):
+                   p1b_cache=None, p4_rs=None, p4_coop=None, r1aim=None,
+                   kc_override=None):
     dt = logits.dtype
     if p1b_cache is None:
         p1b_cache = dispatch_p1bc_mc_op26(dt)
@@ -1687,8 +1700,9 @@ def gvr_r0_mc_op26(logits, pre_idx, seq_lens, index_topk, compress_ratio=1,
     if p4_coop is None:
         p4_coop = dispatch_p4co_mc_op26(dt, index_topk)
     qf = tuple(qfracs) if qfracs is not None else M2D
+    ra = r1aim if r1aim is not None else "center"
     cfg = _resolve_config_mc(logits, NUM_SMS, cluster_size)
-    key = (dt, index_topk, next_n, compress_ratio, qf,
+    key = (dt, index_topk, next_n, compress_ratio, qf, ra, kc_override,
            cfg["min_blocks_per_mp"], cfg["use_256bit_load"],
            cfg["num_threads_per_block"], cfg["enable_warp_parallel_reduce"],
            cfg["cluster_size"], bool(p1b_cache), bool(p4_rs), bool(p4_coop))
@@ -1706,7 +1720,7 @@ def gvr_r0_mc_op26(logits, pre_idx, seq_lens, index_topk, compress_ratio=1,
             cluster_size=cfg["cluster_size"], enable_smem_cache=False,
             smem_cache_elems=32768,
             qfracs=qf, p1b_cache=bool(p1b_cache), p4_rs=bool(p4_rs),
-            p4_coop=bool(p4_coop),
+            p4_coop=bool(p4_coop), r1aim=ra, kC_override=kc_override,
         )
         n_rows, n_cols, n_batch = cute.sym_int(), cute.sym_int(), cute.sym_int()
         in_align = 32 if cfg["use_256bit_load"] else 16
