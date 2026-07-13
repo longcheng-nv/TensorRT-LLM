@@ -148,3 +148,46 @@ Ledger write-back: N<=65536 entry re-scoped to N<=32768 (65536 REVIVED);
 tier-B entry marked RESOLVED-SHIPPED; K2048 entry closed by iter12.
 Next: cluster-path HBE (BS<=512); short rows N<=16K (P5); full-grid sweep +
 REPORT arm; production dispatch-tier decision (user).
+
+## op31 HBE-C (hint-ladder cluster single-pass; BS<=512 domain) — 2026-07-13 node umbriel-b200-072
+
+Campaign renamed op31 (op30 taken by the 10-arm re-test). Probe ladder per
+DESIGN_HBEC_HINT_LADDER.md §6; omni-kernel protocol.
+
+### rung 0 CRUX — GO (RUNG0_HBEC_RESULTS.md, @8bd8ecfd85)
+Host replay of C0 placement on 45 op22rr bundles + 60 realcap rows, 3 arms.
+- collect@loosest is mandatory (bracket lands on the loosest rung in most
+  real rows; mid-rung collect misses 63-100%).
+- ship ladder = **w3a (0.92, 0.45, 0.048) for ALL K** + cap 32xK/row.
+  rr-real 0% miss / E[passes] 1.00; REAL AXIS (rr-real+realcap) 1.3% / 1.03.
+- FALSIFIED: op27's K2048 0.75 top column has an h>0.75 lt_K hole (rr-real
+  N=524288 h=0.82 -> all rungs <K). HBE-C K2048 must use 0.92 top, not the
+  op27 fallback-tuned 0.75.
+- buffer tail: cand@loosest flash realcap med 17xK/p90 25xK, v32 h~0.01
+  layers up to 33xK (the single realcap miss) -> cap-32xK + stock fallback.
+
+### rung 2 microbench — GO w/ C2 REVISED (RUNG2_HBEC_RESULTS.md, @42671d220e)
+BS=1 single-cluster per-round latency via slope-fit.
+- FALSIFIED: DESIGN's "distributed candidate mini-hist, remote DSMEM
+  atomics" = 5.8us@8K..22us@32K, WORSE than the dense all-reduce it
+  replaces (cross-CTA smem atomics serialize).
+- REVISED C2 = per-CTA LOCAL mini-hist build (1.4us flat, cand-count
+  insensitive) + stock 1024-bin dense all-reduce. Multi-rung M x 8 scalar
+  select saves only 0.45us -> DROPPED (single boundary + dense all-reduce
+  dominates). BS=1 win must come from Phase-1 full-scan elimination, not the
+  reduce chain (small-N BS=1 ~= wash, decide at pilot; 512K/1M engage).
+
+### rung 3 kernel — SMOKE + GATE PASS (@cf90e929f0)
+topk_hbec.cuh TopKClusterHbec<8> behind GVR29_HBEC flag (default unset =
+byte-identical dispatch). C0 hint subsample + single 0.92 boundary; C1 one
+chunk pass (cand buf cap 4K/CTA + local mini-hist); C2 stock DSMEM
+all-reduce + count-validity b*; MISS -> untouched Cluster::forward.
+- Bug fixed pre-commit: C2 scalar reduce called warp::reduce_sum (full-mask
+  shfl) under tx<16 guard -> warp-0 divergence DEADLOCK (same class as the
+  rung-2 fix). Full warp now enters.
+- Extended smoke SMOKE EXACT (cluster cells x good/bad/adv hints).
+- gate_hbec.py 720/720 exact, 0 fails 0 errs (3 scen x 3 K x 4 N
+  {131072..1048576} x 5 BS {1,4,64,256,512} x 4 hint tracks incl adversarial
+  bottom-K + out-of-range garbage + use_hbe=off parity).
+- nsys 4-arm same-batch pilot (anchor gvr_cutedsl / rival sglang_v2 /
+  gvr29_hbec / hbec_off) IN FLIGHT: N{131072..1M} x BS{1,16,64,256,512}.
