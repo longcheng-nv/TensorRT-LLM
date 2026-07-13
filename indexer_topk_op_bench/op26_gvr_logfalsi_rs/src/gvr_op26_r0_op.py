@@ -710,8 +710,20 @@ def dispatch_r0_op26(dtype, K, n):
     """Ladder per (dtype, K, N). v0.2: M2D everywhere — the M=2 pass is
     ~free (x1.02) so worst-like already-admitted rows pay no tax, and the
     R1 inline falsi shot covers the 3-7% bracket misses. UH4/M3A remain
-    ablation alternatives via the qfracs wrapper arg."""
+    ablation alternatives via the qfracs wrapper arg (uh4 silicon-
+    FALSIFIED 2026-07-13: mc gm 0.956 — admission != latency, again)."""
     return M2D
+
+
+def dispatch_kc_op26(K):
+    """kC-diet (backlog-3). kC=1536 won on silicon (16-bit 16-32K band gm
+    fp16 1.023 / bf16 1.017, zero loss cells) but is EXACTNESS-UNSAFE:
+    gate Suite C 16-bit tie plateaus (min(5K,5120)=2560 ties + K/2
+    winners) need kC >= ~2816 at K512 — a plateau spanning the whole
+    [K, kC] window admits no threshold and cannot be bracketed (6 fails,
+    256x -1 outputs). Tie-safe candidate kC=3072 (host admission
+    identical to 5120) pending its own A/B — until then, stock."""
+    return None
 
 
 def _config_1cta(bs, n):
@@ -737,8 +749,9 @@ def gvr_r0_op26(logits, pre_idx, seq_lens, index_topk, compress_ratio=1,
         p1b_cache = dispatch_p1bc_op26(dt)
     qf = tuple(qfracs) if qfracs is not None else dispatch_r0_op26(dt, index_topk, n)
     rs_on = dispatch_rs_op26(dt, bs)
+    kc = kc_override if kc_override is not None else dispatch_kc_op26(index_topk)
     key = (dt, bs, n, index_topk, compress_ratio, qf, rs_on, bool(p1b_cache),
-           kc_override)
+           kc)
     compiled = _compiled_r0.get(key)
     if compiled is None:
         t, use256, min_bpm = _config_1cta(bs, n)
@@ -749,7 +762,7 @@ def gvr_r0_op26(logits, pre_idx, seq_lens, index_topk, compress_ratio=1,
             min_blocks_per_mp=min_bpm, return_output_values=False,
             enable_p4_rank_scatter=rs_on, enable_p4_rank_scatter_exact=rs_on,
             qfracs=qf, fb_fix=True, p1b_cache=p1b_cache,
-            kC_override=kc_override,
+            kC_override=kc,
         )
         n_rows, n_cols, n_batch = cute.sym_int(), cute.sym_int(), cute.sym_int()
         in_align = 32 if use256 else 16

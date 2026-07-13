@@ -580,3 +580,23 @@
   低 reps 的 BS1 单点正带是重测教训第 N 例——判带先看能否复现。
 - 工具:sweep_r1aim.py / drive_nsys_r1aim.sh / analyze_r1aim_ab.py;
   根 = results_b200_op26_r1aim_ab + _confirm(不入库)。
+
+### 积压③ kC-diet K512 — kc=1536 gate 证伪 → kc=3072 迭代中 (2026-07-13, 027)
+
+- **host 筛(screen_kc_diet.py)**:kC 5120→1536 时 real/best 准入
+  100%→87.5%(miss 全 bracket 型,一步 fb_fix),cand med ~880;
+  kC=3072 准入与 5120 完全一致 → 1536 上硅。
+- **kc=1536 A/B(sweep_kcdiet.py,批内配对,双臂显式 kc_override)**:
+  1cta 16-bit 带(16-32K)gm fp16 1.0229 / bf16 1.0173,32/32 格全正
+  (max 1.059);fp32 BS≥128 路由持平(1.003);mc 持平(latency-bound
+  预期);损失格 <0.98 = 0。曾按此翻默认。
+- **gate 证伪(全 582 重验,op26_r0+r0auto 三 dtype 分片)**:
+  204/210 ×3 —— **Suite C 16-bit tie plateau 6 fails**(K512 bf16/fp16
+  N16384/131072,256 个 -1 输出)。机理:Suite C 平台 = min(5K,5120)
+  = 2560 个等值 + K/2=256 winner ⇒ 平台阈值 count≈2816,窗上界必须
+  ≥2816;kc=1536 时平台横跨整个 [512,1536] 窗,任何阈值要么 <K 要么
+  >kC,fb_fix 括号两端无内点(平台!)→ 无法收敛。**教训:kC 不只是
+  性能包络,还是 16-bit tie 平台的正确性契约(≥ 5K+K/2)**——smoke
+  的随机数据永远抓不到,只有 gate Suite C 能。默认已回退 stock。
+- **kc=3072 迭代**(tie-safe:3072≥2816,host 准入=5120):16-bit 带
+  A/B 在飞;判决绿则翻 3072(省 16KB smem)+ 再全 gate。

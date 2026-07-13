@@ -23,6 +23,7 @@ Run via drive_nsys_kcdiet.sh.
 import argparse
 import gc
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -44,15 +45,23 @@ from gvr_op26_r0mc_op import (gvr_r0_mc_op26,     # noqa: E402
 
 DEV = "cuda"
 K = 512
-KC_DIET = 1536
-ARMS = [("kc5120", None), ("kc1536", KC_DIET)]
+# KCDIET_KC picks the diet window (default 1536 = the original backlog-3
+# candidate; 3072 = the tie-safe iteration after gate Suite C killed
+# 1536). Explicit values on BOTH arms so the stock arm stays a true
+# baseline regardless of the wrapper's dispatch default.
+KC_DIET = int(os.environ.get("KCDIET_KC", "1536"))
+ARMS = [("kc5120", 5120), (f"kc{KC_DIET}", KC_DIET)]
 
-# (port, dtype, N, BS)
+# (port, dtype, N, BS). KCDIET_DT16 swaps the 16-bit band dtype
+# (bf16 spot-confirm pass); KCDIET_ONLY16=1 drops the fp32/mc cells.
+_DT16 = os.environ.get("KCDIET_DT16", "fp16")
 CELLS = (
-    [("r1cta", "fp16", n, bs) for n in (16384, 32768)
+    [("r1cta", _DT16, n, bs) for n in (16384, 32768)
      for bs in (1, 8, 64, 256)] +
-    [("r1cta", "fp32", n, bs) for n in (65536, 131072) for bs in (128, 256)] +
-    [("mc", "fp32", n, bs) for n in (65536, 131072) for bs in (1, 8)]
+    ([] if os.environ.get("KCDIET_ONLY16") else
+     [("r1cta", "fp32", n, bs) for n in (65536, 131072)
+      for bs in (128, 256)] +
+     [("mc", "fp32", n, bs) for n in (65536, 131072) for bs in (1, 8)])
 )
 
 
