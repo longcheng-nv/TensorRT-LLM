@@ -33,9 +33,13 @@ struct HbeConfig {
   static constexpr uint32_t kQbMarginBins = 2;
   // capA entries hold {val,idx} (8 B), capB entries hold idx (4 B).
   // Budget: static smem ~52 KB + dyn <= ~60 KB keeps occupancy 2 (B200
-  // 227 KB/SM). At K=2048: 2K*8 + 2K*4 = 48 KB dyn.
-  static constexpr uint32_t capA(uint32_t topk) { return 2 * topk; }
+  // 227 KB/SM). Dispatch guards K <= 1024, so 4K*8 + 2K*4 = 40 KB max dyn.
+  // iter4: capA 2K->4K (worst-scenario cand med 3.4xK overflowed 2K).
+  static constexpr uint32_t capA(uint32_t topk) { return 4 * topk; }
   static constexpr uint32_t capB(uint32_t topk) { return 2 * topk; }
+  // iter4: subsample the hint gather 4x (quantile estimate needs only
+  // ~hundreds of samples; the full-K gather was K*BS random reads).
+  static constexpr uint32_t kHintStride = 4;
   static constexpr size_t dyn_smem_bytes(uint32_t topk) {
     return size_t(capA(topk)) * sizeof(TieValue)
          + size_t(capB(topk)) * sizeof(int32_t);
@@ -79,22 +83,24 @@ struct TopKHbeStreaming : TopKStreaming {
     __syncthreads();
     PDLWaitPrimary<kUsePDL>();
 
-    // gather K hint values; clamp indices for safety
-    for (uint32_t t = tx; t < topk; t += kBlockSize) {
-      const uint32_t hi = min(static_cast<uint32_t>(max(pre_idx[t], 0)),
-                              problem.seq_len - 1);
+    // gather a 1/kHintStride subsample of the hint values (clamped)
+    const uint32_t n_hint = max(1u, topk / HbeConfig::kHintStride);
+    for (uint32_t t = tx; t < n_hint; t += kBlockSize) {
+      const uint32_t hi = min(
+          static_cast<uint32_t>(max(pre_idx[t * HbeConfig::kHintStride], 0)),
+          problem.seq_len - 1);
       const float hv = problem.in[hi];
       atomicAdd(&smem->histogram[extract_coarse_bin<kHistBits>(hv)], 1);
     }
     __syncthreads();
-    // rank-from-top rA/rB over the K-entry hint histogram
-    const uint32_t rA = max(1u, topk * HbeConfig::kQaPermille / 1000u);
-    const uint32_t rB = max(1u, topk * HbeConfig::kQbPermille / 1000u);
-    find_threshold(rA, topk, smem);
+    // rank-from-top rA/rB over the n_hint-entry hint histogram
+    const uint32_t rA = max(1u, n_hint * HbeConfig::kQaPermille / 1000u);
+    const uint32_t rB = max(1u, n_hint * HbeConfig::kQbPermille / 1000u);
+    find_threshold(rA, n_hint, smem);
     __syncthreads();
     if (tx == 0) hc.bin_a = smem->threshold_bin;
     __syncthreads();
-    find_threshold(rB, topk, smem);
+    find_threshold(rB, n_hint, smem);
     __syncthreads();
     if (tx == 0) {
       const uint32_t bb = smem->threshold_bin;
