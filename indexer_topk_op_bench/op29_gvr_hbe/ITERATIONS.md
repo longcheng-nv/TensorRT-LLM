@@ -50,3 +50,29 @@ Ledger write-back: FALSIFIED.md += (HBE fused pass at BS*N*4B < ~1.5x L2,
 {fp32, streaming}, nsys) structural-wall L2-trap.
 Next: iter4 = capA 4xK (K<=1024), hint 4x subsample, dispatch guard
 (K<=1024 && N>=131072); re-pilot.
+
+## iter 5 — 2026-07-13 — WASH (global spill; worst 262144 0.80->0.88-0.96, not enough)
+## iter 6 — 2026-07-13 — FALSIFIED (hint x sample max() breaks one-sided safety; 131K 0.70-0.74)
+## iter 7 — 2026-07-13 — FALSIFIED-BY-SILICON (cand-targeted cols PERFECT on host
+   replay [binA<=b*, candA 1.1-2.6xK] yet slow: strided sample gather = DRAM-burst
+   waste ~half a pass at BS=1024)
+## iter 8 — 2026-07-13 — PARTIAL (chunked coalesced sampling: 262144 positive
+   1.02-1.14, 131072 still 0.88-0.91)
+## iter 9 — 2026-07-13 — SHIP-CANDIDATE (breakthrough)
+Hypothesis: NCU attribution — fused pass read 545MB (1.06 passes, DRAM goal met)
+but 378us vs rival 245us => ISSUE-bound (1.4TB/s): the inline full histogram
+(F2F+twiddle+smem atomic per element) is the bottleneck, and it is UNNECESSARY:
+validity = cnt(>=vA) >= K (count proves top-K containment); b* recoverable from
+a candidate-only mini-hist in smem at resolve.
+Result: nsys same-batch, all 3 scenarios: 262144x1024 1.470-1.498, 262144x2048
+1.364-1.398, 131072x1024 1.089-1.119; non-engaged parity 0.997-1.003; gate
+216/216. SCENARIO-INVARIANT (hint-free sample estimator).
+Diagnosis: fused pass now ~2 cmps/element (lighter than rival's hist pass);
+131072 residual gap = fixed per-CTA overheads (sample + 2x find_threshold +
+resolve) vs shorter main pass.
+Ledger: WALLS.md += inline full-row histogram in a fused collect pass is
+issue-bound-prohibitive on B200 (per-element smem atomic + F2F); the fix is
+count-validity + candidate mini-hist.
+Next: iter10 = per-K caps to re-enable K2048; widen guard to
+batch*maxseq >= 128M elems (adds 65536x2048); re-pilot; then cluster-path HBE
++ full-grid sweep.

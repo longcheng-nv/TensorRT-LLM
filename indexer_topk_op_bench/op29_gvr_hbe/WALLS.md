@@ -16,3 +16,8 @@
 | L2 trap | input ≪ L2 ⇒ re-read passes are L2 hits; traffic levers idle | `ncu --metrics dram__bytes_read.sum` ≈ input bytes? |
 | Phase-chain latency (small N) | serial P1→…→P4 barrier chain sets a ~13-15µs floor | config-insensitivity probe + cold/warm differential |
 | Pass-count floor | algorithm needs ≥k full-N passes; target implies <k | min_passes × bytes / BW vs target µs |
+
+- Inline full-row 4096-bin histogram inside a fused collect pass: issue-bound
+  wall on B200 (per-element F2F+twiddle+smem atomic drops effective BW to
+  1.4TB/s; NCU iter9). Fix pattern: count-based validity + candidate-only
+  mini-hist at resolve. {fp32 streaming, 1024thr occ2}
