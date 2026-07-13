@@ -1,5 +1,15 @@
 # MIGRATION_RESUME — omni-kernel v2 skill validation (node handoff)
 
+> **⛔ OBSOLETE — CAMPAIGN COMPLETE 2026-07-13 @f5364a2d6d (umbriel-b200-035).**
+> Everything below was executed and closed out. Do NOT re-run the resume flow.
+> - Tier B: SHIP at iter 3/5 (commits 566fadda5d / 8b7849a08b / d68bb16b47);
+>   re-anchor done (21.82@027 → 21.17@035).
+> - Tier C: audit 22 PASS / 2 DEGRADED / 1 N-A; P1-P5 adjudicated.
+> - Authoritative record: `VALIDATION_REPORT.md` (same directory).
+> - Open follow-ups (new campaigns, not resumes): P3 human-pivot control arm;
+>   P6 parallel orchestration; split-row small-T attack; TileIR/TMA vs WALLS #3;
+>   v3 hooks (gate-per-impl-file, RESUME+COST per commit).
+
 > Written 2026-07-13 ~02:15 on umbriel-b200-027 (session timing out).
 > Workspace is NFS scratch — visible from any computelab node. All durable
 > state is in git; this file is the five-part relay per the v2 skill protocol.
