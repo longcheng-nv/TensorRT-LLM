@@ -716,14 +716,20 @@ def dispatch_r0_op26(dtype, K, n):
 
 
 def dispatch_kc_op26(K):
-    """kC-diet (backlog-3). kC=1536 won on silicon (16-bit 16-32K band gm
-    fp16 1.023 / bf16 1.017, zero loss cells) but is EXACTNESS-UNSAFE:
-    gate Suite C 16-bit tie plateaus (min(5K,5120)=2560 ties + K/2
-    winners) need kC >= ~2816 at K512 — a plateau spanning the whole
-    [K, kC] window admits no threshold and cannot be bracketed (6 fails,
-    256x -1 outputs). Tie-safe candidate kC=3072 (host admission
-    identical to 5120) pending its own A/B — until then, stock."""
-    return None
+    """kC-diet (backlog-3, shipped 2026-07-13 @027): 1cta-port candidate
+    window [K, 3072] for K512 — saves (5120-3072)*8B = 16KB SMEM per CTA.
+    Silicon @3072: 16-bit 16-32K band gm fp16 1.0245 (16/16 positive) /
+    bf16 1.0167 (min 0.991), fp32 BS>=128 route flat; host admission
+    identical to stock 5120. NOT 1536: that won the same band (gm 1.023/
+    1.017) but is exactness-unsafe — gate Suite C tie plateaus
+    (min(5K,5120) ties, K/2 winners drawn from inside the plateau) put
+    count_ge(plateau) = 5K = 2560 at K512, so any kC < 2560 leaves a
+    window no threshold can enter and fb_fix has no interior point to
+    bisect. kC is a 16-bit tie-safety CONTRACT (>= 5K), not just a perf
+    envelope. mc port stays stock (latency-bound, flat). K1024: 5K bound
+    = 5120 = stock exactly (Suite C cap sits on the boundary by design)
+    — zero diet room; K2048 likewise capped — closed."""
+    return 3072 if K == 512 else None
 
 
 def _config_1cta(bs, n):

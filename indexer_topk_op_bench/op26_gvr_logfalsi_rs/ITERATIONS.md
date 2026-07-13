@@ -600,3 +600,23 @@
   的随机数据永远抓不到,只有 gate Suite C 能。默认已回退 stock。
 - **kc=3072 迭代**(tie-safe:3072≥2816,host 准入=5120):16-bit 带
   A/B 在飞;判决绿则翻 3072(省 16KB smem)+ 再全 gate。
+
+### 积压③ kc=3072 SHIP (2026-07-13, 027;修正 tie 下界)
+
+- **tie 下界修正**:Suite C winner 取自平台内部(plateau[:K//2]),
+  count_ge(平台值) = 5K = **2560**(非前文 2816);K512 tie-safe 域 =
+  kC ≥ 2560。K1024/K2048 的 Suite C 平台按 min(5K,5120) 封顶恰落
+  stock kC 边界 → 无 diet 空间,永久关闭。
+- **kc=3072 A/B(16-bit 带 16-32K real+worst)**:fp16 gm **1.0245**
+  (16/16 全正,max 1.055)/ bf16 gm **1.0167**(唯一软格 0.9909);
+  fp32 BS≥128 路由持平 1.0004;省 smem = (5120-3072)*8B = 16KB。
+  与 kc=1536(gm 1.023/1.017)等值——**收益在 16-32K 带已饱和,
+  减半窗口不再多给**,tie-safe 的 3072 即最优可 ship 点。
+- **落默认**:`dispatch_kc_op26(K) = 3072 if K==512 else None`,仅
+  1cta 港(gvr_r0_op26);mc 港 stock(latency-bound 持平)。
+  消融臂强制值不受 dispatch 影响(sweep_kcdiet 双臂显式 kc_override)。
+- **验证**:smoke 3 dtype exact;**全 gate 582(210×3)全绿**(含
+  Suite C tie 平台,3072≥2560 ✓)。
+- 根:results_b200_op26_kcdiet_ab(1536)/ _bf16 / kcdiet3072_fp16 /
+  _bf16(均不入库);工具 sweep_kcdiet.py(KCDIET_KC/KCDIET_DT16/
+  KCDIET_ONLY16)+ analyze_kcdiet_ab.py + screen_kc_diet.py。
