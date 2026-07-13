@@ -421,13 +421,11 @@ void topk_v2_transform(torch::Tensor scores, torch::Tensor seq_lens,
   // op29 HBE dispatch: streaming regime only (no cluster, rows > 16384).
   const bool cluster_eligible =
       (static_cast<uint32_t>(max_seq_len) > params.cluster_floor) && (batch_size <= kClusterMaxBatch);
-  // iter10 shape guard: engaged when the rival's 2nd pass is DRAM-cold
-  // (L2-trap ledger): total footprint batch*N >= 128M elems (512MB fp32
-  // ~= 4x L2) and rows in the streaming regime. K2048 re-enabled (sample
-  // estimator is hint-free; per-K caps keep occ 2).
-  if (use_hbe && !cluster_eligible &&
-      static_cast<uint32_t>(max_seq_len) > kReg4MaxSeqLen &&
-      static_cast<uint64_t>(max_seq_len) * batch_size >= (128ull << 20)) {
+  // iter10b guard REVERT to the proven domain (iter10 expansion falsified:
+  // 65536x2048 0.63 [fixed per-CTA overheads vs short rows], K2048 0.56-0.88
+  // [unattributed K-proportional cost — NCU next]): K <= 1024 && N >= 131072.
+  if (use_hbe && !cluster_eligible && static_cast<int64_t>(K) <= 1024 &&
+      static_cast<uint32_t>(max_seq_len) >= 131072) {
     TORCH_CHECK(pre_idx.scalar_type() == torch::kInt32 &&
                 pre_idx.size(0) == batch_size &&
                 pre_idx.size(1) == static_cast<int64_t>(topk),

@@ -34,3 +34,12 @@
 - (hint-quantile columns at K=2048, {V3.2 marginals}, crux+nsys) structural-
   wall — hint quantile lands ~2000 bins low; always-miss ~0.5x. Revival:
   a better K2048 hint statistic (not quantile-of-values).
+
+- (HBE fused pass at N<=65536, {fp32, even batch*N>=128M}, nsys iter10)
+  complexity-backfire — per-CTA fixed phases (sample+2*find_threshold+resolve)
+  don't amortize on short rows. Revival: cut fixed costs (fewer bins /
+  merged find_threshold / resolve-lite).
+- (HBE at K=2048 with capA=2K, {fp32 N>=131072}, nsys iter10) measurement gap
+  — cand target 2*K=8192 > capA 4096 forces universal spill; +188us vs
+  rival's +13us K-scaling. Revival: NCU attribution + rank-1.2*rS_K tighter
+  column or capA=4K at occ-1 A/B.

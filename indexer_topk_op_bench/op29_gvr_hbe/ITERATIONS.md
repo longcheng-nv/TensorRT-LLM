@@ -76,3 +76,13 @@ count-validity + candidate mini-hist.
 Next: iter10 = per-K caps to re-enable K2048; widen guard to
 batch*maxseq >= 128M elems (adds 65536x2048); re-pilot; then cluster-path HBE
 + full-grid sweep.
+
+## iter 10 — 2026-07-13 — EXPANSION FALSIFIED (guard reverted)
+K512 proven cells unchanged (1.06-1.49). New cells lost: 65536x2048 0.63
+(per-CTA fixed overheads vs 65K rows), K2048 all 0.56-0.88 (rival +13us going
+K512->K2048 at 262144x1024, HBE +188us — K-proportional cost unattributed;
+suspects: cand target 2*K=8192 > capA 4096 => universal spill r/w, resolve
+scaling, tie machinery). Guard reverted to K<=1024 && N>=131072.
+Ledger: FALSIFIED += (HBE at N<=65536 even when batch*N>=128M, {fp32}, nsys)
+— fixed overheads; revival = shrink sample/resolve fixed costs.
+Next: NCU-attribute K2048; cluster-path HBE; full-grid sweep + REPORT arm.
