@@ -15,3 +15,29 @@ F2 — raise threads/CTA 512->768/1024 at BS=1 short-N — WASH-to-loss.
 F3 — reduction final-aggregate (tid0 16-sum vs warp0 shuffle) at 512 threads — WASH, not the cost.
   domain: fp32 BS=1 short-N. evidence: L1 A/B (noise 0.66-1.08). root-class: measurement/structural —
   final-sum is ~16 int-adds drowned in barrier latency. The bottleneck is the barrier COUNT, not reduce.
+
+CORRECTION (2026-07-13, double-check vs count_ge_multi_bench/REPORT.html) —
+  "M=4 multi-threshold = per-element compare tax" is a MIS-ATTRIBUTION. Do NOT repeat it.
+  Evidence (nsys cold-L2, B200, BS=1, block_count_ge micro-bench, ×vs M=1):
+    N     M=2    M=4    M=6    M=8
+    4K    1.00   1.01   1.03   1.12
+    8K    1.01   1.20   1.23   1.56
+    32K   1.01   1.23   1.40   1.61
+    256K  1.05   1.46   1.89   2.40
+  count_ge is memory-bound: the row is read once, +M cheap predicated compares. M=4 costs
+  ~1.15-1.46× a single scan (NOT 4×), amortized 0.31-0.35/threshold; M=2 is ~free everywhere.
+  The report RECOMMENDS M=4 for iterative Phase-2 refine (fewer total scans).
+  => The M-COUNT is cheap; it is NOT why op26 ships M=2 or why R0 lost at short-N.
+  TRUE reasons op26 retreated to M=2 (three, none is count cost):
+   (i)  single-round admission economics: R0's one M-ary pass already admits 96.8% at M=2; the
+        extra M=4 columns cost 1.2-1.46× on ALL rows to first-pass-admit ~3% more — not repaid
+        (the cheap R1 log-falsi shot covers the 3%). M=4-for-refine (report) ≠ M=4-single-round.
+   (ii) secant already at the iteration floor: base secant = 1.46 iters (Q5e); M-ary saves ~0.46
+        iter but the per-pass barriers do NOT shrink → Opt-F multi-threshold P2 measured WASH.
+   (iii) the short-N R0 loss ("小N R0门", plain wins 1.10-1.14×) is the 256-bin HISTOGRAM BUILD
+        fixed cost (zero 256 bins + K atomicAdds + warp-0 rung extraction), NOT the M-count.
+  META: this is a "microbench isolates the primitive → full-kernel silicon slaps the projection"
+  case (the report recommends M=4; production ships M=2). count_ge cost ≠ full-kernel latency.
+  The op32 wall (W1) stands: short-N is barrier/pass-count latency-bound; the ~9.7µs floor is
+  ~2.5 latency-bound count passes + P1/P4/barriers, and every op26-family pass-reduction lever
+  (R0 hist / Opt-F) is either fixed-cost-dominated or at the iteration floor. NO-SHIP unchanged.
