@@ -146,7 +146,11 @@ struct TopKHbeStreaming : TopKStreaming {
     const float vA = coarse_bin_lower_bound<kHistBits>(binA);
     const float vB = coarse_bin_lower_bound<kHistBits>(binB);
 
-    // re-zero the histogram for the main pass
+    // re-zero the histogram: reused in H2 for the CANDIDATE mini-hist
+    // (iter9: the full-row inline histogram was the fused pass's downfall —
+    // NCU showed 545MB read (1.06 passes, perfect) but 378us vs rival 245us:
+    // issue-bound at 1.4TB/s. Validity needs only cnt_a >= K; b* is
+    // recoverable from the candidates alone.)
     {
       typename Smem::kHistVec hist_vec;
       hist_vec.fill(0);
@@ -154,9 +158,8 @@ struct TopKHbeStreaming : TopKStreaming {
     }
     __syncthreads();
 
-    // ---- Phase H1: ONE fused pass: full histogram + dual-column collect --
+    // ---- Phase H1: ONE fused pass: pure dual-column classify (2 cmps) ----
     for_each_input(problem.in, problem.seq_len, [&](float val, uint32_t idx) {
-      atomicAdd(&smem->histogram[extract_coarse_bin<kHistBits>(val)], 1);
       if (val >= vA) {
         const auto p = atomicAdd(&hc.cnt_a, 1);
         if (p < capA) {
@@ -175,17 +178,49 @@ struct TopKHbeStreaming : TopKStreaming {
     });
     __syncthreads();
 
-    // ---- Phase H2: exact threshold + tiered resolve ---------------------
-    find_threshold(topk, problem.seq_len, smem);
+    // ---- Phase H2: count-based validity + candidate mini-hist -----------
     __syncthreads();
-    const uint32_t bstar = smem->threshold_bin;
     const uint32_t cntA = hc.cnt_a, cntB = hc.cnt_b;
+    // tier A valid iff the top-K provably sits inside bufA: cnt(>=vA) >= K,
+    // and nothing was dropped past the spill.
+    const bool tierA = (cntA >= topk) && (cntA <= capA + spA);
+    const bool tierB = !tierA && (cntA + cntB >= topk) &&
+                       (cntA <= capA + spA) && (cntB <= capB + spB);
+
+    uint32_t bstar = 0;
+    if (tierA || tierB) {
+      // mini-histogram over the candidates only (<= capA+capB smem entries
+      // + spills) -> exact global b* (candidates contain the whole top-K).
+      const uint32_t nA_s = min(cntA, capA);
+      for (uint32_t t2 = tx; t2 < nA_s; t2 += kBlockSize) {
+        atomicAdd(&smem->histogram[
+            extract_coarse_bin<kHistBits>(bufA[t2].value)], 1);
+      }
+      for (uint32_t t2 = capA + tx; t2 < cntA; t2 += kBlockSize) {
+        atomicAdd(&smem->histogram[
+            extract_coarse_bin<kHistBits>(spillA_g[t2 - capA].value)], 1);
+      }
+      uint32_t histed = cntA;
+      if (tierB) {
+        const uint32_t nB_s = min(cntB, capB);
+        for (uint32_t t2 = tx; t2 < nB_s; t2 += kBlockSize) {
+          const auto i2 = static_cast<uint32_t>(bufB[t2]);
+          atomicAdd(&smem->histogram[
+              extract_coarse_bin<kHistBits>(problem.in[i2])], 1);
+        }
+        for (uint32_t t2 = capB + tx; t2 < cntB; t2 += kBlockSize) {
+          atomicAdd(&smem->histogram[
+              extract_coarse_bin<kHistBits>(spillB_g[t2 - capB].value)], 1);
+        }
+        histed += cntB;
+      }
+      __syncthreads();
+      find_threshold(topk, histed, smem);
+      __syncthreads();
+      bstar = smem->threshold_bin;
+    }
     const float v_hi = coarse_bin_lower_bound<kHistBits>(bstar + 1);
     const float v_lo = coarse_bin_lower_bound<kHistBits>(bstar);
-
-    const bool tierA = (bstar >= binA) && (cntA <= capA + spA);
-    const bool tierB = !tierA && (bstar >= binB) && (cntA <= capA + spA)
-                       && (cntB <= capB + spB);
     if (tx == 0) {
       smem->count_gt = 0;
       smem->count_eq = 0;
@@ -227,9 +262,12 @@ struct TopKHbeStreaming : TopKStreaming {
         }
       }
     } else {
-      // MISS: stock second pass at the exact bin (== rival's collect pass)
-      for_each_input(problem.in, problem.seq_len,
-                     [&](float val, uint32_t idx) { classify(val, idx); });
+      // MISS (columns above the K-th value or buffer blowout): fall back to
+      // the FULL stock streaming algorithm (hist pass + collect pass) —
+      // 3 passes total; the cand-targeted columns make this rare.
+      __syncthreads();
+      TopKStreaming::forward<false>(problem, _smem);
+      return;
     }
 
     __syncthreads();
