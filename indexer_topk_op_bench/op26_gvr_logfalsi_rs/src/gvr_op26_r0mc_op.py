@@ -53,8 +53,9 @@ from cute_vendored.blackwell.top_k.gvr_topk_decode_cluster import (  # noqa: E40
 )
 from cute_vendored.blackwell.top_k.gvr_topk_decode_cluster import (  # noqa: E402
     mapa_shared_cluster, ld_shared_cluster_i32, ld_shared_cluster_f32,
-    _fmin_f32_inline,
+    _fmin_f32_inline, float_as_uint32,
 )
+from cutlass._mlir.dialects import llvm  # noqa: E402  (p4_rs bitcast)
 from cute_vendored.blackwell.utils import (  # noqa: E402
     TRTLLM_ENABLE_PDL, griddepcontrol_launch_dependents, griddepcontrol_wait,
 )
@@ -69,10 +70,20 @@ M2D = (0.85, 0.35)   # iter6 v0.2 ship ladder (see gvr_op26_r0_op.py)
 class GvrOp26R0ClusterKernel(GvrTopKClusterKernel):
     """Cluster GVR + R0 h-space ladder admission + R1 inline falsi shot."""
 
-    def __init__(self, *a, qfracs=M2D, mt_unroll=4, p1b_cache=False, **kw):
+    def __init__(self, *a, qfracs=M2D, mt_unroll=4, p1b_cache=False,
+                 p4_rs=False, **kw):
         super().__init__(*a, **kw)
         # compile-time debug printfs (OP26_R0MC_DEBUG=1, fresh process)
         self.dbg = bool(int(os.environ.get("OP26_R0MC_DEBUG", "0")))
+        # p4_rs (iter7): leader P4 = op#7 EXACT rank-scatter (verbatim from
+        # p4_recursive_digit GvrTopKKernel.phase4_rank_scatter, fixed 256-bin
+        # fine level) instead of the vendored histogram_snap. Motivation:
+        # ncu on the fin low-BS negative band shows the leader serial tail
+        # (peer gather + single-CTA P4) is 57-61% of wall time while 3 CTAs
+        # idle at the final cluster barrier (PLAN_ITER7.md §0).
+        self.p4_rs = bool(p4_rs)
+        # keep the ported body verbatim (it const_exprs on this flag)
+        self.enable_p4_rank_scatter_exact = True
         # p1b_cache (1cta r0f port): P1 stores the K gathered preIdx values
         # into SMEM so the per-CTA-redundant P1b hist skips its second GMEM
         # random gather. Costs top_k*4B extra SMEM per CTA of the cluster.
@@ -596,6 +607,322 @@ class GvrOp26R0ClusterKernel(GvrTopKClusterKernel):
             tidx, warp_id, lane, smem_input=smem_input)
 
     # ------------------------------------------------------------------
+    # P4 (p4_rs variant) — op#7 EXACT rank-scatter, verbatim port from
+    # p4_recursive_digit/src/gvr_topk_decode_p4.py:phase4_rank_scatter
+    # (fixed 256-bin fine recursion on the straddling bin => vdiff=0).
+    # Leader-only in the cluster epilogue; same signature/contract as
+    # the vendored phase4_histogram_snap it replaces (s_iscalars scratch
+    # slots [0]-[4] are dead after P3 handoff, [5] consumed pre-P4).
+    # ------------------------------------------------------------------
+    @cute.jit
+    def phase4_rank_scatter(
+        self,
+        smem_keys,
+        smem_vals,
+        smem_hist,
+        smem_wcnt,
+        s_thr,
+        s_iscalars,
+        output_values_row,
+        output_indices_row,
+        cand_count,
+        tidx,
+        warp_id,
+        lane,
+    ):
+        kK = cutlass.const_expr(self.top_k)
+        kBins = cutlass.const_expr(self.kNumBins)
+        num_threads = cutlass.const_expr(self.num_threads)
+        num_warps = cutlass.const_expr(self.num_warps)
+        bins_per_warp = cutlass.const_expr(kBins // self.num_warps)
+
+        if cand_count == cutlass.Int32(kK):
+            i4 = tidx
+            while i4 < cutlass.Int32(kK):
+                if cutlass.const_expr(self.return_output_values):
+                    output_values_row[i4] = self.dtype(smem_keys[i4])
+                output_indices_row[i4] = smem_vals[i4]
+                i4 = i4 + cutlass.Int32(num_threads)
+        elif cand_count > cutlass.Int32(kK):
+            # ---- block min/max over candidates ----
+            local_cmin = cutlass.Float32(self.FLT_MAX)
+            local_cmax = cutlass.Float32(self.NEG_FLT_MAX)
+            i5 = tidx
+            while i5 < cand_count:
+                v = smem_keys[i5]
+                local_cmin = _fmin_f32_inline(local_cmin, v)
+                local_cmax = cute.arch.fmax(local_cmax, v)
+                i5 = i5 + cutlass.Int32(num_threads)
+            cmin = self.warp_reduce_min_f32(local_cmin)
+            cmax = self.warp_reduce_max_f32(local_cmax)
+            if lane == cutlass.Int32(0):
+                smem_wcnt[warp_id] = float_as_uint32(cmin)
+                smem_hist[warp_id] = float_as_uint32(cmax)
+            cute.arch.barrier()
+            bmin_r = cutlass.Float32(self.FLT_MAX)
+            bmax_r = cutlass.Float32(self.NEG_FLT_MAX)
+            for w in cutlass.range_constexpr(self.num_warps):
+                vmin = cutlass.Float32(llvm.bitcast(cutlass.Float32.mlir_type, smem_wcnt[w].ir_value()))
+                vmax = cutlass.Float32(llvm.bitcast(cutlass.Float32.mlir_type, smem_hist[w].ir_value()))
+                bmin_r = _fmin_f32_inline(bmin_r, vmin)
+                bmax_r = cute.arch.fmax(bmax_r, vmax)
+            if bmax_r <= bmin_r:
+                bmax_r = bmin_r + cutlass.Float32(1e-6)
+            cute.arch.barrier()
+            # ---- zero + build histogram ----
+            i6 = tidx
+            while i6 < cutlass.Int32(kBins):
+                smem_hist[i6] = cutlass.Int32(0)
+                i6 = i6 + cutlass.Int32(num_threads)
+            cute.arch.barrier()
+            range1 = bmax_r - bmin_r
+            inv1 = (cutlass.Float32(kBins - 1) + cutlass.Float32(0.99)) / range1
+            i7 = tidx
+            while i7 < cand_count:
+                vk = smem_keys[i7]
+                bin_i = cutlass.Int32((vk - bmin_r) * inv1)
+                if bin_i < cutlass.Int32(0):
+                    bin_i = cutlass.Int32(0)
+                if bin_i > cutlass.Int32(kBins - 1):
+                    bin_i = cutlass.Int32(kBins - 1)
+                atomicAdd(smem_hist.iterator + bin_i, cutlass.Int32(1))
+                i7 = i7 + cutlass.Int32(num_threads)
+            cute.arch.barrier()
+            # ---- 3-step high→low bin search → straddling bin b* + rank_above ----
+            warp_bin_sum = cutlass.Int32(0)
+            for jb in cutlass.range_constexpr(bins_per_warp):
+                bidx_s = (cutlass.Int32(kBins - 1) - warp_id * cutlass.Int32(bins_per_warp)
+                          - cutlass.Int32(jb))
+                warp_bin_sum = warp_bin_sum + smem_hist[bidx_s]
+            if lane == cutlass.Int32(0):
+                smem_wcnt[warp_id] = warp_bin_sum
+            cute.arch.barrier()
+            if tidx == cutlass.Int32(0):
+                cum = cutlass.Int32(0)
+                tw = cutlass.Int32(num_warps - 1)
+                found = cutlass.Int32(0)
+                for w2 in cutlass.range_constexpr(self.num_warps):
+                    cum = cum + smem_wcnt[w2]
+                    if cum >= cutlass.Int32(kK) and found == cutlass.Int32(0):
+                        tw = cutlass.Int32(w2)
+                        found = cutlass.Int32(1)
+                cum2 = cutlass.Int32(0)
+                for w3 in cutlass.range_constexpr(self.num_warps):
+                    if cutlass.Int32(w3) < tw:
+                        cum2 = cum2 + smem_wcnt[w3]
+                s_iscalars[2] = cum2  # prefix-count before target warp
+                s_iscalars[3] = tw
+            cute.arch.barrier()
+            target_warp = s_iscalars[3]
+            if warp_id == target_warp and lane == cutlass.Int32(0):
+                base_cum = s_iscalars[2]
+                b_star = cutlass.Int32(kBins - 1)
+                rank_above = base_cum
+                set_d = cutlass.Int32(0)
+                for jb2 in cutlass.range_constexpr(bins_per_warp):
+                    bidx2 = (cutlass.Int32(kBins - 1) - target_warp * cutlass.Int32(bins_per_warp)
+                             - cutlass.Int32(jb2))
+                    ra_before = base_cum
+                    base_cum = base_cum + smem_hist[bidx2]
+                    if base_cum >= cutlass.Int32(kK) and set_d == cutlass.Int32(0):
+                        b_star = bidx2
+                        rank_above = ra_before  # count in bins strictly above b*
+                        set_d = cutlass.Int32(1)
+                s_iscalars[2] = rank_above
+                s_iscalars[3] = b_star
+                s_iscalars[4] = cutlass.Int32(0)  # cnt_above
+                s_iscalars[1] = cutlass.Int32(0)  # cnt_straddle
+            cute.arch.barrier()
+            b_star = s_iscalars[3]
+            rank_above = s_iscalars[2]
+
+            # ---- EXACT: one fine-histogram recursion on the straddling bin b* ----
+            if cutlass.const_expr(self.enable_p4_rank_scatter_exact):
+                # FIXED small fine-bin count (independent of kNumBins) — cuts the
+                # re-zero + 3-step cost (esp. K=2048 where kNumBins=2048); 256
+                # sub-bins over bin b* gives kNumBins×256 effective resolution,
+                # enough to resolve the straddling bin to ≤1 distinct value.
+                fbins = cutlass.const_expr(256)
+                fbpw = cutlass.const_expr(256 // self.num_warps)
+                # bin b* value range under the inv1 binning: [f_lo, f_lo + 1/inv1)
+                f_lo = bmin_r + cutlass.Float32(b_star) / inv1
+                finv = (cutlass.Float32(fbins - 1) + cutlass.Float32(0.99)) * inv1
+                # re-zero (only fbins slots) + build fine sub-hist of bin-b* cands
+                iz = tidx
+                while iz < cutlass.Int32(fbins):
+                    smem_hist[iz] = cutlass.Int32(0)
+                    iz = iz + cutlass.Int32(num_threads)
+                cute.arch.barrier()
+                ifb = tidx
+                while ifb < cand_count:
+                    vf = smem_keys[ifb]
+                    cb = cutlass.Int32((vf - bmin_r) * inv1)
+                    if cb < cutlass.Int32(0):
+                        cb = cutlass.Int32(0)
+                    if cb > cutlass.Int32(kBins - 1):
+                        cb = cutlass.Int32(kBins - 1)
+                    if cb == b_star:
+                        sb = cutlass.Int32((vf - f_lo) * finv)
+                        if sb < cutlass.Int32(0):
+                            sb = cutlass.Int32(0)
+                        if sb > cutlass.Int32(fbins - 1):
+                            sb = cutlass.Int32(fbins - 1)
+                        atomicAdd(smem_hist.iterator + sb, cutlass.Int32(1))
+                    ifb = ifb + cutlass.Int32(num_threads)
+                cute.arch.barrier()
+                # fine 3-step search seeded at rank_above (over fbins bins)
+                fws = cutlass.Int32(0)
+                for jbf in cutlass.range_constexpr(fbpw):
+                    bif = (cutlass.Int32(fbins - 1) - warp_id * cutlass.Int32(fbpw)
+                           - cutlass.Int32(jbf))
+                    fws = fws + smem_hist[bif]
+                if lane == cutlass.Int32(0):
+                    smem_wcnt[warp_id] = fws
+                cute.arch.barrier()
+                if tidx == cutlass.Int32(0):
+                    cumf = rank_above
+                    twf = cutlass.Int32(num_warps - 1)
+                    fnd = cutlass.Int32(0)
+                    for w2 in cutlass.range_constexpr(self.num_warps):
+                        cumf = cumf + smem_wcnt[w2]
+                        if cumf >= cutlass.Int32(kK) and fnd == cutlass.Int32(0):
+                            twf = cutlass.Int32(w2)
+                            fnd = cutlass.Int32(1)
+                    pre = rank_above
+                    for w3 in cutlass.range_constexpr(self.num_warps):
+                        if cutlass.Int32(w3) < twf:
+                            pre = pre + smem_wcnt[w3]
+                    # Stage prefix/target-warp metadata in spare s_iscalars
+                    # slots, NOT smem_hist[0]/[1]: the last fine warp's reverse
+                    # scan below walks fine bins down to 0/1, so reusing those
+                    # histogram bins as scratch would corrupt sb_star/ra_fine
+                    # when twf2 == num_warps-1. Slots [4]/[1] are dead here
+                    # (re-zeroed at the cnt_above/cnt_strad reset below).
+                    s_iscalars[4] = pre   # prefix into target fine warp
+                    s_iscalars[1] = twf   # target fine warp
+                cute.arch.barrier()
+                pre_f = s_iscalars[4]
+                twf2 = s_iscalars[1]
+                if warp_id == twf2 and lane == cutlass.Int32(0):
+                    base_f = pre_f
+                    sb_star = cutlass.Int32(fbins - 1)
+                    ra_fine = base_f
+                    sd = cutlass.Int32(0)
+                    for jb3 in cutlass.range_constexpr(fbpw):
+                        sbi = (cutlass.Int32(fbins - 1) - twf2 * cutlass.Int32(fbpw)
+                               - cutlass.Int32(jb3))
+                        ra_b = base_f
+                        base_f = base_f + smem_hist[sbi]
+                        if base_f >= cutlass.Int32(kK) and sd == cutlass.Int32(0):
+                            sb_star = sbi
+                            ra_fine = ra_b
+                            sd = cutlass.Int32(1)
+                    smem_hist[2] = sb_star
+                    smem_hist[3] = ra_fine
+                cute.arch.barrier()
+                if tidx == cutlass.Int32(0):
+                    s_iscalars[4] = cutlass.Int32(0)  # cnt_above
+                    s_iscalars[0] = cutlass.Int32(0)  # cnt_mid (b*, sub>sb*)
+                    s_iscalars[1] = cutlass.Int32(0)  # cnt_strad (b*, sub==sb*)
+                cute.arch.barrier()
+                sb_star = smem_hist[2]
+                rank_above_fine = smem_hist[3]
+                isc = tidx
+                while isc < cand_count:
+                    v = smem_keys[isc]
+                    bin_i = cutlass.Int32((v - bmin_r) * inv1)
+                    if bin_i < cutlass.Int32(0):
+                        bin_i = cutlass.Int32(0)
+                    if bin_i > cutlass.Int32(kBins - 1):
+                        bin_i = cutlass.Int32(kBins - 1)
+                    if bin_i > b_star:
+                        pos = atomicAdd(s_iscalars.iterator + cutlass.Int32(4), cutlass.Int32(1))
+                        if pos < cutlass.Int32(kK):
+                            if cutlass.const_expr(self.return_output_values):
+                                output_values_row[pos] = self.dtype(v)
+                            output_indices_row[pos] = smem_vals[isc]
+                    elif bin_i == b_star:
+                        sb = cutlass.Int32((v - f_lo) * finv)
+                        if sb < cutlass.Int32(0):
+                            sb = cutlass.Int32(0)
+                        if sb > cutlass.Int32(fbins - 1):
+                            sb = cutlass.Int32(fbins - 1)
+                        if sb > sb_star:
+                            o = atomicAdd(s_iscalars.iterator + cutlass.Int32(0), cutlass.Int32(1))
+                            pos = rank_above + o
+                            if pos < cutlass.Int32(kK):
+                                if cutlass.const_expr(self.return_output_values):
+                                    output_values_row[pos] = self.dtype(v)
+                                output_indices_row[pos] = smem_vals[isc]
+                        elif sb == sb_star:
+                            o = atomicAdd(s_iscalars.iterator + cutlass.Int32(1), cutlass.Int32(1))
+                            pos = rank_above_fine + o
+                            if pos < cutlass.Int32(kK):
+                                if cutlass.const_expr(self.return_output_values):
+                                    output_values_row[pos] = self.dtype(v)
+                                output_indices_row[pos] = smem_vals[isc]
+                    isc = isc + cutlass.Int32(num_threads)
+                cute.arch.barrier()
+                cnt_strad = s_iscalars[1]
+                filled = rank_above_fine + cnt_strad
+                if filled > cutlass.Int32(kK):
+                    filled = cutlass.Int32(kK)
+                ipad = filled + tidx
+                while ipad < cutlass.Int32(kK):
+                    if cutlass.const_expr(self.return_output_values):
+                        output_values_row[ipad] = self.dtype(self.NEG_FLT_MAX)
+                    output_indices_row[ipad] = cutlass.Int32(-1)
+                    ipad = ipad + cutlass.Int32(num_threads)
+            else:
+                # ---- APPROX rank-and-scatter (single pass), arbitrary straddling order ----
+                isc = tidx
+                while isc < cand_count:
+                    v = smem_keys[isc]
+                    bin_i = cutlass.Int32((v - bmin_r) * inv1)
+                    if bin_i < cutlass.Int32(0):
+                        bin_i = cutlass.Int32(0)
+                    if bin_i > cutlass.Int32(kBins - 1):
+                        bin_i = cutlass.Int32(kBins - 1)
+                    if bin_i > b_star:
+                        pos = atomicAdd(s_iscalars.iterator + cutlass.Int32(4), cutlass.Int32(1))
+                        if pos < cutlass.Int32(kK):
+                            if cutlass.const_expr(self.return_output_values):
+                                output_values_row[pos] = self.dtype(v)
+                            output_indices_row[pos] = smem_vals[isc]
+                    elif bin_i == b_star:
+                        off = atomicAdd(s_iscalars.iterator + cutlass.Int32(1), cutlass.Int32(1))
+                        pos = rank_above + off
+                        if pos < cutlass.Int32(kK):
+                            if cutlass.const_expr(self.return_output_values):
+                                output_values_row[pos] = self.dtype(v)
+                            output_indices_row[pos] = smem_vals[isc]
+                    isc = isc + cutlass.Int32(num_threads)
+                cute.arch.barrier()
+                cnt_strad = s_iscalars[1]
+                filled = rank_above + cnt_strad
+                if filled > cutlass.Int32(kK):
+                    filled = cutlass.Int32(kK)
+                ipad = filled + tidx
+                while ipad < cutlass.Int32(kK):
+                    if cutlass.const_expr(self.return_output_values):
+                        output_values_row[ipad] = self.dtype(self.NEG_FLT_MAX)
+                    output_indices_row[ipad] = cutlass.Int32(-1)
+                    ipad = ipad + cutlass.Int32(num_threads)
+        else:
+            i10 = tidx
+            while i10 < cand_count:
+                if cutlass.const_expr(self.return_output_values):
+                    output_values_row[i10] = self.dtype(smem_keys[i10])
+                output_indices_row[i10] = smem_vals[i10]
+                i10 = i10 + cutlass.Int32(num_threads)
+            i11 = cand_count + tidx
+            while i11 < cutlass.Int32(kK):
+                if cutlass.const_expr(self.return_output_values):
+                    output_values_row[i11] = self.dtype(self.NEG_FLT_MAX)
+                output_indices_row[i11] = cutlass.Int32(-1)
+                i11 = i11 + cutlass.Int32(num_threads)
+
+    # ------------------------------------------------------------------
     # Entry — vendored cluster entry with Phase 2 replaced by P1b + R0 (+R1).
     # ------------------------------------------------------------------
     @cute.kernel
@@ -881,10 +1208,18 @@ class GvrOp26R0ClusterKernel(GvrTopKClusterKernel):
                     if cand_count_p4 > cutlass.Int32(self.kC):
                         cand_count_p4 = cutlass.Int32(self.kC)
 
-                    self.phase4_histogram_snap(
-                        smem_keys, smem_vals, smem_hist, smem_wcnt, s_thr,
-                        s_iscalars, output_values_row, output_indices_row,
-                        cand_count_p4, tidx, warp_id, lane)
+                    if cutlass.const_expr(self.p4_rs):
+                        self.phase4_rank_scatter(
+                            smem_keys, smem_vals, smem_hist, smem_wcnt,
+                            s_thr, s_iscalars, output_values_row,
+                            output_indices_row, cand_count_p4, tidx,
+                            warp_id, lane)
+                    else:
+                        self.phase4_histogram_snap(
+                            smem_keys, smem_vals, smem_hist, smem_wcnt,
+                            s_thr, s_iscalars, output_values_row,
+                            output_indices_row, cand_count_p4, tidx,
+                            warp_id, lane)
 
         if cutlass.const_expr(self.cluster_size > 1):
             cute.arch.cluster_arrive_relaxed()
@@ -910,18 +1245,29 @@ def dispatch_p1bc_mc_op26(dt):
     return True
 
 
+def dispatch_p4rs_mc_op26(dt):
+    """p4_rs (leader rank-scatter P4) dispatch for the mc port.
+    Default OFF pending the iter7 mc-domain A/B (arm op26_r0mcr forces ON).
+    1cta precedent (dispatch_rs_op26) = fp32 anywhere, 16-bit only BS>=256
+    — but iter6 taught that 1cta verdicts must be re-judged in the cluster
+    port before becoming defaults."""
+    return False
+
+
 def gvr_r0_mc_op26(logits, pre_idx, seq_lens, index_topk, compress_ratio=1,
                    next_n=1, out=None, cluster_size=None, qfracs=None,
-                   p1b_cache=None):
+                   p1b_cache=None, p4_rs=None):
     dt = logits.dtype
     if p1b_cache is None:
         p1b_cache = dispatch_p1bc_mc_op26(dt)
+    if p4_rs is None:
+        p4_rs = dispatch_p4rs_mc_op26(dt)
     qf = tuple(qfracs) if qfracs is not None else M2D
     cfg = _resolve_config_mc(logits, NUM_SMS, cluster_size)
     key = (dt, index_topk, next_n, compress_ratio, qf,
            cfg["min_blocks_per_mp"], cfg["use_256bit_load"],
            cfg["num_threads_per_block"], cfg["enable_warp_parallel_reduce"],
-           cfg["cluster_size"], bool(p1b_cache))
+           cfg["cluster_size"], bool(p1b_cache), bool(p4_rs))
     compiled = _compiled_r0mc.get(key)
     if compiled is None:
         kobj = GvrOp26R0ClusterKernel(
@@ -935,7 +1281,7 @@ def gvr_r0_mc_op26(logits, pre_idx, seq_lens, index_topk, compress_ratio=1,
             compress_ratio=compress_ratio, return_output_values=False,
             cluster_size=cfg["cluster_size"], enable_smem_cache=False,
             smem_cache_elems=32768,
-            qfracs=qf, p1b_cache=bool(p1b_cache),
+            qfracs=qf, p1b_cache=bool(p1b_cache), p4_rs=bool(p4_rs),
         )
         n_rows, n_cols, n_batch = cute.sym_int(), cute.sym_int(), cute.sym_int()
         in_align = 32 if cfg["use_256bit_load"] else 16
@@ -966,6 +1312,15 @@ def gvr_r0mcc_op26(logits, pre_idx, seq_lens, index_topk, compress_ratio=1,
     return gvr_r0_mc_op26(logits, pre_idx, seq_lens, index_topk,
                           compress_ratio=compress_ratio, out=out,
                           qfracs=qfracs, p1b_cache=True)
+
+
+def gvr_r0mcr_op26(logits, pre_idx, seq_lens, index_topk, compress_ratio=1,
+                   out=None, qfracs=None):
+    """op26_r0mcr = op26_r0mc with p4_rs forced ON (iter7 leader-tail
+    rank-scatter P4 ablation arm; 1cta twin is the dispatch_rs_op26 path)."""
+    return gvr_r0_mc_op26(logits, pre_idx, seq_lens, index_topk,
+                          compress_ratio=compress_ratio, out=out,
+                          qfracs=qfracs, p4_rs=True)
 
 
 def picked_cluster_size_r0mc(logits, index_topk, compress_ratio=1):
@@ -1002,6 +1357,10 @@ if __name__ == "__main__":
     # production default (dispatch_p1bc_mc_op26: ON all dtypes).
     _env_p1bc = os.environ.get("OP26_R0MC_SMOKE_P1BC")
     P1BC = None if _env_p1bc is None else _env_p1bc == "1"
+    # "1" forces the leader rank-scatter P4 (iter7 p4_rs); unset exercises
+    # the production default (dispatch_p4rs_mc_op26).
+    _env_p4rs = os.environ.get("OP26_R0MC_SMOKE_P4RS")
+    P4RS = None if _env_p4rs is None else _env_p4rs == "1"
 
     def check(logits, pre_idx, K, crv, tag):
         N = logits.shape[1]
@@ -1009,7 +1368,7 @@ if __name__ == "__main__":
                               device="cuda")
         cs = picked_cluster_size_r0mc(logits, K, crv)
         out = gvr_r0_mc_op26(logits, pre_idx, seq_lens, K, crv,
-                             p1b_cache=P1BC)
+                             p1b_cache=P1BC, p4_rs=P4RS)
         torch.cuda.synchronize()
         for r in (0, logits.shape[0] - 1):
             idx = out[r].clamp(min=0).long()
