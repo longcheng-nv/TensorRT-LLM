@@ -1,0 +1,12 @@
+d3_qbins128_K512_N8192 exact=True
+d3_qbins64_K512_N8192 exact=True
+d3_qbins128_K512_N32768 exact=True
+d3_qbins64_K512_N32768 exact=True
+d3_qbins128_K512_N65536 exact=True
+d3_qbins64_K512_N65536 exact=True
+d3_qbins64_K1024_N8192 exact=True
+d3_qbins128_K1024_N8192 exact=True
+d3_qbins64_K1024_N32768 exact=True
+d3_qbins128_K1024_N32768 exact=True
+d3_qbins128_K1024_N65536 exact=True
+d3_qbins64_K1024_N65536 exact=True
