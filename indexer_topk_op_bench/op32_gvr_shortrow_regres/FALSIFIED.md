@@ -50,3 +50,22 @@ F4 — path-A barrier-cheapened secant (all-thread-redundant control flow) — S
   512 threads is CHEAPER than the redundant work to avoid it. rank-scatter's "cut barriers → +19%"
   does NOT transfer (it also reduced work; this added work). Revival: only a barrier cut that does
   NOT add per-thread redundant work (none identified within the secant skeleton).
+
+F5 — exponential/log binning of the 256-hist (vs current LINEAR) — WORSE, not better.
+  Hypothesis (user): logits CCDF is ~exponential near top-K, so log-spaced bins would place the
+  rank-quantile rungs more precisely than linear bins → better M=2/4 initial thresholds + tighter
+  fast-write sandwich. HOST ablation (scripts/abl_expbin2.py, 24 rungs, fp32 BS=1 K512/1024
+  N8192/16384, count(full-N>=rung) vs EXACT kthvalue rung as ground truth):
+    binning count-error  q0.85=55.9  q0.35=11.5  q0.15=11.7  q0.05=4.8  (LINEAR)
+                         q0.85=102   q0.35=42.7  q0.15=27.2  q0.05=21.6 (LOG)
+    OVERALL: LINEAR 21.0 vs LOG 48.5 — LINEAR wins at EVERY qfrac incl the deep tail.
+  root-class: premise-error. (1) LINEAR 256-bin is ALREADY near-optimal: ~1-3% count error at the
+  rungs (range ~6.5 units / 256 bins = 0.025 value res). (2) The hist bins the PREV-topK VALUES
+  (bounded [pmin,pmax] sample), NOT the full-N CCDF; the rank-quantile rungs (q0.85/0.35 = 436/180th
+  of K) sit in the prev-topK BODY, not its exponential tail — log-dense-near-vlo misallocates
+  resolution AWAY from the rungs. Even the deep thr0 tail (q0.05) favors LINEAR. (3) admission is
+  already 96.8% (M2D) so placement-precision headroom is tiny regardless.
+  fast-write corollary: the "if more precise, combine with fast-write" premise fails at step 1
+  (log is not more precise), AND fast-write = op27 sandwich (excluded op18 lineage, loses to base
+  at fp32 short-N). Killed cheaply by host ablation — no kernel written. Revival: only a
+  boundary-ADAPTIVE binning (dense at the unknown v_K), but linear's 1-3% error is not the bottleneck.
