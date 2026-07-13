@@ -191,6 +191,59 @@ def main():
                          f"{'%.3f' % g if g else '—'} | {n} |")
         lines.append("")
 
+    # ---- vs anchor-transferred op22rr production arms ----
+    def rr_ratio_table(num_arm, rr_arm):
+        """t(rr_arm, anchor-transferred)/t(num_arm) — >1 => num_arm faster."""
+        out = []
+        for scen in ("best", "worst", "real"):
+            for K in (512, 1024, 2048):
+                rs = []
+                for key, recs in data.items():
+                    scen_k, sweep, Kk, N, BS = key
+                    if scen_k != scen or Kk != K or sweep == "bs_hugeN":
+                        continue
+                    rr = (rr_bs if sweep == "bs" else rr_seq).get(
+                        (scen, K, N, BS))
+                    g = recs.get("gvr_cutedsl", {}).get("us_cold")
+                    a = recs.get(num_arm, {}).get("us_cold")
+                    if not (rr and g and a):
+                        continue
+                    try:
+                        gvr_orig = float(rr["gvr_cutedsl_cold_us"])
+                        rv = float(rr[f"{rr_arm}_cold_us"]) * g / gvr_orig
+                    except (KeyError, ValueError, ZeroDivisionError):
+                        continue
+                    rs.append(rv / a)
+                out.append((scen, K, geomean(rs), len(rs)))
+        return out
+
+    for num in ("sglang_v2", "flashinfer_topk"):
+        for rr_arm in ("op21_hls", "op26_r0auto", "op25_hls",
+                       "gvr_multicta_cutedsl"):
+            lines += [f"## {num} vs {rr_arm} (op22rr arm, anchor-transferred "
+                      f"onto node-027 scale; >1 => {num} faster)", "",
+                      "| scenario | K | geomean | n |", "|---|---|---|---|"]
+            for scen, K, g, n in rr_ratio_table(num, rr_arm):
+                lines.append(f"| {scen} | {K} | "
+                             f"{'%.3f' % g if g else '—'} | {n} |")
+            lines.append("")
+
+    lines += [
+        "## Caveats",
+        "- canonical `us` = per-range kernel-time SUM (comparable to all",
+        "  prior report numbers). sglang_v2's persistent-cluster path",
+        "  (N>=131072, 30<BS<=512) launches 2 PDL kernels: sum can",
+        "  double-count overlap (observed up to 1.8x at N=262144 BS=64 where",
+        "  span=0.56x sum) or miss the inter-kernel gap (span up to 1.2x sum",
+        "  at N=131072); `*_span_us` columns carry the honest wall-clock.",
+        "- sglang_v2 `topk_plan` runs untimed (production: once per step,",
+        "  reused across ~61 layers; measured ~7us wall => ~0.11us/layer).",
+        "- flashinfer public top_k returns (values fp32, indices int64) --",
+        "  slightly larger output traffic than the int32-only in-tree",
+        "  contract; flashinfer_topk_i32 is the contract-matched variant",
+        "  (~2-5% faster).",
+    ]
+
     (HERE / "RESULTS_SUMMARY.md").write_text("\n".join(lines))
     print("wrote RESULTS_SUMMARY.md")
 

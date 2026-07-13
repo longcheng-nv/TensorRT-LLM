@@ -18,14 +18,14 @@
 4. DONE — 27/27 nsys 批次 (GPU2-7; GPU0/1 当时被占):
    `../results_b200_op28/{real,best,worst}/` 每批 .done_* 标记, jsonl 零 error。
    驱动日志 op28_gpu{2..7}.log。
-5. IN-FLIGHT — parse_op28.py (nvtx_kern_sum + nvtx_gpu_proj_sum span) →
+5. DONE — parse + gen 完成 (906 cells, 0 error, 锚漂移 med 0.9984); 判决见 RESULTS_SUMMARY.md。
    results.jsonl, 然后 gen_results_op28.py → op28_{bs,seqlen,bs_hugeN}_data.csv
    + RESULTS_SUMMARY.md。若中断: 直接重跑
    `python3 parse_op28.py ../results_b200_op28 && python3 gen_results_op28.py ../results_b200_op28`
    (幂等; parse 需 env -u GITHUB_TOKEN -u HF_TOKEN 因 nsys 会导出 sqlite)。
    已知待验证: bs_hugeN 的早期 parse 出现 ranges=0 (rep 未写完时解析所致),
    完整重跑后必须确认 3 个 hugeN rep ranges>0。
-6. TODO — 结果解读写入 RESULTS_SUMMARY.md 增强版 + 回复用户; 视需要
+6. DONE — RESULTS_SUMMARY.md 含 vs 生产臂 (op21_hls/op26_r0auto/op25_hls) 锚换算表 + caveats。
    REPORT html。锚换算: gvr_cutedsl 对 op22rr CSV (`../op22_temporal_fixed_hr_bench/
    op22rr_{bs,seqlen}_data.csv`), us_adj = us_rr / (gvr_rr/gvr_op28)。
 
