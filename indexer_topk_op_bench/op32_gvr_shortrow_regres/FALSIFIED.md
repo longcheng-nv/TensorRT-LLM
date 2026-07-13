@@ -41,3 +41,12 @@ CORRECTION (2026-07-13, double-check vs count_ge_multi_bench/REPORT.html) —
   The op32 wall (W1) stands: short-N is barrier/pass-count latency-bound; the ~9.7µs floor is
   ~2.5 latency-bound count passes + P1/P4/barriers, and every op26-family pass-reduction lever
   (R0 hist / Opt-F) is either fixed-cost-dominated or at the iteration floor. NO-SHIP unchanged.
+
+F4 — path-A barrier-cheapened secant (all-thread-redundant control flow) — SLOWER on silicon.
+  domain: fp32 BS=1 short-N (K512 N8192 tested). evidence: nsys (base 9721 vs op32 11277 ns, +16%);
+  exactness ALL PASS (27 cells) so it's CORRECT but slower. root-class: structural-wall — removing
+  ~2.5 barriers by making 512 threads redundantly interpolate + re-sum smem_wcnt (8192 smem reads/
+  iter, bank contention + issue pressure) costs MORE than the barriers saved. The block barrier at
+  512 threads is CHEAPER than the redundant work to avoid it. rank-scatter's "cut barriers → +19%"
+  does NOT transfer (it also reduced work; this added work). Revival: only a barrier cut that does
+  NOT add per-thread redundant work (none identified within the secant skeleton).

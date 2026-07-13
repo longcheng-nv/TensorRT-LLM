@@ -82,3 +82,28 @@ Diagnosis: the dominant ~9.7µs is the K-independent structural chain (count/sec
   (op29 HBE owns N≥65536). Next: user fork — (A) pursue ~10-20% barrier-fusion+warp-spec restructure
   within skeleton (risky, nsys+exact-gated), or (B) relax skeleton to port register-resident single-
   pass (only path to 2×). Recommend A only if 10-20% is worth the restructure risk; else B.
+
+## iter5 — 2026-07-13 — FALSIFIED (silicon): path-A barrier-cheapened secant is SLOWER
+Implemented GvrOp32Kernel(redundant_secant=True): per refine-iter, bracket-update + interpolation
+run REDUNDANTLY on ALL 512 threads from registers (removing barrier B bracket-visibility + barrier A
+nv-broadcast), keeping only block_count_ge's internal reduce barrier + 1 protect. Secant math copied
+bit-for-bit.
+Gate: exactness ALL PASS (27 cells, 3K×3N×3scen fp32 BS=1, tie-aware vdiff=0) — the restructure is
+CORRECT.
+Verdict (nsys, K512 N8192 best): base(red=0) **9721 ns** vs op32(red=1) **11277 ns** = **+16% SLOWER**.
+Diagnosis: the "redundant interpolation is free (all threads parallel)" assumption is WRONG on silicon.
+  512 threads each doing log2/div + a 16-slot smem re-sum (512×16 = 8192 smem reads/iter → bank
+  contention + issue-slot pressure) costs MORE than the ~2.5 barriers removed. The rank-scatter
+  precedent (cut barriers → +19%) does NOT transfer: rank-scatter cut barriers AND reduced work;
+  this cut barriers but ADDED redundant work. At 512 threads the block barrier is CHEAPER than the
+  redundant work needed to avoid it → confirms the barriers are already near-optimal.
+Ledger: FALSIFIED F4. WALLS W1 reinforced (barrier chain is near-optimal, not cheapenable this way).
+
+## VERDICT (updated) — 2026-07-13 — NO-SHIP, TRIPLE-locked
+Path A (skeleton-preserving barrier-cheapening) is now FALSIFIED on silicon (iter5, +16% slower),
+adding a 3rd lock to the register-resident (F1) and single-phase-lever (iter4) walls. Every skeleton-
+preserving lever tried — register-resident (dead), threads (wash), warp-reduce (wash), secant-removal
+(slower), single-phase kFTarget/P1 (K-flat = no headroom), barrier-cheapening (slower) — fails. The
+9.7µs floor is the near-optimal barrier chain of the 5-phase secant skeleton. Substantial improvement
+requires the EXCLUDED single-pass skeleton (path B = port op29 HBE to short-N) or lifting BS=1/short-N.
+op26_r0auto remains the best skeleton-compliant option at fp32 BS=1 short-N. Campaign CLOSED.
