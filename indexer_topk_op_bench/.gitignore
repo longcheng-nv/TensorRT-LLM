@@ -23,3 +23,9 @@ results_b200_op22rr_mc074/
 op22_temporal_fixed_hr_bench/REPORT.html.bak_pre_rr_20260708
 op22_temporal_fixed_hr_bench/mc074_gpu*.log
 _smoke_mc074/
+results_iter7_prof/
+*.ncu-rep
+# op28 external-arm nsys results (per-machine, sqlite/rep may embed env)
+results_b200_op28/
+op28_ext_topk/gate_op28.log
+op28_ext_topk/op28_gpu*.log
