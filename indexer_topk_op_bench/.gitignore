@@ -29,3 +29,11 @@ results_iter7_prof/
 results_b200_op28/
 op28_ext_topk/gate_op28.log
 op28_ext_topk/op28_gpu*.log
+# op30 GVR-base extremes: generated bundles + per-machine nsys results
+op30_gvrbase_extremes/bundles_op30/
+op30_gvrbase_extremes/calib_bundles/
+results_b200_op30/
+results_b200_op30_calib/
+op30_gvrbase_extremes/*_gpu*.log
+op30_gvrbase_extremes/gate_op30.log
+results_b200_op30_smoke/

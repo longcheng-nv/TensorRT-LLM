@@ -1,0 +1,30 @@
+{
+  "best": {
+    "v4flash": [
+      "beta_shallow",
+      0.3
+    ],
+    "v4pro": [
+      "aggregate",
+      0.15
+    ],
+    "v32": [
+      "beta_shallow",
+      0.15
+    ]
+  },
+  "worst": {
+    "v4flash": [
+      "beta_shallow",
+      0.9
+    ],
+    "v4pro": [
+      "beta_deep",
+      0.85
+    ],
+    "v32": [
+      "aggregate",
+      0.85
+    ]
+  }
+}
