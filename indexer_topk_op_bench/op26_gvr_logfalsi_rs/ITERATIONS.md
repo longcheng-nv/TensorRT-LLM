@@ -562,3 +562,21 @@
 - 工具:sweep_qfracs.py / drive_nsys_qfracs.sh / analyze_qfracs_ab.py;
   根 = results_b200_op26_qfracs_ab(不入库)。uh4/M3A 候选就此关闭,
   qfracs 杠杆除非出现新机理证据不再重开。
+
+### 积压② K2048 fp32 edge-aim R1 对照 — CLOSED 无收益 (2026-07-13, 027)
+
+- **动机**:iter5d 1cta aim 表按 (K,dtype,N) 翻转,mc 港 R1 inline shot
+  只用过几何中心 √(kK·kCC);K2048 fp32 是唯一未对照的重 K。
+- **实现**:GvrOp26R0ClusterKernel 加 r1aim∈{center,edge} ctor 参数
+  (edge = log2(kK)),wrapper gvr_r0_mc_op26 透传并入编译 key(批内
+  同进程双臂配对);默认保持 center,post-edit gate 582/582。
+- **A/B(sweep_r1aim.py,K2048 fp32 131072/262144 BS1-16 real+worst,
+  20 cold reps)**:整体 gm 1.0021,BS≥2 全平;唯一疑似正带 = BS1
+  4 格 gm≈1.016。**确认批(60 cold reps,BS∈{1,2})**:BS1 带缩回
+  噪声(real gm 1.0059 / worst gm 0.9992,worst 262K BS1 翻 0.992),
+  ALL gm 1.0026。
+- **判决:CLOSED,center 保持默认**。机理符合预期:real 轴 R0 静态
+  命中 ~0.96,R1 触发率低 → 收益上限天然小;worst 轴也无肉。
+  低 reps 的 BS1 单点正带是重测教训第 N 例——判带先看能否复现。
+- 工具:sweep_r1aim.py / drive_nsys_r1aim.sh / analyze_r1aim_ab.py;
+  根 = results_b200_op26_r1aim_ab + _confirm(不入库)。
