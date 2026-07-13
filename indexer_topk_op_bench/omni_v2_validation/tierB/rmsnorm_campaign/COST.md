@@ -18,3 +18,5 @@ Budget: 5 iterations / ~2 h wall-clock, single B200 (GPU2).
 | Phase / iter range | GPU-h | Tokens ($, per /cost) | Notes |
 |---|---|---|---|
 | setup + iter0 characterization | ~0.25 | n/a (session) | smoke, L1 grid, ncu x1 cell, nsys incumbent+copy grids (start 01:43 UTC) |
+| node migration + re-anchor (027→035) | ~0.05 | n/a | anchor re-run x3 on 035/GPU1 → 21.17 µs |
+| iter 1 (gate + full nsys grid) | ~0.6 | n/a | verify_exact x5 cells, nsys_verdict x5 cells (T=16384 rerun after 10-min timeout) |

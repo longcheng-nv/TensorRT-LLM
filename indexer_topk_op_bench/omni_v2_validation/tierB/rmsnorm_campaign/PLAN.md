@@ -10,7 +10,7 @@ objective:
   ship_rule: "geomean >= 1.00 vs incumbent AND no cell < 0.98 AND exactness green
               (dense bf16 atol/rtol 1e-2) AND dispatch rules <= 3"
   hard_constraints: [CUDA-graph compatible, out-of-place, no incumbent source edits]
-budget: {iterations_max: 5, wallclock_max: 2h, gpu: CUDA_VISIBLE_DEVICES=2 umbriel-b200-027}
+budget: {iterations_max: 5, wallclock_max: 2h, gpu: CUDA_VISIBLE_DEVICES=1 umbriel-b200-035 (migrated from 027 after iter0)}
 pre_authorized_negative_conclusion: >
   If flashinfer.norm.rmsnorm remains best on the envelope, say so plainly with
   numbers. A clean FALSIFIED/INFEASIBLE verdict is a fully successful outcome.
@@ -41,7 +41,8 @@ pre_authorized_negative_conclusion: >
 
 ## Anchor cell
 - cell: T=4096, hidden=7168, bf16 · impl: incumbent (flashinfer) · nsys pure-kernel
-- expected: 21.82 µs ± 3% (set at iter0 on umbriel-b200-027 GPU2, nsys x3 median)
+- expected: 21.17 µs ± 3% (re-anchored 2026-07-13 on umbriel-b200-035 GPU1, nsys x3 median
+  21.209/21.166/21.026; superseded 027-era 21.82 — iter0 ratio conclusions survive the move)
 
 ## Probe plan (Phase 3 ladder)
 | # | Hypothesis | Crux question | Rung-0 tool | GO/NO-GO criterion |

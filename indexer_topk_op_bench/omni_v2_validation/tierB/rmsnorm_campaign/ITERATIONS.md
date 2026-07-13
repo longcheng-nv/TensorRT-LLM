@@ -31,3 +31,32 @@ small T, ~0-5% BW margin at large T.
 Ledger write-back: WALLS.md + FALSIFIED.md #1 (traffic levers void — NCU-locked).
 Anchor set: incumbent T=4096 nsys = 21.82 µs ± 3%.
 Next: iter 1 = single-pass Triton kernel, 1 CTA/row, fp32 accum, autotune num_warps by T.
+
+## iter 1 — 2026-07-13 — PIVOT (node migration 027→035 mid-iter; re-anchored 21.17 µs)
+Hypothesis (ledger check: FALSIFIED #1 not triggered — launch/occupancy lever, not
+traffic; WALLS large-T saturation ⇒ T>=4096 is margin defense only): a single-pass
+Triton kernel (1 CTA/row, BLOCK=8192 masked, fp32 accum, autotune num_warps
+{4,8,16,32}) closes the small-T latency gap while defending >=0.98 at large T.
+Probe: rung 3 direct (kernel shape identical to incumbent's structure; rung 0 was iter0's
+copy-ceiling table). Prior session's unverified partial claimed T=4096 ≈ 0.933 — treated
+as hypothesis; re-measured below (actual 0.898, the partial was optimistic).
+Result: gate 5/5 synth + 5/5 adversarial GREEN at every cell (50/50; no real track in
+this campaign per PLAN). L2 nsys ×3-median, anchor drift +0.2% (21.212 vs 21.17):
+  | T | cand µs | incumbent µs | ratio |
+  |---|---|---|---|
+  | 1 | 2.666 | 2.791 | 1.047 |
+  | 16 | 2.976 | 2.961 | 0.995 |
+  | 256 | 3.940 | 4.037 | 1.025 |
+  | 4096 | 23.553 | 21.152 | 0.898 |
+  | 16384 | 75.621 | 71.965 | 0.952 |
+  worst 0.898 (T=4096) · geomean 0.982 · best 1.047 (T=1). Ship rule FAILS
+  (geomean < 1.00; two cells < 0.98).
+Diagnosis: small-T wins are real but modest (occupancy lever works: 1.047/0.995/1.025);
+large-T loses 5-10% effective BW (cand 4.99 TB/s vs incumbent 5.55 @T=4096; 6.21 vs
+6.53 @16384) — suspected code-shape artifact (masked 8192-tail = 12.5% dead lanes,
+fp32 register pressure), NOT a wall (torch's own elementwise hits 5.45 TB/s @4096).
+Ledger write-back: none yet — large-T deficit needs NCU attribution before naming a
+wall or falsifying; that is iter 2's rung 0.
+Next: iter 2 = NCU attribution of cand@4096 vs incumbent, then large-T repair variants
+(exact-fit chunking / register diet); fallback lever if unfixable = regime dispatch
+(triton T<=256, flashinfer T>=4096; 1 rule, within dispatch<=3 budget).
