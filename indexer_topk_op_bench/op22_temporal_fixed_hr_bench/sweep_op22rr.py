@@ -125,6 +125,24 @@ N_SEQ_EXT = N_SEQ_MAIN + N_HUGE
 BS_GRID = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048]
 BS_HUGE = [2, 4, 8, 16, 32, 64]
 
+# OP22RR_NS="4096,8192,16384,32768" -> restrict every sweep's N grid to
+# these values (opt-in, same pattern as OP22RR_ARMS; unset -> unchanged).
+_N_FILTER = os.environ.get("OP22RR_NS")
+if _N_FILTER:
+    _ns = {int(x) for x in _N_FILTER.split(",") if x.strip()}
+    N_SEQ_MAIN = [n for n in N_SEQ_MAIN if n in _ns]
+    N_HUGE = [n for n in N_HUGE if n in _ns]
+    N_SEQ_EXT = N_SEQ_MAIN + N_HUGE
+
+# OP22RR_BS="1,4,16,64,256,1024" -> restrict the bs sweeps' BS grid
+# (opt-in; unset -> unchanged). JIT compiles per (arm, N, BS) dominate
+# small-N batch wall-clock, so trimming BS points cuts it ~linearly.
+_BS_FILTER = os.environ.get("OP22RR_BS")
+if _BS_FILTER:
+    _bss = {int(x) for x in _BS_FILTER.split(",") if x.strip()}
+    BS_GRID = [b for b in BS_GRID if b in _bss]
+    BS_HUGE = [b for b in BS_HUGE if b in _bss]
+
 SUBDIR = {"seqlen": "seqlen_sweep", "bs": "bs_scaling", "bs_hugeN": "bs_hugeN"}
 
 
