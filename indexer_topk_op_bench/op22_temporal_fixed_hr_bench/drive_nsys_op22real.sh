@@ -40,7 +40,8 @@ for model in $MODELS; do
          --capture-range=cudaProfilerApi --capture-range-end=stop \
          -o "$rep" -f true \
          python3 sweep_op22_real.py --model "$model" --dtype "$dt" \
-           --out-root "$OUT" --reps "$REPS" --reps-warm "$REPS_WARM"; then
+           --out-root "$OUT" --reps "$REPS" --reps-warm "$REPS_WARM" \
+           ${BS:+--bs "$BS"} ${LAYERS:+--layers "$LAYERS"}; then
       touch "$done_m"
     else
       echo "!!! batch $model $dt FAILED (leaving un-marked for resume)"

@@ -110,3 +110,8 @@ enroot/tensorrt_llm.devel.sqsh
 .claude/agent-memory/
 .claude/agent-tests/perf-test-sync/report.html
 .claude/agent-tests/perf-test-sync/results.json
+
+# op22 v32 no-shift control A/B (nsys artifacts, local only)
+indexer_topk_op_bench/results_b200_op22real_pair_*/
+indexer_topk_op_bench/results_b200_op22real_ctrl/
+indexer_topk_op_bench/results_b200_op22real_noshift/

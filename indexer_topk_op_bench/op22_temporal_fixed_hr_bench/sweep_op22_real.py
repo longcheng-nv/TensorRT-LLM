@@ -90,6 +90,10 @@ DEFAULT_SKIP = {"gvr29_hbe"}
 FP32_ONLY = {"sglang_streaming", "sglang_v2", "flashinfer_topk",
              "gvr29_hbe"}
 
+# OP22REAL_V32_NOSHIFT=1 -> v32 preIdx control experiment (pass preIdx-1 so the
+# cr=1 kernel's internal +1 recovers RAW alignment; see run_batch note).
+_V32_NOSHIFT = os.environ.get("OP22REAL_V32_NOSHIFT") == "1"
+
 # OP22REAL_ARMS="gvr_cutedsl,op27_hls" -> arm subset (debug / split runs)
 _ARM_FILTER = os.environ.get("OP22REAL_ARMS")
 if _ARM_FILTER:
@@ -205,6 +209,20 @@ def run_batch(model, dt_name, out_path, reps_cold, reps_warm, bs_grid,
         for i, (L, BS) in enumerate(cells):
             b = RD2.get_real_bundle_v2(model, L, dt_name)
             logits_row, preidx_row, N = b["logits"], b["preIdx"], b["N"]
+            hit_rate = b["hit_rate"]
+            # CONTROL EXPERIMENT (OP22REAL_V32_NOSHIFT=1): the v32 (cr=1) kernel
+            # internally reads logits[(preIdx+1) mod N]; the report's preIdx is
+            # the recomputed prev-step top-K (raw current-frame indices). Passing
+            # (preIdx-1) mod N makes the kernel's +1 recover the RAW alignment,
+            # lifting the kernel-read hit-rate from ~0.44 (+1) to ~0.66 (raw).
+            # This isolates whether the GVR arms' real-row collapse is driven by
+            # hit-rate/preIdx or by the short-N / traffic-regime structural wall.
+            if _V32_NOSHIFT and model == "v32":
+                raw = b["preIdx"][0].to(torch.int64) % N
+                hit_rate = torch.isin(
+                    raw, b["ref"].to(torch.int64)).float().mean().item()
+                preidx_row = ((b["preIdx"].to(torch.int64) - 1) % N).to(
+                    torch.int32).contiguous()
             for arm, op, falsi, dist in arms:
                 if (arm, model, L, dt_name, BS) in done:
                     continue
@@ -213,7 +231,10 @@ def run_batch(model, dt_name, out_path, reps_cold, reps_warm, bs_grid,
                        "model": model, "K": K, "dtype": dt_name, "N": N,
                        "Npad": b["Npad"], "BS": BS, "cr": cr, "layer": L,
                        "s_last": b["s_last"],
-                       "hit_rate": round(b["hit_rate"], 4),
+                       "hit_rate": round(hit_rate, 4),
+                       "preidx_variant": ("v32_noshift"
+                                          if (_V32_NOSHIFT and model == "v32")
+                                          else "default"),
                        "range_cold": f"c|{base}", "range_warm": f"w|{base}",
                        "reps_cold": reps_cold, "reps_warm": reps_warm}
                 try:
