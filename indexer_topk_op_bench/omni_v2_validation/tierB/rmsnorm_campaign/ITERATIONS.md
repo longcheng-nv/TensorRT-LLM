@@ -60,3 +60,27 @@ wall or falsifying; that is iter 2's rung 0.
 Next: iter 2 = NCU attribution of cand@4096 vs incumbent, then large-T repair variants
 (exact-fit chunking / register diet); fallback lever if unfixable = regime dispatch
 (triton T<=256, flashinfer T>=4096; 1 rule, within dispatch<=3 budget).
+
+## iter 2 — 2026-07-13 — FALSIFIED (domain: Triton 1-CTA/row single-pass, T>=4096, bf16 h=7168, B200)
+Hypothesis (ledger check: no hits — config lever, not traffic; single-pass preserved):
+the large-T 5-10% deficit is a fixable code-shape artifact (warm-L2-miscalibrated
+autotune num_warps, missing cache/eviction hints).
+Probe rung 0 (L3 NCU, cand@4096): dram_read ratio 1.00 (single pass intact), 26 regs
+(no spills), achieved occ 82%, autotune had picked 1024 thr → nothing pathological;
+GO to config screen.
+Probe rung 2 (L1 cold screen, 7 configs: NW {4,8,16,32} × eviction {none, evict_first
+load/store/both}): best-of-cell T=4096 = NW8+ev/ev cold 0.995; T=16384 = NW4 plain
+0.975. L2 nsys escalation of both winners (anchor drift -0.3%, 21.10):
+  T=4096 NW8+ev/ev = 0.9271 (L1's 0.995 was graph-bias fiction — M1 again)
+  T=16384 NW4      = 0.9519 (identical to iter1 autotune 0.9517 — config-insensitive)
+Result: NO config reaches the 0.98 floor at either large-T cell.
+Diagnosis: flashinfer's CUDA kernel runs ABOVE the generic elementwise BW ceiling
+(iter0: beats torch same-traffic elementwise by ~2% @4096 and ~4.5% @16384); a Triton
+single-pass 1-CTA/row kernel plateaus AT that generic ceiling (6.21 vs 6.53 TB/s
+@16384). The loss is config-insensitive within Triton → structural.
+Ledger write-back: FALSIFIED #2 (config levers at large T, evidence nsys) + WALLS
+"flashinfer large-T BW-efficiency edge" (one-line test: nsys candidate-vs-incumbent
+@T=16384; Triton caps ~0.95).
+Next: iter 3 = productize via regime dispatch (SKILL Phase 6 "dispatch by regime"):
+triton autotuned arm for T<=512, flashinfer arm for T>512 (1 rule, budget 3) →
+expected grid 1.047/0.995/1.025/1.00/1.00, geomean ~1.013 → ship-rule candidate.
