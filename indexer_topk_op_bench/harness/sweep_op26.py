@@ -25,6 +25,7 @@ from gvr_op26_r0_op import gvr_r0_op26, gvr_r0f_op26  # noqa: E402
 from gvr_op26_r0mc_op import (gvr_r0_mc_op26, gvr_r0mcc_op26,  # noqa: E402
                               gvr_r0mcr_op26, gvr_r0mcp_op26,
                               gvr_r0_auto_op26, dispatch_r0_arm_op26,
+                              dispatch_r0_smalln_op26,
                               picked_cluster_size_r0mc)
 
 DEV = "cuda"
@@ -118,6 +119,8 @@ def _build_op26_r0auto_call(K, dtype, N, BS, cr, logits_row, preidx_row):
     out = torch.empty((BS, K), dtype=torch.int32, device=DEV)
     keep = [logits, seq_div, pre, out]
     arm = dispatch_r0_arm_op26(BS, N)
+    if arm == "1cta" and dispatch_r0_smalln_op26(dtype, N):
+        arm = "plain"  # small-N gate reroutes to op26_1cta
     gvr_r0_auto_op26(logits, pre, seq_div, K, compress_ratio=cr, out=out)
     return (lambda: gvr_r0_auto_op26(logits, pre, seq_div, K,
                                      compress_ratio=cr, out=out)), keep, arm

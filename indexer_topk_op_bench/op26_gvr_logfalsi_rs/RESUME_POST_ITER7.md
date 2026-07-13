@@ -10,13 +10,18 @@
 - **现役默认**(src/gvr_op26_r0mc_op.py):
   `dispatch_p1bc_mc_op26 = True(无条件)`;
   `dispatch_p4rs_mc_op26(dt,K) = not(bf16 ∧ K512)`;
-  `dispatch_p4co_mc_op26 = False(D2 证伪,勿翻)`。
+  `dispatch_p4co_mc_op26 = False(D2 证伪,勿翻)`;
+  `dispatch_r0_smalln_op26(dt,n) = n < (65536 if fp32 else 16384)`
+  (小 N 门,07-13 smalln A/B,r0auto 小 N 直路由 op26_1cta)。
   消融臂:op26_r0mcc(p1bc 强制)/ op26_r0mcr(p4_rs 强制)/
-  op26_r0mcp(p4_coop 强制,证伪对照)——四处已注册。
-- **验证态**:smoke 全绿;gate 582/582(r0mc+r0auto,p4_rs 默认下);
-  gate 291/291(r0mcp)。
+  op26_r0mcp(p4_coop 强制,证伪对照)——四处已注册;
+  op26_r0/op26_r0mc 保持纯 R0 对照(不吃小 N 门)。
+- **验证态**:smoke 全绿;gate 582/582(r0mc+r0auto,p4_rs + 小 N 门
+  默认下);gate 291/291(r0mcp);r0auto 三点路径 exact。
 - **判决记录**:ITERATIONS.md iter7 段(预研/D3 ship/D2 证伪/结构税
-  记档);PLAN_ITER7.md;COST.md §7。
+  记档)+ 小 N R0 门段;PLAN_ITER7.md;COST.md §7-8。
+- **小 N 门 A/B 已收口**(TAKEOVER_SMALLN_8GPU.md 已执行完毕,042 11 批
+  + 039 16 批 = 27/27):其 REPORT backfill 并入下方积压⑤统一收编。
 - **gotcha 全集**:ITERATIONS.md + memory;最要命的三条:
   ① sweep 每批 re-import 源码,**A/B 在飞时禁改 src**;
   ② `cluster_arrive_relaxed()` 无 release,DSMEM 读刚写数据必须
@@ -70,7 +75,8 @@ python3 src/gvr_op26_r0mc_op.py   # 末行 "op26_r0mc smoke OK"
 
 ## 5 · 统一报告 backfill(~2h,可与未来战役合并)
 
-- 内容:把 p1bc_mc + p4_rs 两个默认的 mc 域增量(+1.5~9%)收进
+- 内容:把 p1bc_mc + p4_rs 两个默认的 mc 域增量(+1.5~9%)**加上
+  07-13 小 N 门默认(N≤32K 段 r0auto 回到 op26_1cta 水位)**收进
   op22rr REPORT——81 批 fin sweep 重跑(臂 = gvr_cutedsl + op26_r0auto
   + radix_cutedsl + sglang)+ **last-writer = update_report_op26_iter6.py**
   (其内部先跑 iter5 wrapper 全量重导;marker 幂等,断点续跑配方照

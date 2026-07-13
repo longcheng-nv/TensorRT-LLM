@@ -1771,15 +1771,43 @@ def dispatch_r0_arm_op26(bs, n):
     return "mc" if (n >= 65536 and bs <= 64) else "1cta"
 
 
+def dispatch_r0_smalln_op26(dt, n):
+    """Small-N R0-ladder gate — 07-13 smalln A/B (umbriel-b200-039 8-GPU,
+    27 nsys batches, 324 paired cells: N in {16384, 32768} x BS 1..1024 x
+    3K x 3 scenarios; plain = op26_1cta, ladder = op26_r0, metric =
+    us_cold(r0)/us_cold(1cta), >1 = the ladder is a net tax):
+      fp32: 16K gm 1.138 / 32K gm 1.096 -> ladder OFF for N < 65536.
+            Residual band (K512, N32K) gm 0.979 (R0 +1.02, scenario-split:
+            worst gm 1.25 plain-favoring) — right at the regression
+            threshold and not addressable at (dt, n) granularity.
+      bf16: 16K gm 0.976 / 32K gm 0.932 with systematic R0-win bands
+            ((512,32K) +16%, (512,16K) +10%) -> ladder ON from 16384.
+      fp16: 16K gm 0.953 / 32K gm 0.965, band (1024,16K) +13% ->
+            ladder ON from 16384.
+    N=4096/8192: OFF for all dtypes on the fin full-grid history
+    (anchor-transfer gm 0.971/0.877, op22rr_op26{,r}_raw.csv) — that
+    evidence is from the full-grid anchor transfer, not this A/B.
+    Returns True when the auto arm must route plain 1cta (op26_1cta)."""
+    n_r0_min = 65536 if dt == torch.float32 else 16384
+    return n < n_r0_min
+
+
 def gvr_r0_auto_op26(logits, pre_idx, seq_lens, index_topk, compress_ratio=1,
                      out=None, qfracs=None):
-    """Production-facing R0 arm: routes to op26_r0 (1cta) or op26_r0mc."""
+    """Production-facing R0 arm: routes to op26_r0mc (big-N low-BS),
+    plain 1cta op26_1cta (below the per-dtype small-N R0 gate), or
+    op26_r0 (1cta R0 ladder) otherwise."""
     from gvr_op26_r0_op import gvr_r0_op26  # local import avoids cycle
+    from gvr_op26_op import gvr_cutedsl_op26  # small-N plain route
     bs, n = logits.shape
     if dispatch_r0_arm_op26(bs, n) == "mc":
         return gvr_r0_mc_op26(logits, pre_idx, seq_lens, index_topk,
                               compress_ratio=compress_ratio, out=out,
                               qfracs=qfracs)
+    # qfracs forced = ablation call: keep it on the R0 ladder unrerouted.
+    if qfracs is None and dispatch_r0_smalln_op26(logits.dtype, n):
+        return gvr_cutedsl_op26(logits, pre_idx, seq_lens, index_topk,
+                                compress_ratio=compress_ratio, out=out)
     return gvr_r0_op26(logits, pre_idx, seq_lens, index_topk,
                        compress_ratio=compress_ratio, out=out, qfracs=qfracs)
 

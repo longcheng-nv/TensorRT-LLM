@@ -503,3 +503,41 @@
   gate,分片按 dtype 编译无重复 JIT)。
 - 报告回填:p4_rs 默认(mc 域 +1.5~9%)与 p1bc 默认一起待下次统一
   backfill 收编,不单独重跑 81 批。
+
+### 小 N R0 门 A/B + dispatch_r0_smalln_op26 落地 (2026-07-13, 042→039 迁移接力)
+
+- **动机**:iter6/iter7 判决中 r0auto 的 N≤16K 段输 iter5 op26_1cta
+  (fin 全网格锚转移 gm:4096 0.971 / 8192 0.877 / 16384 0.984,
+  fp32 段 0.79-0.86)。机理 = 小 N 相位链/latency 主导,R0 梯省趟
+  收益≈0,P1b 固定税纯亏。本 A/B 只钉 N∈{16384,32768} 模糊带。
+- **A/B(27 批 324 配对格,同批三臂 byte-identical:gvr_cutedsl 锚 +
+  op26_1cta + op26_r0;N∈{16K,32K} × BS 1-1024 × 3K × 3 场景;
+  042 跑 11 批 → 039 8 卡接力 16 批;metric us_cold(r0)/us_cold(1cta),
+  >1 = R0 梯净税)**:
+  - fp32:16K gm **1.138** / 32K gm **1.096**,两档 plain 全胜
+    (worst 轴最痛 1.154/1.253)→ **OFF 区 = N<65536**。残余带
+    (K512,32K) gm 0.979(R0 +1.021,恰在 ≥1.02 红线上且场景分裂:
+    real 高 BS R0 +1.26-1.29,worst plain +1.25)——(dt,n) 粒度
+    无法切,判不可行动,记档。
+  - bf16:16K gm **0.976** / 32K gm **0.932**,R0 系统性赢带
+    (512,32K) +16% / (512,16K) +10%(real 轴 K512 全 BS +1.29-1.47)
+    → 非 wash,**R0 从 16384 开**。
+  - fp16:16K gm **0.953** / 32K gm **0.965**,赢带 (1024,16K) +13%
+    → 同 bf16,**R0 从 16384 开**。
+  - "16-bit wash 则并 fp32 简单优先"预案未触发——赢带远超 1.02。
+- **落默认:`dispatch_r0_smalln_op26(dt,n) = n < (65536 if fp32 else
+  16384)`**;gvr_r0_auto_op26 mc 判定后小 N 直路由 gvr_cutedsl_op26
+  (qfracs 强制 = 消融调用不改道);op26_r0/op26_r0mc 臂不动(纯对照);
+  harness _build_op26_r0auto_call 小 N 记 r0_arm="plain"。
+  证据口径注:16K/32K 判决 = 本 A/B 同批数据;4096/8192 方向 = fin
+  全网格锚转移历史(op22rr_op26{,r}_raw.csv),两者分开引。
+- **验证**:smoke 全绿;r0auto 三点路径(8192 plain / 32768 分 dtype /
+  131072 BS4 mc)3 dtype × 3 点全 exact;gate 582/582。
+- 工具 analyze_smalln_ab.py;根 = results_b200_op26_smalln_ab(不入库);
+  harness sweep_op22rr.py 新增 OP22RR_NS/OP22RR_BS opt-in 网格过滤器。
+- **过程事故记档(双 driver 禁令第 3 例,模式新)**:8 卡发车布局中
+  g7 兜底分片(real fp16 → best fp16 串行)因 real fp16 三批全 marker
+  秒跳,提前撞进 g5 正在重测的半批 best K2048 fp16(两个 nsys 写同一
+  输出文件)。处置 = 精确 PID 击杀两棵树(不用 pkill -f)→ 显存归零
+  复核 → 作废半批单 driver 重发。教训:**兜底分片不能与主分片有
+  未完成批次交集**——串行兜底段只该在全部主分片收尾后手动补发。
