@@ -27,3 +27,10 @@
 - (P1 model-driven seed, {all}, 91k-cell host+silicon) structural-wall — drift ~symmetric, unfixable at P1.
 - (torch.randn for 16-bit selection inputs, {bf16/fp16}, gate) measurement-artifact — collapses to ~256 levels, tie storms.
 - (event-axis ship claims, {all}, protocol) measurement-artifact — >=5 fabricated wins in record; nsys only.
+
+- (HBE 1-pass fusion when BS*N*4B <~ 1.5x L2, {fp32 streaming, B200}, nsys
+  54-cell pilot) structural-wall — rival's 2nd pass is L2-hot there; the
+  saved "pass" was never DRAM. Revival: none for cold-L2; warm-L2 axis moot.
+- (hint-quantile columns at K=2048, {V3.2 marginals}, crux+nsys) structural-
+  wall — hint quantile lands ~2000 bins low; always-miss ~0.5x. Revival:
+  a better K2048 hint statistic (not quantile-of-values).

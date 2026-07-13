@@ -29,3 +29,24 @@ Next: iter0.
 ## iter 0 — 2026-07-13 — (in progress)
 Fork vendored sglang_v2 -> src/gvr29 (baseline immutable; new op files).
 Gate + L1 parity vs sglang_v2 arm expected +-3%.
+
+## iter 0 — 2026-07-13 — SHIP (fork parity)
+Fork gvr29 (src/gvr29) builds; gvr29_off/rival same-batch nsys = 0.993-1.032
+(54 cells, geomean ~1.000) — fork and harness trusted.
+
+## iter 3 — 2026-07-13 — PIVOT (pilot verdict)
+Probe: nsys same-batch 3 arms x 54 cells (results/pilot/). GO/NO-GO mixed:
+- WIN pocket: K512 N>=131072 BS>=1024: rival/hbe 1.17-1.47x (real 1.34/1.45,
+  best 1.17/1.47/1.35) — the fused-pass DRAM saving is real at bandwidth bound.
+- LOSS everywhere else. Diagnosis (mechanism):
+  (1) L2-trap (Phase 1.4 veto, should have pre-computed): BS*N*4B <~ L2
+      (126MB) => rival's 2nd pass is L2-hot, 1-pass saves no DRAM; fused-pass
+      smem-atomic tax + hint phase then lose outright (K512 32768 cells 0.55-0.81).
+  (2) capA=2xK too small for worst (crux cand med 3.4xK) -> tier miss ->
+      redo = 2 passes + overhead (worst 131K/262K 0.85 instead of winning).
+  (3) hint gather K*BS random reads = fixed tax (65536x2048: 1M gathers, 0.91).
+  (4) K2048 hint quantiles unreliable (crux) -> always-miss ~0.5x. Dispatch off.
+Ledger write-back: FALSIFIED.md += (HBE fused pass at BS*N*4B < ~1.5x L2,
+{fp32, streaming}, nsys) structural-wall L2-trap.
+Next: iter4 = capA 4xK (K<=1024), hint 4x subsample, dispatch guard
+(K<=1024 && N>=131072); re-pilot.
