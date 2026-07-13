@@ -1,0 +1,5 @@
+*.sqlite
+*.nsys-rep
+*.ncu-rep
+results/nsys/
+__pycache__/
