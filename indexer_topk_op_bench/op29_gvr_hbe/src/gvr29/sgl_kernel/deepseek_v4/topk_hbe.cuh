@@ -43,9 +43,13 @@ struct HbeConfig {
   // iter6: hint-free ROW-SAMPLE estimator (scenario-invariant; rescues the
   // uncorrelated-hint worst pole). s strided samples -> mini-hist -> bin at
   // rank ceil(s*K/N); columns take max(hint, sample-guard) per tier.
-  static constexpr uint32_t kSampleTarget = 4096;
-  static constexpr uint32_t kSampleGuardA = 1;
-  static constexpr uint32_t kSampleGuardB = 6;
+  // iter8: CHUNKED sampling — 64 evenly-spaced chunks of 64 contiguous
+  // elements (4096 samples). Per-element strided gather (iter6/7) was a
+  // DRAM-burst disaster: 128-256B stride = 32B useful per 128B burst,
+  // ~half a pass of waste at BS=1024. Chunked = coalesced 256B runs,
+  // 16KB/row total. Positional trends average over the 64 chunks.
+  static constexpr uint32_t kSampleChunks = 64;
+  static constexpr uint32_t kChunkElems = 64;
   // iter5: global spill (flashinfer-style) — candidates past the smem caps
   // go to a per-row global region instead of forcing a full redo pass.
   // Spill traffic ~(cand-cap)*8B*2 vs redo N*4B: e.g. worst K512 N=262144
@@ -110,11 +114,16 @@ struct TopKHbeStreaming : TopKStreaming {
     __syncthreads();
     PDLWaitPrimary<kUsePDL>();
 
-    const uint32_t stride =
-        max(1u, problem.seq_len / HbeConfig::kSampleTarget);
-    const uint32_t n_samp = (problem.seq_len + stride - 1) / stride;
-    for (uint32_t t = tx; t < n_samp; t += kBlockSize) {
-      const float sv = problem.in[t * stride];
+    constexpr uint32_t kNSamp =
+        HbeConfig::kSampleChunks * HbeConfig::kChunkElems;
+    const uint32_t chunk_stride =
+        max(HbeConfig::kChunkElems, problem.seq_len / HbeConfig::kSampleChunks);
+    const uint32_t n_samp = kNSamp;
+    for (uint32_t t = tx; t < kNSamp; t += kBlockSize) {
+      const uint32_t c = t / HbeConfig::kChunkElems;
+      const uint32_t o = t % HbeConfig::kChunkElems;
+      const uint32_t idx = min(c * chunk_stride + o, problem.seq_len - 1);
+      const float sv = problem.in[idx];
       atomicAdd(&smem->histogram[extract_coarse_bin<kHistBits>(sv)], 1);
     }
     __syncthreads();
