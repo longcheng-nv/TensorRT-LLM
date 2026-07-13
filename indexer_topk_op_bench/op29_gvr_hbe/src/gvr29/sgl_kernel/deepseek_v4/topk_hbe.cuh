@@ -68,12 +68,11 @@ struct TopKHbeStreaming : TopKStreaming {
     uint32_t bin_a, bin_b;
   };
 
-  /// pre_idx: K hint indices for this row (already offset for this batch
-  /// element); values are clamped into [0, seq_len) — garbage hints only
-  /// cost speed, never correctness.
+  /// pre_idx: RESERVED (iter7 uses the hint-free row-sample estimator; the
+  /// hint may return for sub-131K dispatch tiers). Unused.
   template <bool kUsePDL>
   SGL_DEVICE static void forward(const TopKProblem problem,
-                                 const int32_t* __restrict__ pre_idx,
+                                 const int32_t* __restrict__ /*pre_idx*/,
                                  TieValue* __restrict__ spill_row,
                                  void* _smem, void* _dyn) {
     const auto tx = threadIdx.x;
@@ -89,7 +88,15 @@ struct TopKHbeStreaming : TopKStreaming {
     TieValue* __restrict__ spillB_g = spill_row + spA;    // [spB]
     __shared__ HbeCounters hc;
 
-    // ---- Phase H0: hint mini-histogram -> column bins bA >= bB ----------
+    // ---- Phase H0 (iter7): row-sample mini-hist, CAND-TARGETED columns ---
+    // Columns are placed by candidate BUDGET, not by value-quantile guesses:
+    //   binA = sample bin at cumulative rank ~2*rS_K  (targets cand ~2*K)
+    //   binB = sample bin at cumulative rank ~8*rS_K  (targets cand ~8*K)
+    // where rS_K = n_samp*K/N is the sample-space image of rank K. A column
+    // targeting cand >= 2K sits at/below b* except under ~2x downward
+    // sampling noise (tier B + miss fallback absorb the tail). Scenario-
+    // invariant and hint-free (iter6 showed quantile-of-hint max() breaks
+    // one-sided safety; iter3 showed hint gather is a real tax).
     {
       typename Smem::kHistVec hist_vec;
       hist_vec.fill(0);
@@ -103,68 +110,29 @@ struct TopKHbeStreaming : TopKStreaming {
     __syncthreads();
     PDLWaitPrimary<kUsePDL>();
 
-    // gather a 1/kHintStride subsample of the hint values (clamped)
-    const uint32_t n_hint = max(1u, topk / HbeConfig::kHintStride);
-    for (uint32_t t = tx; t < n_hint; t += kBlockSize) {
-      const uint32_t hi = min(
-          static_cast<uint32_t>(max(pre_idx[t * HbeConfig::kHintStride], 0)),
-          problem.seq_len - 1);
-      const float hv = problem.in[hi];
-      atomicAdd(&smem->histogram[extract_coarse_bin<kHistBits>(hv)], 1);
+    const uint32_t stride =
+        max(1u, problem.seq_len / HbeConfig::kSampleTarget);
+    const uint32_t n_samp = (problem.seq_len + stride - 1) / stride;
+    for (uint32_t t = tx; t < n_samp; t += kBlockSize) {
+      const float sv = problem.in[t * stride];
+      atomicAdd(&smem->histogram[extract_coarse_bin<kHistBits>(sv)], 1);
     }
     __syncthreads();
-    // rank-from-top rA/rB over the n_hint-entry hint histogram
-    const uint32_t rA = max(1u, n_hint * HbeConfig::kQaPermille / 1000u);
-    const uint32_t rB = max(1u, n_hint * HbeConfig::kQbPermille / 1000u);
-    find_threshold(rA, n_hint, smem);
+    const uint32_t rS_K = max(1u, static_cast<uint32_t>(
+        (static_cast<uint64_t>(n_samp) * topk) / problem.seq_len));
+    const uint32_t rk_a = min(n_samp, 2 * rS_K);
+    const uint32_t rk_b = min(n_samp, 8 * rS_K);
+    find_threshold(rk_a, n_samp, smem);
     __syncthreads();
     if (tx == 0) hc.bin_a = smem->threshold_bin;
     __syncthreads();
-    find_threshold(rB, n_hint, smem);
+    find_threshold(rk_b, n_samp, smem);
     __syncthreads();
     if (tx == 0) {
-      const uint32_t bb = smem->threshold_bin;
-      hc.bin_b = bb > HbeConfig::kQbMarginBins ? bb - HbeConfig::kQbMarginBins
-                                               : 0u;
-      if (hc.bin_b > hc.bin_a) hc.bin_b = hc.bin_a;  // keep A above B
+      hc.bin_b = smem->threshold_bin;
+      if (hc.bin_b > hc.bin_a) hc.bin_b = hc.bin_a;  // keep B <= A
     }
     __syncthreads();
-
-    // ---- Phase H0b (iter6): row-sample estimator, fused with hint cols ---
-    {
-      const uint32_t stride =
-          max(1u, problem.seq_len / HbeConfig::kSampleTarget);
-      const uint32_t n_samp = (problem.seq_len + stride - 1) / stride;
-      // re-zero hist for the sample mini-hist
-      {
-        typename Smem::kHistVec hist_vec;
-        hist_vec.fill(0);
-        smem->hist_vecs[tx] = hist_vec;
-      }
-      __syncthreads();
-      for (uint32_t t = tx; t < n_samp; t += kBlockSize) {
-        const float sv = problem.in[t * stride];
-        atomicAdd(&smem->histogram[extract_coarse_bin<kHistBits>(sv)], 1);
-      }
-      __syncthreads();
-      // sample-space rank of the row's K-th value
-      const uint32_t rS = max(1u, static_cast<uint32_t>(
-          (static_cast<uint64_t>(n_samp) * problem.topk) / problem.seq_len));
-      find_threshold(rS, n_samp, smem);
-      __syncthreads();
-      if (tx == 0) {
-        const uint32_t bs = smem->threshold_bin;
-        const uint32_t sA =
-            bs > HbeConfig::kSampleGuardA ? bs - HbeConfig::kSampleGuardA : 0u;
-        const uint32_t sB =
-            bs > HbeConfig::kSampleGuardB ? bs - HbeConfig::kSampleGuardB : 0u;
-        // tighter (higher) of hint/sample per column; keep B <= A
-        hc.bin_a = max(hc.bin_a, sA);
-        hc.bin_b = max(hc.bin_b, sB);
-        if (hc.bin_b > hc.bin_a) hc.bin_b = hc.bin_a;
-      }
-      __syncthreads();
-    }
     const uint32_t binA = hc.bin_a, binB = hc.bin_b;
     const float vA = coarse_bin_lower_bound<kHistBits>(binA);
     const float vB = coarse_bin_lower_bound<kHistBits>(binB);
