@@ -24,6 +24,7 @@
 /// distribution; exposed separately so the harness can run it timed or not.
 #include <sgl_kernel/deepseek_v4/topk_impl.cuh>
 #include <sgl_kernel/deepseek_v4/topk_hbe.cuh>
+#include <sgl_kernel/deepseek_v4/topk_hbec.cuh>
 
 #include <cstdint>
 #include <iterator>
@@ -209,6 +210,65 @@ TOPK_KERNEL void topk_main_kernel(const __grid_constant__ TopKLaunchParams param
 
 using HbeStreaming = impl::TopKHbeStreaming;
 using HbeCfg = impl::HbeConfig;
+using ClusterHbec = impl::TopKClusterHbec<8>;
+using HbecCfg = impl::HbecConfig;
+
+/// op31 HBE-C tier-5: persistent cluster pool with the hint-ladder
+/// single-pass body (topk_hbec.cuh). Structure mirrors
+/// topk_persistent_cluster_kernel; dynamic smem = the candidate buffer, so
+/// NO enable_smem_spilling() here (ptxas forbids it with dyn smem).
+template <bool kPDL>
+CLUSTER_TOPK_KERNEL void topk_persistent_cluster_hbec_kernel(
+    const __grid_constant__ TopKLaunchParams params,
+    const int32_t* __restrict__ pre_idx) {
+  __shared__ impl::MaxSmem<ClusterHbec::HbecSmem> smem;
+  extern __shared__ uint8_t hbec_dyn[];
+  const uint32_t num_cluster_items = params.global().num_cluster_items;
+  device::PDLWaitPrimary<kPDL>();
+  device::PDLTriggerSecondary<kPDL>();
+#pragma unroll 1
+  for (uint32_t w = blockIdx.x; w < num_cluster_items; w += kNumPersistentClusters) {
+    const auto it = params.item(w);
+    const auto problem = params.problem(it.batch_id, it.seq_len);
+    ClusterHbec::forward<false>(
+        problem, pre_idx + it.batch_id * static_cast<int64_t>(params.topk),
+        &smem, hbec_dyn);
+    __syncthreads();
+  }
+}
+
+/// op31 HBE-C tier-5 small-batch variant: mirrors topk_small_batch_kernel
+/// with the cluster branch swapped for ClusterHbec.
+template <bool kPDL>
+CLUSTER_TOPK_KERNEL void topk_small_batch_hbec_kernel(
+    const __grid_constant__ TopKLaunchParams params,
+    const int32_t* __restrict__ pre_idx) {
+  auto problem = params.problem(blockIdx.x);
+  __shared__ impl::MaxSmem<Streaming::Smem, ClusterHbec::HbecSmem> smem;
+  extern __shared__ uint8_t hbec_dyn[];
+  if (problem.seq_len <= problem.topk) return trivial_transform<kPDL>(problem);
+  __shared__ int32_t topk_indices[kMaxTopK];
+  problem.out = topk_indices;
+
+  const auto worker_rank = blockIdx.x % kClusterSize;
+
+  if (problem.seq_len <= kReg4MaxSeqLen) {
+    if (blockIdx.y == worker_rank) Register4::forward<kPDL>(problem, &smem);
+  } else if (problem.seq_len <= params.cluster_floor) {
+    if (blockIdx.y == worker_rank) Streaming::forward<kPDL>(problem, &smem);
+  } else {
+    auto cluster = cooperative_groups::this_cluster();
+    problem.out = cluster.map_shared_rank(topk_indices, worker_rank);
+    ClusterHbec::forward<kPDL>(
+        problem, pre_idx + blockIdx.x * static_cast<int64_t>(params.topk),
+        &smem, hbec_dyn);
+    cluster.sync();
+  }
+
+  device::PDLWaitPrimary<kPDL>();
+  __syncthreads();
+  if (blockIdx.y == worker_rank) problem_transform(problem, params.get_output_ptr(blockIdx.x));
+}
 
 /// op29 HBE kernel: streaming regime only (max_seq_len > 16384, no cluster).
 /// pre_idx: [B, topk] hint indices (per-row). Dynamic smem = candidate bufs.
@@ -471,6 +531,46 @@ void topk_v2_transform(torch::Tensor scores, torch::Tensor seq_lens,
   const bool use_cluster =
       (static_cast<uint32_t>(max_seq_len) > params.cluster_floor) && (batch_size <= kClusterMaxBatch);
   constexpr bool kUsePDL = true;
+  // op31 HBE-C tier-5 (env-keyed; unset = byte-identical dispatch): the
+  // cluster path swaps its 2-pass body for the hint-ladder single pass.
+  static const bool hbec_on = [] {
+    const char* e = std::getenv("GVR29_HBEC");
+    return e != nullptr && e[0] == '1';
+  }();
+  if (use_cluster && use_hbe && hbec_on) {
+    TORCH_CHECK(pre_idx.scalar_type() == torch::kInt32 &&
+                pre_idx.size(0) == batch_size &&
+                pre_idx.size(1) == static_cast<int64_t>(topk),
+                "pre_idx must be [B, K] int32");
+    const size_t dyn = HbecCfg::dyn_smem_bytes(topk);
+    static bool hbec_attr_done = [] {
+      const auto max_dyn = static_cast<int>(HbecCfg::dyn_smem_bytes(2048));
+      cudaFuncSetAttribute(topk_small_batch_hbec_kernel<kUsePDL>,
+                           cudaFuncAttributeMaxDynamicSharedMemorySize,
+                           max_dyn);
+      cudaFuncSetAttribute(topk_persistent_cluster_hbec_kernel<kUsePDL>,
+                           cudaFuncAttributeMaxDynamicSharedMemorySize,
+                           max_dyn);
+      return true;
+    }();
+    (void)hbec_attr_done;
+    if (batch_size <= kNumPersistentClusters) {
+      host::LaunchKernel({batch_size, kClusterSize}, kBlockSize, stream, dyn)
+          .config({.use_pdl = kUsePDL, .cluster_dim = dim3{1, kClusterSize}})
+          .launch(topk_small_batch_hbec_kernel<kUsePDL>, params,
+                  pre_idx.data_ptr<int32_t>());
+    } else {
+      const uint32_t num_clusters = std::min(batch_size, kNumPersistentClusters);
+      host::LaunchKernel({num_clusters, kClusterSize}, kBlockSize, stream, dyn)
+          .config({.use_pdl = kUsePDL, .cluster_dim = dim3{1, kClusterSize}})
+          .launch(topk_persistent_cluster_hbec_kernel<kUsePDL>, params,
+                  pre_idx.data_ptr<int32_t>());
+      host::LaunchKernel(batch_size, kBlockSize, stream)
+          .config({.use_pdl = kUsePDL})
+          .launch(topk_main_kernel<kUsePDL, /*kLevel=*/3>, params);
+    }
+    return;
+  }
   if (use_cluster) {
     if (batch_size <= kNumPersistentClusters) {
       host::LaunchKernel({batch_size, kClusterSize}, kBlockSize, stream)

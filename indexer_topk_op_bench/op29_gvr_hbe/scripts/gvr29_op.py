@@ -112,6 +112,11 @@ def gvr29_topk(scores, seq_lens, K, pre_idx, out=None, metadata=None,
 
 if __name__ == "__main__":
     torch.manual_seed(0)
+    # op31: enable the HBE-C cluster tier for the smoke BEFORE the first
+    # transform call (the C++ side reads GVR29_HBEC once, statically). The
+    # legacy cells below are all cluster-ineligible (BS>512 or N<=floor), so
+    # their dispatch is unchanged; the added cells exercise HBE-C.
+    os.environ["GVR29_HBEC"] = "1"
     _module()
     print("gvr29 built OK")
     # smoke: exactness with GOOD hints (true topk), BAD hints (random), and
@@ -119,7 +124,11 @@ if __name__ == "__main__":
     for K in (512, 1024, 2048):
         # BS=4 @32768 exercises HBE below the cluster floor; BS=520 (>512
         # disables the cluster path) exercises HBE at large N.
-        for N, BS in ((32768, 4), (65536, 520), (262144, 520)):
+        # HBE-C cluster cells: (65536,4)/(131072,4) small-batch fused
+        # (batch<=15 floor 32768), (131072,64) persistent pool + epilogue,
+        # (262144,2) small-batch at bigger N.
+        for N, BS in ((32768, 4), (65536, 520), (262144, 520),
+                      (65536, 4), (131072, 4), (131072, 64), (262144, 2)):
             x = torch.randn(BS, N, dtype=torch.float32, device="cuda")
             sl = torch.full((BS,), N, dtype=torch.int32, device="cuda")
             ref = torch.topk(x, K, dim=1)

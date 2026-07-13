@@ -37,6 +37,10 @@ def build_call_ext29(op, K, dtype, N, BS, cr, logits_row, preidx_row):
     Npad = logits_row.shape[1]
     assert Npad == N, f"{op} assumes Npad==N (got Npad={Npad}, N={N})"
     logits = logits_row.to(dtype).expand(BS, -1).contiguous()
+    if cr == 1:
+        # op31 HBE-C reads the hint; production cr=1 kernel-read convention
+        # is (preIdx+1) mod N. No effect on HBE streaming (hint-free) arms.
+        preidx_row = (preidx_row.to(torch.int32) + 1) % N
     pre = preidx_row.to(torch.int32).expand(BS, -1).contiguous()
     assert pre.shape == (BS, K)
     seq = torch.full((BS,), N, dtype=torch.int32, device=DEV)
