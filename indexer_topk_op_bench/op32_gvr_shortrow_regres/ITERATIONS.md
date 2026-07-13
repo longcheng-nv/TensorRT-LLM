@@ -62,3 +62,23 @@ LOCK 2 (relaxed control): op26's OWN R0 ladder (fewer barriers, single multi-thr
 CONCLUSION: the ~30-40% gap to sglang IS the 5-phase-secant vs 2-phase-histogram structural
   difference; closing it needs the excluded skeleton (or lifting BS=1/short-N — op29 HBE owns
   N≥65536). op26_r0auto stays the best skeleton-compliant option here. NO further spend on this axis.
+
+## iter4 — 2026-07-13 — DECOMP (aggressive re-open): cost is K-independent barrier chain
+Probe (nsys, N=8192 fp32 BS=1 real): K-scaling + rs on/off.
+  K512 rs 9762 / K1024 rs 9597 / K2048 rs 11176 ns; K512 snap 11584 ns.
+Result:
+  - K512→K1024 FLAT (9762≈9597) → cost is NOT K-dependent → P1-hint(∝K) and P4(∝cand∝K) are
+    NOT the dominant cost at K≤1024. Kills "shrink-P4-via-kFTarget" and "overlap-P1-hint" as BIG
+    levers (both K-dependent, but the kernel is K-flat here). Only K2048 shows +16% (P1/P4/smem).
+  - rank-scatter already 19% faster than snap (9762 vs 11584) → P4's best algorithm is deployed;
+    the win came from CUTTING BARRIERS (snap's iters → rank-scatter one pass). Precedent: cut
+    barriers → win, ~19% for one phase.
+Diagnosis: the dominant ~9.7µs is the K-independent structural chain (count/secant/P3 + their
+  barriers) = W1, confirmed a 3rd way. Single-phase aggressive levers (kFTarget/P1) have limited
+  headroom. The ONLY skeleton-preserving lever with precedent = apply "cut barriers" (that gave
+  rank-scatter its 19%) to the count/secant/P3 barriers: (a) all-thread-redundant secant control
+  (drop the tid0-only broadcast barrier/iter), (b) warp-specialization (Q3'/Q4', fill 85% idle).
+  Ceiling ~10-20% STACKED, not 2×. 2× needs single-pass (excluded skeleton) or lifting BS=1/short-N
+  (op29 HBE owns N≥65536). Next: user fork — (A) pursue ~10-20% barrier-fusion+warp-spec restructure
+  within skeleton (risky, nsys+exact-gated), or (B) relax skeleton to port register-resident single-
+  pass (only path to 2×). Recommend A only if 10-20% is worth the restructure risk; else B.
