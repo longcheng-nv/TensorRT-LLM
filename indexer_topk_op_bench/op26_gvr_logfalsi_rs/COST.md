@@ -124,3 +124,22 @@ $12.5 cache-write(实测全部 5-min TTL)/ $1.0 cache-read,单位每 MTok。
 
 - 069 段特点:长等待用 Monitor 事件驱动,cache-read 只有 20M
   (049 段的 1/5)——挂机监控不烧上下文。
+
+## 7 · iter7 leader 尾段攻坚 — 092 段(2026-07-13)
+
+### GPU 花费(umbriel-b200-092,8 卡)
+
+| 内容 | GPU-h |
+|---|---|
+| 新机预检 smoke×2 + gate 582 | ~1.3 |
+| ncu 预研/复测 6 采集(3 负格 + radix + r0mcr×2) | ~1.2 |
+| D3 A/B 54 批(8 卡 ~0.3h)+ gate 291 + 默认重验 smoke+gate 582 | ~3.9 |
+| 3 臂负格探针 ×3 批 | ~0.4 |
+| D2 首硅 + debug 循环(repro×3)+ smoke + gate 291 | ~1.5 |
+| D2 A/B 54 批 | ~2.6 |
+| **小计(iter7)** | **≈ 11** |
+
+### Claude token 花费
+
+- 本 session(092)未做 usage snapshot;量级参考 069 段(事件驱动挂机
+  监控为主,cache-read 占大头),估 ≈$40-70。收口后如有 snapshot 请回填。

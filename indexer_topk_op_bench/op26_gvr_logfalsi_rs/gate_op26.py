@@ -50,6 +50,12 @@ DEV = "cuda"
 ARMS = ["op26_1cta", "op26_mc"]
 if os.environ.get("OP26_GATE_ARMS"):
     ARMS = [a.strip() for a in os.environ["OP26_GATE_ARMS"].split(",")]
+# dtype shard selector (e.g. OP26_GATE_DTYPES=fp32 for a 3-way GPU split;
+# each shard JIT-compiles only its own dtype specs => no redundant compile)
+GATE_DTS = ("fp32", "bf16", "fp16")
+if os.environ.get("OP26_GATE_DTYPES"):
+    GATE_DTS = tuple(d.strip()
+                     for d in os.environ["OP26_GATE_DTYPES"].split(","))
 SCENARIOS = ["real", "best", "worst"]
 N_SPOTS = [8192, 65536, 262144]
 BS_SPOTS = [1, 16, 256]
@@ -82,7 +88,7 @@ def run_suite_a():
     print("== Suite A: op22rr bundles ==", flush=True)
     for scen in SCENARIOS:
         for K in (512, 1024, 2048):
-            for dt_name in ("fp32", "bf16", "fp16"):
+            for dt_name in GATE_DTS:
                 dtype = DTYPES[dt_name]
                 for N in N_SPOTS:
                     try:
@@ -138,7 +144,7 @@ def run_suite_b():
     torch.manual_seed(1234)
     for K, cr in ((512, 4), (1024, 4), (2048, 1)):
         for N in (16384, 131072):
-            for dt_name in ("fp32", "bf16", "fp16"):
+            for dt_name in GATE_DTS:
                 dtype = DTYPES[dt_name]
                 # beta-tailed row (heavier tail than randn)
                 base = torch.distributions.Beta(2.0, 5.0).sample((N,))

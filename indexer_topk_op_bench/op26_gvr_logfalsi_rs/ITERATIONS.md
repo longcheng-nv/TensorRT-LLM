@@ -469,3 +469,37 @@
 - 工具 analyze_r0mcr_ab.py;根 = results_b200_op26_r0mcr_ab(不入库)。
   注:REPORT 的 op26_r0auto mc 域行采于本默认之前,下次 backfill 收编
   (同 p1bc 先例,不单独重跑 81 批)。
+
+### D2 p4_coop(cluster 协作 P4)臂 op26_r0mcp — 上硅证伪,不 ship (092, 54 批 1812 配对格)
+
+- 设计:去掉 leader gather,各 CTA 就地 rank-scatter 自己的 P3 候选;
+  粗/细直方图驻 leader smem 由全 cluster `red.shared::cluster` 共建,
+  三个 rank 计数器 `atom.shared::cluster` 取号;6 次均衡 cluster 同步。
+- **首硅 bug(新 gotcha,已入库记忆)**:`cluster_arrive_relaxed()` 无
+  release 语义 —— 同步后 rank-3 CTA 经 DSMEM 读 leader **刚写**的广播
+  标量读到过期值 → 整 slice 候选被误判跳过(错/漏选 index 按 CTA slice
+  聚类,debug_r0mcp.py 定位法)。修复 = coop 内 6 同步改
+  `cluster_arrive()`(release)。修复后 smoke 全绿 + gate 291/291。
+- **A/B 判决(vs op26_r0mc @p4_rs 默认)**:mc 调度域 ALL gm **0.914**,
+  全 dtype 全 K 一致负(0.903-0.924),worst 轴同构,679 损失格无正带;
+  全格上下文也 0.967。**同步税 + DSMEM 原子延迟 > 分布式收益**,
+  iter6c 的全局同步税警告在 intra-cluster 尺度同样成立。
+- **裁决:p4_coop 默认 OFF 不变,op26_r0mcp 保留证伪对照;D1 peer-push
+  连带不立项**(只省 leader 串行拉取 ~2-3µs 却加 1 次同步,按本数据
+  上限即 wash)。
+- 工具 analyze_r0mcp_ab.py;根 = results_b200_op26_r0mcp_ab(不入库)。
+
+### iter7 收口判决 (2026-07-13, 092)
+
+- **Ship = D3 p4_rs**(dispatch_p4rs_mc_op26 = not(bf16∧K512))@de9d33b7aa:
+  mc 域 gm 1.038(fp32 大 K 1.093,max 1.23)。
+- **负格带现状(3 臂 real/bs 探针,当前默认 vs radix)**:K1024 fp32
+  65K-262K BS1-8 **全翻正 1.06-1.41**;残余 = 16-bit 262K 低 BS
+  (fp16 K2048 0.69-0.71 / bf16 K512 0.78)与 fp16 K2048 65-131K
+  0.84-0.90 —— ncu 证 seg3(尾段)仍 51%,但 D2 证伪后 cluster 内
+  再无可拿的并行化路径(D1/D2 均判死),**判结构税记档**(radix 行内
+  CTA 随 N 扩 + 2-byte 带宽优势的组合)。
+- 顺带:gate_op26.py 增 `OP26_GATE_DTYPES` 分片选择器(3 卡并行
+  gate,分片按 dtype 编译无重复 JIT)。
+- 报告回填:p4_rs 默认(mc 域 +1.5~9%)与 p1bc 默认一起待下次统一
+  backfill 收编,不单独重跑 81 批。
