@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<!--
+SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES.
+All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+
+gvr29_hbe (op29 iter12) — complete algorithm description, bilingual EN/ZH.
+CSS-only language toggle (no JavaScript; viewer-safe). Charts are inline SVG
+with native <title> tooltips; palette = dataviz reference instance (validated
+set, subset in canonical order; relief rule satisfied via direct labels).
+-->
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>gvr29_hbe — 1-pass sample-column top-K · Algorithm</title>
+<style>
+:root{
+  --surface-1:#fcfcfb; --surface-2:#f2f1ee; --border:#d8d6d0;
+  --text-primary:#0b0b0b; --text-secondary:#52514e; --text-muted:#8a887f;
+  --s-blue:#2a78d6; --s-aqua:#1baf7a; --s-yellow:#eda100; --s-violet:#4a3aa7;
+  --accent:#2a78d6; --code-bg:#f5f4f1;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --surface-1:#1a1a19; --surface-2:#242422; --border:#3d3c38;
+    --text-primary:#ffffff; --text-secondary:#c3c2b7; --text-muted:#8a887f;
+    --s-blue:#3987e5; --s-aqua:#199e70; --s-yellow:#c98500; --s-violet:#9085e9;
+    --accent:#3987e5; --code-bg:#232322;
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--surface-1);color:var(--text-primary);
+  font:15px/1.65 "Segoe UI",system-ui,-apple-system,"Noto Sans SC",sans-serif}
+input.langsw{position:absolute;opacity:0;pointer-events:none}
+.page{max-width:980px;margin:0 auto;padding:28px 22px 80px}
+header{display:flex;align-items:baseline;gap:16px;flex-wrap:wrap;
+  border-bottom:2px solid var(--border);padding-bottom:14px;margin-bottom:22px}
+h1{font-size:24px;margin:0}
+.meta{color:var(--text-muted);font-size:13px}
+.langbtns{margin-left:auto;display:flex;gap:0;border:1px solid var(--border);
+  border-radius:8px;overflow:hidden;font-size:13px}
+.langbtns label{padding:5px 14px;cursor:pointer;color:var(--text-secondary);
+  background:var(--surface-2)}
+#lang-zh:checked ~ .page label[for=lang-zh],
+#lang-en:checked ~ .page label[for=lang-en]{
+  background:var(--accent);color:#fff}
+#lang-en:checked ~ .page .zh{display:none}
+#lang-zh:checked ~ .page .en{display:none}
+h2{font-size:19px;margin:38px 0 10px;padding-top:10px;
+  border-top:1px solid var(--border)}
+h3{font-size:16px;margin:22px 0 6px}
+p{margin:8px 0}
+.card{background:var(--surface-2);border:1px solid var(--border);
+  border-radius:10px;padding:14px 18px;margin:14px 0}
+.card.hl{border-left:4px solid var(--accent)}
+code,pre{font-family:"Cascadia Code",ui-monospace,Consolas,monospace;
+  font-size:13px}
+code{background:var(--code-bg);padding:1px 5px;border-radius:4px}
+pre{background:var(--code-bg);border:1px solid var(--border);
+  border-radius:8px;padding:14px 16px;overflow-x:auto;line-height:1.5}
+pre .cm{color:var(--text-muted)}
+pre .kw{color:var(--s-violet);font-weight:600}
+pre .fn{color:var(--s-blue)}
+table{border-collapse:collapse;width:100%;font-size:13.5px;margin:10px 0}
+th,td{border:1px solid var(--border);padding:5px 10px;text-align:right}
+th{background:var(--surface-2);color:var(--text-secondary);font-weight:600}
+td:first-child,th:first-child{text-align:left}
+.win{color:var(--s-aqua);font-weight:600}
+.figcap{color:var(--text-muted);font-size:13px;margin:4px 0 18px}
+svg{max-width:100%;height:auto;display:block;margin:10px auto}
+svg text{font:12.5px "Segoe UI",system-ui,sans-serif;fill:var(--text-secondary)}
+svg .tp{fill:var(--text-primary);font-weight:600}
+svg .tm{fill:var(--text-muted);font-size:11.5px}
+svg .box{fill:var(--surface-2);stroke:var(--border);stroke-width:1.2;rx:8}
+svg .boxhl{fill:var(--surface-2);stroke:var(--accent);stroke-width:2}
+svg .edge{stroke:var(--text-muted);stroke-width:1.4;fill:none}
+svg .edgehl{stroke:var(--accent);stroke-width:2;fill:none}
+svg .edgedash{stroke:var(--text-muted);stroke-width:1.4;fill:none;
+  stroke-dasharray:5 4}
+svg .grid{stroke:var(--border);stroke-width:1}
+svg .parity{stroke:var(--text-muted);stroke-width:1.4;stroke-dasharray:6 4}
+svg .bar{rx:4}
+svg g.barg:hover .bar{filter:brightness(1.12)}
+.legend{display:flex;gap:18px;font-size:13px;color:var(--text-secondary);
+  justify-content:center;margin:2px 0 4px}
+.legend .sw{display:inline-block;width:11px;height:11px;border-radius:3px;
+  margin-right:5px;vertical-align:-1px}
+.toc{font-size:14px;columns:2}
+.toc a{color:var(--accent);text-decoration:none}
+li{margin:3px 0}
+</style>
+</head>
+<body>
+<input class="langsw" type="radio" name="lang" id="lang-zh" checked>
+<input class="langsw" type="radio" name="lang" id="lang-en">
+<div class="page">
+
+<header>
+  <h1>gvr29_hbe</h1>
+  <div class="meta">
+    <span class="zh">op29 iter12 · 单遍采样定列 top-K · 2026-07-13 · B200 (SM100)</span>
+    <span class="en">op29 iter12 · 1-pass sample-column top-K · 2026-07-13 · B200 (SM100)</span>
+  </div>
+  <div class="langbtns"><label for="lang-zh">中文</label><label for="lang-en">EN</label></div>
+</header>
+
+<div class="card hl">
+  <p class="zh"><b>一句话:</b>把 SGLang v2 的"直方图遍 + 收集遍"两遍全行 DRAM 扫描压缩成<b>一遍</b>:
+  先用 4096 个采样点放置一条候选目标收集列(阈值下界猜测),单遍扫描时每元素只做 1 次比较收集候选;
+  收集后用<b>计数判据</b>(候选数 ≥ K)证明 top-K 已被包含,再从<b>仅候选的迷你直方图</b>恢复精确阈值 bin,
+  用原有 tie 机制边界精确求解。猜错则整行回退原两遍算法(fail-soft,精确性与命中率无关)。
+  同批实测:引擎化域(N≥65536、BS≥1024)对 sglang_v2 <b>1.03–1.75×</b>,全网格 906 cell 无一输超 5%。</p>
+  <p class="en"><b>One-liner:</b> compresses SGLang v2's two full-row DRAM passes (histogram pass +
+  collect pass) into <b>one</b>: a 4096-point row sample places a candidate-targeted collect column
+  (a guessed lower bound on the threshold), so the single pass does 1 comparison per element;
+  a <b>count-validity check</b> (candidates ≥ K) then proves top-K containment, the exact threshold
+  bin is recovered from a <b>candidates-only mini-histogram</b>, and the stock boundary-exact tie
+  machinery resolves the output. A wrong guess falls back to the stock 2-pass for that row
+  (fail-soft; exactness never depends on the guess). Same-batch measured: engaged domain
+  (N≥65536, BS≥1024) <b>1.03–1.75×</b> over sglang_v2; zero of 906 grid cells lose &gt;5%.</p>
+</div>
+
+<div class="card toc">
+  <span class="zh"><b>目录</b></span><span class="en"><b>Contents</b></span>
+  <ol>
+    <li><a href="#s1"><span class="zh">问题与基线</span><span class="en">Problem &amp; baseline</span></a></li>
+    <li><a href="#s2"><span class="zh">分发结构(流程图)</span><span class="en">Dispatch structure (flowchart)</span></a></li>
+    <li><a href="#s3"><span class="zh">HBE 三阶段管线(流程图)</span><span class="en">The HBE 3-phase pipeline (flowchart)</span></a></li>
+    <li><a href="#s4"><span class="zh">伪码</span><span class="en">Pseudocode</span></a></li>
+    <li><a href="#s5"><span class="zh">正确性论证</span><span class="en">Correctness argument</span></a></li>
+    <li><a href="#s6"><span class="zh">设计演化(证伪驱动)</span><span class="en">Design evolution (falsification-driven)</span></a></li>
+    <li><a href="#s7"><span class="zh">性能</span><span class="en">Performance</span></a></li>
+    <li><a href="#s8"><span class="zh">成本模型</span><span class="en">Cost model</span></a></li>
+    <li><a href="#s9"><span class="zh">源码与工件索引</span><span class="en">Source &amp; artifact index</span></a></li>
+  </ol>
+</div>
+
+<h2 id="s1"><span class="zh">1. 问题与基线</span><span class="en">1. Problem &amp; baseline</span></h2>
+<p class="zh">场景:DeepSeek-V4 稀疏注意力 indexer 的 decode 阶段 top-K —— 每行从 N 个 fp32 logits
+中选出 K 个最大值的索引(K=512/1024/2048 对应 V4-Flash / V4-Pro / V3.2),N 至 262K(部署主战场),
+BS 至 2048。精确性判据为 <b>tie-aware 值多重集</b>:输出索引对应的值排序后与
+<code>torch.topk</code> 完全一致(平局元素可互换,数量必须精确为 K)。</p>
+<p class="en">Setting: decode-phase top-K for the DeepSeek-V4 sparse-attention indexer — per row,
+select the indices of the K largest of N fp32 logits (K=512/1024/2048 for V4-Flash / V4-Pro /
+V3.2), N up to 262K (the deployment envelope), BS up to 2048. The exactness criterion is the
+<b>tie-aware value multiset</b>: sorted values at the output indices must equal
+<code>torch.topk</code>'s exactly (tied elements interchangeable, cardinality exactly K).</p>
+<p class="zh">基线/对手 <b>sglang_v2</b>(sglang@main 的 DSv4 top-K,2026-07 树内外全场最快)对流式行固定两遍:
+① 全行直方图遍 —— 每元素做 fp16-ordered 变换 + smem 原子加,得 4096-bin 直方图,求出阈值 bin b*;
+② 全行收集遍 —— 每元素 2 次比较,&gt;b* 直接输出,=b* 进 tie 缓冲精确选边界。
+两遍 = 2×N×4B 的 DRAM 读,它已坐在"无先验信息"的信息下限上。</p>
+<p class="en">The baseline/rival <b>sglang_v2</b> (sglang@main's DSv4 top-K, fastest in- or
+out-of-tree as of 2026-07) does a fixed two passes on streaming rows: ① a full-row histogram
+pass — per element an fp16-ordered transform + smem atomic into a 4096-bin histogram, yielding
+the threshold bin b*; ② a full-row collect pass — 2 comparisons per element, &gt;b* emitted
+directly, =b* into a tie buffer for boundary-exact selection. Two passes = 2×N×4B of DRAM
+reads; it sits at the prior-free information floor.</p>
+<p class="zh"><b>核心洞见</b>:阈值 bin 只需要"猜得不高于 b*"(单侧安全)。一个便宜的行采样就能给出
+这样的下界猜测,而猜测的对错可以在单遍扫描后用一个<b>计数</b>零成本判定 —— 于是第二遍在命中时完全消失。</p>
+<p class="en"><b>Core insight</b>: the threshold bin only needs to be guessed <i>at or below</i>
+b* (one-sided safety). A cheap row sample provides such a lower bound, and whether the guess
+worked is decidable after the single pass by one <b>count</b>, at zero cost — so the second pass
+vanishes entirely on a hit.</p>
+
+<h2 id="s2"><span class="zh">2. 分发结构</span><span class="en">2. Dispatch structure</span></h2>
+<p class="zh">gvr29 是 sglang_v2 的逐字 fork(register / streaming / 8-CTA cluster 三路不动),
+仅新增第 4 层:<b>N ≥ 65536 的流式行走 HBE</b>(iter12 守卫;2 条 shape-keyed 规则)。守卫外与
+sglang_v2 按构造等价 —— 零回归由结构保证。</p>
+<p class="en">gvr29 is a verbatim fork of sglang_v2 (register / streaming / 8-CTA-cluster paths
+untouched) plus one new tier: <b>streaming rows with N ≥ 65536 take HBE</b> (iter12 guard; 2
+shape-keyed rules). Outside the guard the op equals sglang_v2 by construction — zero regression
+is structural.</p>
+
+<svg viewBox="0 0 940 380" role="img" aria-label="dispatch flowchart">
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7"
+      markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="var(--text-muted)"/></marker>
+    <marker id="arhl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7"
+      markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="var(--accent)"/></marker>
+  </defs>
+  <rect class="box" x="20" y="40" width="180" height="58" rx="8"/>
+  <text class="tp" x="110" y="64" text-anchor="middle">scores[B,N], K, preIdx</text>
+  <text class="tm" x="110" y="82" text-anchor="middle">
+    <tspan class="zh">plan kernel(每步一次,摊销)</tspan>
+    <tspan class="en">plan kernel (once/step, amortized)</tspan></text>
+
+  <rect class="box" x="250" y="40" width="190" height="58" rx="8"/>
+  <text class="tp" x="345" y="64" text-anchor="middle">cluster-eligible?</text>
+  <text class="tm" x="345" y="82" text-anchor="middle">BS ≤ 512 &amp;&amp; N &gt; floor</text>
+
+  <rect class="box" x="510" y="10" width="200" height="50" rx="8"/>
+  <text class="tp" x="610" y="31" text-anchor="middle">8-CTA cluster (stock)</text>
+  <text class="tm" x="610" y="48" text-anchor="middle">
+    <tspan class="zh">分块扫描 + DSMEM 归并</tspan>
+    <tspan class="en">chunked scan + DSMEM reduce</tspan></text>
+
+  <rect class="box" x="250" y="150" width="190" height="58" rx="8"/>
+  <text class="tp" x="345" y="174" text-anchor="middle">N ≥ 65536 ?</text>
+  <text class="tm" x="345" y="192" text-anchor="middle">
+    <tspan class="zh">iter12 守卫(全 K)</tspan>
+    <tspan class="en">iter12 guard (all K)</tspan></text>
+
+  <rect class="box" x="510" y="90" width="200" height="50" rx="8"/>
+  <text class="tp" x="610" y="111" text-anchor="middle">
+    <tspan class="zh">stock 2 遍 / register 路径</tspan>
+    <tspan class="en">stock 2-pass / register path</tspan></text>
+  <text class="tm" x="610" y="128" text-anchor="middle">
+    <tspan class="zh">N &lt; 65536:持平区</tspan>
+    <tspan class="en">N &lt; 65536: parity region</tspan></text>
+
+  <rect class="boxhl" x="510" y="170" width="200" height="58" rx="8"/>
+  <text class="tp" x="610" y="194" text-anchor="middle">gvr29_hbe_kernel</text>
+  <text class="tm" x="610" y="212" text-anchor="middle">
+    <tspan class="zh">每行 1 CTA(1024 线程)</tspan>
+    <tspan class="en">1 CTA per row (1024 thr)</tspan></text>
+
+  <rect class="boxhl" x="760" y="150" width="160" height="98" rx="8"/>
+  <text class="tp" x="840" y="176" text-anchor="middle">HBE-noB</text>
+  <text class="tm" x="840" y="196" text-anchor="middle">H0 sample</text>
+  <text class="tm" x="840" y="213" text-anchor="middle">H1 fused pass</text>
+  <text class="tm" x="840" y="230" text-anchor="middle">H2 validate+resolve</text>
+
+  <rect class="box" x="510" y="280" width="200" height="52" rx="8"/>
+  <text class="tp" x="610" y="302" text-anchor="middle">
+    <tspan class="zh">行内短行:register 路径</tspan>
+    <tspan class="en">short rows: register path</tspan></text>
+  <text class="tm" x="610" y="320" text-anchor="middle">seq_len ≤ 16384 (stock)</text>
+
+  <path class="edge" d="M200 69 H244" marker-end="url(#ar)"/>
+  <path class="edge" d="M440 55 H504 V38" marker-end="url(#ar)"/>
+  <text class="tm" x="470" y="48">yes</text>
+  <path class="edge" d="M345 98 V144" marker-end="url(#ar)"/>
+  <text class="tm" x="352" y="126">no</text>
+  <path class="edge" d="M440 165 H470 V115 H504" marker-end="url(#ar)"/>
+  <text class="tm" x="447" y="155">no</text>
+  <path class="edgehl" d="M440 194 H504" marker-end="url(#arhl)"/>
+  <text class="tm" x="458" y="188">yes</text>
+  <path class="edgehl" d="M710 199 H754" marker-end="url(#arhl)"/>
+  <path class="edgedash" d="M610 228 V274" marker-end="url(#ar)"/>
+  <text class="tm" x="618" y="256">seq ≤ 16K</text>
+</svg>
+<p class="figcap">
+  <span class="zh">图 1 · host 分发。蓝色高亮 = 新增 HBE 层;其余路径与 sglang_v2 逐字一致。</span>
+  <span class="en">Fig 1 · host dispatch. Blue highlight = the new HBE tier; all other paths are
+  byte-identical to sglang_v2.</span></p>
+
+<h2 id="s3"><span class="zh">3. HBE 三阶段管线</span><span class="en">3. The HBE 3-phase pipeline</span></h2>
+
+<svg viewBox="0 0 940 560" role="img" aria-label="HBE pipeline flowchart">
+  <rect class="boxhl" x="20" y="20" width="900" height="120" rx="10"/>
+  <text class="tp" x="40" y="46">H0 —
+    <tspan class="zh">采样定列</tspan><tspan class="en">sample &amp; column placement</tspan>
+    <tspan class="tm">  (~16 KB read, K/N-invariant)</tspan></text>
+  <text x="40" y="72">
+    <tspan class="zh">① 64 × 64 分块合并采样(4096 点)→ fp16-ordered 12-bit 分箱 → smem 直方图</tspan>
+    <tspan class="en">① 64 × 64-chunk coalesced sample (4096 pts) → fp16-ordered 12-bit bins → smem histogram</tspan></text>
+  <text x="40" y="96">
+    <tspan class="zh">② rS_K = 4096·K/N(K 名次在采样空间的像);binA = find_threshold(rank = 2·rS_K)</tspan>
+    <tspan class="en">② rS_K = 4096·K/N (rank K's image in sample space); binA = find_threshold(rank = 2·rS_K)</tspan></text>
+  <text x="40" y="120">
+    <tspan class="zh">③ vA = binA 的 fp32 下界 —— 目标候选量 ≈ 2K,单侧偏低留裕量</tspan>
+    <tspan class="en">③ vA = binA's fp32 lower bound — targets ≈2K candidates, biased low for one-sided margin</tspan></text>
+
+  <rect class="boxhl" x="20" y="170" width="900" height="120" rx="10"/>
+  <text class="tp" x="40" y="196">H1 —
+    <tspan class="zh">唯一的一遍全行扫描</tspan><tspan class="en">the ONE full-row pass</tspan>
+    <tspan class="tm">  (N×4 B read, 1 cmp/elem)</tspan></text>
+  <text x="40" y="222">
+    <tspan class="zh">向量化流读全行;val ≥ vA 的元素:p = atomicAdd(cnt_a)</tspan>
+    <tspan class="en">Vectorized stream over the row; for each val ≥ vA: p = atomicAdd(cnt_a)</tspan></text>
+  <text x="40" y="246">
+    <tspan class="zh">p &lt; capA → smem bufA[p]={val,idx};否则 → 全局 spillA(仅溢出部分,~0.6% 流量)</tspan>
+    <tspan class="en">p &lt; capA → smem bufA[p]={val,idx}; else → global spillA (overflow only, ~0.6% traffic)</tspan></text>
+  <text x="40" y="270">
+    <tspan class="zh">val &lt; vA 的元素:零额外工作(iter12 删除了 tier-B 保险列 —— 见 §6)</tspan>
+    <tspan class="en">Elements below vA: zero extra work (iter12 removed the tier-B insurance column — §6)</tspan></text>
+
+  <rect class="box" x="20" y="320" width="420" height="70" rx="10"/>
+  <text class="tp" x="40" y="346">H2a —
+    <tspan class="zh">计数判据</tspan><tspan class="en">count-validity</tspan></text>
+  <text x="40" y="372">K ≤ cnt_a ≤ capA + spillA ?</text>
+
+  <rect class="boxhl" x="520" y="320" width="400" height="120" rx="10"/>
+  <text class="tp" x="540" y="346">H2b —
+    <tspan class="zh">候选内精确求解</tspan><tspan class="en">exact resolve inside candidates</tspan></text>
+  <text x="540" y="372">
+    <tspan class="zh">① 仅对 cnt_a 个候选建迷你直方图 → b* 精确</tspan>
+    <tspan class="en">① mini-histogram over the cnt_a candidates → exact b*</tspan></text>
+  <text x="540" y="396">
+    <tspan class="zh">② &gt;b* 直接 emit;=b* 走 stock tie 机制选边界</tspan>
+    <tspan class="en">② &gt;b* emitted; =b* via the stock tie machinery</tspan></text>
+  <text x="540" y="420">
+    <tspan class="zh">③ 输出 K 个索引(page-transform 尾声不变)</tspan>
+    <tspan class="en">③ emit K indices (page-transform epilogue unchanged)</tspan></text>
+
+  <rect class="box" x="20" y="460" width="420" height="76" rx="10"/>
+  <text class="tp" x="40" y="486">MISS —
+    <tspan class="zh">fail-soft 回退</tspan><tspan class="en">fail-soft fallback</tspan></text>
+  <text x="40" y="510">
+    <tspan class="zh">整套 stock 两遍(≈ 对手成本 + 1 遍);</tspan>
+    <tspan class="en">full stock 2-pass (≈ rival cost + 1 pass);</tspan></text>
+  <text x="40" y="530">
+    <tspan class="zh">本网格 906 cell 从未触发</tspan>
+    <tspan class="en">never fired across the 906-cell grid</tspan></text>
+
+  <path class="edgehl" d="M470 140 V164" marker-end="url(#arhl)"/>
+  <path class="edgehl" d="M470 290 V314" marker-end="url(#arhl)"/>
+  <path class="edgehl" d="M440 355 H470 V370 H514" marker-end="url(#arhl)"/>
+  <text class="tm" x="452" y="348">
+    <tspan class="zh">是(命中)</tspan><tspan class="en">yes (hit)</tspan></text>
+  <path class="edgedash" d="M230 390 V454" marker-end="url(#ar)"/>
+  <text class="tm" x="238" y="428">
+    <tspan class="zh">否(未观测到)</tspan><tspan class="en">no (never observed)</tspan></text>
+</svg>
+<p class="figcap">
+  <span class="zh">图 2 · HBE 管线。DRAM 主成本 = H1 的一遍;H0/H2 是固定小相位。</span>
+  <span class="en">Fig 2 · the HBE pipeline. Dominant DRAM cost = H1's single pass; H0/H2 are
+  small fixed phases.</span></p>
+
+<h2 id="s4"><span class="zh">4. 伪码</span><span class="en">4. Pseudocode</span></h2>
+<p class="zh">每行一个 CTA(1024 线程),与 kernel 实现一一对应
+(<code>src/gvr29/sgl_kernel/deepseek_v4/topk_hbe.cuh</code>)。<code>bin(x)</code> =
+fp16 转换后按符号翻转的 16 位有序键右移 4 位(4096 bin,对 fp32 单调)。</p>
+<p class="en">One CTA (1024 threads) per row; maps 1:1 onto the kernel
+(<code>src/gvr29/sgl_kernel/deepseek_v4/topk_hbe.cuh</code>). <code>bin(x)</code> = the
+sign-flipped 16-bit ordered key of the fp16 cast, shifted right by 4 (4096 bins, monotonic
+in the fp32 value).</p>
+<pre>
+<span class="cm">// ---- Phase H0: sample &amp; place the collect column (per row) ----</span>
+hist[4096] ← 0
+<span class="kw">for</span> t <span class="kw">in</span> 0..4095 <span class="kw">parallel</span>:                <span class="cm">// 64 chunks × 64 contiguous elems</span>
+    c, o ← t / 64, t mod 64                    <span class="cm">// chunked ⇒ coalesced 256B runs</span>
+    idx  ← min(c · max(64, N/64) + o, N−1)
+    <span class="fn">atomicAdd</span>(hist[<span class="fn">bin</span>(x[idx])], 1)
+rS_K ← max(1, 4096·K / N)                      <span class="cm">// rank K in sample space</span>
+binA ← <span class="fn">find_threshold</span>(hist, rank = 2·rS_K)    <span class="cm">// cand target ≈ 2K ⇒ one-sided margin</span>
+vA   ← <span class="fn">coarse_bin_lower_bound</span>(binA)           <span class="cm">// exact fp32 bin edge</span>
+hist ← 0                                       <span class="cm">// smem histogram reused in H2</span>
+
+<span class="cm">// ---- Phase H1: the ONE fused DRAM pass (1 cmp/elem) ----</span>
+cnt_a ← 0
+<span class="kw">for</span> (val, idx) <span class="kw">in</span> row <span class="kw">parallel</span>:              <span class="cm">// float4-vectorized stream</span>
+    <span class="kw">if</span> val ≥ vA:
+        p ← <span class="fn">atomicAdd</span>(cnt_a, 1)
+        <span class="kw">if</span>   p &lt; capA:          bufA[p] ← {val, idx}          <span class="cm">// smem (capA = 4K|2K·8B)</span>
+        <span class="kw">elif</span> p &lt; capA + spillA:  spillA_g[p − capA] ← {val, idx} <span class="cm">// global overflow (28·K)</span>
+        <span class="cm">// beyond spillA ⇒ counted but dropped ⇒ H2a will reject ⇒ fallback</span>
+
+<span class="cm">// ---- Phase H2: count-validity, exact b*, boundary-exact resolve ----</span>
+<span class="kw">if</span> K ≤ cnt_a ≤ capA + spillA:                  <span class="cm">// top-K provably ⊆ candidates (§5)</span>
+    <span class="kw">for</span> e <span class="kw">in</span> candidates <span class="kw">parallel</span>: <span class="fn">atomicAdd</span>(hist[<span class="fn">bin</span>(e.val)], 1)
+    b* ← <span class="fn">find_threshold</span>(hist, rank = K)         <span class="cm">// GLOBAL threshold bin — exact (§5)</span>
+    v_hi, v_lo ← bin edges of b*
+    <span class="kw">for</span> e <span class="kw">in</span> candidates <span class="kw">parallel</span>:
+        <span class="kw">if</span>   e.val ≥ v_hi: out[<span class="fn">atomicAdd</span>(count_gt,1)] ← e.idx   <span class="cm">// strictly above b*</span>
+        <span class="kw">elif</span> e.val ≥ v_lo: tie_buf[<span class="fn">atomicAdd</span>(count_eq,1)] ← e   <span class="cm">// boundary bin</span>
+    <span class="fn">handle_tie</span>(tie_buf, K − count_gt)          <span class="cm">// stock machinery, unchanged</span>
+<span class="kw">else</span>:                                          <span class="cm">// MISS — sample noise or blowout</span>
+    <span class="fn">TopKStreaming::forward</span>(row)                <span class="cm">// stock hist pass + collect pass</span>
+</pre>
+<pre>
+<span class="cm">// ---- Host dispatch (gvr29_standalone.cu; guard = iter12) ----</span>
+<span class="kw">if</span> use_hbe <span class="kw">and not</span> cluster_eligible <span class="kw">and</span> max_seq_len ≥ 65536:
+    <span class="fn">launch</span> gvr29_hbe_kernel&lt;PDL, kColB=<span class="kw">false</span>&gt;   <span class="cm">// dyn smem = capA·8B only</span>
+<span class="kw">else</span>: <span class="cm">// verbatim sglang_v2 dispatch: register / streaming / 8-CTA cluster</span>
+    <span class="fn">stock_dispatch</span>(...)
+</pre>
+
+<h2 id="s5"><span class="zh">5. 正确性论证</span><span class="en">5. Correctness argument</span></h2>
+<ul>
+  <li><p class="zh"><b>单侧安全</b>:binA 只需 ≤ b*。若 cnt_a ≥ K,则 vA 之上至少有 K 个元素,
+  即第 K 大值 ≥ vA,故 b* ≥ binA —— <b>计数本身就是判据</b>,无需知道 b*。</p>
+  <p class="en"><b>One-sided safety</b>: binA only needs to be ≤ b*. If cnt_a ≥ K, at least K
+  elements lie at/above vA, so the K-th largest value is ≥ vA and hence b* ≥ binA — <b>the count
+  itself is the certificate</b>; b* need not be known.</p></li>
+  <li><p class="zh"><b>候选集完备</b>:cnt_a ≤ capA+spillA 保证没有候选被丢弃;候选集 = 全部 val ≥ vA
+  的元素 ⊇ 全部 val ≥ v(b*) 的元素 ⊇ top-K。</p>
+  <p class="en"><b>Candidate completeness</b>: cnt_a ≤ capA+spillA guarantees no candidate was
+  dropped; the candidate set = all elements ≥ vA ⊇ all elements ≥ v(b*) ⊇ the top-K.</p></li>
+  <li><p class="zh"><b>迷你直方图给出全局 b*</b>:所有落在 bin ≥ binA 的元素都是候选,故候选直方图在
+  [binA, 4095] 区间与全行直方图逐 bin 相等;find_threshold(K) 的解落在该区间内(由上一条),
+  因此等于全局解。</p>
+  <p class="en"><b>The mini-histogram yields the global b*</b>: every element in bins ≥ binA is a
+  candidate, so the candidate histogram equals the full-row histogram bin-for-bin on
+  [binA, 4095]; find_threshold(K)'s solution lies in that interval (previous bullet), hence
+  equals the global one.</p></li>
+  <li><p class="zh"><b>边界精确</b>:b* bin 内的平局用与 stock 完全相同的 tie 机制精确选取
+  K − count_gt 个 —— 输出满足 tie-aware 值多重集判据。</p>
+  <p class="en"><b>Boundary exactness</b>: ties inside bin b* are resolved by the identical stock
+  tie machinery selecting exactly K − count_gt — the output meets the tie-aware value-multiset
+  criterion.</p></li>
+  <li><p class="zh"><b>fail-soft</b>:判据不通过(采样噪声或溢出)则整行执行原两遍算法。
+  采样质量只影响速度,<b>从不影响精确性</b>。Gate:324/324(3 场景 × 3 K × 4 N × 3 BS ×
+  双 colB 臂,含全域强制引擎化与对抗 hint),见 <code>gate_op29.log</code>。</p>
+  <p class="en"><b>Fail-soft</b>: if the check fails (sample noise or blowout) the row runs the
+  stock 2-pass. Sample quality moves only speed, <b>never exactness</b>. Gate: 324/324 (3
+  scenarios × 3 K × 4 N × 3 BS × both colB arms, incl. forced engagement everywhere and
+  adversarial hints), see <code>gate_op29.log</code>.</p></li>
+</ul>
+
+<h2 id="s6"><span class="zh">6. 设计演化(证伪驱动)</span><span class="en">6. Design evolution (falsification-driven)</span></h2>
+<p class="zh">最终形态是 12 轮迭代中 5 次硅上证伪的幸存者;每条弯路都有 ledger 条目
+(<code>FALSIFIED.md</code>/<code>WALLS.md</code>)。三个决定性转折:</p>
+<p class="en">The final form survived 5 on-silicon falsifications across 12 iterations; every
+dead end has a ledger entry (<code>FALSIFIED.md</code>/<code>WALLS.md</code>). Three decisive
+turns:</p>
+<table>
+<tr><th style="width:8%">iter</th>
+    <th style="width:24%"><span class="zh">尝试</span><span class="en">Attempt</span></th>
+    <th style="width:14%"><span class="zh">判定</span><span class="en">Verdict</span></th>
+    <th><span class="zh">机理 / 教训</span><span class="en">Mechanism / lesson</span></th></tr>
+<tr><td>1–6</td>
+  <td><span class="zh">preIdx hint 定列(分位数 / max 融合)</span>
+      <span class="en">hint-quantile columns (quantile / max-fuse)</span></td>
+  <td><span class="zh">证伪</span><span class="en">falsified</span></td>
+  <td><span class="zh">K2048 时 hint 分位数偏低 ~2000 bin;max() 破坏单侧安全。→ 换成场景无关的行采样估计器,hint 弃用。</span>
+      <span class="en">at K2048 hint quantiles land ~2000 bins low; max() breaks one-sidedness. → replaced by the scenario-invariant row-sample estimator; hint dropped.</span></td></tr>
+<tr><td>7–8</td>
+  <td><span class="zh">逐点跨步采样</span><span class="en">per-element strided sampling</span></td>
+  <td><span class="zh">硅上证伪</span><span class="en">falsified on silicon</span></td>
+  <td><span class="zh">host replay 完美但 128-256B 跨步 = 每 128B burst 只用 32B,浪费约半遍。→ 64×64 分块合并采样。</span>
+      <span class="en">perfect on host replay, but a 128-256B stride uses 32B per 128B burst — ~half a pass wasted. → 64×64 chunked coalesced sampling.</span></td></tr>
+<tr><td>9</td>
+  <td><span class="zh">融合遍内联全行直方图</span><span class="en">inline full-row histogram in the fused pass</span></td>
+  <td><span class="zh">墙(NCU)</span><span class="en">wall (NCU)</span></td>
+  <td><span class="zh">DRAM 已达 1.06 遍却比对手慢:issue-bound(每元素 F2F+twiddle+smem 原子)。→ <b>计数判据 + 仅候选迷你直方图</b> —— 本算法的核心产出。</span>
+      <span class="en">DRAM already at 1.06 passes yet slower than the rival: issue-bound (per-element F2F+twiddle+smem atomic). → <b>count-validity + candidates-only mini-histogram</b> — the algorithm's core contribution.</span></td></tr>
+<tr><td>11–12</td>
+  <td><span class="zh">tier-B 保险列(rank 8·rS_K,存 idx + 溢出)</span>
+      <span class="en">tier-B insurance column (rank 8·rS_K, idx store + spill)</span></td>
+  <td><span class="zh">归因后删除</span><span class="en">attributed &amp; removed</span></td>
+  <td><span class="zh">NCU:融合遍 81-84% issue-bound,候选带每元素 ~16 条指令;B 列宽 ~6K/行、18 次采样 0 触发,却是 K2048 "+188µs" 的全部真身。删除后 K1024/K2048 翻正、N=65536 复活。</span>
+      <span class="en">NCU: the fused pass is 81-84% issue-bound at ~16 inst per candidate-band element; the B column is ~6K wide per row, fired 0/18, and WAS the entire "+188µs" K2048 cost. Removing it flipped K1024/K2048 positive and revived N=65536.</span></td></tr>
+</table>
+
+<h2 id="s7"><span class="zh">7. 性能</span><span class="en">7. Performance</span></h2>
+<p class="zh">同批 nsys 纯 kernel 时间(冷 L2 规范口径,20/50 reps,B200 umbriel-073),
+op22rr 真实场景 bundle,比值 = t(sglang_v2)/t(gvr29)。完整 906 cell 已按锚协议
+(gvr_cutedsl 同批锚,漂移 med 1.0020 / p90 1.0156)换算入
+<code>op22_temporal_fixed_hr_bench/REPORT.html</code>。</p>
+<p class="en">Same-batch nsys pure-kernel time (canonical cold-L2, 20/50 reps, B200
+umbriel-073), op22rr real-scenario bundles; ratio = t(sglang_v2)/t(gvr29). The full 906 cells
+are anchor-transferred (co-located gvr_cutedsl anchor, drift med 1.0020 / p90 1.0156) into
+<code>op22_temporal_fixed_hr_bench/REPORT.html</code>.</p>
+
+<div class="legend">
+  <span><span class="sw" style="background:var(--s-blue)"></span>K = 512</span>
+  <span><span class="sw" style="background:var(--s-aqua)"></span>K = 1024</span>
+  <span><span class="sw" style="background:var(--s-yellow)"></span>K = 2048</span>
+</div>
+<svg viewBox="0 0 760 400" role="img" aria-label="speedup bar chart">
+  <line class="grid" x1="70" y1="330" x2="730" y2="330"/>
+  <line class="grid" x1="70" y1="247" x2="730" y2="247"/>
+  <line class="grid" x1="70" y1="80"  x2="730" y2="80"/>
+  <text class="tm" x="62" y="334" text-anchor="end">0</text>
+  <text class="tm" x="62" y="251" text-anchor="end">0.5</text>
+  <text class="tm" x="62" y="168" text-anchor="end">1.0</text>
+  <text class="tm" x="62" y="84"  text-anchor="end">1.5</text>
+  <line class="parity" x1="70" y1="164" x2="730" y2="164"/>
+  <text class="tm" x="734" y="168">
+    <tspan class="zh">持平</tspan><tspan class="en">parity</tspan></text>
+
+  <!-- N=65536: 1.104 1.125 1.071 → h=v*166; y=330-h -->
+  <g class="barg"><title>N=65536 K=512: 1.104×</title>
+    <rect class="bar" x="100" y="146.7" width="44" height="183.3" fill="var(--s-blue)"/>
+    <text class="tp" x="122" y="138" text-anchor="middle">1.10</text></g>
+  <g class="barg"><title>N=65536 K=1024: 1.125×</title>
+    <rect class="bar" x="146" y="143.2" width="44" height="186.8" fill="var(--s-aqua)"/>
+    <text class="tp" x="168" y="135" text-anchor="middle">1.13</text></g>
+  <g class="barg"><title>N=65536 K=2048: 1.071×</title>
+    <rect class="bar" x="192" y="152.2" width="44" height="177.8" fill="var(--s-yellow)"/>
+    <text class="tp" x="214" y="144" text-anchor="middle">1.07</text></g>
+  <text x="168" y="352" text-anchor="middle">N = 65 536</text>
+
+  <!-- N=131072: 1.458 1.483 1.334 -->
+  <g class="barg"><title>N=131072 K=512: 1.458×</title>
+    <rect class="bar" x="320" y="88" width="44" height="242" fill="var(--s-blue)"/>
+    <text class="tp" x="342" y="80" text-anchor="middle">1.46</text></g>
+  <g class="barg"><title>N=131072 K=1024: 1.483×</title>
+    <rect class="bar" x="366" y="83.8" width="44" height="246.2" fill="var(--s-aqua)"/>
+    <text class="tp" x="388" y="75" text-anchor="middle">1.48</text></g>
+  <g class="barg"><title>N=131072 K=2048: 1.334×</title>
+    <rect class="bar" x="412" y="108.6" width="44" height="221.4" fill="var(--s-yellow)"/>
+    <text class="tp" x="434" y="100" text-anchor="middle">1.33</text></g>
+  <text x="388" y="352" text-anchor="middle">N = 131 072</text>
+
+  <!-- N=262144: 1.729 1.712 1.637 -->
+  <g class="barg"><title>N=262144 K=512: 1.729×</title>
+    <rect class="bar" x="540" y="43" width="44" height="287" fill="var(--s-blue)"/>
+    <text class="tp" x="562" y="35" text-anchor="middle">1.73</text></g>
+  <g class="barg"><title>N=262144 K=1024: 1.712×</title>
+    <rect class="bar" x="586" y="45.8" width="44" height="284.2" fill="var(--s-aqua)"/>
+    <text class="tp" x="608" y="37" text-anchor="middle">1.71</text></g>
+  <g class="barg"><title>N=262144 K=2048: 1.637×</title>
+    <rect class="bar" x="632" y="58.3" width="44" height="271.7" fill="var(--s-yellow)"/>
+    <text class="tp" x="654" y="50" text-anchor="middle">1.64</text></g>
+  <text x="654" y="352" text-anchor="middle" class="tm"> </text>
+  <text x="608" y="352" text-anchor="middle">N = 262 144</text>
+
+  <text class="tm" x="400" y="384" text-anchor="middle">
+    <tspan class="zh">t(sglang_v2) / t(gvr29) —— real 场景,BS=1024,同批冷 L2</tspan>
+    <tspan class="en">t(sglang_v2) / t(gvr29) — real scenario, BS=1024, same-batch cold-L2</tspan></text>
+</svg>
+<p class="figcap">
+  <span class="zh">图 3 · 引擎化域加速比(&gt;1 为 gvr29 胜)。BS=2048 时 262144 行为 1.61–1.73×,
+  131072 为 1.32–1.52×(见下表)。</span>
+  <span class="en">Fig 3 · engaged-domain speedup (&gt;1 = gvr29 wins). At BS=2048: 262144 rows
+  1.61–1.73×, 131072 rows 1.32–1.52× (table below).</span></p>
+
+<h3><span class="zh">表格视图(real 场景全部引擎化 cell)</span>
+    <span class="en">Table view (all engaged cells, real scenario)</span></h3>
+<table>
+<tr><th>N</th><th>BS</th><th>K=512</th><th>K=1024</th><th>K=2048</th></tr>
+<tr><td>65 536</td><td>1024</td><td class="win">1.104</td><td class="win">1.125</td><td class="win">1.071</td></tr>
+<tr><td>65 536</td><td>2048</td><td class="win">1.099</td><td class="win">1.072</td><td class="win">1.028</td></tr>
+<tr><td>131 072</td><td>1024</td><td class="win">1.458</td><td class="win">1.483</td><td class="win">1.334</td></tr>
+<tr><td>131 072</td><td>2048</td><td class="win">1.524</td><td class="win">1.465</td><td class="win">1.320</td></tr>
+<tr><td>262 144</td><td>1024</td><td class="win">1.729</td><td class="win">1.712</td><td class="win">1.637</td></tr>
+<tr><td>262 144</td><td>2048</td><td class="win">1.734</td><td class="win">1.715</td><td class="win">1.612</td></tr>
+</table>
+<p class="zh">best / worst 场景的引擎化域范围分别为 1.034–1.744× / 1.034–1.752× ——
+采样估计器与数据分布无关,三场景不变量。守卫外(N &lt; 65536、cluster、register)按构造持平;
+全网格 906 cell(含全部持平区)ship-rule 切片 geomean 9/9 ≥ sglang_v2,无一 cell 输超 5%。</p>
+<p class="en">Engaged-domain ranges for best / worst scenarios: 1.034–1.744× / 1.034–1.752× —
+the sample estimator is distribution-free, so results are scenario-invariant. Outside the guard
+(N &lt; 65536, cluster, register) the op is parity by construction; over the full 906-cell grid
+(parity regions included) all 9 ship-rule slice geomeans ≥ sglang_v2 and no cell loses &gt;5%.</p>
+
+<h2 id="s8"><span class="zh">8. 成本模型</span><span class="en">8. Cost model</span></h2>
+<table>
+<tr><th></th>
+    <th>sglang_v2</th><th>gvr29_hbe</th></tr>
+<tr><td><span class="zh">全行 DRAM 遍数</span><span class="en">full-row DRAM passes</span></td>
+    <td>2.0</td><td class="win">1 + 2·P(miss) ≈ 1.0</td></tr>
+<tr><td><span class="zh">每元素融合遍工作量</span><span class="en">per-element fused-pass work</span></td>
+    <td><span class="zh">遍1: F2F+twiddle+smem 原子;遍2: 2 cmp</span>
+        <span class="en">pass1: F2F+twiddle+smem atomic; pass2: 2 cmp</span></td>
+    <td class="win">1 cmp (+ ~16 inst × 仅 ~2K 候选<span class="en" style="display:inline"> </span><span class="zh">个</span>)</td></tr>
+<tr><td><span class="zh">K-扩展成本(262144×1024 实测)</span><span class="en">K-scaling cost (measured, 262144×1024)</span></td>
+    <td>+13 µs (K512→K2048)</td><td class="win">≈ +20 µs<span class="zh">(纯 A 列)</span><span class="en"> (A column only)</span></td></tr>
+<tr><td><span class="zh">固定相位</span><span class="en">fixed phases</span></td>
+    <td><span class="zh">无(直方图遍即第 1 遍)</span><span class="en">none (histogram pass = pass 1)</span></td>
+    <td><span class="zh">16 KB 采样读 + 2× find_threshold + resolve(N=32768 处不摊销 → 守卫排除)</span>
+        <span class="en">16 KB sample read + 2× find_threshold + resolve (don't amortize at N=32768 → guarded out)</span></td></tr>
+<tr><td><span class="zh">理论上限(262144,带宽极限)</span><span class="en">theoretical ceiling (262144, BW-bound)</span></td>
+    <td>1.0×</td><td>2.0× <span class="zh">(实测 1.73×,残差 = 固定相位)</span><span class="en">(measured 1.73×; residual = fixed phases)</span></td></tr>
+</table>
+
+<h2 id="s9"><span class="zh">9. 源码与工件索引</span><span class="en">9. Source &amp; artifact index</span></h2>
+<ul>
+<li><code>src/gvr29/sgl_kernel/deepseek_v4/topk_hbe.cuh</code> —
+  <span class="zh">HBE kernel(<code>TopKHbeStreaming::forward</code>、<code>HbeConfig</code>、<code>kColB</code> 编译键)</span>
+  <span class="en">the HBE kernel (<code>TopKHbeStreaming::forward</code>, <code>HbeConfig</code>, the <code>kColB</code> compile key)</span></li>
+<li><code>src/gvr29/gvr29_standalone.cu</code> —
+  <span class="zh">host 分发 + 守卫(:427)+ <code>GVR29_FORCE_HBE</code> 诊断开关 + 绑定</span>
+  <span class="en">host dispatch + guard (:427) + the <code>GVR29_FORCE_HBE</code> diagnostic switch + bindings</span></li>
+<li><code>scripts/gvr29_op.py</code> —
+  <span class="zh">Python 封装 <code>gvr29_topk(...)</code>(JIT 构建至 <code>../_build/gvr29</code>)</span>
+  <span class="en">Python wrapper <code>gvr29_topk(...)</code> (JIT build into <code>../_build/gvr29</code>)</span></li>
+<li><code>scripts/gate_op29.py</code> + <code>gate_op29.log</code> —
+  <span class="zh">正确性 gate 324/324</span><span class="en">exactness gate 324/324</span></li>
+<li><code>scripts/{sweep_op29.py, ops_ext29.py, drive_nsys_op29.sh}</code> —
+  <span class="zh">报告级三臂全网格 sweep;原始根 <code>../results_b200_op29/</code></span>
+  <span class="en">report-grade 3-arm full-grid sweep; raw root <code>../results_b200_op29/</code></span></li>
+<li><code>../op22_temporal_fixed_hr_bench/update_report_op29.py</code> →
+  <code>REPORT.html</code> —
+  <span class="zh">锚换算入报(append-on-top last-writer)</span>
+  <span class="en">anchor-transferred report injection (append-on-top last-writer)</span></li>
+<li><code>ITERATIONS.md / FALSIFIED.md / WALLS.md / RESUME_PROMPT.md</code> —
+  <span class="zh">战役全史、证伪账、恢复入口</span>
+  <span class="en">full campaign history, falsification ledger, resume entry</span></li>
+</ul>
+
+<p class="meta" style="margin-top:30px">
+  <span class="zh">测量:nsys 纯 kernel、冷 L2 规范口径、同批三臂、锚换算;节点 umbriel-b200-073;
+  git @97edc7edc2。本文档零 JavaScript(CSS-only 语言切换),深色模式随系统。</span>
+  <span class="en">Measurement: nsys pure-kernel, canonical cold-L2, 3 arms same-batch,
+  anchor-transferred; node umbriel-b200-073; git @97edc7edc2. This document contains zero
+  JavaScript (CSS-only language toggle); dark mode follows the system.</span></p>
+
+</div>
+</body>
+</html>
