@@ -25,16 +25,22 @@ INLINE FULL HISTOGRAM in fused pass (issue-bound wall); tier-B insurance
 column (0/18 fires, ~6*K*16 inst/row — revival needs real per-row-variance
 miss-rate data); N<=32768 engagement (fixed overheads, re-scoped iter12).
 
+## REPORT ARM DONE (2026-07-13, node 073)
+Full-grid sweep + REPORT.html arm SHIPPED @97edc7edc2: 906 cells, 3 arms
+same-batch (gvr_cutedsl anchor + sglang_v2 + gvr29_hbe), anchor drift med
+1.0020 / p90 1.0156; ship-rule 9/9 (scenario x K) slices geomean >=
+sglang_v2 (1.021-1.026 grid-diluted), engaged tier 1.03-1.75x, ZERO cells
+lose >5%. Updater = op22.../update_report_op29.py (append-on-top
+last-writer; any older updater re-run erases the arm — re-run op29 after).
+Raw root = ../results_b200_op29 (local, untracked).
+
 ## Next steps (priority order)
 1. Cluster-path HBE (BS<=512, N>cluster_floor): same trick inside
    TopKCluster::forward (skip Phase1+DSMEM all-reduce on count-valid hit).
 2. Short rows N<=16K: register-path already 1-read; win only via P5 (occ/vec).
-3. Full-grid sweep: add gvr29(noB) to op28-style harness (3 arms incl
-   anchors), all idle GPUs, K512/1024 first; then REPORT.html arm via
-   update_report pattern (must extend the op28 last-writer chain).
-4. Production shape: guard means HBE is a dispatch tier of gvr_ms_auto
+3. Production shape: guard means HBE is a dispatch tier of gvr_ms_auto
    (N>=65536 streaming) — integration decision needs the user.
-5. (opt) real-world tier-A miss-rate study on varied-row captures (bench rows
+4. (opt) real-world tier-A miss-rate study on varied-row captures (bench rows
    are identical per cell; B-off insurance argument rests on cnt_a>=1.33*K
    margins seen in replay).
 
