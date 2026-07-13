@@ -56,6 +56,7 @@ from cute_vendored.blackwell.top_k.gvr_topk_decode_cluster import (  # noqa: E40
     _fmin_f32_inline, float_as_uint32,
 )
 from cutlass._mlir.dialects import llvm  # noqa: E402  (p4_rs bitcast)
+from cutlass.cutlass_dsl import T, dsl_user_op  # noqa: E402  (p4_coop DSMEM atomics)
 from cute_vendored.blackwell.utils import (  # noqa: E402
     TRTLLM_ENABLE_PDL, griddepcontrol_launch_dependents, griddepcontrol_wait,
 )
@@ -67,11 +68,61 @@ _DT = {torch.float32: cutlass.Float32, torch.bfloat16: cutlass.BFloat16,
 M2D = (0.85, 0.35)   # iter6 v0.2 ship ladder (see gvr_op26_r0_op.py)
 
 
+# --------------------------------------------------------------------------
+# DSMEM atomics for the p4_coop cooperative P4 (iter7 D2). Same inline-PTX
+# pattern as the vendored mapa/ld cluster helpers: CuTe DSL smem tensor ops
+# do not lower to cluster address space.
+# --------------------------------------------------------------------------
+@dsl_user_op
+def _red_shared_cluster_add_i32(mapped_addr, val, *, loc=None, ip=None):
+    """Atomic add (no return) into a cluster-mapped SMEM address."""
+    llvm.inline_asm(
+        None,
+        [mapped_addr.ir_value(loc=loc, ip=ip), val.ir_value(loc=loc, ip=ip)],
+        "red.shared::cluster.add.u32 [$0], $1;",
+        "r,r",
+        has_side_effects=True,
+        is_align_stack=False,
+        asm_dialect=llvm.AsmDialect.AD_ATT,
+        loc=loc,
+        ip=ip,
+    )
+
+
+@cute.jit
+def red_shared_cluster_add_i32(mapped_addr, val):
+    _red_shared_cluster_add_i32(mapped_addr, val)
+
+
+@dsl_user_op
+def _atom_shared_cluster_add_i32(mapped_addr, val, *, loc=None, ip=None):
+    """Atomic fetch-add into a cluster-mapped SMEM address (returns old)."""
+    return cutlass.Int32(
+        llvm.inline_asm(
+            T.i32(),
+            [mapped_addr.ir_value(loc=loc, ip=ip),
+             val.ir_value(loc=loc, ip=ip)],
+            "atom.shared::cluster.add.u32 $0, [$1], $2;",
+            "=r,r,r",
+            has_side_effects=True,
+            is_align_stack=False,
+            asm_dialect=llvm.AsmDialect.AD_ATT,
+            loc=loc,
+            ip=ip,
+        )
+    )
+
+
+@cute.jit
+def atom_shared_cluster_add_i32(mapped_addr, val):
+    return _atom_shared_cluster_add_i32(mapped_addr, val)
+
+
 class GvrOp26R0ClusterKernel(GvrTopKClusterKernel):
     """Cluster GVR + R0 h-space ladder admission + R1 inline falsi shot."""
 
     def __init__(self, *a, qfracs=M2D, mt_unroll=4, p1b_cache=False,
-                 p4_rs=False, **kw):
+                 p4_rs=False, p4_coop=False, **kw):
         super().__init__(*a, **kw)
         # compile-time debug printfs (OP26_R0MC_DEBUG=1, fresh process)
         self.dbg = bool(int(os.environ.get("OP26_R0MC_DEBUG", "0")))
@@ -84,6 +135,11 @@ class GvrOp26R0ClusterKernel(GvrTopKClusterKernel):
         self.p4_rs = bool(p4_rs)
         # keep the ported body verbatim (it const_exprs on this flag)
         self.enable_p4_rank_scatter_exact = True
+        # p4_coop (iter7 D2): cluster-cooperative exact rank-scatter — no
+        # leader gather, distributed hist/scatter via DSMEM atomics. Only
+        # meaningful at cluster_size>1 (cs=1 falls back to p4_rs/snap).
+        # Needs >=2 s_cluster_partial_m slots for the min/max exchange.
+        self.p4_coop = bool(p4_coop)
         # p1b_cache (1cta r0f port): P1 stores the K gathered preIdx values
         # into SMEM so the per-CTA-redundant P1b hist skips its second GMEM
         # random gather. Costs top_k*4B extra SMEM per CTA of the cluster.
@@ -96,6 +152,8 @@ class GvrOp26R0ClusterKernel(GvrTopKClusterKernel):
             "qfracs must be descending h (ascending threshold value)"
         self.qfracs = tuple(float(q) for q in qfracs)
         self.M_thr = len(self.qfracs)
+        if self.p4_coop:
+            assert self.M_thr >= 2, "p4_coop needs M>=2 partial slots"
         self.mt_unroll = int(mt_unroll)
         self.qneeds = tuple(max(1, int(math.ceil(q * self.top_k)))
                             for q in self.qfracs)
@@ -923,6 +981,354 @@ class GvrOp26R0ClusterKernel(GvrTopKClusterKernel):
                 i11 = i11 + cutlass.Int32(num_threads)
 
     # ------------------------------------------------------------------
+    # P4 (p4_coop variant, iter7 D2) — cluster-COOPERATIVE exact rank-
+    # scatter: NO leader gather; each CTA rank-scatters its OWN P3
+    # candidates. Coarse/fine hists live in the LEADER's smem, built by all
+    # CTAs via red.shared::cluster; the three scatter rank counters are
+    # cluster fetch-adds on the leader's s_iscalars. ~6 extra balanced
+    # cluster syncs (measured sub-us when CTAs arrive together) buy the
+    # removal of the leader serial tail (gather + full-cand P4) that ncu
+    # put at 51-61% of wall time on the fin low-BS negative band
+    # (PLAN_ITER7.md). Binning scalars (bmin/inv1/f_lo) are reduced from
+    # cluster-published per-CTA min/max in identical order on every CTA =>
+    # bit-identical => same selection semantics as phase4_rank_scatter.
+    # ------------------------------------------------------------------
+    @cute.jit
+    def phase4_rank_scatter_coop(self, smem_keys, smem_vals, smem_hist,
+                                 smem_wcnt, s_iscalars, s_cluster_partial_m,
+                                 output_values_row, output_indices_row,
+                                 tidx, warp_id, lane, cta_rank):
+        kK = cutlass.const_expr(self.top_k)
+        kBins = cutlass.const_expr(self.kNumBins)
+        num_threads = cutlass.const_expr(self.num_threads)
+        num_warps = cutlass.const_expr(self.num_warps)
+        bins_per_warp = cutlass.const_expr(kBins // self.num_warps)
+        cluster_size = cutlass.const_expr(self.cluster_size)
+        leader = cutlass.Int32(0)
+
+        own_cnt = s_iscalars[5]
+        # cand_total + my prefix base (peers' [5] valid: entry synced
+        # the cluster right after P3).
+        if tidx == cutlass.Int32(0):
+            tot = cutlass.Int32(0)
+            base = cutlass.Int32(0)
+            for peer in cutlass.range_constexpr(cluster_size):
+                addr5 = mapa_shared_cluster(
+                    s_iscalars.iterator + cutlass.Int32(5),
+                    cutlass.Int32(peer))
+                c5 = ld_shared_cluster_i32(addr5)
+                tot = tot + c5
+                if cutlass.Int32(peer) < cta_rank:
+                    base = base + c5
+            s_iscalars[2] = base
+            s_iscalars[0] = tot
+        cute.arch.barrier()
+        cand_total = s_iscalars[0]
+        my_base = s_iscalars[2]
+
+        if cand_total <= cutlass.Int32(kK):
+            # direct copy at prefix offsets; leader pads the tail with -1
+            i0 = tidx
+            while i0 < own_cnt:
+                pos0 = my_base + i0
+                if pos0 < cutlass.Int32(kK):
+                    if cutlass.const_expr(self.return_output_values):
+                        output_values_row[pos0] = self.dtype(smem_keys[i0])
+                    output_indices_row[pos0] = smem_vals[i0]
+                i0 = i0 + cutlass.Int32(num_threads)
+            if cta_rank == leader:
+                ip0 = cand_total + tidx
+                while ip0 < cutlass.Int32(kK):
+                    if cutlass.const_expr(self.return_output_values):
+                        output_values_row[ip0] = self.dtype(self.NEG_FLT_MAX)
+                    output_indices_row[ip0] = cutlass.Int32(-1)
+                    ip0 = ip0 + cutlass.Int32(num_threads)
+        else:
+            # ---- A: local block min/max over OWN cands + zero own hist ----
+            local_cmin = cutlass.Float32(self.FLT_MAX)
+            local_cmax = cutlass.Float32(self.NEG_FLT_MAX)
+            i5 = tidx
+            while i5 < own_cnt:
+                v5 = smem_keys[i5]
+                local_cmin = _fmin_f32_inline(local_cmin, v5)
+                local_cmax = cute.arch.fmax(local_cmax, v5)
+                i5 = i5 + cutlass.Int32(num_threads)
+            wmin = self.warp_reduce_min_f32(local_cmin)
+            wmax = self.warp_reduce_max_f32(local_cmax)
+            if lane == cutlass.Int32(0):
+                smem_wcnt[warp_id] = float_as_uint32(wmin)
+                smem_hist[warp_id] = float_as_uint32(wmax)
+            cute.arch.barrier()
+            if tidx == cutlass.Int32(0):
+                cmin_c = cutlass.Float32(self.FLT_MAX)
+                cmax_c = cutlass.Float32(self.NEG_FLT_MAX)
+                for w in cutlass.range_constexpr(self.num_warps):
+                    vmn = cutlass.Float32(llvm.bitcast(
+                        cutlass.Float32.mlir_type, smem_wcnt[w].ir_value()))
+                    vmx = cutlass.Float32(llvm.bitcast(
+                        cutlass.Float32.mlir_type, smem_hist[w].ir_value()))
+                    cmin_c = _fmin_f32_inline(cmin_c, vmn)
+                    cmax_c = cute.arch.fmax(cmax_c, vmx)
+                s_cluster_partial_m[0] = float_as_uint32(cmin_c)
+                s_cluster_partial_m[1] = float_as_uint32(cmax_c)
+            cute.arch.barrier()
+            # zero own hist (leader's is the red target; uniform on peers)
+            iz0 = tidx
+            while iz0 < cutlass.Int32(kBins):
+                smem_hist[iz0] = cutlass.Int32(0)
+                iz0 = iz0 + cutlass.Int32(num_threads)
+            cute.arch.cluster_arrive()   # release; SYNC1: minmax + zero
+            cute.arch.cluster_wait()
+            # cluster min/max reduce (identical order on every CTA)
+            if tidx == cutlass.Int32(0):
+                gmin = cutlass.Float32(self.FLT_MAX)
+                gmax = cutlass.Float32(self.NEG_FLT_MAX)
+                pmp = s_cluster_partial_m.iterator
+                for peer in cutlass.range_constexpr(cluster_size):
+                    amn = mapa_shared_cluster(pmp, cutlass.Int32(peer))
+                    amx = mapa_shared_cluster(pmp + cutlass.Int32(1),
+                                              cutlass.Int32(peer))
+                    fmn = ld_shared_cluster_f32(amn)
+                    fmx = ld_shared_cluster_f32(amx)
+                    gmin = _fmin_f32_inline(gmin, fmn)
+                    gmax = cute.arch.fmax(gmax, fmx)
+                if gmax <= gmin:
+                    gmax = gmin + cutlass.Float32(1e-6)
+                smem_wcnt[0] = float_as_uint32(gmin)
+                smem_wcnt[1] = float_as_uint32(gmax)
+            cute.arch.barrier()
+            bmin_r = cutlass.Float32(llvm.bitcast(
+                cutlass.Float32.mlir_type, smem_wcnt[0].ir_value()))
+            bmax_r = cutlass.Float32(llvm.bitcast(
+                cutlass.Float32.mlir_type, smem_wcnt[1].ir_value()))
+            range1 = bmax_r - bmin_r
+            inv1 = (cutlass.Float32(kBins - 1) + cutlass.Float32(0.99)) / range1
+            # ---- B: coarse hist into LEADER smem via cluster red ----
+            hbase = smem_hist.iterator
+            i7 = tidx
+            while i7 < own_cnt:
+                vk = smem_keys[i7]
+                bin_i = cutlass.Int32((vk - bmin_r) * inv1)
+                if bin_i < cutlass.Int32(0):
+                    bin_i = cutlass.Int32(0)
+                if bin_i > cutlass.Int32(kBins - 1):
+                    bin_i = cutlass.Int32(kBins - 1)
+                ah = mapa_shared_cluster(hbase + bin_i, leader)
+                red_shared_cluster_add_i32(ah, cutlass.Int32(1))
+                i7 = i7 + cutlass.Int32(num_threads)
+            cute.arch.cluster_arrive()   # release; SYNC2: coarse hist done
+            cute.arch.cluster_wait()
+            # ---- C: leader coarse 3-step search (verbatim) ----
+            if cta_rank == leader:
+                warp_bin_sum = cutlass.Int32(0)
+                for jb in cutlass.range_constexpr(bins_per_warp):
+                    bidx_s = (cutlass.Int32(kBins - 1)
+                              - warp_id * cutlass.Int32(bins_per_warp)
+                              - cutlass.Int32(jb))
+                    warp_bin_sum = warp_bin_sum + smem_hist[bidx_s]
+                if lane == cutlass.Int32(0):
+                    smem_wcnt[warp_id] = warp_bin_sum
+                cute.arch.barrier()
+                if tidx == cutlass.Int32(0):
+                    cum = cutlass.Int32(0)
+                    tw = cutlass.Int32(num_warps - 1)
+                    found = cutlass.Int32(0)
+                    for w2 in cutlass.range_constexpr(self.num_warps):
+                        cum = cum + smem_wcnt[w2]
+                        if cum >= cutlass.Int32(kK) and found == cutlass.Int32(0):
+                            tw = cutlass.Int32(w2)
+                            found = cutlass.Int32(1)
+                    cum2 = cutlass.Int32(0)
+                    for w3 in cutlass.range_constexpr(self.num_warps):
+                        if cutlass.Int32(w3) < tw:
+                            cum2 = cum2 + smem_wcnt[w3]
+                    s_iscalars[2] = cum2
+                    s_iscalars[3] = tw
+                cute.arch.barrier()
+                target_warp = s_iscalars[3]
+                if warp_id == target_warp and lane == cutlass.Int32(0):
+                    base_cum = s_iscalars[2]
+                    b_star_l = cutlass.Int32(kBins - 1)
+                    rank_above_l = base_cum
+                    set_d = cutlass.Int32(0)
+                    for jb2 in cutlass.range_constexpr(bins_per_warp):
+                        bidx2 = (cutlass.Int32(kBins - 1)
+                                 - target_warp * cutlass.Int32(bins_per_warp)
+                                 - cutlass.Int32(jb2))
+                        ra_before = base_cum
+                        base_cum = base_cum + smem_hist[bidx2]
+                        if base_cum >= cutlass.Int32(kK) and set_d == cutlass.Int32(0):
+                            b_star_l = bidx2
+                            rank_above_l = ra_before
+                            set_d = cutlass.Int32(1)
+                    s_iscalars[2] = rank_above_l
+                    s_iscalars[3] = b_star_l
+                cute.arch.barrier()
+                # re-zero the fine window [0:256) AFTER the search consumed it
+                izf = tidx
+                while izf < cutlass.Int32(256):
+                    smem_hist[izf] = cutlass.Int32(0)
+                    izf = izf + cutlass.Int32(num_threads)
+            cute.arch.cluster_arrive()   # release; SYNC3: b*/rank + fine zero
+            cute.arch.cluster_wait()
+            # broadcast b*/rank_above (leader s_iscalars[3]/[2]) to regs
+            if tidx == cutlass.Int32(0):
+                a2 = mapa_shared_cluster(
+                    s_iscalars.iterator + cutlass.Int32(2), leader)
+                a3 = mapa_shared_cluster(
+                    s_iscalars.iterator + cutlass.Int32(3), leader)
+                smem_wcnt[2] = ld_shared_cluster_i32(a2)
+                smem_wcnt[3] = ld_shared_cluster_i32(a3)
+            cute.arch.barrier()
+            rank_above = smem_wcnt[2]
+            b_star = smem_wcnt[3]
+            # ---- D: fine 256-bin hist of bin-b* cands into leader smem ----
+            fbins = cutlass.const_expr(256)
+            fbpw = cutlass.const_expr(256 // self.num_warps)
+            f_lo = bmin_r + cutlass.Float32(b_star) / inv1
+            finv = (cutlass.Float32(fbins - 1) + cutlass.Float32(0.99)) * inv1
+            ifb = tidx
+            while ifb < own_cnt:
+                vf = smem_keys[ifb]
+                cb = cutlass.Int32((vf - bmin_r) * inv1)
+                if cb < cutlass.Int32(0):
+                    cb = cutlass.Int32(0)
+                if cb > cutlass.Int32(kBins - 1):
+                    cb = cutlass.Int32(kBins - 1)
+                if cb == b_star:
+                    sb = cutlass.Int32((vf - f_lo) * finv)
+                    if sb < cutlass.Int32(0):
+                        sb = cutlass.Int32(0)
+                    if sb > cutlass.Int32(fbins - 1):
+                        sb = cutlass.Int32(fbins - 1)
+                    af = mapa_shared_cluster(hbase + sb, leader)
+                    red_shared_cluster_add_i32(af, cutlass.Int32(1))
+                ifb = ifb + cutlass.Int32(num_threads)
+            cute.arch.cluster_arrive()   # release; SYNC4: fine hist done
+            cute.arch.cluster_wait()
+            # ---- E: leader fine 3-step (verbatim) + zero rank counters ----
+            if cta_rank == leader:
+                fws = cutlass.Int32(0)
+                for jbf in cutlass.range_constexpr(fbpw):
+                    bif = (cutlass.Int32(fbins - 1)
+                           - warp_id * cutlass.Int32(fbpw)
+                           - cutlass.Int32(jbf))
+                    fws = fws + smem_hist[bif]
+                if lane == cutlass.Int32(0):
+                    smem_wcnt[warp_id] = fws
+                cute.arch.barrier()
+                if tidx == cutlass.Int32(0):
+                    cumf = rank_above
+                    twf = cutlass.Int32(num_warps - 1)
+                    fnd = cutlass.Int32(0)
+                    for w2 in cutlass.range_constexpr(self.num_warps):
+                        cumf = cumf + smem_wcnt[w2]
+                        if cumf >= cutlass.Int32(kK) and fnd == cutlass.Int32(0):
+                            twf = cutlass.Int32(w2)
+                            fnd = cutlass.Int32(1)
+                    pre = rank_above
+                    for w3 in cutlass.range_constexpr(self.num_warps):
+                        if cutlass.Int32(w3) < twf:
+                            pre = pre + smem_wcnt[w3]
+                    s_iscalars[4] = pre
+                    s_iscalars[1] = twf
+                cute.arch.barrier()
+                pre_f = s_iscalars[4]
+                twf2 = s_iscalars[1]
+                if warp_id == twf2 and lane == cutlass.Int32(0):
+                    base_f = pre_f
+                    sb_star_l = cutlass.Int32(fbins - 1)
+                    ra_fine_l = base_f
+                    sd = cutlass.Int32(0)
+                    for jb3 in cutlass.range_constexpr(fbpw):
+                        sbi = (cutlass.Int32(fbins - 1)
+                               - twf2 * cutlass.Int32(fbpw)
+                               - cutlass.Int32(jb3))
+                        ra_b = base_f
+                        base_f = base_f + smem_hist[sbi]
+                        if base_f >= cutlass.Int32(kK) and sd == cutlass.Int32(0):
+                            sb_star_l = sbi
+                            ra_fine_l = ra_b
+                            sd = cutlass.Int32(1)
+                    smem_hist[2] = sb_star_l
+                    smem_hist[3] = ra_fine_l
+                cute.arch.barrier()
+                if tidx == cutlass.Int32(0):
+                    s_iscalars[4] = cutlass.Int32(0)  # cnt_above
+                    s_iscalars[0] = cutlass.Int32(0)  # cnt_mid
+                    s_iscalars[1] = cutlass.Int32(0)  # cnt_strad
+                cute.arch.barrier()
+            cute.arch.cluster_arrive()   # release; SYNC5: fine scalars+ctrs
+            cute.arch.cluster_wait()
+            if tidx == cutlass.Int32(0):
+                ah2 = mapa_shared_cluster(hbase + cutlass.Int32(2), leader)
+                ah3 = mapa_shared_cluster(hbase + cutlass.Int32(3), leader)
+                smem_wcnt[4] = ld_shared_cluster_i32(ah2)
+                smem_wcnt[5] = ld_shared_cluster_i32(ah3)
+            cute.arch.barrier()
+            sb_star = smem_wcnt[4]
+            rank_above_fine = smem_wcnt[5]
+            # ---- F: distributed scatter of OWN cands (cluster counters) ----
+            a_above = mapa_shared_cluster(
+                s_iscalars.iterator + cutlass.Int32(4), leader)
+            a_mid = mapa_shared_cluster(
+                s_iscalars.iterator + cutlass.Int32(0), leader)
+            a_strad = mapa_shared_cluster(
+                s_iscalars.iterator + cutlass.Int32(1), leader)
+            isc = tidx
+            while isc < own_cnt:
+                v = smem_keys[isc]
+                bin_i = cutlass.Int32((v - bmin_r) * inv1)
+                if bin_i < cutlass.Int32(0):
+                    bin_i = cutlass.Int32(0)
+                if bin_i > cutlass.Int32(kBins - 1):
+                    bin_i = cutlass.Int32(kBins - 1)
+                if bin_i > b_star:
+                    pos = atom_shared_cluster_add_i32(a_above,
+                                                      cutlass.Int32(1))
+                    if pos < cutlass.Int32(kK):
+                        if cutlass.const_expr(self.return_output_values):
+                            output_values_row[pos] = self.dtype(v)
+                        output_indices_row[pos] = smem_vals[isc]
+                elif bin_i == b_star:
+                    sb = cutlass.Int32((v - f_lo) * finv)
+                    if sb < cutlass.Int32(0):
+                        sb = cutlass.Int32(0)
+                    if sb > cutlass.Int32(fbins - 1):
+                        sb = cutlass.Int32(fbins - 1)
+                    if sb > sb_star:
+                        o = atom_shared_cluster_add_i32(a_mid,
+                                                        cutlass.Int32(1))
+                        pos = rank_above + o
+                        if pos < cutlass.Int32(kK):
+                            if cutlass.const_expr(self.return_output_values):
+                                output_values_row[pos] = self.dtype(v)
+                            output_indices_row[pos] = smem_vals[isc]
+                    elif sb == sb_star:
+                        o = atom_shared_cluster_add_i32(a_strad,
+                                                        cutlass.Int32(1))
+                        pos = rank_above_fine + o
+                        if pos < cutlass.Int32(kK):
+                            if cutlass.const_expr(self.return_output_values):
+                                output_values_row[pos] = self.dtype(v)
+                            output_indices_row[pos] = smem_vals[isc]
+                isc = isc + cutlass.Int32(num_threads)
+            cute.arch.cluster_arrive()   # release; SYNC6: scatter done
+            cute.arch.cluster_wait()
+            # ---- G: leader pads the unfilled tail with -1 ----
+            if cta_rank == leader:
+                cnt_strad = s_iscalars[1]
+                filled = rank_above_fine + cnt_strad
+                if filled > cutlass.Int32(kK):
+                    filled = cutlass.Int32(kK)
+                ipad = filled + tidx
+                while ipad < cutlass.Int32(kK):
+                    if cutlass.const_expr(self.return_output_values):
+                        output_values_row[ipad] = self.dtype(self.NEG_FLT_MAX)
+                    output_indices_row[ipad] = cutlass.Int32(-1)
+                    ipad = ipad + cutlass.Int32(num_threads)
+
+    # ------------------------------------------------------------------
     # Entry — vendored cluster entry with Phase 2 replaced by P1b + R0 (+R1).
     # ------------------------------------------------------------------
     @cute.kernel
@@ -1175,51 +1581,58 @@ class GvrOp26R0ClusterKernel(GvrTopKClusterKernel):
                             s_iscalars[1], s_iscalars[0], s_iscalars[5],
                             s_thr[0], s_thr[1], s_thr[2])
 
-                if cluster_size == 1 or is_leader:
-                    if cutlass.const_expr(cluster_size > 1):
-                        local_cnt_self = s_iscalars[5]
-                        local_iscalars_ptr = s_iscalars.iterator + cutlass.Int32(5)
-                        smem_keys_iter = smem_keys.iterator
-                        smem_vals_iter = smem_vals.iterator
-                        base_offset = local_cnt_self
-                        for peer in cutlass.range_constexpr(1, cluster_size):
-                            peer_iscalars_addr = mapa_shared_cluster(
-                                local_iscalars_ptr, cutlass.Int32(peer))
-                            peer_cnt = ld_shared_cluster_i32(peer_iscalars_addr)
-                            i_gather = tidx
-                            while i_gather < peer_cnt:
-                                peer_key_addr = mapa_shared_cluster(
-                                    smem_keys_iter + i_gather, cutlass.Int32(peer))
-                                peer_val_addr = mapa_shared_cluster(
-                                    smem_vals_iter + i_gather, cutlass.Int32(peer))
-                                k_val = ld_shared_cluster_f32(peer_key_addr)
-                                v_val = ld_shared_cluster_i32(peer_val_addr)
-                                dst = base_offset + i_gather
-                                if dst < cutlass.Int32(self.kC):
-                                    smem_keys[dst] = k_val
-                                    smem_vals[dst] = v_val
-                                i_gather = i_gather + cutlass.Int32(num_threads)
-                            base_offset = base_offset + peer_cnt
-                        if tidx == cutlass.Int32(0):
-                            s_iscalars[0] = base_offset
-                        cute.arch.barrier()
+                if cutlass.const_expr(self.p4_coop and self.cluster_size > 1):
+                    self.phase4_rank_scatter_coop(
+                        smem_keys, smem_vals, smem_hist, smem_wcnt,
+                        s_iscalars, s_cluster_partial_m, output_values_row,
+                        output_indices_row, tidx, warp_id, lane,
+                        cta_in_cluster)
+                else:
+                    if cluster_size == 1 or is_leader:
+                        if cutlass.const_expr(cluster_size > 1):
+                            local_cnt_self = s_iscalars[5]
+                            local_iscalars_ptr = s_iscalars.iterator + cutlass.Int32(5)
+                            smem_keys_iter = smem_keys.iterator
+                            smem_vals_iter = smem_vals.iterator
+                            base_offset = local_cnt_self
+                            for peer in cutlass.range_constexpr(1, cluster_size):
+                                peer_iscalars_addr = mapa_shared_cluster(
+                                    local_iscalars_ptr, cutlass.Int32(peer))
+                                peer_cnt = ld_shared_cluster_i32(peer_iscalars_addr)
+                                i_gather = tidx
+                                while i_gather < peer_cnt:
+                                    peer_key_addr = mapa_shared_cluster(
+                                        smem_keys_iter + i_gather, cutlass.Int32(peer))
+                                    peer_val_addr = mapa_shared_cluster(
+                                        smem_vals_iter + i_gather, cutlass.Int32(peer))
+                                    k_val = ld_shared_cluster_f32(peer_key_addr)
+                                    v_val = ld_shared_cluster_i32(peer_val_addr)
+                                    dst = base_offset + i_gather
+                                    if dst < cutlass.Int32(self.kC):
+                                        smem_keys[dst] = k_val
+                                        smem_vals[dst] = v_val
+                                    i_gather = i_gather + cutlass.Int32(num_threads)
+                                base_offset = base_offset + peer_cnt
+                            if tidx == cutlass.Int32(0):
+                                s_iscalars[0] = base_offset
+                            cute.arch.barrier()
 
-                    cand_count_p4 = s_iscalars[0]
-                    if cand_count_p4 > cutlass.Int32(self.kC):
-                        cand_count_p4 = cutlass.Int32(self.kC)
+                        cand_count_p4 = s_iscalars[0]
+                        if cand_count_p4 > cutlass.Int32(self.kC):
+                            cand_count_p4 = cutlass.Int32(self.kC)
 
-                    if cutlass.const_expr(self.p4_rs):
-                        self.phase4_rank_scatter(
-                            smem_keys, smem_vals, smem_hist, smem_wcnt,
-                            s_thr, s_iscalars, output_values_row,
-                            output_indices_row, cand_count_p4, tidx,
-                            warp_id, lane)
-                    else:
-                        self.phase4_histogram_snap(
-                            smem_keys, smem_vals, smem_hist, smem_wcnt,
-                            s_thr, s_iscalars, output_values_row,
-                            output_indices_row, cand_count_p4, tidx,
-                            warp_id, lane)
+                        if cutlass.const_expr(self.p4_rs):
+                            self.phase4_rank_scatter(
+                                smem_keys, smem_vals, smem_hist, smem_wcnt,
+                                s_thr, s_iscalars, output_values_row,
+                                output_indices_row, cand_count_p4, tidx,
+                                warp_id, lane)
+                        else:
+                            self.phase4_histogram_snap(
+                                smem_keys, smem_vals, smem_hist, smem_wcnt,
+                                s_thr, s_iscalars, output_values_row,
+                                output_indices_row, cand_count_p4, tidx,
+                                warp_id, lane)
 
         if cutlass.const_expr(self.cluster_size > 1):
             cute.arch.cluster_arrive_relaxed()
@@ -1257,20 +1670,28 @@ def dispatch_p4rs_mc_op26(dt, top_k):
     return not (dt == torch.bfloat16 and top_k == 512)
 
 
+def dispatch_p4co_mc_op26(dt, top_k):
+    """p4_coop (cluster-cooperative P4) dispatch. Default OFF pending the
+    iter7 D2 mc-domain A/B (arm op26_r0mcp forces ON)."""
+    return False
+
+
 def gvr_r0_mc_op26(logits, pre_idx, seq_lens, index_topk, compress_ratio=1,
                    next_n=1, out=None, cluster_size=None, qfracs=None,
-                   p1b_cache=None, p4_rs=None):
+                   p1b_cache=None, p4_rs=None, p4_coop=None):
     dt = logits.dtype
     if p1b_cache is None:
         p1b_cache = dispatch_p1bc_mc_op26(dt)
     if p4_rs is None:
         p4_rs = dispatch_p4rs_mc_op26(dt, index_topk)
+    if p4_coop is None:
+        p4_coop = dispatch_p4co_mc_op26(dt, index_topk)
     qf = tuple(qfracs) if qfracs is not None else M2D
     cfg = _resolve_config_mc(logits, NUM_SMS, cluster_size)
     key = (dt, index_topk, next_n, compress_ratio, qf,
            cfg["min_blocks_per_mp"], cfg["use_256bit_load"],
            cfg["num_threads_per_block"], cfg["enable_warp_parallel_reduce"],
-           cfg["cluster_size"], bool(p1b_cache), bool(p4_rs))
+           cfg["cluster_size"], bool(p1b_cache), bool(p4_rs), bool(p4_coop))
     compiled = _compiled_r0mc.get(key)
     if compiled is None:
         kobj = GvrOp26R0ClusterKernel(
@@ -1285,6 +1706,7 @@ def gvr_r0_mc_op26(logits, pre_idx, seq_lens, index_topk, compress_ratio=1,
             cluster_size=cfg["cluster_size"], enable_smem_cache=False,
             smem_cache_elems=32768,
             qfracs=qf, p1b_cache=bool(p1b_cache), p4_rs=bool(p4_rs),
+            p4_coop=bool(p4_coop),
         )
         n_rows, n_cols, n_batch = cute.sym_int(), cute.sym_int(), cute.sym_int()
         in_align = 32 if cfg["use_256bit_load"] else 16
@@ -1326,6 +1748,16 @@ def gvr_r0mcr_op26(logits, pre_idx, seq_lens, index_topk, compress_ratio=1,
                           qfracs=qfracs, p4_rs=True)
 
 
+def gvr_r0mcp_op26(logits, pre_idx, seq_lens, index_topk, compress_ratio=1,
+                   out=None, qfracs=None):
+    """op26_r0mcp = op26_r0mc with p4_coop forced ON (iter7 D2 cluster-
+    cooperative rank-scatter P4 ablation arm; falls back to the production
+    p4_rs/snap dispatch wherever cluster_size==1)."""
+    return gvr_r0_mc_op26(logits, pre_idx, seq_lens, index_topk,
+                          compress_ratio=compress_ratio, out=out,
+                          qfracs=qfracs, p4_coop=True)
+
+
 def picked_cluster_size_r0mc(logits, index_topk, compress_ratio=1):
     return _resolve_config_mc(logits, NUM_SMS)["cluster_size"]
 
@@ -1364,6 +1796,9 @@ if __name__ == "__main__":
     # the production default (dispatch_p4rs_mc_op26).
     _env_p4rs = os.environ.get("OP26_R0MC_SMOKE_P4RS")
     P4RS = None if _env_p4rs is None else _env_p4rs == "1"
+    # "1" forces the cluster-cooperative P4 (iter7 D2 p4_coop).
+    _env_p4co = os.environ.get("OP26_R0MC_SMOKE_P4CO")
+    P4CO = None if _env_p4co is None else _env_p4co == "1"
 
     def check(logits, pre_idx, K, crv, tag):
         N = logits.shape[1]
@@ -1371,7 +1806,7 @@ if __name__ == "__main__":
                               device="cuda")
         cs = picked_cluster_size_r0mc(logits, K, crv)
         out = gvr_r0_mc_op26(logits, pre_idx, seq_lens, K, crv,
-                             p1b_cache=P1BC, p4_rs=P4RS)
+                             p1b_cache=P1BC, p4_rs=P4RS, p4_coop=P4CO)
         torch.cuda.synchronize()
         for r in (0, logits.shape[0] - 1):
             idx = out[r].clamp(min=0).long()

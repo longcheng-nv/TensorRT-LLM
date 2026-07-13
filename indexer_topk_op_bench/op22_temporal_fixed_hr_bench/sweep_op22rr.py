@@ -97,6 +97,8 @@ ARMS_EXTRA = [
     # op26_r0mcr = op26_r0mc + p4_rs (iter7 leader rank-scatter P4 ablation:
     # op#7 exact rank-scatter replaces vendored snap in the cluster epilogue).
     ("op26_r0mcr", "op26_r0mcr", None, None),
+    # op26_r0mcp = op26_r0mc + p4_coop (iter7 D2 cluster-cooperative P4).
+    ("op26_r0mcp", "op26_r0mcp", None, None),
     # op26_r0auto = production-facing R0: dispatch_r0_arm_op26 routes to
     # op26_r0 (1cta, N<64K or BS>=128) / op26_r0mc (N>=65536 & BS<=64).
     ("op26_r0auto", "op26_r0auto", None, None),

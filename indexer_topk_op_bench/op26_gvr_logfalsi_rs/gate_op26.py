@@ -38,7 +38,8 @@ import bundle_data_rr  # noqa: E402
 from gvr_op26_op import gvr_cutedsl_op26, gvr_multicta_op26  # noqa: E402
 from gvr_op26_r0_op import gvr_r0_op26, gvr_r0f_op26  # noqa: E402
 from gvr_op26_r0mc_op import (  # noqa: E402
-    gvr_r0_mc_op26, gvr_r0mcc_op26, gvr_r0mcr_op26, gvr_r0_auto_op26,
+    gvr_r0_mc_op26, gvr_r0mcc_op26, gvr_r0mcr_op26, gvr_r0mcp_op26,
+    gvr_r0_auto_op26,
 )
 
 DEV = "cuda"
@@ -120,6 +121,7 @@ def _run_arms_single(logits, pre, N, K, cr, tag):
                     ("op26_r0mc", gvr_r0_mc_op26),
                     ("op26_r0mcc", gvr_r0mcc_op26),
                     ("op26_r0mcr", gvr_r0mcr_op26),
+                    ("op26_r0mcp", gvr_r0mcp_op26),
                     ("op26_r0auto", gvr_r0_auto_op26)):
         if arm not in ARMS:
             continue
