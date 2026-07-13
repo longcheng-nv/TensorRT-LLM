@@ -5,10 +5,12 @@
 ## 1. Context (1 minute)
 Campaign: rmsnorm_campaign (omni-kernel v2 Tier-B trial). Objective: beat/tie
 flashinfer.norm.rmsnorm on hidden=7168 bf16, T grid {1,16,256,4096,16384}, B200.
-State: iter 1 done (PIVOT): Triton 1-CTA/row candidate = 1.047/0.995/1.025 at
-T=1/16/256 but 0.898/0.952 at T=4096/16384 (geomean 0.982, ship rule fails).
-Next: iter 2 = NCU attribution of the large-T deficit + repair variants; fallback
-lever = regime dispatch (triton small-T / flashinfer large-T, 1 rule).
+State: CAMPAIGN CONVERGED — SHIP at iter 3 (of 5). Final artifact
+src/candidate_dispatch.py (1-rule dispatch: T<=512 triton arm / T>512 flashinfer).
+Final grid (nsys): 1.0372/0.9957/1.0048/1.0013/0.9986, geomean 1.0074, worst 0.9957
+— ship rule met. See ITERATIONS.md "FINAL CAMPAIGN VERDICT". Nothing to resume;
+any follow-up campaign starts from the un-spent levers listed in iter 3 (split-row
+small-T attack; TileIR/TMA vs WALLS #3).
 Read PLAN.md + ITERATIONS.md tail + FALSIFIED.md before proposing anything.
 
 ## 2. Preflight checklist

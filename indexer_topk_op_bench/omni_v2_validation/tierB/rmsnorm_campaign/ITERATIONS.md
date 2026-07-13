@@ -84,3 +84,75 @@ Ledger write-back: FALSIFIED #2 (config levers at large T, evidence nsys) + WALL
 Next: iter 3 = productize via regime dispatch (SKILL Phase 6 "dispatch by regime"):
 triton autotuned arm for T<=512, flashinfer arm for T>512 (1 rule, budget 3) →
 expected grid 1.047/0.995/1.025/1.00/1.00, geomean ~1.013 → ship-rule candidate.
+
+## iter 3 — 2026-07-13 — SHIP (src/candidate_dispatch.py)
+Hypothesis (ledger check: cites WALLS "large-T bandwidth saturation" + "flashinfer
+large-T BW-efficiency edge" as the motivation — route the walled regime to the
+incumbent arm; FALSIFIED #1/#2 not re-proposed): a 1-rule regime dispatch
+(T<=512 → iter1 Triton autotuned arm; T>512 → flashinfer) meets the ship rule.
+Probe: none needed beyond iter1/iter2 measurements (both arms already nsys-charted);
+threshold 512 sits in the (256, 4096] grid gap with 2x margin below the first losing cell.
+Result: gate 5/5 synth + 5/5 adversarial GREEN at every cell (50/50). L2 nsys ×3-median
+on the FINAL artifact, anchor drift -0.15% (21.139 vs 21.17); baselines reproduce
+iter1 within 0.5% at every cell (T=16384: 71.965 = iter1's 71.965 — bracket holds):
+  | T | cand µs | incumbent µs | ratio | arm |
+  |---|---|---|---|---|
+  | 1 | 2.667 | 2.766 | 1.0372 | triton |
+  | 16 | 2.970 | 2.957 | 0.9957 | triton |
+  | 256 | 4.018 | 4.037 | 1.0048 | triton |
+  | 4096 | 21.126 | 21.153 | 1.0013 | flashinfer (self) |
+  | 16384 | 72.067 | 71.965 | 0.9986 | flashinfer (self) |
+  worst 0.9957 (T=16) · geomean 1.0074 · best 1.0372 (T=1)
+Ship rule: geomean 1.0074 >= 1.00 ✓ · min cell 0.9957 >= 0.98 ✓ · exactness green ✓ ·
+dispatch rules = 1 <= 3 ✓ · hard constraints: CUDA-graph compatible (host-side shape
+dispatch, resolved at capture), out-of-place, zero incumbent edits ✓ → SHIP.
+Diagnosis: the campaign's entire real win is the T=1 latency cell (+3.7-4.7%, from
+wider CTAs: 1024 vs 128 threads on the single resident row); T=16/256 are parity-band;
+large-T cells are the incumbent by construction. Honest framing: this is a small,
+narrow win — flashinfer remains the best single kernel on 4/5 cells.
+Ledger write-back: none (no falsification; walls unchanged).
+Next: campaign verdict below. Un-spent levers for any future campaign: split-row
+(multi-CTA/row) attack on the T=1/16 latency floor (iter0 headroom table says up to
+1.73x/1.31x remains); TileIR/TMA streaming path vs WALL #3 (revival condition in
+FALSIFIED #2).
+
+---
+
+# FINAL CAMPAIGN VERDICT — 2026-07-13 — SHIP (converged, iter 3 of 5; ~2 h wall)
+
+**Artifact**: `src/candidate_dispatch.py` — 1-rule regime dispatch:
+T<=512 → single-pass Triton (1 CTA/row, fp32 accum, autotuned num_warps);
+T>512 → flashinfer.norm.rmsnorm (incumbent, unmodified).
+
+**Per-cell nsys table (candidate/incumbent, ×3-median, anchored 21.17 µs ±3%,
+umbriel-b200-035 GPU1)**:
+| T | candidate µs | incumbent µs | ratio |
+|---|---|---|---|
+| 1 | 2.667 | 2.766 | 1.0372 |
+| 16 | 2.970 | 2.957 | 0.9957 |
+| 256 | 4.018 | 4.037 | 1.0048 |
+| 4096 | 21.126 | 21.153 | 1.0013 |
+| 16384 | 72.067 | 71.965 | 0.9986 |
+
+**Verdict axes**: worst 0.9957 (T=16) · geomean 1.0074 · best 1.0372 (T=1).
+
+**Ship rule (KICKOFF.md, verbatim clauses)**:
+- geomean >= 1.00 vs incumbent: **1.0074 → PASS**
+- no cell < 0.98: **min 0.9957 → PASS**
+- exactness green (dense bf16 atol/rtol 1e-2): **50/50 (5 synth + 5 adversarial × 5 cells) → PASS**
+- dispatch rules <= 3: **1 → PASS**
+- hard constraints (CUDA-graph compatible, out-of-place, no incumbent source edits): **PASS**
+→ **SHIP** (per AUTONOMY, actual production integration / PR is a human decision;
+this campaign ends at this verdict).
+
+**Honest negative content (pre-authorized)**: flashinfer remains the best *single*
+kernel on the envelope — it is unbeaten at T ∈ {16, 4096, 16384} and its large-T BW
+efficiency exceeds the generic Triton/elementwise ceiling (WALLS #3, FALSIFIED #2).
+The shipped artifact's only genuine kernel win is the T=1 (and marginally T=256)
+latency regime, worth +3.7-4.7% (T=1) via wider CTAs. If a 1-rule dispatch wrapper is
+judged not worth carrying for a ~0.7% geomean gain, KEEP FLASHINFER AS-IS — that
+call is the human's; the numbers above are the complete basis for it.
+
+**Iterations used**: 4 of 5 (iter0 characterization, iter1 PIVOT, iter2 FALSIFIED,
+iter3 SHIP). Ledger: 2 FALSIFIED entries, 3 WALLS entries — every residual loss maps
+to a named wall (large-T → WALLS #2/#3; T=16 0.9957 = parity-band noise, not a wall).
