@@ -1,40 +1,47 @@
-# op29 RESUME — GVR-HBE campaign (updated 2026-07-13, iter2 gate green)
+# op29 RESUME — GVR-HBE campaign (updated 2026-07-13, iter10 done @2a5931fca2)
 
 ## 1-minute context
-Goal: beat sglang_v2 (op28 arm, new fastest in op22 REPORT) across the full
-fp32 grid, from op27 as production incumbent. Core design = HBE: hint-quantile
-dual-column speculative collect fused with the full histogram in ONE DRAM pass
-(rival needs 2); miss -> in-kernel redo = rival parity. See PLAN.md + crux
-verdict in ITERATIONS.md iter1.
+Goal: beat sglang_v2 across the op22 fp32 grid, op27 = production incumbent.
+WINNING DESIGN (iter9, SHIP-CANDIDATE in its domain): hint-free HBE =
+64x64-chunk coalesced row sample -> cand-targeted columns (sample-rank
+2*rS_K / 8*rS_K) -> histogram-FREE fused single pass (2 cmps/elem, smem bufs
++ global spill) -> validity by count (cnt_a>=K) -> b* from candidate-only
+smem mini-hist -> tiered resolve; miss falls back to stock 2-pass.
 
-## State
-- iter1 CRUX GO @9286086177 (scripts/crux_hint_{bin,quantile}.py).
-- iter2 kernel DONE @eb59922b46: src/gvr29 (fork of ops/sglang_v2 + HBE
-  streaming path, flag use_hbe, dyn-smem bufs); wrapper scripts/gvr29_op.py
-  (build dir ../_build/gvr29). randn smoke 27/27; bundle gate
-  scripts/gate_op29.py 216/216 (real hints, HBE on+off).
-- iter3 pilot IN FLIGHT: scripts/pilot_op29.py — 3 arms (sglang_v2 rival /
-  gvr29_hbe / gvr29_off parity) x {K512,K2048} x 9 HBE-engaged (N,BS) cells,
-  nsys same-batch, scenarios real/best/worst on GPU2/6/7.
-  Artifacts: results/pilot/pilot_<scen>.{nsys-rep,jsonl,log}.
-  Parse: scripts/parse_pilot.py -> ratio tables.
+## Proven verdicts (nsys same-batch, gate 216/216, fork parity 1.000)
+- ENGAGED domain (guard: K<=1024 && N>=131072, streaming regime i.e. BS>512):
+  262144x1024 **1.46-1.50x**, 262144x2048 **1.36-1.40x**, 131072x1024
+  **1.06-1.12x** over sglang_v2, ALL scenarios incl worst (scenario-invariant).
+- Outside guard: parity 0.99-1.01 (zero regression).
 
-## Preflight checklist
-- git log -1 must show iter >= 2; branch omni/op21-gvr-prod.
-- GPU blacklist (2026-07-13): GPU0 (co-tenant 100%), GPU4/5 (co-tenant
-  158GB) — RECHECK nvidia-smi, occupancy changes hourly.
-- nsys must run with `env -u GITHUB_TOKEN -u HF_TOKEN`.
-- Builds cached in ../_build/{gvr29,sglang_v2}; if lock-stale, rm the lock.
+## Falsification ledger highlights (do NOT re-propose; see FALSIFIED.md)
+min-hint predictor; hint x sample max(); strided single-element sampling
+(DRAM-burst ~half a pass); INLINE FULL HISTOGRAM in fused pass (issue-bound
+wall — NCU 545MB@1.4TB/s vs rival 1.02GB@4.2TB/s); N<=65536 engagement
+(fixed overheads); K2048 w/ capA=2K (+188us unattributed K-cost).
 
-## Next steps (disjoint)
-1. Parse pilot -> iter3 verdict (target: hbe/rival >= 1.2 on engaged cells,
-   gvr29_off/rival ~= 1.0 fork parity; miss telemetry via K2048 cells).
-2. If GO: extend HBE to level-3 streaming rows + cluster path (iter4);
-   short-row register hint trim (iter5); dispatch-floor tuning (iter6).
-3. Full-grid sweep via op28 harness pattern (add gvr29 ops to ops_ext-style
-   build_call), all idle GPUs, then REPORT arm + anchor transfer.
+## Next steps (priority order)
+1. NCU-attribute the K2048 HBE cell (262144x1024): suspects = universal spill
+   (cand target 2K=8192 > capA 4096), resolve/tie scaling. Then either
+   capA=4K@occ1 A/B or tighter col (rank 1.2*rS_K) + capB catch.
+2. 131072 residual (1.09 vs 1.47): shrink fixed phases — merge the two
+   find_thresholds (one pass over sample hist can yield both ranks), or
+   sample 2048 instead of 4096.
+3. Cluster-path HBE (BS<=512, N>cluster_floor): same trick inside
+   TopKCluster::forward (skip Phase1+DSMEM all-reduce on count-valid hit).
+4. Short rows N<=16K: register-path already 1-read; win only via P5 (occ/vec).
+5. Full-grid sweep: add gvr29 to op28-style harness (3 arms incl anchors),
+   all idle GPUs, K512/1024 first; then REPORT.html arm via update_report
+   pattern (must extend the op28 last-writer chain).
+6. Production shape: the guard means HBE is a THIRD dispatch tier of
+   gvr_ms_auto (>=131K high-BS) — integration decision needs the user.
 
-## Launch commands (byte-exact)
+## Preflight
+- git log -1 >= 2a5931fca2; branch omni/op21-gvr-prod.
+- GPU blacklist recheck (was: 0 co-tenant, 4/5 co-tenant 158GB; 1/2/3/6/7 free).
+- nsys/ncu: env -u GITHUB_TOKEN -u HF_TOKEN. Builds in ../_build/gvr29.
+- Pilot relaunch: see launch block below (byte-exact).
+
 ```bash
 cd indexer_topk_op_bench/op29_gvr_hbe
 setsid env -u GITHUB_TOKEN -u HF_TOKEN CUDA_VISIBLE_DEVICES=<g> \
@@ -45,11 +52,6 @@ setsid env -u GITHUB_TOKEN -u HF_TOKEN CUDA_VISIBLE_DEVICES=<g> \
 ```
 
 ## Gotchas
-- enable_smem_spilling pragma is ILLEGAL in dyn-smem kernels (ptxas fatal) —
-  HBE kernel omits it; other kernels keep it.
-- TieValue.idx is uint32 (not int32).
-- find_threshold(rank, TOTAL, smem): 2nd arg must equal the histogram's total
-  count (topk for the hint mini-hist).
-- HBE engages ONLY when !cluster_eligible && maxseq > 16384: BS>512 all N, or
-  N <= cluster_floor (32768@BS<=15 / 65536@BS<=512). Cluster cells run the
-  baseline fork path.
+- enable_smem_spilling illegal with dyn smem; TieValue.idx uint32;
+  find_threshold(rank, TOTAL_IN_HIST, smem); pilot jsonl archived per-iter
+  under results/pilot/iter<N>/.
