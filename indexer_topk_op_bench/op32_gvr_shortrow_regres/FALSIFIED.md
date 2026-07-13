@@ -11,3 +11,7 @@ F2 — raise threads/CTA 512->768/1024 at BS=1 short-N — WASH-to-loss.
   barrier-dependency chain (data-dependent secant), not warp occupancy; extra warps have no
   independent work to overlap. Revival: only alongside a restructuring that creates independent
   overlappable work across the barrier chain (none proposed yet).
+
+F3 — reduction final-aggregate (tid0 16-sum vs warp0 shuffle) at 512 threads — WASH, not the cost.
+  domain: fp32 BS=1 short-N. evidence: L1 A/B (noise 0.66-1.08). root-class: measurement/structural —
+  final-sum is ~16 int-adds drowned in barrier latency. The bottleneck is the barrier COUNT, not reduce.

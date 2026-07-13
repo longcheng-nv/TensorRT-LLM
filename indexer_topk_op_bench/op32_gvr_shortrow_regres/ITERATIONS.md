@@ -33,3 +33,32 @@ Next: the only skeleton-preserving latency lever left = CUT/CHEAPEN the barriers
   (warp-level shuffle reduce replacing block-barrier+smem reduce per secant iter; the mc path's
   enable_warp_parallel_reduce is a candidate primitive). Tension: the biggest structural win (few
   barriers / single pass) IS sglang's skeleton, which the user excluded — bounds the achievable.
+
+## iter2 — 2026-07-13 — WASH: enable_warp_parallel_reduce @512 threads
+Hypothesis: replace the per-count-pass tid0-serial 16-slot final-sum with a warp0 shuffle reduce.
+Probe: L1 cold A/B (off vs on), 3 scen x 3 N. Result: ratios 0.66-1.08 = pure noise, exact all Y.
+Diagnosis: the final-aggregate is ~16 serial int-adds, drowned in barrier/interpolation latency —
+  NOT the bottleneck. Ledger: FALSIFIED F3. Also: L1 event timing at this launch floor is unusable
+  (same kernel 14-26µs) → all verdicts require nsys.
+
+## iter3 — 2026-07-13 — BOUND: secant-refine is NOT removable (nsys)
+Meta-op (UB/LB bounding): nsys pure-kernel, N=8192 K512 fp32 BS=1, MAX_REFINE_ITERS 15 vs 0.
+Result: refine=15 (base) **9766/9733 ns** (best/real) = TRUE floor ~9.7µs (L1's 16-26µs was noise);
+  refine=0 (no secant) **10475 ns** = SLOWER, not faster.
+Diagnosis: killing the secant makes the initial threshold non-converge → P3 over-collects → P4 blows
+  up. The secant is LOAD-BEARING (bounds candidate count), already ~1.46 iters (Q5e). A perfect
+  barrier-fusion rewrite caps at ~1.46 iters ×2 barriers ≈ 0.6-1.2µs = 6-12% of 9.7µs, high impl
+  risk, cheap probes already WASH. Ledger: WALLS W1.
+
+## VERDICT — 2026-07-13 — NO-SHIP (structural wall, double-locked; pre-authorized negative)
+Within "keep M2+secant skeleton, no sglang-copy", fp32 BS=1 short-N is at a structural wall; no
+skeleton-preserving lever gives substantial improvement.
+LOCK 1 (measured): NCU latency/issue-bound (issue 15% / warps 25% / dram 0.06%, single-CTA); nsys
+  floor ~9.7µs; secant not removable (refine=0 slower); threads & warp-reduce & register-resident all
+  WASH/dead; barrier-fusion ceiling ~6-12%, within probe noise.
+LOCK 2 (relaxed control): op26's OWN R0 ladder (fewer barriers, single multi-thresh pass) already
+  A/B-LOST to base at fp32 short-N (plain wins 1.10-1.14×, memory 小N R0门). Only variant beating base
+  = sglang single-pass histogram (~7µs) = the excluded skeleton.
+CONCLUSION: the ~30-40% gap to sglang IS the 5-phase-secant vs 2-phase-histogram structural
+  difference; closing it needs the excluded skeleton (or lifting BS=1/short-N — op29 HBE owns
+  N≥65536). op26_r0auto stays the best skeleton-compliant option here. NO further spend on this axis.
