@@ -1,0 +1,5 @@
+results/nsys_reps/
+*.nsys-rep
+*.sqlite
+*.kern.json
+*.log
