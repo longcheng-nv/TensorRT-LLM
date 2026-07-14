@@ -76,3 +76,23 @@ MEASUREMENT LESSON (both omni-kernel violations): (a) NEVER headline one verdict
 ## FINAL VERDICT — 2026-07-14 — op33 CLOSED, NO-SHIP (+30% infeasible, no valid lever)
 No borrow (D1 already default) and no knob (D2 M=3 fails worst; D3/D4 negative) beats op27_hls on
 the full 3-axis envelope. +30% infeasible. op27_hls remains best. Pre-authorized negative delivered.
+
+## iter7 — 2026-07-14 — DEFINITIVE clean full grid: NO-SHIP confirmed, safe region NONE
+Re-ran the full op22rr fp32 BS=1 grid CLEANLY on umbriel-b200-027 (2-way sequential, base+m3
+back-to-back same GPU — the reliable method after 8-GPU contention + 8-way nsys-flakiness were both
+falsified as measurement-corrupters). 54/54 cells, K512/1024 × 9N × best/real/worst.
+M=3/base speedup (>1 = M=3 faster), geomean over K512/1024:
+  N       best   real   worst
+  4096    1.124  1.103  0.947
+  8192    1.132  1.115  0.808
+  16384   1.197  1.157  0.992
+  32768   1.125  1.123  0.958
+  65536   1.067  1.032  0.717
+  131072  1.047  1.043  0.711
+  262144  1.061  1.065  0.725
+  524288  1.059  1.062  0.685
+  1048576 1.099  1.099  0.667
+M=3 wins best/real at EVERY N, LOSES worst at EVERY N (0.67-0.99). SAFE region (all 3 axes >=1) =
+NONE. Overall geomean 0.982 (net negative incl worst). CONFIRMS iter6 NO-SHIP definitively.
+dispatch STAYS default op27_hls (no M=3). Report REPORT.html refreshed with this clean grid as the
+authoritative table. Data: results/reliable_grid.csv. op33 CLOSED.
