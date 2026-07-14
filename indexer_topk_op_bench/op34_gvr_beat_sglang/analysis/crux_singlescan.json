@@ -1,0 +1,3926 @@
+{
+ "flash/4k": {
+  "model": "flash",
+  "isl": "4k",
+  "N": 1027,
+  "K": 512,
+  "kC": 3072,
+  "happy_pct": 100.0,
+  "hr_med": 0.7421875,
+  "fast_med": 0.8984375,
+  "band_over_K_med": 0.201171875,
+  "oracle_med": 0.998046875,
+  "per_layer": [
+   {
+    "layer": 2,
+    "hit_rate": 0.89453125,
+    "happy": true,
+    "fast_share": 0.83984375,
+    "band_over_K": 0.166015625,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 4,
+    "hit_rate": 0.890625,
+    "happy": true,
+    "fast_share": 0.8515625,
+    "band_over_K": 0.17578125,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 6,
+    "hit_rate": 0.86328125,
+    "happy": true,
+    "fast_share": 0.8984375,
+    "band_over_K": 0.18359375,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 8,
+    "hit_rate": 0.744140625,
+    "happy": true,
+    "fast_share": 0.91015625,
+    "band_over_K": 0.201171875,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 10,
+    "hit_rate": 0.845703125,
+    "happy": true,
+    "fast_share": 0.9140625,
+    "band_over_K": 0.203125,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 12,
+    "hit_rate": 0.607421875,
+    "happy": true,
+    "fast_share": 0.978515625,
+    "band_over_K": 0.228515625,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 14,
+    "hit_rate": 0.7109375,
+    "happy": true,
+    "fast_share": 0.984375,
+    "band_over_K": 0.23828125,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 16,
+    "hit_rate": 0.673828125,
+    "happy": true,
+    "fast_share": 0.845703125,
+    "band_over_K": 0.203125,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 18,
+    "hit_rate": 0.72265625,
+    "happy": true,
+    "fast_share": 0.951171875,
+    "band_over_K": 0.212890625,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 20,
+    "hit_rate": 0.646484375,
+    "happy": true,
+    "fast_share": 0.888671875,
+    "band_over_K": 0.2109375,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 22,
+    "hit_rate": 0.638671875,
+    "happy": true,
+    "fast_share": 0.91015625,
+    "band_over_K": 0.216796875,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 24,
+    "hit_rate": 0.552734375,
+    "happy": true,
+    "fast_share": 0.892578125,
+    "band_over_K": 0.21484375,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 26,
+    "hit_rate": 0.5859375,
+    "happy": true,
+    "fast_share": 0.8359375,
+    "band_over_K": 0.19140625,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 28,
+    "hit_rate": 0.74609375,
+    "happy": true,
+    "fast_share": 0.896484375,
+    "band_over_K": 0.232421875,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 30,
+    "hit_rate": 0.771484375,
+    "happy": true,
+    "fast_share": 0.865234375,
+    "band_over_K": 0.2109375,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 32,
+    "hit_rate": 0.6328125,
+    "happy": true,
+    "fast_share": 0.947265625,
+    "band_over_K": 0.18359375,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 34,
+    "hit_rate": 0.6953125,
+    "happy": true,
+    "fast_share": 0.841796875,
+    "band_over_K": 0.166015625,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 36,
+    "hit_rate": 0.93359375,
+    "happy": true,
+    "fast_share": 0.935546875,
+    "band_over_K": 0.169921875,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 38,
+    "hit_rate": 0.7421875,
+    "happy": true,
+    "fast_share": 0.9453125,
+    "band_over_K": 0.154296875,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 40,
+    "hit_rate": 0.794921875,
+    "happy": true,
+    "fast_share": 0.869140625,
+    "band_over_K": 0.13671875,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 42,
+    "hit_rate": 0.931640625,
+    "happy": true,
+    "fast_share": 0.953125,
+    "band_over_K": 0.1953125,
+    "oracle_fast": 0.998046875
+   }
+  ]
+ },
+ "flash/8k": {
+  "model": "flash",
+  "isl": "8k",
+  "N": 2051,
+  "K": 512,
+  "kC": 3072,
+  "happy_pct": 100.0,
+  "hr_med": 0.529296875,
+  "fast_med": 0.88671875,
+  "band_over_K_med": 0.31640625,
+  "oracle_med": 0.998046875,
+  "per_layer": [
+   {
+    "layer": 2,
+    "hit_rate": 0.83984375,
+    "happy": true,
+    "fast_share": 0.93359375,
+    "band_over_K": 0.208984375,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 4,
+    "hit_rate": 0.84375,
+    "happy": true,
+    "fast_share": 0.89453125,
+    "band_over_K": 0.24609375,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 6,
+    "hit_rate": 0.75,
+    "happy": true,
+    "fast_share": 0.89453125,
+    "band_over_K": 0.2734375,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 8,
+    "hit_rate": 0.630859375,
+    "happy": true,
+    "fast_share": 0.88671875,
+    "band_over_K": 0.3515625,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 10,
+    "hit_rate": 0.671875,
+    "happy": true,
+    "fast_share": 0.8671875,
+    "band_over_K": 0.216796875,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 12,
+    "hit_rate": 0.4765625,
+    "happy": true,
+    "fast_share": 0.794921875,
+    "band_over_K": 0.275390625,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 14,
+    "hit_rate": 0.416015625,
+    "happy": true,
+    "fast_share": 0.8984375,
+    "band_over_K": 0.375,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 16,
+    "hit_rate": 0.498046875,
+    "happy": true,
+    "fast_share": 0.6875,
+    "band_over_K": 0.314453125,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 18,
+    "hit_rate": 0.5859375,
+    "happy": true,
+    "fast_share": 0.76953125,
+    "band_over_K": 0.31640625,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 20,
+    "hit_rate": 0.48828125,
+    "happy": true,
+    "fast_share": 0.701171875,
+    "band_over_K": 0.328125,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 22,
+    "hit_rate": 0.333984375,
+    "happy": true,
+    "fast_share": 0.89453125,
+    "band_over_K": 0.330078125,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 24,
+    "hit_rate": 0.48046875,
+    "happy": true,
+    "fast_share": 0.814453125,
+    "band_over_K": 0.2578125,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 26,
+    "hit_rate": 0.439453125,
+    "happy": true,
+    "fast_share": 0.869140625,
+    "band_over_K": 0.337890625,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 28,
+    "hit_rate": 0.638671875,
+    "happy": true,
+    "fast_share": 0.916015625,
+    "band_over_K": 0.38671875,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 30,
+    "hit_rate": 0.4921875,
+    "happy": true,
+    "fast_share": 0.693359375,
+    "band_over_K": 0.31640625,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 32,
+    "hit_rate": 0.30859375,
+    "happy": true,
+    "fast_share": 0.970703125,
+    "band_over_K": 0.384765625,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 34,
+    "hit_rate": 0.611328125,
+    "happy": true,
+    "fast_share": 0.966796875,
+    "band_over_K": 0.26953125,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 36,
+    "hit_rate": 0.865234375,
+    "happy": true,
+    "fast_share": 0.857421875,
+    "band_over_K": 0.2109375,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 38,
+    "hit_rate": 0.509765625,
+    "happy": true,
+    "fast_share": 0.970703125,
+    "band_over_K": 0.32421875,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 40,
+    "hit_rate": 0.529296875,
+    "happy": true,
+    "fast_share": 0.880859375,
+    "band_over_K": 0.34375,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 42,
+    "hit_rate": 0.84765625,
+    "happy": true,
+    "fast_share": 0.90625,
+    "band_over_K": 0.20703125,
+    "oracle_fast": 0.998046875
+   }
+  ]
+ },
+ "flash/16k": {
+  "model": "flash",
+  "isl": "16k",
+  "N": 4099,
+  "K": 512,
+  "kC": 3072,
+  "happy_pct": 100.0,
+  "hr_med": 0.5078125,
+  "fast_med": 0.890625,
+  "band_over_K_med": 0.328125,
+  "oracle_med": 0.998046875,
+  "per_layer": [
+   {
+    "layer": 2,
+    "hit_rate": 0.76171875,
+    "happy": true,
+    "fast_share": 0.85546875,
+    "band_over_K": 0.216796875,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 4,
+    "hit_rate": 0.861328125,
+    "happy": true,
+    "fast_share": 0.890625,
+    "band_over_K": 0.185546875,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 6,
+    "hit_rate": 0.748046875,
+    "happy": true,
+    "fast_share": 0.869140625,
+    "band_over_K": 0.255859375,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 8,
+    "hit_rate": 0.6328125,
+    "happy": true,
+    "fast_share": 0.912109375,
+    "band_over_K": 0.3046875,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 10,
+    "hit_rate": 0.6484375,
+    "happy": true,
+    "fast_share": 0.89453125,
+    "band_over_K": 0.255859375,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 12,
+    "hit_rate": 0.40625,
+    "happy": true,
+    "fast_share": 0.97265625,
+    "band_over_K": 0.375,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 14,
+    "hit_rate": 0.4921875,
+    "happy": true,
+    "fast_share": 0.681640625,
+    "band_over_K": 0.3359375,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 16,
+    "hit_rate": 0.359375,
+    "happy": true,
+    "fast_share": 0.765625,
+    "band_over_K": 0.505859375,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 18,
+    "hit_rate": 0.439453125,
+    "happy": true,
+    "fast_share": 0.857421875,
+    "band_over_K": 0.498046875,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 20,
+    "hit_rate": 0.330078125,
+    "happy": true,
+    "fast_share": 0.900390625,
+    "band_over_K": 0.384765625,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 22,
+    "hit_rate": 0.34375,
+    "happy": true,
+    "fast_share": 0.751953125,
+    "band_over_K": 0.40234375,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 24,
+    "hit_rate": 0.265625,
+    "happy": true,
+    "fast_share": 0.62109375,
+    "band_over_K": 0.56640625,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 26,
+    "hit_rate": 0.345703125,
+    "happy": true,
+    "fast_share": 0.767578125,
+    "band_over_K": 0.490234375,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 28,
+    "hit_rate": 0.626953125,
+    "happy": true,
+    "fast_share": 0.9140625,
+    "band_over_K": 0.291015625,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 30,
+    "hit_rate": 0.544921875,
+    "happy": true,
+    "fast_share": 0.875,
+    "band_over_K": 0.28515625,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 32,
+    "hit_rate": 0.302734375,
+    "happy": true,
+    "fast_share": 0.982421875,
+    "band_over_K": 0.447265625,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 34,
+    "hit_rate": 0.34765625,
+    "happy": true,
+    "fast_share": 0.83203125,
+    "band_over_K": 0.318359375,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 36,
+    "hit_rate": 0.916015625,
+    "happy": true,
+    "fast_share": 0.970703125,
+    "band_over_K": 0.328125,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 38,
+    "hit_rate": 0.5078125,
+    "happy": true,
+    "fast_share": 0.984375,
+    "band_over_K": 0.3359375,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 40,
+    "hit_rate": 0.60546875,
+    "happy": true,
+    "fast_share": 0.984375,
+    "band_over_K": 0.314453125,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 42,
+    "hit_rate": 0.82421875,
+    "happy": true,
+    "fast_share": 0.95703125,
+    "band_over_K": 0.267578125,
+    "oracle_fast": 0.998046875
+   }
+  ]
+ },
+ "flash/32k": {
+  "model": "flash",
+  "isl": "32k",
+  "N": 8195,
+  "K": 512,
+  "kC": 3072,
+  "happy_pct": 100.0,
+  "hr_med": 0.759765625,
+  "fast_med": 0.865234375,
+  "band_over_K_med": 0.265625,
+  "oracle_med": 0.998046875,
+  "per_layer": [
+   {
+    "layer": 2,
+    "hit_rate": 0.80859375,
+    "happy": true,
+    "fast_share": 0.98828125,
+    "band_over_K": 0.43359375,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 4,
+    "hit_rate": 0.775390625,
+    "happy": true,
+    "fast_share": 0.814453125,
+    "band_over_K": 0.25,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 6,
+    "hit_rate": 0.859375,
+    "happy": true,
+    "fast_share": 0.861328125,
+    "band_over_K": 0.263671875,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 8,
+    "hit_rate": 0.759765625,
+    "happy": true,
+    "fast_share": 0.841796875,
+    "band_over_K": 0.244140625,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 10,
+    "hit_rate": 0.72265625,
+    "happy": true,
+    "fast_share": 0.953125,
+    "band_over_K": 0.34765625,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 12,
+    "hit_rate": 0.630859375,
+    "happy": true,
+    "fast_share": 0.90625,
+    "band_over_K": 0.333984375,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 14,
+    "hit_rate": 0.6875,
+    "happy": true,
+    "fast_share": 0.767578125,
+    "band_over_K": 0.294921875,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 16,
+    "hit_rate": 0.58984375,
+    "happy": true,
+    "fast_share": 0.765625,
+    "band_over_K": 0.279296875,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 18,
+    "hit_rate": 0.712890625,
+    "happy": true,
+    "fast_share": 0.953125,
+    "band_over_K": 0.40625,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 20,
+    "hit_rate": 0.794921875,
+    "happy": true,
+    "fast_share": 0.80859375,
+    "band_over_K": 0.205078125,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 22,
+    "hit_rate": 0.685546875,
+    "happy": true,
+    "fast_share": 0.806640625,
+    "band_over_K": 0.23828125,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 24,
+    "hit_rate": 0.71875,
+    "happy": true,
+    "fast_share": 0.947265625,
+    "band_over_K": 0.259765625,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 26,
+    "hit_rate": 0.712890625,
+    "happy": true,
+    "fast_share": 0.955078125,
+    "band_over_K": 0.322265625,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 28,
+    "hit_rate": 0.869140625,
+    "happy": true,
+    "fast_share": 0.869140625,
+    "band_over_K": 0.20703125,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 30,
+    "hit_rate": 0.82421875,
+    "happy": true,
+    "fast_share": 0.958984375,
+    "band_over_K": 0.306640625,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 32,
+    "hit_rate": 0.615234375,
+    "happy": true,
+    "fast_share": 0.9609375,
+    "band_over_K": 0.412109375,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 34,
+    "hit_rate": 0.669921875,
+    "happy": true,
+    "fast_share": 0.830078125,
+    "band_over_K": 0.26171875,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 36,
+    "hit_rate": 0.908203125,
+    "happy": true,
+    "fast_share": 0.978515625,
+    "band_over_K": 0.2734375,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 38,
+    "hit_rate": 0.76171875,
+    "happy": true,
+    "fast_share": 0.865234375,
+    "band_over_K": 0.265625,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 40,
+    "hit_rate": 0.798828125,
+    "happy": true,
+    "fast_share": 0.78125,
+    "band_over_K": 0.22265625,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 42,
+    "hit_rate": 0.873046875,
+    "happy": true,
+    "fast_share": 0.8515625,
+    "band_over_K": 0.2109375,
+    "oracle_fast": 0.998046875
+   }
+  ]
+ },
+ "flash/64k": {
+  "model": "flash",
+  "isl": "64k",
+  "N": 16387,
+  "K": 512,
+  "kC": 3072,
+  "happy_pct": 100.0,
+  "hr_med": 0.3359375,
+  "fast_med": 0.8359375,
+  "band_over_K_med": 0.5703125,
+  "oracle_med": 0.998046875,
+  "per_layer": [
+   {
+    "layer": 2,
+    "hit_rate": 0.71484375,
+    "happy": true,
+    "fast_share": 0.95703125,
+    "band_over_K": 0.328125,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 4,
+    "hit_rate": 0.765625,
+    "happy": true,
+    "fast_share": 0.8359375,
+    "band_over_K": 0.291015625,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 6,
+    "hit_rate": 0.705078125,
+    "happy": true,
+    "fast_share": 0.994140625,
+    "band_over_K": 0.326171875,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 8,
+    "hit_rate": 0.6171875,
+    "happy": true,
+    "fast_share": 0.93359375,
+    "band_over_K": 0.31640625,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 10,
+    "hit_rate": 0.58203125,
+    "happy": true,
+    "fast_share": 0.78125,
+    "band_over_K": 0.3046875,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 12,
+    "hit_rate": 0.25390625,
+    "happy": true,
+    "fast_share": 0.646484375,
+    "band_over_K": 0.693359375,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 14,
+    "hit_rate": 0.310546875,
+    "happy": true,
+    "fast_share": 0.951171875,
+    "band_over_K": 0.490234375,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 16,
+    "hit_rate": 0.2265625,
+    "happy": true,
+    "fast_share": 0.896484375,
+    "band_over_K": 0.5703125,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 18,
+    "hit_rate": 0.412109375,
+    "happy": true,
+    "fast_share": 0.93359375,
+    "band_over_K": 0.814453125,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 20,
+    "hit_rate": 0.177734375,
+    "happy": true,
+    "fast_share": 0.283203125,
+    "band_over_K": 0.91015625,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 22,
+    "hit_rate": 0.076171875,
+    "happy": true,
+    "fast_share": 0.49609375,
+    "band_over_K": 0.912109375,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 24,
+    "hit_rate": 0.107421875,
+    "happy": true,
+    "fast_share": 0.94921875,
+    "band_over_K": 1.8359375,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 26,
+    "hit_rate": 0.15625,
+    "happy": true,
+    "fast_share": 0.46484375,
+    "band_over_K": 0.9375,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 28,
+    "hit_rate": 0.41015625,
+    "happy": true,
+    "fast_share": 0.95703125,
+    "band_over_K": 0.6953125,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 30,
+    "hit_rate": 0.255859375,
+    "happy": true,
+    "fast_share": 0.59765625,
+    "band_over_K": 0.703125,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 32,
+    "hit_rate": 0.1484375,
+    "happy": true,
+    "fast_share": 0.642578125,
+    "band_over_K": 1.060546875,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 34,
+    "hit_rate": 0.14453125,
+    "happy": true,
+    "fast_share": 0.630859375,
+    "band_over_K": 0.802734375,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 36,
+    "hit_rate": 0.779296875,
+    "happy": true,
+    "fast_share": 0.82421875,
+    "band_over_K": 0.2109375,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 38,
+    "hit_rate": 0.3359375,
+    "happy": true,
+    "fast_share": 0.853515625,
+    "band_over_K": 0.416015625,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 40,
+    "hit_rate": 0.40625,
+    "happy": true,
+    "fast_share": 0.9765625,
+    "band_over_K": 0.451171875,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 42,
+    "hit_rate": 0.779296875,
+    "happy": true,
+    "fast_share": 0.818359375,
+    "band_over_K": 0.21875,
+    "oracle_fast": 0.998046875
+   }
+  ]
+ },
+ "flash/128k": {
+  "model": "flash",
+  "isl": "128k",
+  "N": 32771,
+  "K": 512,
+  "kC": 3072,
+  "happy_pct": 100.0,
+  "hr_med": 0.701171875,
+  "fast_med": 0.884765625,
+  "band_over_K_med": 0.298828125,
+  "oracle_med": 0.998046875,
+  "per_layer": [
+   {
+    "layer": 2,
+    "hit_rate": 0.603515625,
+    "happy": true,
+    "fast_share": 0.978515625,
+    "band_over_K": 0.357421875,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 4,
+    "hit_rate": 0.8046875,
+    "happy": true,
+    "fast_share": 0.974609375,
+    "band_over_K": 0.33984375,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 6,
+    "hit_rate": 0.63671875,
+    "happy": true,
+    "fast_share": 0.88671875,
+    "band_over_K": 0.326171875,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 8,
+    "hit_rate": 0.7421875,
+    "happy": true,
+    "fast_share": 0.904296875,
+    "band_over_K": 0.248046875,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 10,
+    "hit_rate": 0.5234375,
+    "happy": true,
+    "fast_share": 0.923828125,
+    "band_over_K": 0.34375,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 12,
+    "hit_rate": 0.490234375,
+    "happy": true,
+    "fast_share": 0.658203125,
+    "band_over_K": 0.40234375,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 14,
+    "hit_rate": 0.578125,
+    "happy": true,
+    "fast_share": 0.7890625,
+    "band_over_K": 0.298828125,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 16,
+    "hit_rate": 0.564453125,
+    "happy": true,
+    "fast_share": 0.818359375,
+    "band_over_K": 0.322265625,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 18,
+    "hit_rate": 0.63671875,
+    "happy": true,
+    "fast_share": 0.8671875,
+    "band_over_K": 0.41015625,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 20,
+    "hit_rate": 0.78515625,
+    "happy": true,
+    "fast_share": 0.83203125,
+    "band_over_K": 0.22265625,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 22,
+    "hit_rate": 0.701171875,
+    "happy": true,
+    "fast_share": 1.0,
+    "band_over_K": 0.0,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 24,
+    "hit_rate": 0.609375,
+    "happy": true,
+    "fast_share": 0.966796875,
+    "band_over_K": 0.416015625,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 26,
+    "hit_rate": 0.744140625,
+    "happy": true,
+    "fast_share": 0.884765625,
+    "band_over_K": 0.2578125,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 28,
+    "hit_rate": 0.85546875,
+    "happy": true,
+    "fast_share": 0.884765625,
+    "band_over_K": 0.2421875,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 30,
+    "hit_rate": 0.77734375,
+    "happy": true,
+    "fast_share": 0.83984375,
+    "band_over_K": 0.2265625,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 32,
+    "hit_rate": 0.474609375,
+    "happy": true,
+    "fast_share": 0.697265625,
+    "band_over_K": 0.408203125,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 34,
+    "hit_rate": 0.6875,
+    "happy": true,
+    "fast_share": 0.78515625,
+    "band_over_K": 0.24609375,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 36,
+    "hit_rate": 0.8984375,
+    "happy": true,
+    "fast_share": 0.84375,
+    "band_over_K": 0.162109375,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 38,
+    "hit_rate": 0.7265625,
+    "happy": true,
+    "fast_share": 0.9296875,
+    "band_over_K": 0.349609375,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 40,
+    "hit_rate": 0.83203125,
+    "happy": true,
+    "fast_share": 0.923828125,
+    "band_over_K": 0.275390625,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 42,
+    "hit_rate": 0.86328125,
+    "happy": true,
+    "fast_share": 0.861328125,
+    "band_over_K": 0.20703125,
+    "oracle_fast": 0.998046875
+   }
+  ]
+ },
+ "flash/256k": {
+  "model": "flash",
+  "isl": "256k",
+  "N": 65538,
+  "K": 512,
+  "kC": 3072,
+  "happy_pct": 100.0,
+  "hr_med": 0.302734375,
+  "fast_med": 0.734375,
+  "band_over_K_med": 0.662109375,
+  "oracle_med": 0.998046875,
+  "per_layer": [
+   {
+    "layer": 2,
+    "hit_rate": 0.302734375,
+    "happy": true,
+    "fast_share": 0.98046875,
+    "band_over_K": 0.697265625,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 4,
+    "hit_rate": 0.18359375,
+    "happy": true,
+    "fast_share": 0.310546875,
+    "band_over_K": 0.833984375,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 6,
+    "hit_rate": 0.302734375,
+    "happy": true,
+    "fast_share": 0.966796875,
+    "band_over_K": 0.662109375,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 8,
+    "hit_rate": 0.158203125,
+    "happy": true,
+    "fast_share": 0.32421875,
+    "band_over_K": 1.01171875,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 10,
+    "hit_rate": 0.193359375,
+    "happy": true,
+    "fast_share": 0.359375,
+    "band_over_K": 0.72265625,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 12,
+    "hit_rate": 0.15625,
+    "happy": true,
+    "fast_share": 0.361328125,
+    "band_over_K": 1.421875,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 14,
+    "hit_rate": 0.181640625,
+    "happy": true,
+    "fast_share": 0.408203125,
+    "band_over_K": 0.791015625,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 16,
+    "hit_rate": 0.265625,
+    "happy": true,
+    "fast_share": 0.693359375,
+    "band_over_K": 0.46875,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 18,
+    "hit_rate": 0.3125,
+    "happy": true,
+    "fast_share": 0.88671875,
+    "band_over_K": 0.6953125,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 20,
+    "hit_rate": 0.599609375,
+    "happy": true,
+    "fast_share": 0.734375,
+    "band_over_K": 0.26953125,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 22,
+    "hit_rate": 0.279296875,
+    "happy": true,
+    "fast_share": 0.5625,
+    "band_over_K": 0.666015625,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 24,
+    "hit_rate": 0.111328125,
+    "happy": true,
+    "fast_share": 0.806640625,
+    "band_over_K": 1.935546875,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 26,
+    "hit_rate": 0.486328125,
+    "happy": true,
+    "fast_share": 0.701171875,
+    "band_over_K": 0.384765625,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 28,
+    "hit_rate": 0.484375,
+    "happy": true,
+    "fast_share": 0.6640625,
+    "band_over_K": 0.392578125,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 30,
+    "hit_rate": 0.470703125,
+    "happy": true,
+    "fast_share": 0.763671875,
+    "band_over_K": 0.330078125,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 32,
+    "hit_rate": 0.40234375,
+    "happy": true,
+    "fast_share": 0.99609375,
+    "band_over_K": 0.494140625,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 34,
+    "hit_rate": 0.630859375,
+    "happy": true,
+    "fast_share": 0.90234375,
+    "band_over_K": 0.40625,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 36,
+    "hit_rate": 0.76171875,
+    "happy": true,
+    "fast_share": 0.880859375,
+    "band_over_K": 0.20703125,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 38,
+    "hit_rate": 0.453125,
+    "happy": true,
+    "fast_share": 0.783203125,
+    "band_over_K": 0.490234375,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 40,
+    "hit_rate": 0.25,
+    "happy": true,
+    "fast_share": 0.5546875,
+    "band_over_K": 0.935546875,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 42,
+    "hit_rate": 0.6171875,
+    "happy": true,
+    "fast_share": 0.9453125,
+    "band_over_K": 0.3671875,
+    "oracle_fast": 0.998046875
+   }
+  ]
+ },
+ "flash/512k": {
+  "model": "flash",
+  "isl": "512k",
+  "N": 131075,
+  "K": 512,
+  "kC": 3072,
+  "happy_pct": 100.0,
+  "hr_med": 0.431640625,
+  "fast_med": 0.8125,
+  "band_over_K_med": 0.66015625,
+  "oracle_med": 0.998046875,
+  "per_layer": [
+   {
+    "layer": 2,
+    "hit_rate": 0.603515625,
+    "happy": true,
+    "fast_share": 0.994140625,
+    "band_over_K": 0.416015625,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 4,
+    "hit_rate": 0.8046875,
+    "happy": true,
+    "fast_share": 0.98828125,
+    "band_over_K": 0.39453125,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 6,
+    "hit_rate": 0.748046875,
+    "happy": true,
+    "fast_share": 0.890625,
+    "band_over_K": 0.328125,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 8,
+    "hit_rate": 0.73828125,
+    "happy": true,
+    "fast_share": 0.900390625,
+    "band_over_K": 0.37890625,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 10,
+    "hit_rate": 0.455078125,
+    "happy": true,
+    "fast_share": 0.775390625,
+    "band_over_K": 0.51171875,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 12,
+    "hit_rate": 0.71484375,
+    "happy": true,
+    "fast_share": 0.94921875,
+    "band_over_K": 0.3828125,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 14,
+    "hit_rate": 0.478515625,
+    "happy": true,
+    "fast_share": 0.736328125,
+    "band_over_K": 0.333984375,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 16,
+    "hit_rate": 0.318359375,
+    "happy": true,
+    "fast_share": 0.84375,
+    "band_over_K": 0.73046875,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 18,
+    "hit_rate": 0.1484375,
+    "happy": true,
+    "fast_share": 0.310546875,
+    "band_over_K": 1.69140625,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 20,
+    "hit_rate": 0.33203125,
+    "happy": true,
+    "fast_share": 0.734375,
+    "band_over_K": 0.765625,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 22,
+    "hit_rate": 0.056640625,
+    "happy": true,
+    "fast_share": 0.720703125,
+    "band_over_K": 1.212890625,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 24,
+    "hit_rate": 0.0234375,
+    "happy": true,
+    "fast_share": 0.0,
+    "band_over_K": 2.330078125,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 26,
+    "hit_rate": 0.30078125,
+    "happy": true,
+    "fast_share": 0.994140625,
+    "band_over_K": 0.806640625,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 28,
+    "hit_rate": 0.525390625,
+    "happy": true,
+    "fast_share": 0.8671875,
+    "band_over_K": 0.701171875,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 30,
+    "hit_rate": 0.119140625,
+    "happy": true,
+    "fast_share": 0.8125,
+    "band_over_K": 1.33984375,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 32,
+    "hit_rate": 0.197265625,
+    "happy": true,
+    "fast_share": 0.20703125,
+    "band_over_K": 0.84765625,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 34,
+    "hit_rate": 0.283203125,
+    "happy": true,
+    "fast_share": 0.423828125,
+    "band_over_K": 0.66015625,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 36,
+    "hit_rate": 0.583984375,
+    "happy": true,
+    "fast_share": 0.708984375,
+    "band_over_K": 0.349609375,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 38,
+    "hit_rate": 0.21484375,
+    "happy": true,
+    "fast_share": 0.86328125,
+    "band_over_K": 1.46875,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 40,
+    "hit_rate": 0.431640625,
+    "happy": true,
+    "fast_share": 0.806640625,
+    "band_over_K": 0.5625,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 42,
+    "hit_rate": 0.611328125,
+    "happy": true,
+    "fast_share": 0.96484375,
+    "band_over_K": 0.421875,
+    "oracle_fast": 0.998046875
+   }
+  ]
+ },
+ "flash/1024k": {
+  "model": "flash",
+  "isl": "1024k",
+  "N": 262127,
+  "K": 512,
+  "kC": 3072,
+  "happy_pct": 100.0,
+  "hr_med": 0.513671875,
+  "fast_med": 0.818359375,
+  "band_over_K_med": 0.38671875,
+  "oracle_med": 0.998046875,
+  "per_layer": [
+   {
+    "layer": 2,
+    "hit_rate": 0.513671875,
+    "happy": true,
+    "fast_share": 0.921875,
+    "band_over_K": 0.38671875,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 4,
+    "hit_rate": 0.703125,
+    "happy": true,
+    "fast_share": 0.982421875,
+    "band_over_K": 0.345703125,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 6,
+    "hit_rate": 0.68359375,
+    "happy": true,
+    "fast_share": 0.787109375,
+    "band_over_K": 0.259765625,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 8,
+    "hit_rate": 0.626953125,
+    "happy": true,
+    "fast_share": 0.92578125,
+    "band_over_K": 0.373046875,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 10,
+    "hit_rate": 0.384765625,
+    "happy": true,
+    "fast_share": 0.658203125,
+    "band_over_K": 0.470703125,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 12,
+    "hit_rate": 0.28515625,
+    "happy": true,
+    "fast_share": 0.556640625,
+    "band_over_K": 0.525390625,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 14,
+    "hit_rate": 0.357421875,
+    "happy": true,
+    "fast_share": 0.7578125,
+    "band_over_K": 0.423828125,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 16,
+    "hit_rate": 0.26171875,
+    "happy": true,
+    "fast_share": 0.505859375,
+    "band_over_K": 0.982421875,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 18,
+    "hit_rate": 0.3125,
+    "happy": true,
+    "fast_share": 0.953125,
+    "band_over_K": 0.669921875,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 20,
+    "hit_rate": 0.56640625,
+    "happy": true,
+    "fast_share": 0.810546875,
+    "band_over_K": 0.33203125,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 22,
+    "hit_rate": 0.421875,
+    "happy": true,
+    "fast_share": 0.9140625,
+    "band_over_K": 0.482421875,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 24,
+    "hit_rate": 0.48828125,
+    "happy": true,
+    "fast_share": 0.71875,
+    "band_over_K": 0.328125,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 26,
+    "hit_rate": 0.578125,
+    "happy": true,
+    "fast_share": 0.740234375,
+    "band_over_K": 0.3828125,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 28,
+    "hit_rate": 0.66015625,
+    "happy": true,
+    "fast_share": 0.818359375,
+    "band_over_K": 0.345703125,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 30,
+    "hit_rate": 0.513671875,
+    "happy": true,
+    "fast_share": 0.94140625,
+    "band_over_K": 0.484375,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 32,
+    "hit_rate": 0.423828125,
+    "happy": true,
+    "fast_share": 0.873046875,
+    "band_over_K": 0.546875,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 34,
+    "hit_rate": 0.37890625,
+    "happy": true,
+    "fast_share": 0.62109375,
+    "band_over_K": 0.431640625,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 36,
+    "hit_rate": 0.837890625,
+    "happy": true,
+    "fast_share": 0.93359375,
+    "band_over_K": 0.2734375,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 38,
+    "hit_rate": 0.619140625,
+    "happy": true,
+    "fast_share": 0.9453125,
+    "band_over_K": 0.380859375,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 40,
+    "hit_rate": 0.380859375,
+    "happy": true,
+    "fast_share": 0.603515625,
+    "band_over_K": 0.546875,
+    "oracle_fast": 0.998046875
+   },
+   {
+    "layer": 42,
+    "hit_rate": 0.7578125,
+    "happy": true,
+    "fast_share": 0.861328125,
+    "band_over_K": 0.275390625,
+    "oracle_fast": 0.998046875
+   }
+  ]
+ },
+ "pro/4k": {
+  "model": "pro",
+  "isl": "4k",
+  "N": 1027,
+  "K": 1024,
+  "kC": 5120,
+  "happy_pct": 0.0,
+  "hr_med": 0.998046875,
+  "fast_med": 0.9814453125,
+  "band_over_K_med": 0.0224609375,
+  "oracle_med": 0.9990234375,
+  "per_layer": [
+   {
+    "layer": 2,
+    "hit_rate": 1.0,
+    "happy": false,
+    "fast_share": 0.98046875,
+    "band_over_K": 0.0224609375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 4,
+    "hit_rate": 0.998046875,
+    "happy": false,
+    "fast_share": 0.98046875,
+    "band_over_K": 0.0224609375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 6,
+    "hit_rate": 0.998046875,
+    "happy": false,
+    "fast_share": 0.98046875,
+    "band_over_K": 0.0224609375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 8,
+    "hit_rate": 0.9990234375,
+    "happy": false,
+    "fast_share": 0.98046875,
+    "band_over_K": 0.0224609375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 10,
+    "hit_rate": 0.998046875,
+    "happy": false,
+    "fast_share": 0.98046875,
+    "band_over_K": 0.0224609375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 12,
+    "hit_rate": 0.9970703125,
+    "happy": false,
+    "fast_share": 0.98046875,
+    "band_over_K": 0.0224609375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 14,
+    "hit_rate": 0.9970703125,
+    "happy": false,
+    "fast_share": 0.98046875,
+    "band_over_K": 0.0224609375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 16,
+    "hit_rate": 1.0,
+    "happy": false,
+    "fast_share": 0.98046875,
+    "band_over_K": 0.0224609375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 18,
+    "hit_rate": 0.9970703125,
+    "happy": false,
+    "fast_share": 0.9814453125,
+    "band_over_K": 0.021484375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 20,
+    "hit_rate": 0.9970703125,
+    "happy": false,
+    "fast_share": 0.982421875,
+    "band_over_K": 0.0205078125,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 22,
+    "hit_rate": 0.998046875,
+    "happy": false,
+    "fast_share": 0.9814453125,
+    "band_over_K": 0.021484375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 24,
+    "hit_rate": 0.9970703125,
+    "happy": false,
+    "fast_share": 0.98046875,
+    "band_over_K": 0.0224609375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 26,
+    "hit_rate": 0.9970703125,
+    "happy": false,
+    "fast_share": 0.982421875,
+    "band_over_K": 0.0205078125,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 28,
+    "hit_rate": 0.9990234375,
+    "happy": false,
+    "fast_share": 0.98046875,
+    "band_over_K": 0.0224609375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 30,
+    "hit_rate": 0.998046875,
+    "happy": false,
+    "fast_share": 0.982421875,
+    "band_over_K": 0.0205078125,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 32,
+    "hit_rate": 0.998046875,
+    "happy": false,
+    "fast_share": 0.9814453125,
+    "band_over_K": 0.021484375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 34,
+    "hit_rate": 0.9970703125,
+    "happy": false,
+    "fast_share": 0.9814453125,
+    "band_over_K": 0.021484375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 36,
+    "hit_rate": 0.9970703125,
+    "happy": false,
+    "fast_share": 0.982421875,
+    "band_over_K": 0.0205078125,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 38,
+    "hit_rate": 0.9970703125,
+    "happy": false,
+    "fast_share": 0.98046875,
+    "band_over_K": 0.0224609375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 40,
+    "hit_rate": 0.9990234375,
+    "happy": false,
+    "fast_share": 0.9814453125,
+    "band_over_K": 0.021484375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 42,
+    "hit_rate": 0.998046875,
+    "happy": false,
+    "fast_share": 0.982421875,
+    "band_over_K": 0.0205078125,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 44,
+    "hit_rate": 0.9970703125,
+    "happy": false,
+    "fast_share": 0.982421875,
+    "band_over_K": 0.0205078125,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 46,
+    "hit_rate": 0.998046875,
+    "happy": false,
+    "fast_share": 0.98046875,
+    "band_over_K": 0.0224609375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 48,
+    "hit_rate": 0.998046875,
+    "happy": false,
+    "fast_share": 0.982421875,
+    "band_over_K": 0.0205078125,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 50,
+    "hit_rate": 0.9990234375,
+    "happy": false,
+    "fast_share": 0.98046875,
+    "band_over_K": 0.0224609375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 52,
+    "hit_rate": 0.998046875,
+    "happy": false,
+    "fast_share": 0.9814453125,
+    "band_over_K": 0.021484375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 54,
+    "hit_rate": 0.998046875,
+    "happy": false,
+    "fast_share": 0.9814453125,
+    "band_over_K": 0.021484375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 56,
+    "hit_rate": 0.9990234375,
+    "happy": false,
+    "fast_share": 0.98046875,
+    "band_over_K": 0.0224609375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 58,
+    "hit_rate": 0.998046875,
+    "happy": false,
+    "fast_share": 0.9814453125,
+    "band_over_K": 0.021484375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 60,
+    "hit_rate": 0.998046875,
+    "happy": false,
+    "fast_share": 0.98046875,
+    "band_over_K": 0.0224609375,
+    "oracle_fast": 0.9990234375
+   }
+  ]
+ },
+ "pro/8k": {
+  "model": "pro",
+  "isl": "8k",
+  "N": 2051,
+  "K": 1024,
+  "kC": 5120,
+  "happy_pct": 100.0,
+  "hr_med": 0.7587890625,
+  "fast_med": 0.939453125,
+  "band_over_K_med": 0.2099609375,
+  "oracle_med": 0.9990234375,
+  "per_layer": [
+   {
+    "layer": 2,
+    "hit_rate": 0.90625,
+    "happy": true,
+    "fast_share": 0.9853515625,
+    "band_over_K": 0.2099609375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 4,
+    "hit_rate": 0.91796875,
+    "happy": true,
+    "fast_share": 0.9619140625,
+    "band_over_K": 0.2041015625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 6,
+    "hit_rate": 0.92578125,
+    "happy": true,
+    "fast_share": 0.9541015625,
+    "band_over_K": 0.1787109375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 8,
+    "hit_rate": 0.935546875,
+    "happy": true,
+    "fast_share": 0.935546875,
+    "band_over_K": 0.2060546875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 10,
+    "hit_rate": 0.9013671875,
+    "happy": true,
+    "fast_share": 0.998046875,
+    "band_over_K": 0.2998046875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 12,
+    "hit_rate": 0.8466796875,
+    "happy": true,
+    "fast_share": 0.9091796875,
+    "band_over_K": 0.2421875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 14,
+    "hit_rate": 0.830078125,
+    "happy": true,
+    "fast_share": 0.951171875,
+    "band_over_K": 0.193359375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 16,
+    "hit_rate": 0.7587890625,
+    "happy": true,
+    "fast_share": 0.892578125,
+    "band_over_K": 0.1845703125,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 18,
+    "hit_rate": 0.7802734375,
+    "happy": true,
+    "fast_share": 0.8544921875,
+    "band_over_K": 0.1806640625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 20,
+    "hit_rate": 0.86328125,
+    "happy": true,
+    "fast_share": 0.892578125,
+    "band_over_K": 0.1806640625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 22,
+    "hit_rate": 0.671875,
+    "happy": true,
+    "fast_share": 0.8525390625,
+    "band_over_K": 0.2109375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 24,
+    "hit_rate": 0.65625,
+    "happy": true,
+    "fast_share": 0.8896484375,
+    "band_over_K": 0.2109375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 26,
+    "hit_rate": 0.6171875,
+    "happy": true,
+    "fast_share": 0.966796875,
+    "band_over_K": 0.2412109375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 28,
+    "hit_rate": 0.6669921875,
+    "happy": true,
+    "fast_share": 0.8583984375,
+    "band_over_K": 0.2138671875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 30,
+    "hit_rate": 0.4609375,
+    "happy": true,
+    "fast_share": 0.888671875,
+    "band_over_K": 0.1767578125,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 32,
+    "hit_rate": 0.5205078125,
+    "happy": true,
+    "fast_share": 0.9541015625,
+    "band_over_K": 0.2138671875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 34,
+    "hit_rate": 0.6083984375,
+    "happy": true,
+    "fast_share": 0.986328125,
+    "band_over_K": 0.2099609375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 36,
+    "hit_rate": 0.48828125,
+    "happy": true,
+    "fast_share": 0.806640625,
+    "band_over_K": 0.2109375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 38,
+    "hit_rate": 0.8291015625,
+    "happy": true,
+    "fast_share": 0.9599609375,
+    "band_over_K": 0.1982421875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 40,
+    "hit_rate": 0.71875,
+    "happy": true,
+    "fast_share": 0.9609375,
+    "band_over_K": 0.185546875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 42,
+    "hit_rate": 0.6005859375,
+    "happy": true,
+    "fast_share": 1.0,
+    "band_over_K": 0.0,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 44,
+    "hit_rate": 0.796875,
+    "happy": true,
+    "fast_share": 0.8408203125,
+    "band_over_K": 0.169921875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 46,
+    "hit_rate": 0.611328125,
+    "happy": true,
+    "fast_share": 0.97265625,
+    "band_over_K": 0.2177734375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 48,
+    "hit_rate": 0.6171875,
+    "happy": true,
+    "fast_share": 0.966796875,
+    "band_over_K": 0.2119140625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 50,
+    "hit_rate": 0.7041015625,
+    "happy": true,
+    "fast_share": 0.98828125,
+    "band_over_K": 0.2451171875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 52,
+    "hit_rate": 0.7392578125,
+    "happy": true,
+    "fast_share": 0.92578125,
+    "band_over_K": 0.21484375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 54,
+    "hit_rate": 0.7470703125,
+    "happy": true,
+    "fast_share": 0.90234375,
+    "band_over_K": 0.22265625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 56,
+    "hit_rate": 0.8330078125,
+    "happy": true,
+    "fast_share": 0.939453125,
+    "band_over_K": 0.2412109375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 58,
+    "hit_rate": 0.875,
+    "happy": true,
+    "fast_share": 0.8759765625,
+    "band_over_K": 0.1904296875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 60,
+    "hit_rate": 0.9521484375,
+    "happy": true,
+    "fast_share": 0.9208984375,
+    "band_over_K": 0.1708984375,
+    "oracle_fast": 0.9990234375
+   }
+  ]
+ },
+ "pro/16k": {
+  "model": "pro",
+  "isl": "16k",
+  "N": 4099,
+  "K": 1024,
+  "kC": 5120,
+  "happy_pct": 100.0,
+  "hr_med": 0.8291015625,
+  "fast_med": 0.923828125,
+  "band_over_K_med": 0.224609375,
+  "oracle_med": 0.9990234375,
+  "per_layer": [
+   {
+    "layer": 2,
+    "hit_rate": 0.80078125,
+    "happy": true,
+    "fast_share": 0.9990234375,
+    "band_over_K": 0.2294921875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 4,
+    "hit_rate": 0.7548828125,
+    "happy": true,
+    "fast_share": 0.8818359375,
+    "band_over_K": 0.2158203125,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 6,
+    "hit_rate": 0.83984375,
+    "happy": true,
+    "fast_share": 0.923828125,
+    "band_over_K": 0.2197265625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 8,
+    "hit_rate": 0.8740234375,
+    "happy": true,
+    "fast_share": 0.8720703125,
+    "band_over_K": 0.1982421875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 10,
+    "hit_rate": 0.8671875,
+    "happy": true,
+    "fast_share": 0.8818359375,
+    "band_over_K": 0.2158203125,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 12,
+    "hit_rate": 0.7099609375,
+    "happy": true,
+    "fast_share": 0.98046875,
+    "band_over_K": 0.2685546875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 14,
+    "hit_rate": 0.7734375,
+    "happy": true,
+    "fast_share": 0.8212890625,
+    "band_over_K": 0.2490234375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 16,
+    "hit_rate": 0.83984375,
+    "happy": true,
+    "fast_share": 0.9326171875,
+    "band_over_K": 0.244140625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 18,
+    "hit_rate": 0.8125,
+    "happy": true,
+    "fast_share": 0.9736328125,
+    "band_over_K": 0.2587890625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 20,
+    "hit_rate": 0.8154296875,
+    "happy": true,
+    "fast_share": 0.9794921875,
+    "band_over_K": 0.228515625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 22,
+    "hit_rate": 0.7021484375,
+    "happy": true,
+    "fast_share": 0.990234375,
+    "band_over_K": 0.3125,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 24,
+    "hit_rate": 0.8154296875,
+    "happy": true,
+    "fast_share": 0.96875,
+    "band_over_K": 0.27734375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 26,
+    "hit_rate": 0.7998046875,
+    "happy": true,
+    "fast_share": 0.7919921875,
+    "band_over_K": 0.208984375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 28,
+    "hit_rate": 0.791015625,
+    "happy": true,
+    "fast_share": 0.8115234375,
+    "band_over_K": 0.2138671875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 30,
+    "hit_rate": 0.7392578125,
+    "happy": true,
+    "fast_share": 0.904296875,
+    "band_over_K": 0.244140625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 32,
+    "hit_rate": 0.7666015625,
+    "happy": true,
+    "fast_share": 0.8701171875,
+    "band_over_K": 0.224609375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 34,
+    "hit_rate": 0.828125,
+    "happy": true,
+    "fast_share": 0.9375,
+    "band_over_K": 0.2685546875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 36,
+    "hit_rate": 0.7919921875,
+    "happy": true,
+    "fast_share": 0.802734375,
+    "band_over_K": 0.2177734375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 38,
+    "hit_rate": 0.9345703125,
+    "happy": true,
+    "fast_share": 0.939453125,
+    "band_over_K": 0.22265625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 40,
+    "hit_rate": 0.9052734375,
+    "happy": true,
+    "fast_share": 0.986328125,
+    "band_over_K": 0.255859375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 42,
+    "hit_rate": 0.875,
+    "happy": true,
+    "fast_share": 0.8544921875,
+    "band_over_K": 0.208984375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 44,
+    "hit_rate": 0.94140625,
+    "happy": true,
+    "fast_share": 0.9287109375,
+    "band_over_K": 0.177734375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 46,
+    "hit_rate": 0.8291015625,
+    "happy": true,
+    "fast_share": 0.9423828125,
+    "band_over_K": 0.2529296875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 48,
+    "hit_rate": 0.7451171875,
+    "happy": true,
+    "fast_share": 0.896484375,
+    "band_over_K": 0.251953125,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 50,
+    "hit_rate": 0.9169921875,
+    "happy": true,
+    "fast_share": 0.9697265625,
+    "band_over_K": 0.275390625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 52,
+    "hit_rate": 0.8642578125,
+    "happy": true,
+    "fast_share": 0.87890625,
+    "band_over_K": 0.2099609375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 54,
+    "hit_rate": 0.880859375,
+    "happy": true,
+    "fast_share": 0.8701171875,
+    "band_over_K": 0.1982421875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 56,
+    "hit_rate": 0.8837890625,
+    "happy": true,
+    "fast_share": 0.8466796875,
+    "band_over_K": 0.2021484375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 58,
+    "hit_rate": 0.8828125,
+    "happy": true,
+    "fast_share": 0.8505859375,
+    "band_over_K": 0.18359375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 60,
+    "hit_rate": 0.9150390625,
+    "happy": true,
+    "fast_share": 0.9716796875,
+    "band_over_K": 0.224609375,
+    "oracle_fast": 0.9990234375
+   }
+  ]
+ },
+ "pro/32k": {
+  "model": "pro",
+  "isl": "32k",
+  "N": 8195,
+  "K": 1024,
+  "kC": 5120,
+  "happy_pct": 100.0,
+  "hr_med": 0.7900390625,
+  "fast_med": 0.9189453125,
+  "band_over_K_med": 0.271484375,
+  "oracle_med": 0.9990234375,
+  "per_layer": [
+   {
+    "layer": 2,
+    "hit_rate": 0.9423828125,
+    "happy": true,
+    "fast_share": 0.9365234375,
+    "band_over_K": 0.1552734375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 4,
+    "hit_rate": 0.9169921875,
+    "happy": true,
+    "fast_share": 0.9541015625,
+    "band_over_K": 0.26171875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 6,
+    "hit_rate": 0.9091796875,
+    "happy": true,
+    "fast_share": 0.9892578125,
+    "band_over_K": 0.244140625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 8,
+    "hit_rate": 0.939453125,
+    "happy": true,
+    "fast_share": 0.9287109375,
+    "band_over_K": 0.197265625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 10,
+    "hit_rate": 0.912109375,
+    "happy": true,
+    "fast_share": 0.978515625,
+    "band_over_K": 0.2666015625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 12,
+    "hit_rate": 0.859375,
+    "happy": true,
+    "fast_share": 0.88671875,
+    "band_over_K": 0.244140625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 14,
+    "hit_rate": 0.8740234375,
+    "happy": true,
+    "fast_share": 0.876953125,
+    "band_over_K": 0.17578125,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 16,
+    "hit_rate": 0.7626953125,
+    "happy": true,
+    "fast_share": 0.8583984375,
+    "band_over_K": 0.2373046875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 18,
+    "hit_rate": 0.6806640625,
+    "happy": true,
+    "fast_share": 0.814453125,
+    "band_over_K": 0.234375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 20,
+    "hit_rate": 0.8349609375,
+    "happy": true,
+    "fast_share": 0.9384765625,
+    "band_over_K": 0.2470703125,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 22,
+    "hit_rate": 0.5625,
+    "happy": true,
+    "fast_share": 0.8271484375,
+    "band_over_K": 0.29296875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 24,
+    "hit_rate": 0.7548828125,
+    "happy": true,
+    "fast_share": 0.875,
+    "band_over_K": 0.2734375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 26,
+    "hit_rate": 0.55859375,
+    "happy": true,
+    "fast_share": 0.8359375,
+    "band_over_K": 0.3203125,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 28,
+    "hit_rate": 0.8212890625,
+    "happy": true,
+    "fast_share": 0.9443359375,
+    "band_over_K": 0.3427734375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 30,
+    "hit_rate": 0.5302734375,
+    "happy": true,
+    "fast_share": 0.888671875,
+    "band_over_K": 0.41015625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 32,
+    "hit_rate": 0.4833984375,
+    "happy": true,
+    "fast_share": 0.7568359375,
+    "band_over_K": 0.2998046875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 34,
+    "hit_rate": 0.7041015625,
+    "happy": true,
+    "fast_share": 0.9951171875,
+    "band_over_K": 0.2802734375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 36,
+    "hit_rate": 0.490234375,
+    "happy": true,
+    "fast_share": 0.74609375,
+    "band_over_K": 0.298828125,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 38,
+    "hit_rate": 0.63671875,
+    "happy": true,
+    "fast_share": 0.9189453125,
+    "band_over_K": 0.2421875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 40,
+    "hit_rate": 0.498046875,
+    "happy": true,
+    "fast_share": 0.681640625,
+    "band_over_K": 0.328125,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 42,
+    "hit_rate": 0.52734375,
+    "happy": true,
+    "fast_share": 0.92578125,
+    "band_over_K": 0.3359375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 44,
+    "hit_rate": 0.822265625,
+    "happy": true,
+    "fast_share": 0.958984375,
+    "band_over_K": 0.240234375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 46,
+    "hit_rate": 0.751953125,
+    "happy": true,
+    "fast_share": 0.892578125,
+    "band_over_K": 0.2568359375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 48,
+    "hit_rate": 0.5595703125,
+    "happy": true,
+    "fast_share": 0.794921875,
+    "band_over_K": 0.318359375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 50,
+    "hit_rate": 0.8310546875,
+    "happy": true,
+    "fast_share": 0.9296875,
+    "band_over_K": 0.279296875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 52,
+    "hit_rate": 0.7197265625,
+    "happy": true,
+    "fast_share": 0.953125,
+    "band_over_K": 0.271484375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 54,
+    "hit_rate": 0.8447265625,
+    "happy": true,
+    "fast_share": 0.9072265625,
+    "band_over_K": 0.22265625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 56,
+    "hit_rate": 0.7900390625,
+    "happy": true,
+    "fast_share": 0.81640625,
+    "band_over_K": 0.2041015625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 58,
+    "hit_rate": 0.8203125,
+    "happy": true,
+    "fast_share": 0.947265625,
+    "band_over_K": 0.283203125,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 60,
+    "hit_rate": 0.9033203125,
+    "happy": true,
+    "fast_share": 0.9892578125,
+    "band_over_K": 0.35546875,
+    "oracle_fast": 0.9990234375
+   }
+  ]
+ },
+ "pro/64k": {
+  "model": "pro",
+  "isl": "64k",
+  "N": 16387,
+  "K": 1024,
+  "kC": 5120,
+  "happy_pct": 100.0,
+  "hr_med": 0.6015625,
+  "fast_med": 0.89453125,
+  "band_over_K_med": 0.3798828125,
+  "oracle_med": 0.9990234375,
+  "per_layer": [
+   {
+    "layer": 2,
+    "hit_rate": 0.787109375,
+    "happy": true,
+    "fast_share": 0.7919921875,
+    "band_over_K": 0.2509765625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 4,
+    "hit_rate": 0.7958984375,
+    "happy": true,
+    "fast_share": 0.7939453125,
+    "band_over_K": 0.220703125,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 6,
+    "hit_rate": 0.83984375,
+    "happy": true,
+    "fast_share": 0.90625,
+    "band_over_K": 0.2978515625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 8,
+    "hit_rate": 0.8603515625,
+    "happy": true,
+    "fast_share": 0.8759765625,
+    "band_over_K": 0.234375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 10,
+    "hit_rate": 0.7373046875,
+    "happy": true,
+    "fast_share": 0.89453125,
+    "band_over_K": 0.326171875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 12,
+    "hit_rate": 0.6552734375,
+    "happy": true,
+    "fast_share": 0.84375,
+    "band_over_K": 0.3037109375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 14,
+    "hit_rate": 0.6064453125,
+    "happy": true,
+    "fast_share": 0.9716796875,
+    "band_over_K": 0.3720703125,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 16,
+    "hit_rate": 0.5439453125,
+    "happy": true,
+    "fast_share": 0.8583984375,
+    "band_over_K": 0.3974609375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 18,
+    "hit_rate": 0.505859375,
+    "happy": true,
+    "fast_share": 0.9853515625,
+    "band_over_K": 0.4208984375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 20,
+    "hit_rate": 0.6318359375,
+    "happy": true,
+    "fast_share": 0.91796875,
+    "band_over_K": 0.287109375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 22,
+    "hit_rate": 0.5146484375,
+    "happy": true,
+    "fast_share": 0.9443359375,
+    "band_over_K": 0.4443359375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 24,
+    "hit_rate": 0.6474609375,
+    "happy": true,
+    "fast_share": 0.896484375,
+    "band_over_K": 0.2880859375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 26,
+    "hit_rate": 0.5205078125,
+    "happy": true,
+    "fast_share": 0.912109375,
+    "band_over_K": 0.4189453125,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 28,
+    "hit_rate": 0.6416015625,
+    "happy": true,
+    "fast_share": 0.8984375,
+    "band_over_K": 0.2841796875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 30,
+    "hit_rate": 0.3125,
+    "happy": true,
+    "fast_share": 0.9453125,
+    "band_over_K": 0.546875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 32,
+    "hit_rate": 0.416015625,
+    "happy": true,
+    "fast_share": 0.927734375,
+    "band_over_K": 0.50390625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 34,
+    "hit_rate": 0.6259765625,
+    "happy": true,
+    "fast_share": 0.916015625,
+    "band_over_K": 0.337890625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 36,
+    "hit_rate": 0.4873046875,
+    "happy": true,
+    "fast_share": 0.71484375,
+    "band_over_K": 0.34375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 38,
+    "hit_rate": 0.2685546875,
+    "happy": true,
+    "fast_share": 0.51953125,
+    "band_over_K": 0.865234375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 40,
+    "hit_rate": 0.2939453125,
+    "happy": true,
+    "fast_share": 0.5087890625,
+    "band_over_K": 0.537109375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 42,
+    "hit_rate": 0.44140625,
+    "happy": true,
+    "fast_share": 0.8017578125,
+    "band_over_K": 0.4541015625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 44,
+    "hit_rate": 0.1435546875,
+    "happy": true,
+    "fast_share": 0.5498046875,
+    "band_over_K": 1.4833984375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 46,
+    "hit_rate": 0.5185546875,
+    "happy": true,
+    "fast_share": 0.9375,
+    "band_over_K": 0.357421875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 48,
+    "hit_rate": 0.271484375,
+    "happy": true,
+    "fast_share": 0.58984375,
+    "band_over_K": 0.6025390625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 50,
+    "hit_rate": 0.44140625,
+    "happy": true,
+    "fast_share": 0.8427734375,
+    "band_over_K": 0.517578125,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 52,
+    "hit_rate": 0.3740234375,
+    "happy": true,
+    "fast_share": 0.6435546875,
+    "band_over_K": 0.4765625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 54,
+    "hit_rate": 0.634765625,
+    "happy": true,
+    "fast_share": 0.90234375,
+    "band_over_K": 0.3798828125,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 56,
+    "hit_rate": 0.6015625,
+    "happy": true,
+    "fast_share": 0.9912109375,
+    "band_over_K": 0.4140625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 58,
+    "hit_rate": 0.6552734375,
+    "happy": true,
+    "fast_share": 0.822265625,
+    "band_over_K": 0.3564453125,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 60,
+    "hit_rate": 0.8603515625,
+    "happy": true,
+    "fast_share": 0.890625,
+    "band_over_K": 0.205078125,
+    "oracle_fast": 0.9990234375
+   }
+  ]
+ },
+ "pro/128k": {
+  "model": "pro",
+  "isl": "128k",
+  "N": 32771,
+  "K": 1024,
+  "kC": 5120,
+  "happy_pct": 100.0,
+  "hr_med": 0.6650390625,
+  "fast_med": 0.865234375,
+  "band_over_K_med": 0.3154296875,
+  "oracle_med": 0.9990234375,
+  "per_layer": [
+   {
+    "layer": 2,
+    "hit_rate": 0.939453125,
+    "happy": true,
+    "fast_share": 0.9365234375,
+    "band_over_K": 0.185546875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 4,
+    "hit_rate": 0.86328125,
+    "happy": true,
+    "fast_share": 0.869140625,
+    "band_over_K": 0.22265625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 6,
+    "hit_rate": 0.8701171875,
+    "happy": true,
+    "fast_share": 0.8671875,
+    "band_over_K": 0.216796875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 8,
+    "hit_rate": 0.927734375,
+    "happy": true,
+    "fast_share": 0.9443359375,
+    "band_over_K": 0.23828125,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 10,
+    "hit_rate": 0.8994140625,
+    "happy": true,
+    "fast_share": 0.8330078125,
+    "band_over_K": 0.1689453125,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 12,
+    "hit_rate": 0.8486328125,
+    "happy": true,
+    "fast_share": 0.8984375,
+    "band_over_K": 0.263671875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 14,
+    "hit_rate": 0.8125,
+    "happy": true,
+    "fast_share": 0.96484375,
+    "band_over_K": 0.2529296875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 16,
+    "hit_rate": 0.6650390625,
+    "happy": true,
+    "fast_share": 0.822265625,
+    "band_over_K": 0.283203125,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 18,
+    "hit_rate": 0.6884765625,
+    "happy": true,
+    "fast_share": 0.779296875,
+    "band_over_K": 0.24609375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 20,
+    "hit_rate": 0.7822265625,
+    "happy": true,
+    "fast_share": 0.810546875,
+    "band_over_K": 0.224609375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 22,
+    "hit_rate": 0.4326171875,
+    "happy": true,
+    "fast_share": 0.869140625,
+    "band_over_K": 0.4501953125,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 24,
+    "hit_rate": 0.6826171875,
+    "happy": true,
+    "fast_share": 0.783203125,
+    "band_over_K": 0.2548828125,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 26,
+    "hit_rate": 0.4541015625,
+    "happy": true,
+    "fast_share": 0.79296875,
+    "band_over_K": 0.439453125,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 28,
+    "hit_rate": 0.7275390625,
+    "happy": true,
+    "fast_share": 0.9267578125,
+    "band_over_K": 0.3154296875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 30,
+    "hit_rate": 0.326171875,
+    "happy": true,
+    "fast_share": 0.865234375,
+    "band_over_K": 0.525390625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 32,
+    "hit_rate": 0.4296875,
+    "happy": true,
+    "fast_share": 0.8603515625,
+    "band_over_K": 0.6162109375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 34,
+    "hit_rate": 0.6123046875,
+    "happy": true,
+    "fast_share": 0.9560546875,
+    "band_over_K": 0.40625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 36,
+    "hit_rate": 0.345703125,
+    "happy": true,
+    "fast_share": 0.7978515625,
+    "band_over_K": 0.572265625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 38,
+    "hit_rate": 0.626953125,
+    "happy": true,
+    "fast_share": 0.884765625,
+    "band_over_K": 0.5146484375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 40,
+    "hit_rate": 0.4150390625,
+    "happy": true,
+    "fast_share": 0.9189453125,
+    "band_over_K": 0.5029296875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 42,
+    "hit_rate": 0.505859375,
+    "happy": true,
+    "fast_share": 0.9775390625,
+    "band_over_K": 0.5224609375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 44,
+    "hit_rate": 0.39453125,
+    "happy": true,
+    "fast_share": 0.6240234375,
+    "band_over_K": 0.4033203125,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 46,
+    "hit_rate": 0.609375,
+    "happy": true,
+    "fast_share": 0.9697265625,
+    "band_over_K": 0.4140625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 48,
+    "hit_rate": 0.345703125,
+    "happy": true,
+    "fast_share": 0.77734375,
+    "band_over_K": 0.67578125,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 50,
+    "hit_rate": 0.5888671875,
+    "happy": true,
+    "fast_share": 0.73828125,
+    "band_over_K": 0.3095703125,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 52,
+    "hit_rate": 0.5439453125,
+    "happy": true,
+    "fast_share": 0.8447265625,
+    "band_over_K": 0.39453125,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 54,
+    "hit_rate": 0.6826171875,
+    "happy": true,
+    "fast_share": 0.7958984375,
+    "band_over_K": 0.271484375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 56,
+    "hit_rate": 0.52734375,
+    "happy": true,
+    "fast_share": 0.9072265625,
+    "band_over_K": 0.4345703125,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 58,
+    "hit_rate": 0.6845703125,
+    "happy": true,
+    "fast_share": 0.767578125,
+    "band_over_K": 0.275390625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 60,
+    "hit_rate": 0.8720703125,
+    "happy": true,
+    "fast_share": 0.853515625,
+    "band_over_K": 0.205078125,
+    "oracle_fast": 0.9990234375
+   }
+  ]
+ },
+ "pro/256k": {
+  "model": "pro",
+  "isl": "256k",
+  "N": 65539,
+  "K": 1024,
+  "kC": 5120,
+  "happy_pct": 100.0,
+  "hr_med": 0.62890625,
+  "fast_med": 0.873046875,
+  "band_over_K_med": 0.3515625,
+  "oracle_med": 0.9990234375,
+  "per_layer": [
+   {
+    "layer": 2,
+    "hit_rate": 0.9228515625,
+    "happy": true,
+    "fast_share": 0.9609375,
+    "band_over_K": 0.1943359375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 4,
+    "hit_rate": 0.876953125,
+    "happy": true,
+    "fast_share": 0.849609375,
+    "band_over_K": 0.2138671875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 6,
+    "hit_rate": 0.908203125,
+    "happy": true,
+    "fast_share": 0.984375,
+    "band_over_K": 0.2958984375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 8,
+    "hit_rate": 0.9267578125,
+    "happy": true,
+    "fast_share": 0.9599609375,
+    "band_over_K": 0.267578125,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 10,
+    "hit_rate": 0.8828125,
+    "happy": true,
+    "fast_share": 0.8515625,
+    "band_over_K": 0.1806640625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 12,
+    "hit_rate": 0.826171875,
+    "happy": true,
+    "fast_share": 0.958984375,
+    "band_over_K": 0.2392578125,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 14,
+    "hit_rate": 0.798828125,
+    "happy": true,
+    "fast_share": 0.7958984375,
+    "band_over_K": 0.2060546875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 16,
+    "hit_rate": 0.62890625,
+    "happy": true,
+    "fast_share": 0.916015625,
+    "band_over_K": 0.341796875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 18,
+    "hit_rate": 0.6083984375,
+    "happy": true,
+    "fast_share": 0.9775390625,
+    "band_over_K": 0.318359375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 20,
+    "hit_rate": 0.740234375,
+    "happy": true,
+    "fast_share": 0.9111328125,
+    "band_over_K": 0.2763671875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 22,
+    "hit_rate": 0.35546875,
+    "happy": true,
+    "fast_share": 0.6796875,
+    "band_over_K": 0.513671875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 24,
+    "hit_rate": 0.6064453125,
+    "happy": true,
+    "fast_share": 0.974609375,
+    "band_over_K": 0.4111328125,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 26,
+    "hit_rate": 0.462890625,
+    "happy": true,
+    "fast_share": 0.7646484375,
+    "band_over_K": 0.478515625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 28,
+    "hit_rate": 0.640625,
+    "happy": true,
+    "fast_share": 0.892578125,
+    "band_over_K": 0.2958984375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 30,
+    "hit_rate": 0.3583984375,
+    "happy": true,
+    "fast_share": 0.7353515625,
+    "band_over_K": 0.556640625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 32,
+    "hit_rate": 0.4892578125,
+    "happy": true,
+    "fast_share": 0.6474609375,
+    "band_over_K": 0.4052734375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 34,
+    "hit_rate": 0.55078125,
+    "happy": true,
+    "fast_share": 0.818359375,
+    "band_over_K": 0.408203125,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 36,
+    "hit_rate": 0.4169921875,
+    "happy": true,
+    "fast_share": 0.9375,
+    "band_over_K": 0.4384765625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 38,
+    "hit_rate": 0.265625,
+    "happy": true,
+    "fast_share": 0.4990234375,
+    "band_over_K": 0.9013671875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 40,
+    "hit_rate": 0.548828125,
+    "happy": true,
+    "fast_share": 0.830078125,
+    "band_over_K": 0.330078125,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 42,
+    "hit_rate": 0.7509765625,
+    "happy": true,
+    "fast_share": 0.8623046875,
+    "band_over_K": 0.2880859375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 44,
+    "hit_rate": 0.46484375,
+    "happy": true,
+    "fast_share": 0.7607421875,
+    "band_over_K": 0.3515625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 46,
+    "hit_rate": 0.708984375,
+    "happy": true,
+    "fast_share": 0.9599609375,
+    "band_over_K": 0.37890625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 48,
+    "hit_rate": 0.4658203125,
+    "happy": true,
+    "fast_share": 0.7353515625,
+    "band_over_K": 0.3994140625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 50,
+    "hit_rate": 0.4560546875,
+    "happy": true,
+    "fast_share": 0.796875,
+    "band_over_K": 0.4326171875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 52,
+    "hit_rate": 0.5166015625,
+    "happy": true,
+    "fast_share": 0.93359375,
+    "band_over_K": 0.41015625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 54,
+    "hit_rate": 0.7021484375,
+    "happy": true,
+    "fast_share": 0.9951171875,
+    "band_over_K": 0.400390625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 56,
+    "hit_rate": 0.568359375,
+    "happy": true,
+    "fast_share": 0.7802734375,
+    "band_over_K": 0.3310546875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 58,
+    "hit_rate": 0.7373046875,
+    "happy": true,
+    "fast_share": 0.90625,
+    "band_over_K": 0.375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 60,
+    "hit_rate": 0.8583984375,
+    "happy": true,
+    "fast_share": 0.873046875,
+    "band_over_K": 0.2529296875,
+    "oracle_fast": 0.9990234375
+   }
+  ]
+ },
+ "pro/512k": {
+  "model": "pro",
+  "isl": "512k",
+  "N": 131075,
+  "K": 1024,
+  "kC": 5120,
+  "happy_pct": 100.0,
+  "hr_med": 0.62890625,
+  "fast_med": 0.87890625,
+  "band_over_K_med": 0.3212890625,
+  "oracle_med": 0.9990234375,
+  "per_layer": [
+   {
+    "layer": 2,
+    "hit_rate": 0.939453125,
+    "happy": true,
+    "fast_share": 0.935546875,
+    "band_over_K": 0.1689453125,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 4,
+    "hit_rate": 0.873046875,
+    "happy": true,
+    "fast_share": 0.861328125,
+    "band_over_K": 0.19921875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 6,
+    "hit_rate": 0.9208984375,
+    "happy": true,
+    "fast_share": 0.9501953125,
+    "band_over_K": 0.21484375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 8,
+    "hit_rate": 0.896484375,
+    "happy": true,
+    "fast_share": 0.8330078125,
+    "band_over_K": 0.171875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 10,
+    "hit_rate": 0.8662109375,
+    "happy": true,
+    "fast_share": 0.8759765625,
+    "band_over_K": 0.220703125,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 12,
+    "hit_rate": 0.8603515625,
+    "happy": true,
+    "fast_share": 0.8828125,
+    "band_over_K": 0.2177734375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 14,
+    "hit_rate": 0.7802734375,
+    "happy": true,
+    "fast_share": 0.8232421875,
+    "band_over_K": 0.21875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 16,
+    "hit_rate": 0.5859375,
+    "happy": true,
+    "fast_share": 0.748046875,
+    "band_over_K": 0.3310546875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 18,
+    "hit_rate": 0.6318359375,
+    "happy": true,
+    "fast_share": 0.88671875,
+    "band_over_K": 0.3720703125,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 20,
+    "hit_rate": 0.7451171875,
+    "happy": true,
+    "fast_share": 0.8896484375,
+    "band_over_K": 0.275390625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 22,
+    "hit_rate": 0.4111328125,
+    "happy": true,
+    "fast_share": 0.9189453125,
+    "band_over_K": 0.708984375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 24,
+    "hit_rate": 0.6005859375,
+    "happy": true,
+    "fast_share": 1.0,
+    "band_over_K": 0.0,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 26,
+    "hit_rate": 0.435546875,
+    "happy": true,
+    "fast_share": 0.7783203125,
+    "band_over_K": 0.560546875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 28,
+    "hit_rate": 0.6123046875,
+    "happy": true,
+    "fast_share": 0.9521484375,
+    "band_over_K": 0.4140625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 30,
+    "hit_rate": 0.23046875,
+    "happy": true,
+    "fast_share": 0.69140625,
+    "band_over_K": 1.2734375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 32,
+    "hit_rate": 0.373046875,
+    "happy": true,
+    "fast_share": 0.654296875,
+    "band_over_K": 0.490234375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 34,
+    "hit_rate": 0.62890625,
+    "happy": true,
+    "fast_share": 0.9033203125,
+    "band_over_K": 0.416015625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 36,
+    "hit_rate": 0.314453125,
+    "happy": true,
+    "fast_share": 0.9169921875,
+    "band_over_K": 0.5859375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 38,
+    "hit_rate": 0.599609375,
+    "happy": true,
+    "fast_share": 0.654296875,
+    "band_over_K": 0.34765625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 40,
+    "hit_rate": 0.4140625,
+    "happy": true,
+    "fast_share": 0.921875,
+    "band_over_K": 0.654296875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 42,
+    "hit_rate": 0.6240234375,
+    "happy": true,
+    "fast_share": 0.87890625,
+    "band_over_K": 0.544921875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 44,
+    "hit_rate": 0.392578125,
+    "happy": true,
+    "fast_share": 0.5712890625,
+    "band_over_K": 0.4541015625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 46,
+    "hit_rate": 0.6640625,
+    "happy": true,
+    "fast_share": 0.8134765625,
+    "band_over_K": 0.3212890625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 48,
+    "hit_rate": 0.296875,
+    "happy": true,
+    "fast_share": 0.4248046875,
+    "band_over_K": 0.6337890625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 50,
+    "hit_rate": 0.6279296875,
+    "happy": true,
+    "fast_share": 0.921875,
+    "band_over_K": 0.3173828125,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 52,
+    "hit_rate": 0.5908203125,
+    "happy": true,
+    "fast_share": 0.72265625,
+    "band_over_K": 0.3193359375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 54,
+    "hit_rate": 0.66796875,
+    "happy": true,
+    "fast_share": 0.8388671875,
+    "band_over_K": 0.2763671875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 56,
+    "hit_rate": 0.734375,
+    "happy": true,
+    "fast_share": 0.923828125,
+    "band_over_K": 0.2919921875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 58,
+    "hit_rate": 0.76171875,
+    "happy": true,
+    "fast_share": 0.8369140625,
+    "band_over_K": 0.2744140625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 60,
+    "hit_rate": 0.859375,
+    "happy": true,
+    "fast_share": 0.890625,
+    "band_over_K": 0.2119140625,
+    "oracle_fast": 0.9990234375
+   }
+  ]
+ },
+ "pro/1024k": {
+  "model": "pro",
+  "isl": "1024k",
+  "N": 262127,
+  "K": 1024,
+  "kC": 5120,
+  "happy_pct": 100.0,
+  "hr_med": 0.6396484375,
+  "fast_med": 0.8505859375,
+  "band_over_K_med": 0.333984375,
+  "oracle_med": 0.9990234375,
+  "per_layer": [
+   {
+    "layer": 2,
+    "hit_rate": 0.9296875,
+    "happy": true,
+    "fast_share": 0.9501953125,
+    "band_over_K": 0.2744140625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 4,
+    "hit_rate": 0.8857421875,
+    "happy": true,
+    "fast_share": 0.8515625,
+    "band_over_K": 0.1748046875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 6,
+    "hit_rate": 0.921875,
+    "happy": true,
+    "fast_share": 0.95703125,
+    "band_over_K": 0.19921875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 8,
+    "hit_rate": 0.87109375,
+    "happy": true,
+    "fast_share": 0.8642578125,
+    "band_over_K": 0.2216796875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 10,
+    "hit_rate": 0.88671875,
+    "happy": true,
+    "fast_share": 0.8505859375,
+    "band_over_K": 0.189453125,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 12,
+    "hit_rate": 0.8564453125,
+    "happy": true,
+    "fast_share": 0.876953125,
+    "band_over_K": 0.2314453125,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 14,
+    "hit_rate": 0.7099609375,
+    "happy": true,
+    "fast_share": 0.974609375,
+    "band_over_K": 0.31640625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 16,
+    "hit_rate": 0.619140625,
+    "happy": true,
+    "fast_share": 0.9453125,
+    "band_over_K": 0.400390625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 18,
+    "hit_rate": 0.7490234375,
+    "happy": true,
+    "fast_share": 0.8994140625,
+    "band_over_K": 0.29296875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 20,
+    "hit_rate": 0.759765625,
+    "happy": true,
+    "fast_share": 0.84375,
+    "band_over_K": 0.2802734375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 22,
+    "hit_rate": 0.5751953125,
+    "happy": true,
+    "fast_share": 0.7763671875,
+    "band_over_K": 0.30078125,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 24,
+    "hit_rate": 0.6640625,
+    "happy": true,
+    "fast_share": 0.8212890625,
+    "band_over_K": 0.333984375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 26,
+    "hit_rate": 0.53515625,
+    "happy": true,
+    "fast_share": 0.86328125,
+    "band_over_K": 0.646484375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 28,
+    "hit_rate": 0.611328125,
+    "happy": true,
+    "fast_share": 0.95703125,
+    "band_over_K": 0.322265625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 30,
+    "hit_rate": 0.2666015625,
+    "happy": true,
+    "fast_share": 0.48046875,
+    "band_over_K": 0.8232421875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 32,
+    "hit_rate": 0.3935546875,
+    "happy": true,
+    "fast_share": 0.6689453125,
+    "band_over_K": 0.4013671875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 34,
+    "hit_rate": 0.6728515625,
+    "happy": true,
+    "fast_share": 0.783203125,
+    "band_over_K": 0.3408203125,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 36,
+    "hit_rate": 0.1962890625,
+    "happy": true,
+    "fast_share": 0.2412109375,
+    "band_over_K": 0.8134765625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 38,
+    "hit_rate": 0.4248046875,
+    "happy": true,
+    "fast_share": 0.861328125,
+    "band_over_K": 0.603515625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 40,
+    "hit_rate": 0.1220703125,
+    "happy": true,
+    "fast_share": 0.666015625,
+    "band_over_K": 2.984375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 42,
+    "hit_rate": 0.478515625,
+    "happy": true,
+    "fast_share": 0.56640625,
+    "band_over_K": 0.5771484375,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 44,
+    "hit_rate": 0.17578125,
+    "happy": true,
+    "fast_share": 0.1591796875,
+    "band_over_K": 1.201171875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 46,
+    "hit_rate": 0.6396484375,
+    "happy": true,
+    "fast_share": 0.8662109375,
+    "band_over_K": 0.3994140625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 48,
+    "hit_rate": 0.244140625,
+    "happy": true,
+    "fast_share": 0.5048828125,
+    "band_over_K": 1.51953125,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 50,
+    "hit_rate": 0.3505859375,
+    "happy": true,
+    "fast_share": 0.6376953125,
+    "band_over_K": 0.9140625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 52,
+    "hit_rate": 0.2919921875,
+    "happy": true,
+    "fast_share": 0.40234375,
+    "band_over_K": 0.64453125,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 54,
+    "hit_rate": 0.6708984375,
+    "happy": true,
+    "fast_share": 0.7666015625,
+    "band_over_K": 0.3291015625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 56,
+    "hit_rate": 0.6240234375,
+    "happy": true,
+    "fast_share": 0.919921875,
+    "band_over_K": 0.3232421875,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 58,
+    "hit_rate": 0.6787109375,
+    "happy": true,
+    "fast_share": 0.7880859375,
+    "band_over_K": 0.2744140625,
+    "oracle_fast": 0.9990234375
+   },
+   {
+    "layer": 60,
+    "hit_rate": 0.8759765625,
+    "happy": true,
+    "fast_share": 0.8759765625,
+    "band_over_K": 0.2001953125,
+    "oracle_fast": 0.9990234375
+   }
+  ]
+ }
+}
