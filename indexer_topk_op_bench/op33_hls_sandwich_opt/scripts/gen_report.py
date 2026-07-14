@@ -103,10 +103,11 @@ def main():
     base_col_hdr = "".join(f"<th>N{N//1024}K</th>" for N in Ns)
 
     best_geo = max(cfg_geo.values()) if cfg_geo else float("nan")
-    dg = cfg_geo.get("op33_dispatch", float("nan"))
-    verdict = ("+30% TARGET MET" if dg >= 1.30 else
-               f"+30% target NOT met — but op33 DISPATCH (M=3 K512/1024, EXACT 48/48) ships a "
-               f"conditional +{(dg-1)*100:.1f}% overall (K512/1024 ~+9%), the only exact positive lever")
+    verdict = ("+30% target NOT met AND NO valid lever. op33 D2/M=3 RETRACTED (iter6): clean "
+               "single-GPU paired A/B shows M=3 REGRESSES worst (K1024 N32768 worst 0.787, K512 "
+               "N262144 worst 0.727) — the earlier +9% was a real-only/N<=65536 + 8-GPU-contention "
+               "artifact. op27_hls remains best. NOTE: the speedup table below is the real-only knob "
+               "sweep (screening) — trust the paired verdict, not these numbers.")
 
     html = f"""<!doctype html><html><head><meta charset=utf-8>
 <title>op33 HLS-op27 sandwich optimization — knob sweep</title>

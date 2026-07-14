@@ -11,7 +11,7 @@ th{background:#f0f0f0} td.lbl{text-align:left;font-weight:600}
 code{background:#eee;padding:1px 4px;border-radius:3px}
 </style></head><body>
 <h1>op33 — HLS-op27 sandwich optimization (BS=1, fp32, K512/1024/2048)</h1>
-<p class='verdict'>Target: beat <code>op27_hls</code> by avg +30% (geomean 1.30). Result: <b>+30% target NOT met — but op33 DISPATCH (M=3 K512/1024, EXACT 48/48) ships a conditional +6.0% overall (K512/1024 ~+9%), the only exact positive lever</b></p>
+<p class='verdict'>Target: beat <code>op27_hls</code> by avg +30% (geomean 1.30). Result: <b>+30% target NOT met AND NO valid lever. op33 D2/M=3 RETRACTED (iter6): clean single-GPU paired A/B shows M=3 REGRESSES worst (K1024 N32768 worst 0.787, K512 N262144 worst 0.727) — the earlier +9% was a real-only/N<=65536 + 8-GPU-contention artifact. op27_hls remains best. NOTE: the speedup table below is the real-only knob sweep (screening) — trust the paired verdict, not these numbers.</b></p>
 <div class='note'>
 <b>Incumbent</b> = <code>op27_hls</code> (gvr_ms_auto @ op27 HEAD; GvrSandwichKernel: P1 hint-gather →
 P1b 256-hist rank-quantile M=4 thresholds → ONE fused count+collect pass → sandwich direct-write M0&lt;K

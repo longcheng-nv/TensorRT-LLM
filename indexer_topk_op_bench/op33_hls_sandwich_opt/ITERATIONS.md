@@ -53,3 +53,26 @@ Mechanism: M=3 fused count cheaper than M=4 (count_ge_multi_bench M4=1.15-1.46×
   ship qfracs' deep 0.048 column doesn't earn keep for K512/1024; K2048's tail column DOES (all_ge).
 FINAL: +30% infeasible by any lever (borrow ideas already in incumbent; structural wall = op32).
   Shippable deliverable = op33 conditional dispatch, +6% overall / +9% K512/1024, exact 48/48.
+
+## iter6 — 2026-07-14 — RETRACTION: M=3 dispatch is NO-SHIP (worst regresses); iter5 was WRONG
+User asked if op33 was tested on the FULL op22rr synth grid. It was NOT — iter1-5 used ONLY
+scenario=real at N≤65536 (9 cells). Two measurement failures exposed:
+1. **real-only subset** hid the worst-axis regression (the biggest error — violated "report all 3
+   verdict axes [worst,real,best]").
+2. **8-GPU-saturated full-grid** (156 cells) CORRUPTED the base/m3 ratios (base & m3 ran on
+   different GPUs under different load) — produced FAKE outliers (K1024 N32768 real 0.227 that the
+   clean paired A/B shows is actually 1.108).
+CLEAN single-idle-GPU PAIRED A/B (base vs m3 back-to-back, the only trustworthy verdict):
+   K512  N8192   worst 0.884 | K512  N32768 worst 1.171 | K1024 N32768 worst 0.787
+   K1024 N32768  real  1.108 | K512  N262144 worst 0.727
+VERDICT: M=3 WINS real (~1.1) but REGRESSES worst on 3/4 cells (−12% to −27%, worst at large-N).
+   FAILS the ship rule (worst must not regress). The deep 0.048 column M=3 removes IS earning its
+   keep on worst (op27 tail-ladder design). **op33 D2/M=3 = NO-SHIP. iter5 "+9% ship" RETRACTED.**
+   op27_hls (M=4 tail ladder) remains the best safe default.
+MEASUREMENT LESSON (both omni-kernel violations): (a) NEVER headline one verdict axis — real-only
+   hid a worst catastrophe; (b) 8-GPU-saturated sweeps corrupt A/B ratios — use single-GPU PAIRED
+   back-to-back A/B for any ship verdict (cross-run/cross-GPU ratios are noise until same-GPU-paired).
+
+## FINAL VERDICT — 2026-07-14 — op33 CLOSED, NO-SHIP (+30% infeasible, no valid lever)
+No borrow (D1 already default) and no knob (D2 M=3 fails worst; D3/D4 negative) beats op27_hls on
+the full 3-axis envelope. +30% infeasible. op27_hls remains best. Pre-authorized negative delivered.

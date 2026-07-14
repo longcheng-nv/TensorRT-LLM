@@ -1,0 +1,5 @@
+K512 N  8192 worst: base/m3=0.884
+K512 N 32768 worst: base/m3=1.171
+K1024 N 32768 worst: base/m3=0.787
+K1024 N 32768 real : base/m3=1.108
+K512 N262144 worst: base/m3=0.727

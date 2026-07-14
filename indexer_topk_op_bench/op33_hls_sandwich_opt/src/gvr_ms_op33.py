@@ -1,6 +1,11 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES.
 # SPDX-License-Identifier: Apache-2.0
-"""op33 conditional dispatch on op27_hls (D2 M-reduction).
+"""op33 conditional dispatch on op27_hls (D2 M-reduction). *** RETRACTED / NO-SHIP (iter6) ***
+Clean single-GPU paired A/B (2026-07-14) shows M=3 REGRESSES the WORST scenario (K1024 N32768
+worst 0.787; K512 N262144 worst 0.727) — the iter5 "+9%" was a real-only/N<=65536 measurement
+artifact + 8-GPU contention. FAILS the ship rule. Kept only as a falsified reference. DO NOT SHIP.
+
+Original (WRONG) rationale below.
 
 Verdict (nsys, BS=1 fp32): qfracs M=3 (0.85,0.35) beats op27_hls default M=4
 for K in {512,1024} (+2.6..14.3%, geomean ~1.09) but LOSES for K2048
