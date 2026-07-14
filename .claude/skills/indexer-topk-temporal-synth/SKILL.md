@@ -12,7 +12,12 @@ description: >
   Temporal = rank-conditional retention curve + real miss-depth samples +
   per-row hit-rate sampled from the real per-step distribution + optional
   Gaussian-copula AR(1) multi-step chain (lag-1 rho from real consecutive
-  decode steps). Trigger keywords: "synthesize DSv3.2/V4 Flash/Pro indexer
+  decode steps). Spatial = a marginal-preserving POSITIONAL model (per-layer
+  winner-position density + AR(1) clustering, assets/posz_*.npz) so preIdx is
+  spatially clustered + recency/sink-shaped as measured (real gather footprint,
+  seg_frac ~2-4x fewer cache-line segments than IID), validated by GVR/radix
+  kernel timing (SYNTH_POSITIONAL=0 for legacy IID). Trigger keywords:
+  "synthesize DSv3.2/V4 Flash/Pro indexer
   logits", "temporal-coherent synthetic decode logits", "GVR top-K synth
   data", "empirical-CDF indexer synth", "generate preIdx with real hit-rate",
   "unified temporal synth", "multi-step decode chain synth".
@@ -38,6 +43,23 @@ generators against the real 64K production captures:
 | single `beta_moderate` curve vs the real all-layer mixture (agg KS 0.19–0.20 for Flash/V3.2) | benchmarked curve unrepresentative of what the kernel sees across the model | `--cfg aggregate` (default): each row samples a real layer's marginal |
 | iid-Gaussian noise + scalar `c` binary-searched to ONE fixed hit-rate | wrong rank-retention profile; no step-to-step hr variance; no undershoot | **rank-conditional retention curve** + per-row hr sampled from the **real per-step hr distribution** + real **miss-depth** samples + V4 sentinel (`n_valid<K`) distribution |
 | no multi-step structure | EMA/A1-style multi-step benches impossible | `--steps T` Gaussian-copula AR(1) chain, exact closed loop `preIdx_t = topK(row_{t-1})` |
+| values assigned to positions IID → preIdx gather uniform-random (real preIdx is heavily clustered + recency/sink-concentrated) | GVR preIdx-gather footprint / coalescing wrong (seg_frac ~2–4× too many cache-line segments); GVR kernel timing off on low-hr layers | **positional model** (Part 3): per-(model,layer) winner-position density `μ_L` + AR(1) local clustering, marginal-preserving value→position assignment (`assets/posz_*.npz`, built by `calib_positional.py`); `SYNTH_POSITIONAL=0` restores legacy IID |
+
+## Positional / gather model (Part 3, 2026-07-14)
+
+Assigns the (unchanged) logit values to positions so the top-K — hence `preIdx`
+— is spatially **clustered + recency/sink-shaped** as measured in the captures,
+instead of uniform-random. It is a **permutation** of the same value multiset,
+so every value/temporal gate above is untouched (all 5 still PASS). Calibration:
+`assets/posz_<model>.npz` (per-layer `μ_L[32]`, clustering target `frac_adj`),
+built by `src/calib_positional.py` from the same captures. Validated in
+`synth_vs_real_validation/` Part 3: `seg_frac` (cache-line coalescing proxy) real
+0.24 / positional 0.20–0.32 / IID 0.52; and by **G8 kernel timing** — with the
+real miss-depth calibrated, the shipped GVR arms (op#21 ms_auto, op#26 R0,
+cuteDSL base) match real to ~5% geomean and radix to <0.5%. Env `SYNTH_POSITIONAL=0`
+disables it (legacy IID placement). Known residual: real preIdx is clustered AND
+value-deep, but the monotone value→position coupling can't reproduce both — a small
+spatial/miss-depth tradeoff, documented in the Part 3 report.
 
 Validation gates (`src/validate_against_real.py`, results in
 `assets/validation_gates.json`, all PASS 2026-07-06):

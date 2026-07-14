@@ -108,6 +108,7 @@ class Calib:
                 nvalid_frac=z[pre + "nvalid_frac"].astype(np.float64),
                 rho=float(z[pre + "rho"]),
             )
+        self.pos = _PosCalib(model, assets_dir)       # positional / gather model
 
     def layer_pool(self, cfg: str):
         """cfg -> list of layers a row may sample its marginal from."""
@@ -141,6 +142,84 @@ def inv_cdf(u: np.ndarray, rec: dict) -> np.ndarray:
         # sanity cap: don't extrapolate absurdly past the observed max
         cap = rec["stats"][3] + 5.0 * max(rec["stats"][3] - u_thr, beta)
         x[tail] = np.minimum(xv, cap)
+    return x
+
+
+# ---------------- positional / gather model (Part-3) ----------------
+# Assigns logit VALUES to POSITIONS so the top-K (hence preIdx) is spatially
+# clustered + recency/sink-shaped as measured in the real captures, instead of
+# uniform-random. Marginal-preserving (a permutation) so every value-distribution
+# gate is untouched. Calibration: assets/posz_<model>.npz (calib_positional.py).
+# Disable with SYNTH_POSITIONAL=0 (legacy IID placement).
+_POS_ENABLED = os.environ.get("SYNTH_POSITIONAL", "1") == "1"
+_RHO_CACHE = {}
+
+
+class _PosCalib:
+    """Per-(model,layer) positional record; absent file -> {} (IID fallback)."""
+
+    def __init__(self, model: str, assets_dir: Path):
+        self.L = {}
+        p = assets_dir / f"posz_{model}.npz"
+        if not p.exists():
+            return
+        z = np.load(p, allow_pickle=True)
+        for L in list(z["layers"]):
+            t = z[f"L{L}__targets"]
+            self.L[int(L)] = dict(
+                mu_norm=z[f"L{L}__mu_norm"].astype(np.float64),
+                frac_adj=float(t[0]))
+
+
+def _ar1_field(N: int, rho: float, rng: np.random.Generator) -> np.ndarray:
+    if rho <= 0:
+        return rng.standard_normal(N)
+    a = math.sqrt(1.0 - rho * rho)
+    eps = rng.standard_normal(N)
+    eps[0] = eps[0] / max(a, 1e-9)
+    try:
+        from scipy.signal import lfilter
+        return lfilter([a], [1.0, -rho], eps)
+    except ImportError:
+        c = np.empty(N)
+        c[0] = eps[0] * a
+        for i in range(1, N):
+            c[i] = rho * c[i - 1] + a * eps[i]
+        return c
+
+
+def _logmu(N: int, mu: np.ndarray) -> np.ndarray:
+    idx = np.minimum((np.arange(N) / N * mu.size).astype(int), mu.size - 1)
+    return np.log(np.maximum(mu[idx], 1e-6))
+
+
+def _tune_rho(N, K, mu, frac_adj_target, rng,
+              grid=(0.0, 0.9, 0.97, 0.99, 0.995, 0.998, 0.999)) -> float:
+    key = (N, K, round(frac_adj_target, 3))
+    if key in _RHO_CACHE:
+        return _RHO_CACHE[key]
+    lm = _logmu(N, mu)
+    best, be = 0.0, 1e9
+    for rho in grid:
+        s = _ar1_field(N, rho, rng) + 0.15 * lm
+        fa = float((np.diff(np.sort(np.argpartition(-s, K)[:K])) <= 2).mean())
+        if abs(fa - frac_adj_target) < be:
+            best, be = rho, abs(fa - frac_adj_target)
+    _RHO_CACHE[key] = best
+    return best
+
+
+def _positional_order(N, K, pos_rec, rng) -> np.ndarray:
+    """Position ranking (high->low score) from real mu_L + AR(1) clustering."""
+    mu = pos_rec["mu_norm"]
+    rho = _tune_rho(N, K, mu, pos_rec["frac_adj"], rng)
+    s = _ar1_field(N, rho, rng) + 1.0 * _logmu(N, mu)
+    return np.argsort(-s)
+
+
+def _assign_by_order(values: np.ndarray, order: np.ndarray) -> np.ndarray:
+    x = np.empty(order.size, dtype=np.float32)
+    x[order] = np.sort(values)[::-1]                  # largest value -> top score
     return x
 
 
@@ -227,8 +306,11 @@ def synth_row(N: int, K: int, calib: Calib, layer: int,
     rec = dict(calib.L[layer])
     rec["_pgrid"] = calib.p_grid
 
-    u = rng.random(N)
-    x = inv_cdf(u, rec).astype(np.float32)
+    values = inv_cdf(rng.random(N), rec).astype(np.float32)
+    if _POS_ENABLED and layer in calib.pos.L:          # cluster values -> real gather
+        x = _assign_by_order(values, _positional_order(N, K, calib.pos.L[layer], rng))
+    else:
+        x = values                                     # legacy IID placement
 
     order = np.argsort(-x, kind="stable").astype(np.int64)
     topk_pos = order[:K]
@@ -297,9 +379,14 @@ def synth_chain(N: int, K: int, calib: Calib, layer: int, steps: int,
     z = rng.standard_normal(N)
     rows, pres = [], []
     prev_topk = None
+    # shared positional order across steps: consistent spatial clustering while
+    # the copula z preserves temporal value-correlation (marginal-preserving).
+    pos_order = (_positional_order(N, K, calib.pos.L[layer], rng)
+                 if _POS_ENABLED and layer in calib.pos.L else None)
     for _ in range(steps):
-        x = inv_cdf(np.clip(_norm_cdf_fast(z), 1e-12, 1 - 1e-12),
-                    rec).astype(np.float32)
+        values = inv_cdf(np.clip(_norm_cdf_fast(z), 1e-12, 1 - 1e-12),
+                         rec).astype(np.float32)
+        x = _assign_by_order(values, pos_order) if pos_order is not None else values
         order = np.argsort(-x, kind="stable").astype(np.int64)
         rows.append(x)
         pres.append(prev_topk)
