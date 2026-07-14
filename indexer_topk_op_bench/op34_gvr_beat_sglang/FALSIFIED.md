@@ -21,4 +21,10 @@ On a hit: cite the revival condition or drop. Scoped triples (conclusion, domain
 | event-axis ship claims | ARTIFACT | all | protocol | measurement (>=5 fabricated wins) | nsys only |
 
 ## op34 own falsifications (append as they occur)
-(none yet)
+- (kC-diet / P4-shrink / fast-write certain-winners as a path to 2x, {BS=1 fp32 real
+  v4cap}, nsys rung-2 kcprobe) FALSIFIED — P4 is a SMALL fraction at BS=1; the two full-N
+  scan passes (R0 count + P3 collect, single-CTA 1/148 SM) dominate. Shrinking the candidate
+  cap yields <=14% (small N) to NEGATIVE (large N: small kC triggers fb_fix extra passes).
+  Data: results/kcprobe. kC-diet stays a known ~4-14% small-N lever, NOT a 2x path. Revival:
+  none for the P4 axis at BS=1; the live sub-lever is PASS-FUSION (remove a full-N read).
+

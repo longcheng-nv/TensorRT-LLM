@@ -35,3 +35,28 @@ SHRINKS P4 [live lever: shrink cand_count], (c) explicit low-prob fallback only 
 - Next: rung 3 kernel — GvrOp34SingleScanKernel ⊂ GvrOp26R0Kernel: fold P3 collect + certain-winner
   fast-write into the R0 multi-count pass; P4 over the contested band only; fallback to op26_r0 path
   when no happy rung (measured counts => always correct). Behind a flag (default byte-identical).
+
+- Probe rung 2 (kC-probe, nsys BS=1 real, scripts/nsys_op34.py + results/kcprobe): time op26_r0auto
+  at kC∈{stock..768} — kC caps BOTH collect-writes AND P4 input, so this sizes the P4/fast-write
+  prize WITHOUT the kernel rewrite. Result (us_cold geomean, exact vdiff=0 all arms):
+    flash/32k r0=12.34 bestkc(1024)=11.77 (-4.6%); flash/256k stock best; flash/1024k stock best
+    (smaller kc WORSE); pro/32k bestkc(1536)=13.92 vs 16.15 (-14%); pro/256k stock; pro/1024k
+    smaller kc MUCH WORSE (kc1280=64 vs 42).
+  => **iter1a (P4-shrink / fast-write) FALSIFIED at BS=1**: shrinking the candidate cap yields
+     ≤14% (small N) to NEGATIVE (large N, fb_fix fallback fires). **P4 is NOT the BS=1 cost — the
+     two full-N scan passes (R0 count + P3 collect) dominate** (single-CTA 1/148 SM bandwidth;
+     matches op#8 root cause). The user's fast-write attacks the wrong phase for BS=1.
+  Ledger write-back: FALSIFIED (kC-diet/P4-shrink as a path to 2x, {BS=1 fp32 real v4cap}, nsys) —
+     complexity/structural: P4 is a small fraction at BS=1, full-N passes dominate; small kC triggers
+     fb_fix extra passes at large N. (kC-diet remains a known ~4-14% small-N lever, not a 2x path.)
+  Anchor note: probe used 3 layers/cell vs §10's 21-layer geomean + different node (074 vs 039);
+     ABSOLUTE us differ ~19% but WITHIN-run ratios (the kC verdict) are valid (same GPU/session/layers).
+
+## iter2 — 2026-07-14 — PIVOT: single-scan PASS-FUSION (the real lever the probe exposed)
+Hypothesis: fold R0 count + P3 collect into ONE full-N pass, removing the 2nd full-N read (the
+confirmed BS=1 bottleneck). Ledger check: Opt-L "fuse collect into count ≈ full pass, even
+FORCE_HAPPY no speedup" — CONDITIONAL REVIVAL: crux shows count(>=t_lo)≈1.2K, so the fused append
+is bounded ~1.2K (vs Opt-L's full-kC ~6K online slot-reserve); test whether a cheaper bounded-append
+fused scan beats Opt-L's verdict on real v4cap. This is the honest test of the user's core single-scan
+idea against the CONFIRMED bottleneck (not the falsified P4 half).
+- STATUS: designing rung-3 kernel.
