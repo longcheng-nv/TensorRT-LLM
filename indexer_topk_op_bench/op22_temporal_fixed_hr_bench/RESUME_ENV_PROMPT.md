@@ -80,11 +80,15 @@ python3 update_report_op22env.py                                     # adds §ne
 - parse_op28.py writes `results.jsonl` per (scenario,sweep) with canonical
   cold-L2 `us` (kernel-sum) + `us_span` (nvtx projection; honest for the
   sglang_v2 2-kernel PDL overlap).
-- update_report_op22env.py (to be finalized after data lands) inserts a new
-  REPORT.html section: seqlen-BS=1 latency+speedup charts per K, BS-scaling
-  heat/line charts, best-vs-worst envelope discussion, 9-arm table. CSS-only
-  (0 `<script>` — the viewer strips inline JS); keep the dark theme + i18n
-  en/zh blocks that the rest of the report uses.
+- update_report_op22env.py is DONE + validated (fake-data smoke: 6 seqlen SVG
+  charts, 2 geomean tables, 8 KPI cards, idempotent marker-replace, `<script>`
+  stays 3). It injects a new REPORT.html §env section: per-K seqlen cold-L2
+  latency line charts (static inline SVG — NO plotly/JS), best/worst 9-arm
+  geomean-speedup tables, KPI headline cards, en/zh discussion; writes
+  op22env_{seqlen,bs}_data.csv. Skeleton-safe: with no results.jsonl it prints
+  the run steps and exits 0. Run it AS-IS after parse (no edits needed).
+  If you want richer BS-scaling visuals, extend build_section() (the SVG helper
+  svg_lines() is reusable).
 
 ## QA gates before shipping the section
 - exactness: all 9 arms' index sets == torch.topk at BS=1 (kernels already
@@ -99,7 +103,8 @@ python3 update_report_op22env.py                                     # adds §ne
 - Harness DONE + smoke-validated (8/9 arms confirmed build+run on best/worst
   env data; flashinfer JIT was still warming at handoff — verify in preflight).
 - bundles_env/ generation validated (best K512 N8192 hr=0.551, Npad==N).
-- NOT YET RUN: the 18-batch nsys sweep (needs 8 GPUs) + update_report_op22env.py
-  (finalize once results.jsonl exists).
-- Files: bundle_data_env.py, sweep_op22env.py, drive_nsys_op22env.sh,
-  launch_op22env_8gpu.sh, _smoke_env.py (all committed).
+- NOT YET RUN: the 18-batch nsys sweep (needs 8 GPUs). Everything downstream
+  (parse reuse + update_report_op22env.py) is DONE + validated — just run.
+- Files (all committed): bundle_data_env.py, sweep_op22env.py,
+  drive_nsys_op22env.sh, launch_op22env_8gpu.sh, update_report_op22env.py,
+  _smoke_env.py.
