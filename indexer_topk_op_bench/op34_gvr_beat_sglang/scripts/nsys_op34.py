@@ -36,6 +36,8 @@ from sglang_v2_op import topk_v2, plan as sglv2_plan      # noqa: E402
 import real_data_v4cap as RD4                             # noqa: E402
 from gvr_op26_r0_op import gvr_r0_op26                    # noqa: E402
 from gvr_op26_op import gvr_cutedsl_op26                  # noqa: E402
+sys.path.insert(0, str(HERE.parent / "src"))
+from op34_mcta_op import mcta_topk, dispatch_C            # noqa: E402
 
 DEV = "cuda"
 
@@ -65,6 +67,23 @@ def build_arm(arm, K, N, cr, logits_row, preidx_row):
         sl = _seq(N, cr)
         return (lambda: gvr_r0_op26(lg, pre, sl, K, cr, out=out)), \
                [lg, pre, sl, out], out
+    if arm == "op34_mcta" or arm.startswith("op34_mcta@C"):
+        C = int(arm.split("@C")[1]) if "@C" in arm else dispatch_C(N)
+        mcta_topk(lg, pre, N, K, out, C=C)   # warm/compile
+        return (lambda: mcta_topk(lg, pre, N, K, out, C=C)), \
+               [lg, pre, out], out
+    if arm in ("op34_mcta_oracle", "op34_collect_only", "op34_collect_oracle"):
+        C = dispatch_C(N)
+        # precompute the oracle threshold OUTSIDE the timed loop (UB cheat)
+        t_or = float(torch.topk(lg[0, :N], K).values.min().item())
+        co = arm.startswith("op34_collect")
+        t_ov = t_or if arm.endswith("oracle") else None
+        mode = "oracle" if arm.endswith("oracle") else "hint"
+        mcta_topk(lg, pre, N, K, out, C=C, mode=mode, collect_only=co,
+                  t_override=t_ov)
+        return (lambda: mcta_topk(lg, pre, N, K, out, C=C, mode=mode,
+                                  collect_only=co, t_override=t_ov)), \
+               [lg, pre, out], out
     if arm.startswith("op26_r0@kc"):
         kc = int(arm.split("kc")[1])
         sl = _seq(N, cr)

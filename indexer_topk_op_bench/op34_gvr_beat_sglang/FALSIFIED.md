@@ -34,4 +34,16 @@ On a hit: cite the revival condition or drop. Scoped triples (conclusion, domain
   a 2x. The wall is NOT pass count. BOTH kernels sit at <0.2% DRAM AND <1% SM peak = LATENCY-bound;
   sglang's only edge is 8-CTA MLP (8x outstanding loads). Revival: none for pass-fusion; the live
   lever is MLP (multi-CTA-per-row >8, or intra-CTA sw-pipeline).
+- (MULTI-CTA single-pass GVR (hint threshold) beats sglang, {BS=1 fp32 real v4cap large-N},
+  nsys iter4) FALSIFIED. op34_mcta = 4–8× SLOWER (76–125µs vs sglang 12–19µs). t=hint.min is
+  exact but admits M=16K–100K candidates on real data (weak hint at hit_rate<1) → collect
+  degenerates to full scan + heavy tail; a tighter hint-quantile rung MISSES exactness (count<K).
+  Data: results/harvest_pro. Revival: none — see the UB lock below.
+- (ANY GVR-skeleton kernel beats sglang by 30% at BS=1, {fp32 real v4cap, all N}, nsys+UB iter4)
+  INFEASIBLE, double-locked. UB probe = oracle-threshold multi-CTA collect-only at C=64 (impossible
+  best case) = 16–17µs @1024k / 12µs @256k ≈ sglang's ENTIRE kernel (12–19µs). The mandatory exact
+  rank tail then exceeds sglang ⇒ parity is the ceiling, never sglang/1.30. Root cause: cold-L2 both
+  do 1 HBM read (latency-bound); sglang's saved-pass advantage is L2-hot (cheap) while GVR pays
+  threshold-safety + collect/rank phase-separation that sglang fuses. Domain {BS=1}; revival =
+  change skeleton (excluded) OR BS>1 (different MLP calculus, out of scope). analysis/DOUBLE_LOCK_048.md.
 

@@ -83,3 +83,27 @@ NCU attribution the paper feasibility analysis never had. analysis/{ANCHOR_048,N
   chain (P1..P4..fb) doesn't shrink with CTAs; sglang is lean. 
 - Next: iter3 CRUX-A (multi-CTA scan-scaling microbench: does MLP keep scaling past C=8?) +
   CRUX-B (op26_r0 phase breakdown for the multi-CTA Amdahl ceiling).
+
+## iter3 — 2026-07-15 — CRUX-A GO (MLP scans past C=8) → build multi-CTA
+CRUX-A (scripts/crux_a_mlp.py, analysis/CRUX_A_MLP_048.md): bare count scan keeps speeding up well
+past C=8 (N=262144: C8→C64 = 34.6→9.3µs = 3.7×; sglang fixed at C=8). CRUX-C proxy (crux_c_proxy.py)
+GO: multi-CTA collect C64 = 14–21µs NCU, EXACT on real data. Napkin said tail budget 7–9µs vs
+sglang. Verdict GO → build the kernel. (Caveat later proven decisive: NCU inflates absolute µs;
+real nsys sglang is 12–19µs, not 28–39µs.)
+
+## iter4 — 2026-07-15 — BUILD multi-CTA + nsys A/B → FALSIFIED, then DOUBLE-LOCK
+Built src/op34_mcta_op.py: multi-CTA single-pass GVR (grid=C CTAs/row; each CTA stream-compacts
+elements >= hint threshold via block prefix-sum + 1 atomic/block-iter; tail = exact top-K on
+candidates). EXACT (vdiff=0) on real pro grid, all 18 cells.
+- nsys A/B (results/harvest_pro): op34_mcta = 76–125µs = **4–8× SLOWER** than sglang (12–19µs).
+  Root cause: t=hint.min is exact but admits M=16K–100K candidates on real data → heavy collect +
+  heavy tail. A tighter hint-quantile rung gives small M but MISSES exactness (count<K) — the GVR
+  threshold-miss that forces op26's 2-pass structure.
+- DECOMPOSITION (results/decomp2, analysis/DOUBLE_LOCK_048.md): oracle-threshold collect-only
+  (col_orac, UB best case, C=64, no tail) = 16–17µs @1024k / 12µs @256k ≈ sglang's ENTIRE kernel.
+  ⇒ **LOCK 1 (UB): the leanest possible GVR scan+collect merely EQUALS sglang; the mandatory rank
+  tail then pushes it over. No 30% headroom at the information floor.** LOCK 2 (relaxed controls):
+  oracle-full 2.7–4.0×, hint 4–8×, op26_r0 2.2–4.6× — all parity-or-worse, none at +30%.
+- **VERDICT: STOP — double-locked INFEASIBLE (pre-authorized negative conclusion, AUTONOMY.md).**
+  sglang_v2 remains best at BS=1. No conditional +30% region (even oracle col-only never beats
+  sglang by 30%). Ledger + WALLS updated. Remaining: full-grid regime map + bilingual HTML report.
