@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>op34 — GVR vs sglang_v2 top-K (BS=1 real V4 decode) </title>
+<style>
+  :root{--bg:#0f1116;--panel:#171a21;--fg:#e6e9ef;--mut:#9aa4b2;--line:#272c36;
+        --blue:#6ea8fe;--red:#ff7a7a;--grn:#6ede8a;--org:#ffbf69;--acc:#8b8bff;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+       font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans SC",sans-serif}
+  .wrap{max-width:960px;margin:0 auto;padding:26px 20px 80px}
+  h1{font-size:25px;margin:.2em 0 .1em} h2{font-size:20px;margin:1.5em 0 .4em;
+     border-left:3px solid var(--acc);padding-left:10px}
+  h3{font-size:16px;color:var(--blue);margin:1.1em 0 .3em}
+  p{margin:.5em 0} code{background:#222633;padding:1px 5px;border-radius:4px;font-size:13px}
+  .mut{color:var(--mut)} .big{font-size:17px}
+  table{border-collapse:collapse;width:100%;margin:.6em 0;font-size:13.5px}
+  th,td{border:1px solid var(--line);padding:5px 8px;text-align:right}
+  th{background:#1c212b;color:var(--blue)} td:first-child,th:first-child{text-align:left}
+  tr:nth-child(even) td{background:#141821}
+  .chart{width:100%;height:auto;background:var(--panel);border:1px solid var(--line);
+         border-radius:8px;margin:.6em 0;padding:4px}
+  .chart .ct{fill:var(--fg);font-size:12px;font-weight:600}
+  .chart .axl{fill:var(--mut);font-size:9px} .chart .lg{fill:var(--fg);font-size:10px}
+  .chart .grid{stroke:#2a2f3a;stroke-width:.5} .chart .ref{stroke:var(--grn);stroke-dasharray:4 3;stroke-width:1}
+  .verdict{background:linear-gradient(90deg,#2a1417,#171a21);border:1px solid #6b2b2b;
+           border-radius:10px;padding:14px 18px;margin:16px 0}
+  .verdict b{color:var(--red)}
+  .keep{background:#12211a;border:1px solid #2b6b45;border-radius:10px;padding:12px 16px;margin:14px 0}
+  .box{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:12px 0}
+  .kpis{display:flex;gap:12px;flex-wrap:wrap;margin:12px 0}
+  .kpi{flex:1;min-width:150px;background:var(--panel);border:1px solid var(--line);
+       border-radius:10px;padding:10px 14px}
+  .kpi .v{font-size:22px;font-weight:700} .kpi .l{color:var(--mut);font-size:12px}
+  .toggle{position:sticky;top:0;background:var(--bg);padding:10px 0;z-index:9;border-bottom:1px solid var(--line)}
+  .toggle label{cursor:pointer;padding:5px 14px;border:1px solid var(--line);border-radius:20px;
+                margin-right:6px;color:var(--mut);user-select:none}
+  #te:checked~.wrap .toggle label[for=te],#tz:checked~.wrap .toggle label[for=tz]{
+     background:var(--acc);color:#fff;border-color:var(--acc)}
+  input[name=lang]{display:none}
+  .lang-zh{display:none}
+  #tz:checked~.wrap .lang-en{display:none}
+  #tz:checked~.wrap .lang-zh{display:block}
+  ul{margin:.4em 0 .4em 0;padding-left:1.2em} li{margin:.25em 0}
+</style>
+</head>
+<body>
+<input type="radio" name="lang" id="te" checked>
+<input type="radio" name="lang" id="tz">
+<div class="wrap">
+<div class="toggle"><label for="te">English</label><label for="tz">中文</label>
+  <span class="mut" style="font-size:12px">· op34 · B200 SM100 · BS=1 fp32 · real V4 decode capture · nsys cold-L2</span></div>
+
+<h1>op34 — Can a GVR threshold kernel beat sglang_v2 by 30% on BS=1 real V4 decode top-K?</h1>
+
+<div class="verdict">
+<div class="lang-en"><span class="big"><b>Verdict: NO — double-locked infeasible within the GVR skeleton.</b></span>
+ sglang_v2 remains the best BS=1 top-K. The <i>theoretical upper bound</i> of any GVR-skeleton
+ single-pass scan+collect (oracle threshold, maximum CTA parallelism, no rank tail) merely
+ <b>equals</b> sglang's <i>entire</i> kernel — leaving zero budget for the mandatory exact rank
+ tail. With the real hint threshold the multi-CTA kernel is 4–8× slower. The pre-authorized
+ negative conclusion (AUTONOMY.md) applies.</div>
+<div class="lang-zh"><span class="big"><b>结论：不能 —— 在 GVR 骨架内已被双重锁定为不可行。</b></span>
+ sglang_v2 仍是 BS=1 场景下最快的 top-K。任何 GVR 骨架单遍 扫描+收集 的<i>理论上界</i>（预言阈值、
+ 最大 CTA 并行、且不含排名尾段）也仅仅<b>等于</b> sglang 的<i>整个</i>核函数——留给必需的精确排名尾段的
+ 预算为零。使用真实 hint 阈值时，多 CTA 核比 sglang 慢 4–8×。触发预先授权的否定结论（AUTONOMY.md）。</div>
+</div>
+
+<div class="kpis">
+  <div class="kpi"><div class="v" style="color:var(--grn)">1.00×</div><div class="l lang-en">UB: oracle collect-only vs sglang (parity)</div><div class="l lang-zh">上界：预言收集 vs sglang（持平）</div></div>
+  <div class="kpi"><div class="v" style="color:var(--red)">4–8×</div><div class="l lang-en">op34_mcta (real hint) slower than sglang</div><div class="l lang-zh">op34_mcta（真实 hint）比 sglang 慢</div></div>
+  <div class="kpi"><div class="v" style="color:var(--org)">%%GR0%%×</div><div class="l lang-en">op26_r0auto grand geomean vs sglang</div><div class="l lang-zh">op26_r0auto 总几何均值 vs sglang</div></div>
+  <div class="kpi"><div class="v">&lt;1%</div><div class="l lang-en">DRAM &amp; SM peak — latency-bound</div><div class="l lang-zh">DRAM 与 SM 峰值占比——延迟受限</div></div>
+</div>
+
+<h2>1 · Objective &amp; setup / 目标与设置</h2>
+<div class="lang-en">
+<p>Start kernel <code>op26_r0auto</code> (best in-tree GVR threshold kernel). Rival to beat:
+<code>sglang_v2</code> (sglang@main DeepSeek-V4 top-K). Goal: BS=1 fp32 grand geomean of a
+GVR-skeleton kernel ≤ sglang/1.30 on the real V4 decode-capture data (9 ISL rungs 4K–1M, cr=4,
+flash K=512 / pro K=1024), keeping the GVR threshold-method skeleton, exact (tie-aware
+value-multiset), CUDA-graph-safe, fail-soft. Test env identical to op22 REPORT.html §10:
+B200 SM100, nsys pure-kernel, cold-L2 (512 MB evict before every timed launch).</p></div>
+<div class="lang-zh">
+<p>起始算子 <code>op26_r0auto</code>（树内最强 GVR 阈值核）。要击败的对手：<code>sglang_v2</code>
+（sglang@main 的 DeepSeek-V4 top-K）。目标：在真实 V4 解码采集数据上（9 档 ISL 4K–1M，cr=4，
+flash K=512 / pro K=1024），BS=1 fp32 下某 GVR 骨架核的总几何均值 ≤ sglang/1.30，同时保持 GVR
+阈值方法骨架、精确（tie 感知的值多重集）、CUDA-graph 安全、fail-soft。测试环境与 op22 REPORT.html
+第 10 章一致：B200 SM100、nsys 纯核、冷 L2（每次计时前驱逐 512 MB）。</p></div>
+
+<h2>2 · Real data — distribution &amp; hit-rate / 真实数据——分布与命中率</h2>
+<div class="lang-en">
+<p>The captured indexer logits are near-exponential (CCDF), so any threshold interpolation lives
+in log space. The prev-topK <b>hint hit-rate</b> (fraction of the previous decode step's top-K
+still in the current top-K) varies strongly by model, layer and ISL:</p>
+<ul>
+<li><b>pro</b> (K=1024): hit-rate ≈ 0.51–1.00 (high; 1.00 at the degenerate 4K rung where N≈K).</li>
+<li><b>flash</b> (K=512): hit-rate ≈ 0.36–0.75 (lower, more volatile across layers).</li>
+<li>The top-K selection boundary is razor-thin — the relative gap between the K-th and (K+1)-th
+value is ~1e-5, so exactness must be tie-aware.</li>
+</ul>
+<p>Consequence for a threshold kernel: a <i>weak</i> hint (low hit-rate) forces a low, safe
+threshold that admits a huge candidate set (up to the whole row). Only a <i>strong</i> hint yields
+a small candidate set — and even then not small enough (see §5).</p></div>
+<div class="lang-zh">
+<p>采集到的 indexer logits 的 CCDF 近似指数分布，因此任何阈值插值都必须在对数空间进行。上一步 top-K
+的 <b>hint 命中率</b>（上一解码步 top-K 中仍留在当前 top-K 的比例）随模型、层、ISL 显著变化：</p>
+<ul>
+<li><b>pro</b>（K=1024）：命中率 ≈ 0.51–1.00（较高；在 N≈K 的退化 4K 档为 1.00）。</li>
+<li><b>flash</b>（K=512）：命中率 ≈ 0.36–0.75（较低，跨层波动更大）。</li>
+<li>top-K 选择边界极其纤薄——第 K 与第 K+1 个值的相对间隔约 1e-5，因此精确性必须 tie 感知。</li>
+</ul>
+<p>对阈值核的影响：<i>弱</i> hint（低命中率）迫使阈值取低而安全，从而收进庞大的候选集（最多整行）；
+只有<i>强</i> hint 才能给出小候选集——而即便如此也仍不够小（见第 5 章）。</p></div>
+
+<h2>3 · Why sglang wins — the NCU CRUX / sglang 为何取胜——NCU 关键实验</h2>
+<div class="lang-en">
+<p>Profiling op26_r0auto vs sglang at pro/256k (N=65539) with <code>ncu --cache-control all</code>
+(cold) is decisive:</p>
+<ul>
+<li>Both read the row <b>exactly once</b> from HBM (~360 KB ≈ 1× the row). Pass count is <i>not</i>
+the differentiator under cold-L2 (sglang's 2nd pass and GVR's collect pass are both L2-hot).</li>
+<li>Both sit at <b>&lt;0.2% of DRAM peak and &lt;1% of SM peak</b> — neither is bandwidth- nor
+compute-bound. The kernels are <b>latency-bound</b>.</li>
+<li>sglang's only structural edge: grid <b>(1,8,1) = 8 cooperating CTAs</b> vs op26's <b>(1,1,1)
+= 1 CTA</b>. 8× the memory-level parallelism (MLP) to hide latency — 1.54× faster for 8× the SMs.</li>
+</ul>
+<p>So the lever is <b>MLP, not bandwidth</b>. At BS=1, 147 of 148 SMs are idle, and sglang fixes
+its cluster at 8 CTAs — suggesting a GVR with C&gt;8 could get <i>more</i> MLP. That hypothesis
+(§4) is genuine, and is what this campaign built and measured.</p></div>
+<div class="lang-zh">
+<p>在 pro/256k（N=65539）上用 <code>ncu --cache-control all</code>（冷）对比 op26_r0auto 与 sglang
+是决定性的：</p>
+<ul>
+<li>两者都<b>恰好一次</b>从 HBM 读取该行（~360 KB ≈ 1× 行）。冷 L2 下遍数<i>不是</i>区分点
+（sglang 的第二遍与 GVR 的收集遍都命中 L2）。</li>
+<li>两者都处于 <b>DRAM 峰值 &lt;0.2%、SM 峰值 &lt;1%</b>——既非带宽受限也非计算受限。核是<b>延迟受限</b>的。</li>
+<li>sglang 唯一的结构性优势：网格 <b>(1,8,1) = 8 个协作 CTA</b>，而 op26 是 <b>(1,1,1) = 1 个 CTA</b>。
+8× 的内存级并行（MLP）用来掩盖延迟——用 8× 的 SM 换来 1.54× 的加速。</li>
+</ul>
+<p>因此杠杆是 <b>MLP 而非带宽</b>。BS=1 时 148 个 SM 中有 147 个空闲，而 sglang 把 cluster 固定为 8 个
+CTA——这暗示 C&gt;8 的 GVR 或许能取得<i>更多</i> MLP。这个假设（第 4 章）是真实的，也是本战役实际构建并测量的。</p></div>
+
+<h2>4 · The winning hypothesis — multi-CTA single-pass GVR / 制胜假设——多 CTA 单遍 GVR</h2>
+<div class="lang-en">
+<p>Split the row across C&gt;8 CTAs; each CTA does ONE fused count+collect pass at the GVR hint
+threshold (the hint lets GVR collect at a known threshold where sglang needs a separate histogram
+pass). A scan-scaling microbench confirms the scan keeps speeding up well past C=8
+(N=262144: C8→C64 = 34.6→9.3 µs = <b>3.7×</b>). So the idea is not a priori dead — the open
+question was the cost of the collect + the cross-CTA rank tail.</p></div>
+<div class="lang-zh">
+<p>把该行切分到 C&gt;8 个 CTA；每个 CTA 在 GVR hint 阈值处做一遍融合的 计数+收集（hint 让 GVR 能在已知
+阈值处收集，而 sglang 需要单独一遍直方图）。扫描伸缩性微基准确认扫描在 C=8 之后仍持续加速
+（N=262144：C8→C64 = 34.6→9.3 µs = <b>3.7×</b>）。因此该想法并非先验死路——悬而未决的是收集成本
+以及跨 CTA 的排名尾段成本。</p></div>
+
+<h2>5 · The decisive decomposition — the double lock / 决定性拆解——双重锁</h2>
+<div class="lang-en">
+<p>Under real nsys (not NCU, which inflates absolute µs by replay), sglang's full kernel is only
+<b>12–19 µs</b> at large N. We decompose the multi-CTA kernel against it. <code>col_oracle</code>
+= fused scan+collect at the <i>oracle</i> threshold (t = true K-th value → minimal candidates),
+C=64, without the rank tail — the theoretical upper bound of the GVR scan+collect.</p></div>
+<div class="lang-zh">
+<p>在真实 nsys 下（而非会因回放放大绝对 µs 的 NCU），sglang 整个核在大 N 处仅 <b>12–19 µs</b>。我们据此
+拆解多 CTA 核。<code>col_oracle</code> = 在<i>预言</i>阈值处（t = 真实第 K 个值 → 最小候选集）、C=64、
+且不含排名尾段的融合 扫描+收集——即 GVR 扫描+收集的理论上界。</p></div>
+%%DEC_CHART%%
+<table><thead><tr><th>ISL</th><th>layer</th><th>sglang FULL</th><th>col_oracle (UB)</th>
+<th>col_hint</th><th>mcta_oracle</th><th>oracle/sgl</th></tr></thead>
+<tbody>%%DEC_ROWS%%</tbody></table>
+<div class="box lang-en">
+<p><b>Lock 1 (upper bound):</b> col_oracle (16–17 µs @1024k, 12 µs @256k) ≈ sglang's ENTIRE kernel.
+The best a GVR scan+collect can <i>ever</i> do — given the impossible oracle threshold, maximum
+parallelism, and skipping the tail — merely matches sglang. The mandatory exact rank of the M
+candidates is a nonzero extra phase, so GVR_total = collect + rank &gt; sglang. Even a zero-cost
+rank yields parity, never sglang/1.30.</p>
+<p><b>Lock 2 (relaxed controls, all fail):</b> oracle-full (col+tail) = 2.7–4.0× sglang; real-hint
+op34_mcta = 4–8×; op26_r0auto (2-pass) = %%GR0%%× grand. Three independent relaxations, none at +30%.</p>
+<p><b>Root cause:</b> cold-L2 both do one HBM read (latency-bound); sglang's saved histogram pass is
+L2-hot (cheap), while GVR pays for (a) a hint threshold that can't be exact-safe AND tight without
+a measurement pass, and (b) SEPARATE collect and rank barrier-bound phases that sglang fuses into
+one lean kernel at the cost GVR needs for collect alone.</p></div>
+<div class="box lang-zh">
+<p><b>锁 1（上界）：</b>col_oracle（1024k 处 16–17 µs、256k 处 12 µs）≈ sglang 的<i>整个</i>核。GVR
+扫描+收集所能达到的最好情形——在不可能的预言阈值、最大并行、且跳过尾段的条件下——也仅仅追平 sglang。
+对 M 个候选的必需精确排名是一个非零的额外阶段，故 GVR_总 = 收集 + 排名 &gt; sglang。即便排名零成本也只是
+持平，永远达不到 sglang/1.30。</p>
+<p><b>锁 2（放宽约束的对照，全部失败）：</b>预言-完整（收集+尾段）= 2.7–4.0× sglang；真实 hint 的
+op34_mcta = 4–8×；op26_r0auto（两遍）总均值 = %%GR0%%×。三个独立放宽，无一达到 +30%。</p>
+<p><b>根因：</b>冷 L2 下两者都只做一次 HBM 读（延迟受限）；sglang 省下的直方图遍是命中 L2 的（便宜），
+而 GVR 却要付出：(a) 一个既要精确安全又要足够紧、却离不开测量遍的 hint 阈值；(b) 把收集与排名拆成两个
+受屏障限制的阶段，而 sglang 只用一个精简核就把二者融合——其成本恰等于 GVR 单收集所需。</p></div>
+
+<h2>6 · Regime map — full grid / 全网格制度图</h2>
+<div class="lang-en"><p>Cold nsys geomean over layers, ratio vs sglang_v2 (lower = faster; 1.0 = parity;
+goal &lt; 0.77). Both GVR arms lose to sglang at every regime; the multi-CTA arm is worst where the
+hint is weak (low hit-rate, low ISL). No conditional +30% win region exists.</p></div>
+<div class="lang-zh"><p>冷 nsys 跨层几何均值，相对 sglang_v2 的比值（越低越快；1.0 = 持平；目标 &lt; 0.77）。
+两个 GVR 臂在所有制度下都输给 sglang；多 CTA 臂在 hint 弱（低命中率、低 ISL）处最差。不存在任何条件性
+的 +30% 胜区。</p></div>
+%%REGIME_CHART%%
+<table><thead><tr><th>model</th><th>ISL</th><th>N</th><th>sglang</th><th>op26_r0auto</th>
+<th>op34_mcta</th></tr></thead><tbody>%%REGIME_ROWS%%</tbody></table>
+<p class="mut lang-en">Grand geomean vs sglang: op26_r0auto = <b>%%GR0%%×</b>, op34_mcta = <b>%%GMC%%×</b>
+(both &gt; 1 = slower; goal was &lt; 0.77×).</p>
+<p class="mut lang-zh">相对 sglang 的总几何均值：op26_r0auto = <b>%%GR0%%×</b>，op34_mcta = <b>%%GMC%%×</b>
+（均 &gt; 1 = 更慢；目标为 &lt; 0.77×）。</p>
+
+<h2>7 · Conclusion &amp; recommendation / 结论与建议</h2>
+<div class="keep">
+<div class="lang-en"><p><b>Keep sglang_v2 as the production BS=1 top-K.</b> Beating it by 30% within the
+GVR threshold skeleton is double-locked infeasible on real V4 decode data: the skeleton's collect
+phase alone, at its theoretical best, already equals sglang's whole kernel. The GVR family's value
+lies elsewhere — batched BS&gt;1 throughput, where multi-row saturation changes the MLP calculus
+(out of this campaign's BS=1 scope). This is a productive falsification: it retires the
+"multi-CTA + hint single-pass" idea with a measured upper bound, not a guess.</p></div>
+<div class="lang-zh"><p><b>生产环境的 BS=1 top-K 继续使用 sglang_v2。</b>在真实 V4 解码数据上，于 GVR 阈值骨架内
+把它击败 30% 已被双重锁定为不可行：骨架的收集阶段在其理论最优下就已等于 sglang 的整个核。GVR 家族的价值
+在别处——批量 BS&gt;1 吞吐，此时多行饱和会改变 MLP 的算式（超出本战役 BS=1 范围）。这是一次富有成效的证伪：
+它用一个<i>测量得到的上界</i>（而非猜测）为“多 CTA + hint 单遍”这一想法画上句号。</p></div>
+</div>
+
+<h2>8 · Falsification ledger (this campaign) / 证伪账本（本战役）</h2>
+<table><thead><tr><th>Hypothesis / 假设</th><th>Verdict</th><th>Evidence</th></tr></thead><tbody>
+<tr><td>Pass-fusion / single-scan collect (Opt-L revival)</td><td>FALSIFIED</td><td>cold-L2: both do 1 HBM read; fused pass saves only L2-hot pass (NCU CRUX)</td></tr>
+<tr><td>P4-shrink / fast-write certain-winners</td><td>FALSIFIED</td><td>kC-probe: ≤14% small-N, negative large-N</td></tr>
+<tr><td>Multi-CTA single-pass (hint threshold) beats sglang</td><td>FALSIFIED</td><td>op34_mcta 4–8× slower (hint admits huge M)</td></tr>
+<tr><td>ANY GVR-skeleton kernel beats sglang by 30% @BS=1</td><td>INFEASIBLE (double-locked)</td><td>oracle collect-only UB ≈ sglang parity</td></tr>
+</tbody></table>
+
+<p class="mut" style="margin-top:2em">op34 · node umbriel-b200-048 · nsys pure-kernel cold-L2 · real V4 decode capture
+(E2E_exp/indexer_decode_capture) · generated by report/gen_report_op34.py · analysis/*.md carry the
+per-experiment detail.</p>
+
+</div>
+</body>
+</html>
