@@ -1,34 +1,40 @@
-# op34 RESUME — GVR-skeleton top-K to beat sglang_v2 by 30% (real v4cap, BS=1)
+# op34 RESUME — GVR-skeleton top-K vs sglang_v2 (real v4cap, BS=1) — CONVERGED
+
 Node-agnostic (NFS-shared). Workspace: indexer_topk_op_bench/op34_gvr_beat_sglang/
 
+## STATUS: CONVERGED — STOP (double-locked INFEASIBLE, pre-authorized negative conclusion)
+Beating sglang_v2 by 30% on BS=1 within the GVR threshold skeleton is infeasible on real V4
+decode data. The UB probe (oracle-threshold multi-CTA collect-only, C=64, no tail) merely EQUALS
+sglang's entire kernel ⇒ no room for the mandatory rank tail. Real hint arm = 4–8× slower.
+Full detail: analysis/DOUBLE_LOCK_048.md. Report: report/op34_report.html (bilingual, CSS toggle).
+
 ## 1-min context
-Goal: GRAND BS=1 fp32 cold-L2 geomean(new GVR) <= sglang/1.30 = 6.06us (need 2.03x over
-op26_r0auto 12.31us). Start kernel op26_r0auto; keep GVR threshold skeleton. sglang is the rival.
-Phase-1 done (analysis/): gap map + data props + iter1 crux GO. Prior walls in FALSIFIED/WALLS.md.
+- LATENCY-bound (both arms <1% DRAM AND <1% SM peak); sglang wins via 8-CTA MLP (NCU_CRUX_048).
+- Cold-L2: both do 1 HBM read; pass count NOT the wall; hint saves only an L2-hot pass.
+- Multi-CTA (C>8) scan scales (3.7× @large-N, CRUX-A) but hint can't place an exact-safe tight
+  threshold ⇒ candidate set huge on real data ⇒ collect+tail loses.
+- REAL nsys sglang = 12–19µs @large N (NCU's 28–39µs was replay inflation — ship-verdict on nsys).
 
 ## preflight (30s)
 cd indexer_topk_op_bench/op34_gvr_beat_sglang
-git rev-parse --abbrev-ref HEAD   # omni/op21-gvr-prod
-python3 -c "import torch,cutlass,flashinfer;print(flashinfer.__version__)"  # 0.6.11
-python3 -c "import sys;sys.path.insert(0,'../harness');import sglang_v2_op,real_data_v4cap"
-nvidia-smi --query-gpu=index,temperature.gpu,memory.used --format=csv,noheader  # idle<50C, mem~0
-# kernels JIT-rebuild per machine on first run.
+git rev-parse --short HEAD
+python3 -c "import torch,triton;print(torch.cuda.get_device_name())"   # B200
+python3 scripts/env_anchor.py    # anchor pro/256k L32: sglang~21.6 r0~31.2 wall (048); r0/sgl~1.45
+nvidia-smi --query-gpu=index,temperature.gpu,memory.used --format=csv,noheader  # idle<50C
 
-## where we are
-- iter0 CHARACTERIZATION done. iter1 (user idea: single-scan bracket + fast-write certain-winners)
-  rung-0 CRUX = GO (fast-write 0.89, band/K 0.29, happy 100% except degenerate pro/4k).
-- NEXT: implement iter1 kernel (rung 3): GvrOp34SingleScanKernel subclass of GvrOp26R0Kernel,
-  fold P3 collect + certain-winner fast-write into R0 multi-count pass; P4 over contested band only;
-  fallback to op26_r0 path when no happy rung (always correct — dispatch on MEASURED counts).
-  Behind a flag (default byte-identical). Gate (tie-aware) -> nsys A/B vs sglang + op26_r0auto.
+## artifacts (all committed except *.nsys-rep/*.sqlite/*.kern.json = gitignored)
+- src/op34_mcta_op.py            multi-CTA single-pass GVR (exact; the falsified arm)
+- scripts/{env_anchor,ncu_crux,crux_a_mlp,crux_c_proxy,nsys_op34,parse_op34}.py + drive_nsys_op34.sh
+- analysis/{ANCHOR,NCU_CRUX,CRUX_A_MLP,CRUX_C_PROXY,DOUBLE_LOCK}_048.md + PHASE1/FEASIBILITY
+- results/{harvest_pro,decomp2,grid}/results.jsonl  (nsys cold pure-kernel)
+- report/{gen_report_op34.py,template.html,op34_report.html}
 
-## measurement (to build in scripts/)
-BS=1 real-data cold-L2 nsys pure-kernel A/B, arms {op26_r0auto[base], sglang_v2[rival], op34_new}
-per (model,ISL,layer) fp32. IDENTICAL protocol to sweep_op22_v4cap.py (measure_cell, cold-L2 evict,
-cudaProfilerApi window). Report [worst,real,best] never one axis; single-GPU paired A/B for ship.
+## to refresh the report after any re-measure
+python3 report/gen_report_op34.py    # reads results/{harvest_pro,decomp2,grid}, idempotent
 
 ## gotchas
-- NEVER commit *.nsys-rep/*.sqlite (env tokens). setsid long runs; pkill-triple to stop.
-- op26_r0 kC = 3072@K512 / 5120@K1024 (kC>=5K = 16-bit tie-safety contract, do not shrink kC itself;
-  the contested BAND is separate from kC).
-- exactness = tie-aware value-multiset vs same-dtype torch.topk (real_data_v4cap.value_metrics).
+- GVR seq_lens = N*cr (uncompressed); passing N → scans N/cr → recall 0 (env_anchor caught this).
+- NEVER commit *.nsys-rep/*.sqlite (env tokens; gitignored). setsid/nohup& is sandbox-killed here
+  (exit 144) → run nsys drive foreground or via the tool's run_in_background.
+- collect_only arms write sentinel out[0]=arange(K) so the harness exactness probe can't OOB.
+- If re-opening: the ONLY unexplored axis is BS>1 (different MLP calculus) — out of this campaign's scope.

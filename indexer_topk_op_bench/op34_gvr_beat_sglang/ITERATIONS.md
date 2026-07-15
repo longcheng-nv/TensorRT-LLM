@@ -107,3 +107,14 @@ candidates). EXACT (vdiff=0) on real pro grid, all 18 cells.
 - **VERDICT: STOP — double-locked INFEASIBLE (pre-authorized negative conclusion, AUTONOMY.md).**
   sglang_v2 remains best at BS=1. No conditional +30% region (even oracle col-only never beats
   sglang by 30%). Ledger + WALLS updated. Remaining: full-grid regime map + bilingual HTML report.
+
+## iter5 — 2026-07-15 — CONVERGED: full-grid regime map + report (STOP)
+Full 18-cell grid (both models × 9 ISL × 3 arms × 3 layers, nsys cold, results/grid, 162 recs 0 err):
+- op26_r0auto vs sglang: 1.56–3.38× SLOWER, GRAND geomean **2.11×** — loses at EVERY regime.
+- op34_mcta vs sglang: 5.58–12.03× SLOWER, GRAND geomean **8.58×** (worst at small N = merge
+  overhead + phase floor) — loses at EVERY regime.
+- NO cell where any GVR arm beats sglang. Goal was <0.77×. Confirms the double-lock across the full
+  envelope; small-N walled a fortiori (op32).
+Deliverable: report/op34_report.html (bilingual EN/中, CSS-only toggle, static SVG, data-driven via
+report/gen_report_op34.py). Memory saved. RESUME_PROMPT + COST updated.
+**CAMPAIGN CLOSED — sglang_v2 remains best BS=1 top-K; +30% double-locked infeasible in GVR skeleton.**
