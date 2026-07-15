@@ -34,9 +34,24 @@ dispatch", and the §7 narrative sentence ("auto-dispatch switches to the
 multi-CTA config" at high BS) is also backwards — the auto arm switches AWAY
 from mc to 1cta at BS≥128 (`dispatch_r0_arm_op26`).
 
-**Caveats**: CUDA-event (not nsys) — inflates all arms alike, paired ratios
-fair (op34 lesson); synth `best` scenario, mostly K512; nsys re-confirm before
-editing REPORT.html §7 tables (narrative fix is safe now).
+**nsys CONFIRMED (same day, same box, canonical protocol)**: `bigbs_nsys.py`
+(one nsys process, NVTX cold-L2 ranges via `measure_cell`, 30 cold reps,
+`parse_nsys_full.parse_rep` kernel-sum, evict-filtered) → `parse_bigbs.py` →
+`bigbs_triage.csv`:
+
+| geomean t/t(op26), nsys | value | CUDA-event (first pass) |
+|---|---|---|
+| pr_frozen | **2.265** (max 6.00 @ bf16 K512 65K BS1024) | 2.016 |
+| pr_runner | **0.952** (range 0.747–1.181) | 0.918 |
+
+20/20 cells 3-arm exact. Same picture, slightly larger frozen gap (nsys strips
+the launch tax that padded the frozen arm's denominator). Residuals unchanged:
+pr_runner beats op26 on fp32 (0.75–0.97) and bf16 16K (0.92–0.93); op26 leads
+only bf16 K512 65K–131K by 3–18% (mbpm/kC tuning band). REPORT.html §7
+narrative + KPI updated from this CSV (gen_report.py reads it).
+
+**Caveats**: synth `best` scenario mostly K512 (+1 K1024 cell, +1 worst cell);
+single GPU (b200-094 GPU0), single day.
 
 **Follow-up**: (a) fix §7 blurb + add this note's KPI to the report; (b) the
 op22 §10 dispatch-analysis claim "op26_r0auto BS≤64 optimal" stays true, but
