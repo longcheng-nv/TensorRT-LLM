@@ -59,4 +59,27 @@ FORCE_HAPPY no speedup" — CONDITIONAL REVIVAL: crux shows count(>=t_lo)≈1.2K
 is bounded ~1.2K (vs Opt-L's full-kC ~6K online slot-reserve); test whether a cheaper bounded-append
 fused scan beats Opt-L's verdict on real v4cap. This is the honest test of the user's core single-scan
 idea against the CONFIRMED bottleneck (not the falsified P4 half).
-- STATUS: designing rung-3 kernel.
+- STATUS: SUPERSEDED by iter2b re-anchor + NCU CRUX (below). Pass-fusion is a dead lever
+  under cold-L2 — see analysis/NCU_CRUX_048.md.
+
+## iter2b — 2026-07-15 — RE-ANCHOR (node 074->048) + DECISIVE NCU CRUX (reframes campaign)
+Session resumed on node umbriel-b200-048 (was 074). Re-established anchor + ran the decisive
+NCU attribution the paper feasibility analysis never had. analysis/{ANCHOR_048,NCU_CRUX_048}.md.
+- Anchor (pro/256k N=65539 L32 hr=0.489, cold-L2 wallclock ×30): sglang 21.6us / op26_r0auto
+  31.2us = 1.446x; op26_r0 EXACT (vdiff=0). Ship goal here = 1.88x over r0.
+  GOTCHA fixed: GVR seq_lens must be N*cr (uncompressed); N alone → scans N/4 → recall 0.
+- NCU CRUX (op26_r0 vs sglang, same cell, ncu --cache-control all = cold):
+  * op26_r0: grid (1,1,1)=1 SM, 43.3us, DRAM 0.11% peak, SM 0.23% peak, occ 50%.
+  * sglang:  grid (1,8,1)=8 SM, 28.2us, DRAM 0.17% peak, SM 0.83% peak, occ 50%.
+  * BOTH read ~360KB = 1x row (pass count NOT the wall under cold-L2). BOTH <1% DRAM AND <1% SM
+    ⇒ **LATENCY-BOUND, not bandwidth/compute-bound.** sglang's ONLY structural edge = 8-CTA MLP
+    (8x outstanding loads to hide latency), 1.54x for 8x SMs (sub-linear).
+- Ledger write-back (FALSIFIED): pass-fusion / single-scan collect-into-count as a BS=1 lever —
+  FALSIFIED on the MECHANISM (cold-L2: both do 1 HBM read; fusing saves only an L2-hot pass =
+  op29's measured 1.03-1.13x). Domain {BS=1 fp32 real v4cap cold-L2}, evidence NCU. This closes
+  the user's original single-scan idea as a 30% path (it was already partially ledgered as Opt-L).
+- Live levers now precisely named: (a) multi-CTA-per-row >8 to exceed sglang's MLP (147 idle SMs
+  at BS=1), (b) intra-CTA MLP (deeper unroll/sw-pipeline). WALL risk: GVR multi-phase barrier
+  chain (P1..P4..fb) doesn't shrink with CTAs; sglang is lean. 
+- Next: iter3 CRUX-A (multi-CTA scan-scaling microbench: does MLP keep scaling past C=8?) +
+  CRUX-B (op26_r0 phase breakdown for the multi-CTA Amdahl ceiling).

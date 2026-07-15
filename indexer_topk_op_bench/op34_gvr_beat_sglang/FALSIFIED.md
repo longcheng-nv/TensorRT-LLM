@@ -27,4 +27,11 @@ On a hit: cite the revival condition or drop. Scoped triples (conclusion, domain
   cap yields <=14% (small N) to NEGATIVE (large N: small kC triggers fb_fix extra passes).
   Data: results/kcprobe. kC-diet stays a known ~4-14% small-N lever, NOT a 2x path. Revival:
   none for the P4 axis at BS=1; the live sub-lever is PASS-FUSION (remove a full-N read).
+- (PASS-FUSION / single-scan collect-into-count as a 30% path, {BS=1 fp32 real v4cap COLD-L2},
+  NCU iter2b) FALSIFIED on mechanism. NCU CRUX (analysis/NCU_CRUX_048.md): under cold-L2 BOTH
+  op26_r0 and sglang read the row exactly ONCE from HBM (~360KB=1x row); GVR's 2nd pass (P3
+  collect) is L2-HOT, so fusing it away saves only an L2 read = op29's measured 1.03-1.13x, NOT
+  a 2x. The wall is NOT pass count. BOTH kernels sit at <0.2% DRAM AND <1% SM peak = LATENCY-bound;
+  sglang's only edge is 8-CTA MLP (8x outstanding loads). Revival: none for pass-fusion; the live
+  lever is MLP (multi-CTA-per-row >8, or intra-CTA sw-pipeline).
 
