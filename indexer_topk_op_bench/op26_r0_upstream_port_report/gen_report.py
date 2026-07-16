@@ -294,6 +294,72 @@ def kpi(v, en, zh, color=""):
 real_kpi = f"{real_pvb:.3f}×" if real else "—"
 
 # ---------------------------------------------------------------- HTML
+# ---- §9 vseed fix chapter (2026-07-16 campaign) --------------------------
+vsr2 = read_csv("vseed_harness/round2.csv")
+vsfull = read_csv("vseed_harness/vsfull.csv")
+
+def _vs_r2_table():
+    if not vsr2:
+        return "<p class='mut'>(round2.csv pending)</p>"
+    h = ("<tr><th>cell</th><th>N</th><th>hit</th><th>base µs</th><th>PR µs</th>"
+         "<th>+vseed µs</th><th>+vs2 µs</th><th>vs2/PR</th><th>vs2/base</th><th>exact</th></tr>")
+    b = ""
+    for r in vsr2:
+        pr, v2, ba = fnum(r["pr"]), fnum(r["vs2"]), fnum(r["base"])
+        cell = f"{r['model']}/{r['isl']}/{r['dtype']}/BS{r['BS']}"
+        b += (f"<tr><td>{cell}</td><td>{r['N']}</td><td>{r['hit']}</td><td>{r['base']}</td>"
+              f"<td>{r['pr']}</td><td>{r['vseed']}</td><td>{r['vs2']}</td>"
+              f"<td>{pr/v2:.2f}</td><td>{ba/v2:.2f}</td><td>{r['exact_all']}</td></tr>")
+    return f"<table>{h}{b}</table>"
+
+def _vs_full_block():
+    if not vsfull:
+        return ("<p class='mut'><b>Full-envelope validation sweep in flight</b> (54 nsys batches, "
+                "8 GPUs) — this block auto-fills from <code>vseed_harness/vsfull.csv</code> on regen. / "
+                "全域验证扫描进行中,完成后本块由 <code>vsfull.csv</code> 自动填充。</p>", "", "")
+    g_all = geo([fnum(r["vs_vs_pr"]) for r in vsfull])
+    g_syn = geo([fnum(r["vs_vs_pr"]) for r in vsfull if r["family"] == "synth"])
+    g_real = geo([fnum(r["vs_vs_pr"]) for r in vsfull if r["family"] == "real"])
+    ex_ok = sum(r["vs_exact"] == "True" for r in vsfull)
+    ex_tot = sum(r["vs_exact"] in ("True", "False") for r in vsfull)
+    reg = sorted((r for r in vsfull if (fnum(r["vs_vs_pr"]) or 1) < 0.98),
+                 key=lambda r: fnum(r["vs_vs_pr"]))
+    win = sorted((r for r in vsfull if (fnum(r["vs_vs_pr"]) or 1) > 1.05),
+                 key=lambda r: -fnum(r["vs_vs_pr"]))
+    kpis = (f"<div class='kpis'>"
+            f"<div class='kpi'><div class='v' style='color:#6ede8a'>{g_all:.3f}×</div>"
+            f"<div class='l lang-en'>geomean vseed/PR, all {len(vsfull)} cells</div>"
+            f"<div class='l lang-zh'>全 {len(vsfull)} cell vseed/PR 几何均值</div></div>"
+            f"<div class='kpi'><div class='v' style='color:#6ede8a'>{g_syn:.3f}× / {g_real:.3f}×</div>"
+            f"<div class='l lang-en'>synth / real geomean vseed/PR</div>"
+            f"<div class='l lang-zh'>合成 / 真实 vseed/PR</div></div>"
+            f"<div class='kpi'><div class='v' style='color:#6ea8fe'>{ex_ok}/{ex_tot}</div>"
+            f"<div class='l lang-en'>vseed exactness (all cells)</div>"
+            f"<div class='l lang-zh'>vseed 精确性（全 cell）</div></div>"
+            f"<div class='kpi'><div class='v' style='color:#ff7a7a'>{len(reg)}</div>"
+            f"<div class='l lang-en'>regressions vs PR (&lt;0.98)</div>"
+            f"<div class='l lang-zh'>对 PR 回退 cell 数（&lt;0.98）</div></div>"
+            f"</div>")
+    def rtab(rows, ratio_color):
+        h = ("<tr><th>family</th><th>cell</th><th>K</th><th>dtype</th><th>N</th><th>BS</th>"
+             "<th>hit</th><th>PR µs</th><th>vseed µs</th><th>vseed/PR</th><th>vseed/base</th></tr>")
+        b = ""
+        for r in rows:
+            cell = r["scenario"] or f"{r['model']}/{r['isl']}"
+            hit = f"{fnum(r['hit']):.2f}" if fnum(r["hit"]) is not None else ""
+            b += (f"<tr><td>{r['family']}</td><td>{cell}</td><td>{r['K']}</td><td>{r['dtype']}</td>"
+                  f"<td>{r['N']}</td><td>{r['BS']}</td><td>{hit}</td><td>{r['pr']}</td><td>{r['vs']}</td>"
+                  f"<td style='color:{ratio_color}'>{r['vs_vs_pr']}</td><td>{r['vs_vs_base']}</td></tr>")
+        return f"<table>{h}{b}</table>"
+    reg_html = (f"<details open><summary class='mut'>ALL regressed cells vs PR "
+                f"(vseed/PR &lt; 0.98): {len(reg)} / 完整回退清单</summary>{rtab(reg, '#ff7a7a')}</details>"
+                if reg else "<p><b>No cell regresses more than 2% vs PR. / 无超过 2% 的回退 cell。</b></p>")
+    win_html = (f"<details><summary class='mut'>top wins vs PR (vseed/PR &gt; 1.05): {len(win)} cells "
+                f"/ 主要收益 cell</summary>{rtab(win[:40], '#6ede8a')}</details>")
+    return kpis, reg_html, win_html
+
+VS_FULL_KPI, VS_FULL_REG, VS_FULL_WIN = _vs_full_block()
+
 HTML = f"""<!DOCTYPE html>
 <!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
@@ -848,7 +914,74 @@ GVR op26 是最强 in-tree 臂,除对 SGLang v2 与 16-bit 全扫描核外均有
 {rival_table()}
 </details>
 
-<h2>9 · Test data · environment · code / 测试数据·环境·代码</h2>
+<h2>9 · vseed fix — flash-1M big-BS regression root cause + fix validation / vseed 修正</h2>
+<div class="lang-en"><p><b>Root cause (corrects the earlier §7b story).</b> Simulating the exact kernel rung
+placement on the bench layer (flash L22, N=262127, hit≈0.42) shows the R0 ladder does NOT miss on this cell —
+it <b>fat-admits</b>: the coarse q0.85 rung is accepted with <b>4408 candidates</b> (near kC=5120) while the
+base secant's pmean init lands <b>633</b> and exits in one pass. P3 collect + P4 rank-scatter then carry ~7×
+more candidate work in pr/op26, which surfaces as the 0.68–0.79× regression once BS≥128/cs=1 saturates the
+GPU (16-bit at all BS). The 512k rung is the opposite regime: BOTH arms miss badly (base pmean count 17752 ≫
+kC) — base burns its secant (43 µs at BS=1, plus the ×36 undershoot cells PR repairs), which is why PR "wins"
+2–3× there.</p>
+<p><b>P1 estimator study (the mean-vs-median question).</b> The current top-K threshold equals the
+<b>rank-(hit·K) order statistic</b> of the gathered prev-topK values (exact identity: exactly hit·K gathered
+values are ≥ the true threshold). Since hit varies 0.06–0.94 across real rows, <b>no fixed statistic — mean,
+median, or any single quantile — is admissible everywhere</b>; mean and median are biased HIGH (undershoot
+side) on most V4 rows. The right insurance is not a better single number but measuring an extra
+data-adaptive threshold in the same pass.</p>
+<p><b>The fix (r0_vseed, ~40-line const-folded kernel change + per-K config).</b> P1 parks its pmean (the
+secant init probe) in the last rung column — zero extra sync (P1's own barrier covers visibility); the M-ary
+count pass then measures it for free; admission picks the <b>tightest</b> admissible column (explicit argmin,
+unsorted-safe); on a miss the measured pmean improves the fallback bracket. Per-K config:
+<b>K512/K1024 → qfracs=(0.85,) + pmean</b> (pmean replaces the q0.35 rung — 2 columns, zero column tax);
+<b>K2048 → qfracs=(0.85, 0.35) + pmean</b> (kC/K=3 makes fat admission costly — v32-64k showed a fat pmean
+admit losing 14% to a slim 2-pass miss, so the mid rung stays).</p></div>
+<div class="lang-zh"><p><b>根因（修正此前 §7b 的说法）。</b>在 bench 层（flash L22,N=262127,hit≈0.42）精确模拟
+kernel 摆 rung 逻辑显示:该 cell 上 R0 梯子并未 miss,而是<b>肥接纳</b>——粗 q0.85 rung 以 <b>4408 候选</b>
+（接近 kC=5120）被接纳,而 base secant 的 pmean 初值只有 <b>633</b> 且一遍收敛。P3 collect + P4 rank-scatter
+随之背负 ~7× 候选开销,在 BS≥128/cs=1 饱和后兑现为 0.68–0.79×（16-bit 全 BS 受累）。512k 档是相反工况:
+两臂全 miss（base pmean count 17752 ≫ kC）——base 烧满 secant（BS=1 43µs,外加 PR 修复的 ×36 undershoot
+cell）,所以 PR 在那里"赢"2–3×。</p>
+<p><b>P1 估计量研究（mean vs median 之问）。</b>当前 top-K 阈值恰等于 gathered prev-topK 值的<b>第 (hit·K) 阶
+统计量</b>（恒等式:恰有 hit·K 个 gathered 值 ≥ 真阈值）。真实数据 hit 在 0.06–0.94 间波动,<b>不存在处处可用的
+固定统计量——mean、median、任何单一分位数都不行</b>;在多数 V4 行上 mean/median 系统性偏高（undershoot 方向）。
+正确的保险不是更好的单点数,而是在同一遍 pass 里免费实测一个数据自适应阈值。</p>
+<p><b>修正（r0_vseed,约 40 行 const-fold kernel 改动 + per-K 配置）。</b>P1 把自己的 pmean（secant 初始探针）
+存进最后一个 rung 列——零额外同步（P1 自带 barrier 保证可见）;M-ary 计数 pass 顺带实测它;接纳规则改为
+显式 argmin（取窗口内最瘦列,乱序安全）;miss 时实测过的 pmean 改善兜底 bracket。per-K 配置:
+<b>K512/K1024 → qfracs=(0.85,) + pmean</b>（pmean 替换 q0.35 rung——2 列,零列税）;
+<b>K2048 → qfracs=(0.85, 0.35) + pmean</b>（kC/K=3 肥接纳代价高——v32-64k 实测肥 pmean 接纳比瘦 2-pass miss
+慢 14%,故保留中位 rung）。</p></div>
+<div class="lang-en"><p class="mut"><b>Provenance</b>: umbriel-b200-072, 2026-07-16, single-GPU paired A/B, nsys
+cold-L2 (same protocol as §3/§4/§7), machine-local edited <code>gvrpkg</code> (/tmp staging; diff =
+<code>vseed_harness/vseed_v2.diff</code>, NOT yet on the PR branch). All numbers local-only.</p></div>
+<div class="lang-zh"><p class="mut"><b>数据来源</b>:umbriel-b200-072,2026-07-16,单卡配对 A/B,nsys 冷 L2
+（与 §3/§4/§7 同协议）,机器本地修改版 <code>gvrpkg</code>（/tmp 暂存;diff 见
+<code>vseed_harness/vseed_v2.diff</code>,尚未上 PR 分支）。所有数字仅本地保留。</p></div>
+<details open><summary class="mut">round-2 key-cell A/B (25 regression + guard cells, 4 arms) / 关键 cell 四臂对照</summary>
+{_vs_r2_table()}
+<div class="lang-en"><p class="mut">Headline: flash-1M fp32 BS128–1024 pulled from 0.70–0.79× of base to
+1.01–1.03× (1.29–1.44× over current PR); 16-bit 1M BS1 0.76→0.88–0.90×base (+16% over PR); v32-256k becomes a
+win (+16%); guard cells (R0-win regime) at 0.98–1.01 — the round-1 3–5% column tax is eliminated by the per-K
+hybrid.</p></div>
+<div class="lang-zh"><p class="mut">要点:flash-1M fp32 BS128–1024 从 base 的 0.70–0.79× 拉回 1.01–1.03×
+（对现 PR 1.29–1.44×）;16-bit 1M BS1 0.76→0.88–0.90×base（对 PR +16%）;v32-256k 转为赢面（+16%）;守卫 cell
+（R0 赢面工况）0.98–1.01——第一轮的 3–5% 列税已被 per-K 混合消除。</p></div>
+</details>
+<h3>9a · Full-envelope regression audit / 全域回退审计</h3>
+<div class="lang-en"><p>The decisive question: does the fix regress ANY other case in this report's coverage?
+Full REPORT grid re-swept with 3 arms (base / PR / PR+vseed): synth (op22 §env) seqlen+BS × K∈(512,1024,2048) ×
+best/worst × 3 dtypes, plus real (V4 Flash/Pro + V3.2) all-ISL seqlen+BS × 3 dtypes — 54 nsys batches, 8 GPUs,
+cold-L2, exactness-gated per cell. Every cell with vseed/PR &lt; 0.98 is listed below — none are hidden.</p></div>
+<div class="lang-zh"><p>决定性问题:该修正是否让本报告覆盖的其它 case 回退?整个 REPORT 网格用 3 臂重扫
+（base / PR / PR+vseed）:合成（op22 §env）seqlen+BS × K∈(512,1024,2048) × best/worst × 3 dtype,加真实
+（V4 Flash/Pro + V3.2）全 ISL seqlen+BS × 3 dtype——54 个 nsys 批次、8 卡、冷 L2、逐 cell 精确性门。
+所有 vseed/PR &lt; 0.98 的 cell 全部列出——绝不隐藏。</p></div>
+{VS_FULL_KPI}
+{VS_FULL_REG}
+{VS_FULL_WIN}
+
+<h2>10 · Test data · environment · code / 测试数据·环境·代码</h2>
 <div class="box">
 <div class="lang-en">
 <p><b>Test input data — how it was obtained + local paths.</b></p>
@@ -945,7 +1078,7 @@ GVR-active 层，slim 张量缓存于 <code>op22_temporal_fixed_hr_bench/data_v4
 </div>
 </div>
 
-<h2>10 · Reproduction / 复现</h2>
+<h2>11 · Reproduction / 复现</h2>
 <div class="box">
 <div class="lang-en"><p>Branch <code>omni/op21-gvr-prod</code> (13 commits over origin/main; production kernel only).
 Harness + importable pkg snapshot staged under this report dir:</p></div>
