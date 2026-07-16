@@ -1,0 +1,27 @@
+headroom = t_bestarm / floor  (floor = max(BSxNxsz/7TBps, 4.0us launch))
+regime                       gm    p10    p90    n  feasible@1.5x?
+('BS1', 'N131-262k')       3.22   2.64   3.81  126  YES
+('BS1', 'N32-65k')         2.49   2.13   2.92  108  YES
+('BS1', 'N<=16k')          1.70   1.21   2.32  156  YES
+('BS1', 'N>=512k')         4.95   3.77   6.78   72  YES
+('BS128-1024', 'N131-262k')   3.74   2.56   5.25  252  YES
+('BS128-1024', 'N32-65k')   4.47   3.05   6.71  216  YES
+('BS128-1024', 'N<=16k')   3.72   1.82   7.84  312  YES
+('BS128-1024', 'N>=512k')   2.83   2.13   3.49  144  YES
+('BS16-64', 'N131-262k')   4.57   3.55   5.62  189  YES
+('BS16-64', 'N32-65k')     3.26   2.73   4.03  162  YES
+('BS16-64', 'N<=16k')      1.97   1.34   2.54  234  YES
+('BS16-64', 'N>=512k')     4.70   3.30   6.86  108  YES
+('BS2-8', 'N131-262k')     3.32   2.70   4.03  189  YES
+('BS2-8', 'N32-65k')       2.65   2.27   3.29  162  YES
+('BS2-8', 'N<=16k')        1.90   1.31   2.44  234  YES
+('BS2-8', 'N>=512k')       6.36   5.00   8.25  108  YES
+
+ALL cells: geomean headroom 3.17 (n=2772)
+  if new kernel = 1.0x floor everywhere: geomean speedup vs frontier = 3.17
+  if new kernel = 1.2x floor everywhere: geomean speedup vs frontier = 2.64
+  if new kernel = 1.5x floor everywhere: geomean speedup vs frontier = 2.11
+  if new kernel = 2.0x floor everywhere: geomean speedup vs frontier = 1.58
+  @1.3x floor, fp32: 2.26 (n=924)
+  @1.3x floor, bf16: 2.55 (n=924)
+  @1.3x floor, fp16: 2.51 (n=924)
