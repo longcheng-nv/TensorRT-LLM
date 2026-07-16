@@ -15,3 +15,12 @@ Probe B (p3_oracle_frac=0.001 ablation, 39 N≥65536 cells, 8-GPU shard, CUDA-ev
     → P2/P3 scans are ~2-4 iters; kernel dominated by fixed phase-chain + gather + handoff).
 Design settled (if GO): fp32 wwmax[warp][win] sideband in P2 (1 FMAX/elem) → P3 per-warp
 ballot bitmap → bit-loop; EXACT for any thr (fallback recounts B2 ride free); gate cs≥4.
+
+## iter1 — 2026-07-16 — FALSIFIED (H3-tail K2048 qfracs)
+Hypothesis: op27 tail ladder (0.75,0.45,0.048) fixes K2048 worst tail (op27: 1.15→1.44×).
+Probe: config-only A/B, 23 K2048 cells (synth best+worst all N + v32 real), 4 GPUs, event paired.
+Result: geomean b/v 0.948-0.973 (variant SLOWER everywhere incl worst axis + real v32); exact 23/23.
+Diagnosis: PR admission = R0+vseed; the vseed pmean rung already covers the tail interior that
+op27's 0.45/0.048 columns bought in the HLS kernel; extra columns = pure M-ary P2 count tax.
+Phase-level conclusions do not transfer across kernel families (omni-kernel rule confirmed).
+Ledger write-back: FALSIFIED domain = qfracs tail-ladder on PR-R0+vseed, K2048, fp32 BS=1, event-paired.
