@@ -44,3 +44,32 @@ iter2a p4_fused_hist (cs=1): hist built during P3 stream-write (bmin=thr, bmax=p
 iter2b distP4 (cs>1): kill handoff2 value-gather; peers keep local cands; leader does
   scalar searches on DSMEM-merged hist; all CTAs scatter own cands via DSMEM atomic ranks.
 iter2c kNumBins diet: screens running (256 needs scratch relocation >=272 if it wins).
+
+## iter2a — 2026-07-16 — FALSIFIED (p4_fused_hist, cs=1)
+Hypothesis: build P4 coarse hist during P3 stream-write -> P4 skips minmax+zero+build.
+Result: exact 3/3 but SLOWER (event 0.93, ~-15% kernel). Diagnosis: per-candidate
+atomic+clamp inside the hot P3 scan loop = scan-loop pollution tax (op21 iter14 class);
+P4's own cand-array passes are cheap (cand<<N). Ledger: any per-candidate extra work
+inside P3's full-N scan loop loses; P4blk cost is NOT its passes.
+
+## iter2-probe — 2026-07-16 — FALSIFIED hypothesis (scatter atomics)
+p4_noatomic_oracle (garbage pos instead of 3-counter same-address atomicAdd):
+WASH (0.97-1.03 event, 4 cells). SM100 smem same-address atomics are pipelined; not the cost.
+
+## iter2-NCU — 2026-07-16 — ATTRIBUTION (L3)
+flash_4k (cs1, 8us): no_instruction (icache) 31% + barrier 26% + long_scoreboard 15%;
+SM 0.07%/Mem 0.91% => pure latency chain. K1024_131k (cs8): **barrier stalls 61.4%**
++ membar 4.9% => cluster path is sync-chain dominated (4 cluster syncs @ R0-hit +
+~14 P4 block barriers on leader critical path; peer idle inflates stalls but leader
+path is what counts). => iter3 = barrier/sync diet.
+
+## iter2c — 2026-07-16 — small WIN (kNumBins 2048/1024 -> 512)
+Full-grid event screen: kb512 geomean 1.010-1.030 (77/77 exact). kb256 similar but
+INVALID (exact-tail scratch smem_hist[256..258] out-of-bounds at kNumBins=256 — UB).
+Folded into iter3 bundle.
+
+## iter3 — 2026-07-16 — bundle L1 (skip_h1 + p4_fuse_mmz + kb512)
+A: skip handoff#1 cluster sync at end of P2 (P3 is CTA-local; admission deterministic
+   cluster-wide after count-merge syncs). B: fuse P4 minmax pass with hist zero
+   (staging -> dead smem_ptcnt; saves 2 barriers + 1 pass). C: kNumBins=512.
+Smoke: +2.7% event geomean, exact 6/6, no cell lost. Full-grid L1 running.

@@ -273,7 +273,21 @@ class GvrTopKKernel:
         kNumBins_override: Optional[int] = None,
         kFTarget_override: Optional[int] = None,
         p4_fused_hist: Optional[bool] = None,
+        p4_noatomic_oracle: bool = False,
+        skip_h1: bool = False,
+        p4_fuse_mmz: bool = False,
     ):
+        # op35 iter3A: skip the end-of-Phase2 cluster handoff #1 (P3 is
+        # CTA-local; admission state is cluster-deterministic after the
+        # count-merge sync inside block_count_ge_multi / block_count_ge).
+        # op35 iter3B: fuse P4's min/max pass with the hist zero (staging
+        # moves to smem_ptcnt, dead at P4 time) - saves 2 barriers + 1 pass.
+        self.skip_h1 = bool(skip_h1)
+        self.p4_fuse_mmz = bool(p4_fuse_mmz)
+        # op35 rung-0 probe: scatter writes at garbage positions instead of
+        # atomicAdd-ordered ranks (output WRONG; sizes same-address atomic
+        # serialization in P4's scatter pass).
+        self.p4_noatomic_oracle = bool(p4_noatomic_oracle)
         # --- op35 iter2a: build P4's coarse histogram DURING the P3 collect
         # stream-write (bmin = thr_final, bmax = P1 pmax upper bound, clamped
         # top bin). P4 then skips its candidate min/max pass, the hist zero
@@ -2043,8 +2057,8 @@ class GvrTopKKernel:
         tidx,
         warp_id,
         lane,
-    
         s_p4f=None,
+        smem_ptcnt=None,
     ):
         kK = cutlass.const_expr(self.top_k)
         kBins = cutlass.const_expr(self.kNumBins)
@@ -2080,32 +2094,51 @@ class GvrTopKKernel:
                     local_cmin = _fmin_f32_inline(local_cmin, v)
                     local_cmax = cute.arch.fmax(local_cmax, v)
                     i5 = i5 + cutlass.Int32(num_threads)
+                if cutlass.const_expr(self.p4_fuse_mmz):
+                    izmm = tidx
+                    while izmm < cutlass.Int32(kBins):
+                        smem_hist[izmm] = cutlass.Int32(0)
+                        izmm = izmm + cutlass.Int32(num_threads)
                 cmin = self.warp_reduce_min_f32(local_cmin)
                 cmax = self.warp_reduce_max_f32(local_cmax)
                 if lane == cutlass.Int32(0):
-                    smem_wcnt[warp_id] = float_as_uint32(cmin)
-                    smem_hist[warp_id] = float_as_uint32(cmax)
+                    if cutlass.const_expr(self.p4_fuse_mmz):
+                        smem_ptcnt[warp_id] = float_as_uint32(cmin)
+                        smem_ptcnt[self.num_warps + warp_id] = float_as_uint32(cmax)
+                    else:
+                        smem_wcnt[warp_id] = float_as_uint32(cmin)
+                        smem_hist[warp_id] = float_as_uint32(cmax)
                 cute.arch.barrier()
                 bmin_r = cutlass.Float32(self.FLT_MAX)
                 bmax_r = cutlass.Float32(self.NEG_FLT_MAX)
                 for w in cutlass.range_constexpr(self.num_warps):
-                    vmin = cutlass.Float32(
-                        llvm.bitcast(cutlass.Float32.mlir_type, smem_wcnt[w].ir_value())
-                    )
-                    vmax = cutlass.Float32(
-                        llvm.bitcast(cutlass.Float32.mlir_type, smem_hist[w].ir_value())
-                    )
+                    if cutlass.const_expr(self.p4_fuse_mmz):
+                        vmin = cutlass.Float32(
+                            llvm.bitcast(cutlass.Float32.mlir_type, smem_ptcnt[w].ir_value())
+                        )
+                        vmax = cutlass.Float32(
+                            llvm.bitcast(cutlass.Float32.mlir_type,
+                                         smem_ptcnt[self.num_warps + w].ir_value())
+                        )
+                    else:
+                        vmin = cutlass.Float32(
+                            llvm.bitcast(cutlass.Float32.mlir_type, smem_wcnt[w].ir_value())
+                        )
+                        vmax = cutlass.Float32(
+                            llvm.bitcast(cutlass.Float32.mlir_type, smem_hist[w].ir_value())
+                        )
                     bmin_r = _fmin_f32_inline(bmin_r, vmin)
                     bmax_r = cute.arch.fmax(bmax_r, vmax)
                 if bmax_r <= bmin_r:
                     bmax_r = bmin_r + cutlass.Float32(1e-6)
-                cute.arch.barrier()
-                # ---- zero + build histogram ----
-                i6 = tidx
-                while i6 < cutlass.Int32(kBins):
-                    smem_hist[i6] = cutlass.Int32(0)
-                    i6 = i6 + cutlass.Int32(num_threads)
-                cute.arch.barrier()
+                if cutlass.const_expr(not self.p4_fuse_mmz):
+                    cute.arch.barrier()
+                    # ---- zero + build histogram ----
+                    i6 = tidx
+                    while i6 < cutlass.Int32(kBins):
+                        smem_hist[i6] = cutlass.Int32(0)
+                        i6 = i6 + cutlass.Int32(num_threads)
+                    cute.arch.barrier()
                 inv1b = (cutlass.Float32(kBins - 1) + cutlass.Float32(0.99)) / (bmax_r - bmin_r)
                 i7 = tidx
                 while i7 < cand_count:
@@ -2280,7 +2313,10 @@ class GvrTopKKernel:
                     if bin_i > cutlass.Int32(kBins - 1):
                         bin_i = cutlass.Int32(kBins - 1)
                     if bin_i > b_star:
-                        pos = atomicAdd(s_iscalars.iterator + cutlass.Int32(4), cutlass.Int32(1))
+                        if cutlass.const_expr(self.p4_noatomic_oracle):
+                            pos = tidx
+                        else:
+                            pos = atomicAdd(s_iscalars.iterator + cutlass.Int32(4), cutlass.Int32(1))
                         if pos < cutlass.Int32(kK):
                             if cutlass.const_expr(self.return_output_values):
                                 output_values_row[pos] = self.dtype(v)
@@ -2292,14 +2328,20 @@ class GvrTopKKernel:
                         if sb > cutlass.Int32(fbins - 1):
                             sb = cutlass.Int32(fbins - 1)
                         if sb > sb_star:
-                            o = atomicAdd(s_iscalars.iterator + cutlass.Int32(0), cutlass.Int32(1))
+                            if cutlass.const_expr(self.p4_noatomic_oracle):
+                                o = tidx
+                            else:
+                                o = atomicAdd(s_iscalars.iterator + cutlass.Int32(0), cutlass.Int32(1))
                             pos = rank_above + o
                             if pos < cutlass.Int32(kK):
                                 if cutlass.const_expr(self.return_output_values):
                                     output_values_row[pos] = self.dtype(v)
                                 output_indices_row[pos] = smem_vals[isc]
                         elif sb == sb_star:
-                            o = atomicAdd(s_iscalars.iterator + cutlass.Int32(1), cutlass.Int32(1))
+                            if cutlass.const_expr(self.p4_noatomic_oracle):
+                                o = tidx
+                            else:
+                                o = atomicAdd(s_iscalars.iterator + cutlass.Int32(1), cutlass.Int32(1))
                             pos = rank_above_fine + o
                             if pos < cutlass.Int32(kK):
                                 if cutlass.const_expr(self.return_output_values):
@@ -2502,7 +2544,10 @@ class GvrTopKKernel:
                     if bin_i > cutlass.Int32(kBins - 1):
                         bin_i = cutlass.Int32(kBins - 1)
                     if bin_i > b_star:
-                        pos = atomicAdd(s_iscalars.iterator + cutlass.Int32(4), cutlass.Int32(1))
+                        if cutlass.const_expr(self.p4_noatomic_oracle):
+                            pos = tidx
+                        else:
+                            pos = atomicAdd(s_iscalars.iterator + cutlass.Int32(4), cutlass.Int32(1))
                         if pos < cutlass.Int32(kK):
                             if cutlass.const_expr(self.return_output_values):
                                 output_values_row[pos] = self.dtype(v)
@@ -3730,7 +3775,7 @@ class GvrTopKKernel:
 
             # Cluster handoff #1 (end of Phase 2). Skipped when
             # do_cluster_sync is False (cs=1 or short-row degrade).
-            if cutlass.const_expr(cluster_size > 1):
+            if cutlass.const_expr(cluster_size > 1 and not self.skip_h1):
                 if do_cluster_sync:
                     cute.arch.cluster_arrive_relaxed()
                     cute.arch.cluster_wait()
@@ -3801,6 +3846,7 @@ class GvrTopKKernel:
                         warp_id,
                         lane,
                         s_p4f=s_p4f,
+                        smem_ptcnt=smem_ptcnt,
                     )
                 else:
                     self.phase4_histogram_snap(
@@ -3878,6 +3924,7 @@ class GvrTopKKernel:
                             tidx,
                             warp_id,
                             lane,
+                            smem_ptcnt=smem_ptcnt,
                         )
                     else:
                         self.phase4_histogram_snap(
