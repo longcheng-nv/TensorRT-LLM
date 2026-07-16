@@ -134,3 +134,22 @@ flash-1M BS128 win intact (51.7us vs pr ~80). vsfull2 re-audit launched.
   correctness price (previously WRONG results), 2 = K2048 16-bit 1M BS256.
 - REPORT.html new §9b (auto-fills from vseed_harness/vsfull3.csv).
 - Neutrality A/B harness: vseed_harness/ab_tail_neutrality.py.
+
+## PR body refresh + CI (2026-07-16, post-ship)
+- PR#16457 body perf sections REWRITTEN to NEW head @eae374554c numbers, all
+  from vsfull3 (same-run 3-arm): synth BS1 fp32 best 1.238/worst 1.022 (min
+  0.891, one best 0.948); real 25-cell 1.294 24/25>=1 (flash 1.276 / pro
+  1.271 / v32 1.348; flash512k 2.15, flash1M 0.977->1.118 repaired, pro512k
+  0.959 = exact-tail repair-active row, called out); BS flatness synth
+  1.096->1.149 / real 1.204->1.209.
+- Summary now describes r0_vseed + p4_exact_tail as PR content; known-
+  limitation rewritten: fat-admission regression FIXED (was 0.68-0.79 ->
+  fp32 1.02-1.03), residual = 16-bit tail (full grid gm 1.132, min 0.790,
+  106<0.90 of which 100 16-bit); follow-up guard wording = in-kernel
+  admission escape / trailing-step feedback (NO hit-rate dispatch).
+- Correctness section: full-grid R0 2772/2772 (base 2736/2772), boundary-tie
+  defect story + p4_exact_tail_ties unit test added.
+- Scrub verified (no internal op#N / node names / harness paths).
+- Old body backed up: PR_BODY_20260716_pre_vseed_backup.md; new =
+  PR_BODY_20260716_vseed_refresh.md.
+- CI triggered: /bot run -> PR comment issuecomment-4993569794.
