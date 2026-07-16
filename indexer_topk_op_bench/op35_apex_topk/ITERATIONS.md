@@ -47,3 +47,31 @@ row -> smem 2-level key-histogram nth-element -> filter own row -> in-CTA tail);
 small-BS = multi-CTA/row single-wave + arrival-counter spin sync; 2 grid modes,
 ONE algorithm (pick_config-style, allowed).
 Next: iter 2 filter v3 (bulk flush) — target F/R tax <= 1.10 at BS256/BS1024.
+
+## iter 2-9 — 2026-07-16 — filter-pass optimization ladder (nsys, GPU1, cold-L2)
+Goal: 1-pass filter at ~read speed. Ladder (tax = filter/pure-read span):
+  v3 barrier-storm flush: FALSIFIED (flush-every-iter at TPB512; BS256 3.44x tax)
+  v4 predicated-skip + warp-prefix + GLOBAL atomic: 2.2-2.4x big-BS
+  v5 = v4 + register double-buffer prefetch: BS256 1.69 (load pipelining real)
+  NCU@BS32: V5 7x instructions, issue 19% -> GLOBAL-ATOMIC RETURN LATENCY in loop
+  v6 smem-slot alloc + peek flush: BS32 1.49 (theory confirmed)
+  v7 = v6 minus per-iter __syncthreads_or (band math bounds admits<=SCAP=4096;
+     overflow -> flag+retry contract): 1.33-1.47 big-BS  <-- smem-atomic best
+  v8 per-warp smem counters: FALSIFIED (no gain; contention was NOT residual)
+  v9 zero-atomic ballot-rank + per-warp global segments: **BS1 tax 1.01-1.10**
+     (BS1 frontier/filter 3.07-4.18x) but big-BS ~1.4-1.5 unchanged
+  NCU@BS256: V9 12x inst (rare path fires 63% of warp-groups, 16-20 inst) AND
+     warps_active 42% (256 CTA/148 SM wave quantization) with issue 44.6% -> BOTH
+     instruction count and occupancy bind.
+  v10<NT> group-prefix unordered append + TPB template:
+     BS32@1024 12.06us tax 1.17 (frontier 1.99x) · BS256@1024 62.56 tax 1.14
+     (1.69x) · BS1024 71.07 tax 1.31 (1.31x, wave-quantized; persistent multi-row
+     per CTA = next lever) · BS1@512 3.74-4.85 tax ~1.0-1.09 (3.1-4.25x frontier)
+Exactness: v9/v10 admit-set/index-set/count screens OK at both NT (segmented layout).
+Ledger write-backs: (global-atomic slot alloc in stream loop; big-BS; NCU) =
+FALSIFIED — latency chains; (per-warp smem counter split; BS>=32) = FALSIFIED —
+no effect; (TPB 1024 at BS>=32 filter) = SHIPPED-lever; unordered-within-group
+append is FREE (tail re-ranks).
+Next: full APEX kernel v0 = stratified-sample+threshold (in-kernel redundant per
+CTA at small BS / per-row at big BS) + v10 filter + last-CTA tail select + miss/
+overflow retry; then 3-track exactness gate; then frontier A/B on the op26 grids.
