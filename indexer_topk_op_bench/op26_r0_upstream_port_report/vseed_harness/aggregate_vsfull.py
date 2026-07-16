@@ -25,16 +25,25 @@ from parse_nsys_full import parse_rep  # noqa: E402
 RESULTS = Path(sys.argv[1] if len(sys.argv) > 1 else "/tmp/gvrval1/vsfull_results")
 THRESH = 0.98   # vs/pr below this = regression
 
-# range name -> us, from every rep
-us = {}
-for rep in sorted(RESULTS.glob("nsys_reps/*.nsys-rep")):
-    us.update(parse_rep(rep))
-print(f"# parsed {len(list(RESULTS.glob('nsys_reps/*.nsys-rep')))} reps, {len(us)} ranges",
-      file=sys.stderr)
-
+# IMPORTANT: NVTX range names do NOT carry the scenario, so ranges from
+# different batches collide by name. Parse each batch's rep separately and
+# join it ONLY with that batch's own jsonl (tag == filename stem).
 cells = defaultdict(dict)   # key -> arm -> (us, exact, extra)
 meta = {}
+def _rep_for(jl):
+    # jsonl: synth_<scen>_<sweep>_K<K>_<dt> / real_<model>_<sweep>_<dt>
+    # rep tag (driver): synth_<sweep>_<scen>_K<K>_<dt> / real_<sweep>_<model>_<dt>
+    p = jl.stem.split("_")
+    tag = "_".join([p[0], p[2], p[1]] + p[3:])
+    return RESULTS / "nsys_reps" / (tag + ".nsys-rep")
+
+
 for jl in sorted(RESULTS.glob("*.jsonl")):
+    rep = _rep_for(jl)
+    if not rep.exists():
+        print(f"# WARN missing rep for {jl.name}", file=sys.stderr)
+        continue
+    us = parse_rep(rep)
     for line in jl.read_text().splitlines():
         r = json.loads(line)
         if r.get("error"):

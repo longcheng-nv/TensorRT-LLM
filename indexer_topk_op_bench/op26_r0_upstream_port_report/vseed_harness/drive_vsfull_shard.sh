@@ -12,7 +12,7 @@
 W=$1; GPU=$2; NW=$3
 WD=/tmp/gvrval1
 RH=/home/scratch.loncheng_gpu/workspace/perf/workloads/DSV4/TensorRT-LLM/indexer_topk_op_bench/op26_r0_upstream_port_report/vseed_harness
-OUT="$WD/vsfull_results"
+OUT="$WD/vsfull2_results"
 mkdir -p "$OUT/nsys_reps"
 # env: bypass stale NFS userbase; cutlass 4.5.0 (make_fragment) + flashinfer 0.6.11
 export PYTHONNOUSERSITE=1

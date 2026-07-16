@@ -74,3 +74,24 @@ Full-envelope validation (REPORT grid: synth seqlen+BS x 3K x 2scen x 3dtype +
 real 3-model all-ISL seqlen+BS x 3dtype, 54 nsys batches, 8 GPUs b200-072)
 launched -> vsfull_results; aggregate_vsfull.py emits vsfull.csv + regression
 list (vs/pr < 0.98). REPORT new-chapter update pending sweep completion.
+
+## Full-envelope audit round 1 (54 batches, 2772 cells) — three findings
+1) AGGREGATOR BUG (fixed): NVTX range names lack the scenario -> best/worst
+   reps collided on merge; aggregate now joins each batch's rep with its own
+   jsonl (_rep_for name-order remap).
+2) EXACTNESS: 12 fails, ALL pro/512k fp32 (hit .23, N=131075). CONTROL-PROVEN
+   PRE-EXISTING: pristine snapshot kernel + qfracs=(0.85,) fails identically
+   (|miss|=1, picks -0.288984 for -0.288981, diff 3e-6) — the P4 rank-scatter
+   "exact" one-level fine recursion resolves ~range/1024^2 ≈ 5e-6; adjacent
+   values 3e-6 apart in the straddling bin are BELOW its resolution. Same
+   class as the op22 §9 "2.7e-6 boundary defect" follow-up. vseed only shifts
+   the admitted threshold and thereby which pair straddles — it does not
+   introduce the defect. Fix = second recursion level (separate follow-up).
+3) PERF TAIL: SEVERE (<0.90 vs pr) concentrated in K2048 16-bit big-BS
+   (0.72-0.89, cs1/T512/mb3) and K1024 16-bit large-N BS>=128 — root cause =
+   the +1 smem_ptcnt_multi column (+2-4KB) pushed high-occupancy 16-bit
+   configs over an smem occupancy cliff (mb probe: vs mb3 68.3us -> mb2
+   60.5us vs pr 54.3us).
+## v3 (occupancy fix): vseed column's per-thread counts REUSE the existing
+smem_ptcnt buffer -> zero smem growth. Bad cell 68.3 -> 56.9us (pr 54.5);
+flash-1M BS128 win intact (51.7us vs pr ~80). vsfull2 re-audit launched.
