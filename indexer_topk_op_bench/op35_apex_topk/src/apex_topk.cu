@@ -28,7 +28,6 @@
 
 #define PAIR_CAP 12288                 // staged pairs per row (96KB dyn smem)
 #define DYN_BYTES (PAIR_CAP * 8)
-#define THR_DYN_BYTES (8192 * 4)       // k_thr: sample words only
 
 __device__ inline uint32_t f2u(float f) {
   uint32_t u = __float_as_uint(f);
@@ -80,33 +79,78 @@ __device__ inline void find_bin_warp(const int* hist, int rank, int* res) {
 }
 
 // ---------------- phase A device body ----------------
-// samp: >= s words of scratch (dynamic smem). Writes t_lo to sthr[0].
-// Histogram rounds skip leading bytes that are constant across all samples
-// (kmin/kmax prefix), so concentrated data resolves in ~2-3 passes.
+// Samples live in REGISTERS (s/NT <= 16 per thread) — no smem sample buffer,
+// histogram rounds re-read registers (MIO relief). Histogram rounds skip
+// leading bytes constant across all samples (kmin/kmax prefix): ~2-3 passes.
+// Writes t_lo to sthr[0].
+// warp0 two-level descending bin search: coarse cst[32] (64-bin groups) then
+// the selected group's 64 fine bins (2/lane) — ~15 serial reads total.
+__device__ void find_bin2k_warp(const int* hist, const int* cst, int rank, int* res) {
+  const int lane = threadIdx.x & 31;
+  // level 1: coarse group, descending (group g covers bins [64g, 64g+63])
+  const int g = 31 - lane;              // lane 0 -> highest group
+  const int csum = cst[g];
+  int pre = csum;
+#pragma unroll
+  for (int o = 1; o < 32; o <<= 1) {
+    const int y = __shfl_up_sync(~0u, pre, o);
+    if (lane >= o) pre += y;
+  }
+  pre -= csum;  // count in groups above g
+  const bool mine = (rank >= pre && rank < pre + csum);
+  const unsigned who = __ballot_sync(~0u, mine);
+  const int src_lane = __ffs(who) - 1;
+  const int gsel = __shfl_sync(~0u, g, src_lane);
+  const int above_g = __shfl_sync(~0u, pre, src_lane);
+  // level 2: 64 fine bins of gsel, descending; lane l covers 2 bins
+  const int b0 = gsel * 64 + 63 - 2 * lane;
+  const int c0 = hist[b0], c1 = hist[b0 - 1];
+  int fsum = c0 + c1;
+  int fpre = fsum;
+#pragma unroll
+  for (int o = 1; o < 32; o <<= 1) {
+    const int y = __shfl_up_sync(~0u, fpre, o);
+    if (lane >= o) fpre += y;
+  }
+  fpre -= fsum;
+  const int r2 = rank - above_g;
+  if (r2 >= fpre && r2 < fpre + fsum) {
+    if (r2 < fpre + c0) { res[0] = b0; res[1] = above_g + fpre; }
+    else { res[0] = b0 - 1; res[1] = above_g + fpre + c0; }
+  }
+}
+
 template <int NT>
 __device__ void dev_thresholds(const float* xr, long N, int row, int s,
-                               int i_lo, uint32_t seed, uint32_t* samp,
-                               int* hist_a, int* sscal, float* sthr) {
+                               int i_lo, uint32_t seed, int* hist_a, int* cst,
+                               int* sscal, float* sthr) {
+  constexpr int CMAX = 16;  // max samples per thread (s <= 16*NT)
   const int wid = threadIdx.x >> 5;
   const int lane = threadIdx.x & 31;
   const float4* xr4 = reinterpret_cast<const float4*>(xr);
   const int s4 = s / 4;
   const long n4s = N / 4;
   const float stride4_f = (float)n4s / (float)s4;
+  const int sper = s / NT;  // 2..16, s % NT == 0 (host asserts)
+  uint32_t sv[CMAX];
   if (threadIdx.x == 0) { sscal[2] = (int)0xFFFFFFFFu; sscal[3] = 0; }
   __syncthreads();
   uint32_t lmin = 0xFFFFFFFFu, lmax = 0u;
-  for (int j = threadIdx.x; j < s4; j += NT) {
-    const uint32_t h = hash3(seed, (uint32_t)row, (uint32_t)j);
-    const float u01 = (float)(h >> 8) * (1.0f / 16777216.0f);
-    long idx = (long)(((float)j + u01) * stride4_f);
-    if (idx >= n4s) idx = n4s - 1;
-    const float4 v = xr4[idx];
-    const uint32_t u0 = f2u(v.x), u1 = f2u(v.y), u2 = f2u(v.z), u3 = f2u(v.w);
-    samp[j * 4] = u0; samp[j * 4 + 1] = u1;
-    samp[j * 4 + 2] = u2; samp[j * 4 + 3] = u3;
-    lmin = min(min(min(lmin, u0), min(u1, u2)), u3);
-    lmax = max(max(max(lmax, u0), max(u1, u2)), u3);
+  // each thread owns strata j = threadIdx.x + t*NT (t < sper/4 float4 loads)
+#pragma unroll
+  for (int t = 0; t < CMAX / 4; ++t) {
+    if (t * 4 < sper) {
+      const int j = threadIdx.x + t * NT;  // stratum in [0, s4)
+      const uint32_t h = hash3(seed, (uint32_t)row, (uint32_t)j);
+      const float u01 = (float)(h >> 8) * (1.0f / 16777216.0f);
+      long idx = (long)(((float)j + u01) * stride4_f);
+      if (idx >= n4s) idx = n4s - 1;
+      const float4 v = xr4[idx];
+      sv[t * 4] = f2u(v.x); sv[t * 4 + 1] = f2u(v.y);
+      sv[t * 4 + 2] = f2u(v.z); sv[t * 4 + 3] = f2u(v.w);
+      lmin = min(min(min(lmin, sv[t * 4]), min(sv[t * 4 + 1], sv[t * 4 + 2])), sv[t * 4 + 3]);
+      lmax = max(max(max(lmax, sv[t * 4]), max(sv[t * 4 + 1], sv[t * 4 + 2])), sv[t * 4 + 3]);
+    }
   }
 #pragma unroll
   for (int o = 16; o; o >>= 1) {
@@ -119,29 +163,32 @@ __device__ void dev_thresholds(const float* xr, long N, int row, int s,
   }
   __syncthreads();
   const uint32_t kmin = (uint32_t)sscal[2], kmax = (uint32_t)sscal[3];
-  uint32_t pre_lo = 0;
-  int shift0 = 24;
-  while (shift0 > 0 && ((kmin >> shift0) & 255u) == ((kmax >> shift0) & 255u)) {
-    pre_lo |= kmin & (255u << shift0);
-    shift0 -= 8;
-  }
-  int above_lo = 0;
-  for (int shift = shift0; shift >= 0; shift -= 8) {
-    for (int b = threadIdx.x; b < 256; b += NT) hist_a[b] = 0;
+  const uint32_t span = kmax - kmin;
+  if (span == 0) {  // all samples equal (plateau/constant row)
+    if (threadIdx.x == 0) sthr[0] = u2f(kmin);
     __syncthreads();
-    const uint32_t pmask = (shift >= 24) ? 0u : (0xFFFFFFFFu << (shift + 8));
-    for (int j = threadIdx.x; j < s; j += NT) {
-      const uint32_t u = samp[j];
-      hist_add(hist_a, (u >> shift) & 255, (u & pmask) == (pre_lo & pmask));
+    return;
+  }
+  // single-pass 2048-bin window histogram over [kmin, kmax]
+  int hb = 31;
+  while (!((span >> hb) & 1u)) --hb;            // highest varying bit
+  const int shift = (hb >= 11) ? (hb - 10) : 0; // (span>>shift) < 2048
+  for (int b = threadIdx.x; b < 2048; b += NT) hist_a[b] = 0;
+  for (int b = threadIdx.x; b < 32; b += NT) cst[b] = 0;
+  __syncthreads();
+#pragma unroll
+  for (int t = 0; t < CMAX; ++t) {
+    if (t < sper) {
+      const int bin = (int)((sv[t] - kmin) >> shift);
+      hist_add(hist_a, bin, true);
+      hist_add(cst, bin >> 6, true);
     }
-    __syncthreads();
-    if (wid == 0) find_bin_warp(hist_a, i_lo - above_lo, &sscal[0]);
-    __syncthreads();
-    above_lo += sscal[1];
-    pre_lo |= (uint32_t)sscal[0] << shift;
-    __syncthreads();
   }
-  if (threadIdx.x == 0) sthr[0] = u2f(pre_lo);
+  __syncthreads();
+  if ((threadIdx.x >> 5) == 0) find_bin2k_warp(hist_a, cst, i_lo, &sscal[0]);
+  __syncthreads();
+  // lower bin edge: <= exact i_lo-th sample value (strictly safer band)
+  if (threadIdx.x == 0) sthr[0] = u2f(kmin + ((uint32_t)sscal[0] << shift));
   __syncthreads();
 }
 
@@ -248,9 +295,10 @@ __device__ void dev_filter(const float* xr, long N, float t_lo,
 
 // ---------------- phase C device body ----------------
 template <int NT>
-__device__ void dev_tail(const float* xr, long N, int K, const int2* cand_row,
-                         int* cnt, int* out_row, int2* spair, int* hist_a,
-                         int* sscal, int row, int* dbg) {
+__device__ void dev_tail(const float* xr, long N, int K, int cap,
+                         const int2* cand_row, int* cnt, int* out_row,
+                         int2* spair, int* hist_a, int* sscal, int row,
+                         int* dbg) {
   const int lane = threadIdx.x & 31;
   const int wid = threadIdx.x >> 5;
   long tg0 = 0, tg1 = 0, tg2 = 0, tg3 = 0;
@@ -264,7 +312,7 @@ __device__ void dev_tail(const float* xr, long N, int K, const int2* cand_row,
   }
   __syncthreads();
   const int M = sscal[4];
-  const bool bad = sscal[5] || M < K || M > PAIR_CAP;
+  const bool bad = sscal[5] || M < K || M > cap;
   if (!bad) {  // coalesced gather + local min/max
     uint32_t lmin = 0xFFFFFFFFu, lmax = 0u;
     for (int p = threadIdx.x; p < M; p += NT) {
@@ -288,7 +336,7 @@ __device__ void dev_tail(const float* xr, long N, int K, const int2* cand_row,
   if (threadIdx.x == 0) asm volatile("mov.u64 %0, %%globaltimer;" : "=l"(tg1));
   if (dbg && threadIdx.x == 0) {
     dbg[row * 8] = M;
-    dbg[row * 8 + 1] = (sscal[5] ? 4 : 0) | (M < K ? 2 : 0) | (M > PAIR_CAP ? 1 : 0);
+    dbg[row * 8 + 1] = (sscal[5] ? 4 : 0) | (M < K ? 2 : 0) | (M > cap ? 1 : 0);
   }
 
   uint32_t u_kth;
@@ -414,12 +462,12 @@ __global__ void k_apex_fused(const float* __restrict__ xbase, int* __restrict__ 
   int2* cand_row = cand + (long)row * PAIR_CAP;
   int* cnt = counts + (long)row * 3;
   extern __shared__ int2 spair[];
-  __shared__ int hist_a[256];
+  __shared__ int hist_a[2048];  // phase A window hist; tail uses first 256
+  __shared__ int cst[32];
   __shared__ int wcnt[32], wpref[32];
   __shared__ int sscal[8];
   __shared__ float sthr[2];
-  dev_thresholds<NT>(xr, N, row, s, i_lo, seed,
-                     reinterpret_cast<uint32_t*>(spair), hist_a, sscal, sthr);
+  dev_thresholds<NT>(xr, N, row, s, i_lo, seed, hist_a, cst, sscal, sthr);
   const float t_lo = sthr[0];
   if (mode == 1) {
     if (threadIdx.x == 0 && sub == 0 && dbg) {
@@ -431,8 +479,8 @@ __global__ void k_apex_fused(const float* __restrict__ xbase, int* __restrict__ 
                  cnt, tickets, wcnt, wpref, sscal);
   if (mode == 2) return;  // probe (probe script resets counts)
   if (!sscal[7]) return;
-  dev_tail<NT>(xr, N, K, cand_row, cnt, out + (long)row * K, spair, hist_a,
-               sscal, row, dbg);
+  dev_tail<NT>(xr, N, K, PAIR_CAP, cand_row, cnt, out + (long)row * K, spair,
+               hist_a, sscal, row, dbg);
 }
 
 __global__ void k_apex_thr(const float* __restrict__ xbase,
@@ -441,11 +489,11 @@ __global__ void k_apex_thr(const float* __restrict__ xbase,
   constexpr int NT = 512;
   const int row = blockIdx.x;
   const float* xr = xbase + (long)row * row_stride;
-  extern __shared__ uint32_t samp_[];
-  __shared__ int hist_a[256];
+  __shared__ int hist_a[2048];
+  __shared__ int cst[32];
   __shared__ int sscal[8];
   __shared__ float sthr[2];
-  dev_thresholds<NT>(xr, N, row, s, i_lo, seed, samp_, hist_a, sscal, sthr);
+  dev_thresholds<NT>(xr, N, row, s, i_lo, seed, hist_a, cst, sscal, sthr);
   if (threadIdx.x == 0) thr[row] = sthr[0];
 }
 
@@ -468,15 +516,17 @@ __global__ void k_apex_filter(const float* __restrict__ xbase,
 
 __global__ void k_apex_tail(const float* __restrict__ xbase, int* __restrict__ out,
                             const int2* __restrict__ cand, int* __restrict__ counts,
-                            long row_stride, long N, int K, int* __restrict__ dbg) {
+                            long row_stride, long N, int K, int tail_cap,
+                            int* __restrict__ dbg) {
   constexpr int NT = 512;
   const int row = blockIdx.x;
   const float* xr = xbase + (long)row * row_stride;
   extern __shared__ int2 spair[];
   __shared__ int hist_a[256];
   __shared__ int sscal[8];
-  dev_tail<NT>(xr, N, K, cand + (long)row * PAIR_CAP, counts + (long)row * 3,
-               out + (long)row * K, spair, hist_a, sscal, row, dbg);
+  dev_tail<NT>(xr, N, K, tail_cap, cand + (long)row * PAIR_CAP,
+               counts + (long)row * 3, out + (long)row * K, spair, hist_a,
+               sscal, row, dbg);
 }
 
 static void set_dyn(const void* fn, int bytes) {
@@ -486,7 +536,7 @@ static void set_dyn(const void* fn, int bytes) {
 void apex_topk(torch::Tensor x, torch::Tensor out, torch::Tensor cand,
                torch::Tensor counts, torch::Tensor tickets, torch::Tensor thr,
                long N, int K, int ctas_per_row, int nt, int s, int i_lo,
-               long seed, int mode, bool split, torch::Tensor dbg) {
+               long seed, int tail_cap, int mode, bool split, torch::Tensor dbg) {
   const int rows = x.size(0);
   const long row_stride = x.size(1);
   int* dp = dbg.numel() ? dbg.data_ptr<int>() : nullptr;
@@ -494,7 +544,6 @@ void apex_topk(torch::Tensor x, torch::Tensor out, torch::Tensor cand,
   if (!init_done) {
     set_dyn((const void*)k_apex_fused<512>, DYN_BYTES);
     set_dyn((const void*)k_apex_fused<1024>, DYN_BYTES);
-    set_dyn((const void*)k_apex_thr, THR_DYN_BYTES);
     set_dyn((const void*)k_apex_filter<512>, DYN_BYTES);
     set_dyn((const void*)k_apex_filter<1024>, DYN_BYTES);
     set_dyn((const void*)k_apex_tail, DYN_BYTES);
@@ -515,7 +564,7 @@ void apex_topk(torch::Tensor x, torch::Tensor out, torch::Tensor cand,
           (uint32_t)seed, mode, dp);
     return;
   }
-  k_apex_thr<<<rows, 512, THR_DYN_BYTES>>>(x.data_ptr<float>(),
+  k_apex_thr<<<rows, 512>>>(x.data_ptr<float>(),
                                            thr.data_ptr<float>(), row_stride, N,
                                            s, i_lo, (uint32_t)seed);
   if (mode < 2) return;
@@ -530,10 +579,10 @@ void apex_topk(torch::Tensor x, torch::Tensor out, torch::Tensor cand,
         reinterpret_cast<int2*>(cand.data_ptr<int>()), counts.data_ptr<int>(),
         tickets.data_ptr<int>(), row_stride, N, ctas_per_row);
   if (mode < 3) return;
-  k_apex_tail<<<rows, 512, DYN_BYTES>>>(
+  k_apex_tail<<<rows, 512, tail_cap * 8>>>(
       x.data_ptr<float>(), out.data_ptr<int>(),
       reinterpret_cast<const int2*>(cand.data_ptr<int>()), counts.data_ptr<int>(),
-      row_stride, N, K, dp);
+      row_stride, N, K, tail_cap, dp);
 }
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) { m.def("apex_topk", &apex_topk); }

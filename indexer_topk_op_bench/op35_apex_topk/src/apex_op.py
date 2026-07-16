@@ -55,7 +55,8 @@ def pick_config(BS, N, K):
     r0 = s * q
     sig = math.sqrt(max(1.0, s * q * (1 - q)))
     i_lo = min(s - 1, int(math.ceil(r0 + Z * sig)) - 1)
-    return dict(cpr=cpr, nt=nt, s=s, i_lo=i_lo, split=split)
+    tail_cap = 4096 if K <= 512 else (8192 if K <= 1024 else PAIR_CAP)
+    return dict(cpr=cpr, nt=nt, s=s, i_lo=i_lo, split=split, tail_cap=tail_cap)
 
 
 _ws = {}
@@ -93,5 +94,5 @@ def apex_topk(x, K, N=None, cfg=None, ws=None, mode=3, dbg=None):
         dbg = _EMPTY
     ext().apex_topk(x, ws["out"], ws["cand"], ws["counts"], ws["tickets"],
                     ws["thr"], N, K, cfg["cpr"], cfg["nt"], cfg["s"],
-                    cfg["i_lo"], SEED, mode, cfg["split"], dbg)
+                    cfg["i_lo"], SEED, cfg["tail_cap"], mode, cfg["split"], dbg)
     return ws["out"]
