@@ -108,3 +108,44 @@ frontier 11.6 — NOT competitive yet. Decision for iter12 (architecture):
   b. BS>=32 (cpr==1): split into 3 lean kernels (thr/filter/tail) to restore
      v10 register count & 2 CTA/SM; BS<=16 keep single fused launch (<=148
      CTAs, occupancy irrelevant, launch latency dominant).
+
+## iter 12-13 — 2026-07-16 — v3 architecture + full-envelope position (b200-072)
+v3 = smem-staged filter (per-warp regions in 96KB dyn smem, ONE end-of-CTA
+flush: block prefix + 1 global atomicAdd reserve + coalesced copy) + split
+kernels for BS>=32 (k_thr/k_filter/k_tail; filter back to v10 registers,
+12.3/62.6/66.9us == v10) + coalesced tail gather + t_hi/c_hi CUT (unused) +
+phase A one-pass 2048-bin window hist (kmin/kmax prefix skip; 2-level 32x64
+warp find; reg-resident samples s/NT<=16) + adaptive tail smem cap.
+Anchor spans: BS1 17.2 (0.63-0.89x F) · BS32 31 (0.76) · BS256 89 (1.16 WIN)
+· BS1024 123-129 (0.72-0.75).
+FALSIFIED along the way: match_any/MIO as thr bottleneck (reg-resident samples
+moved nothing — cost is PASS/BARRIER serialization at ~0.5-1GHz effective);
+find_bin2k 64-serial-reads-per-lane (thr 31->57us, fixed by 2-level).
+DVFS hypothesis falsified directly (hot vs cold+idle50ms: 55 vs 61us).
+
+iter13 FULL-ENVELOPE sweep (op26 rival grid, fp32, 347 cells, protocol ==
+rival_harness measure_cell; scripts/iter13_{sweep,report}.py):
+  run1 (pre-fix): gm 0.51 BUT catastrophic tail (0.01-0.12x): op26 synth data
+    is SPATIALLY CLUSTERED -> float4-quad samples correlated (s_eff ~ s/4) ->
+    genuinely wide bands (t_lo 2.11 vs kth 4.33, M=14.5K at K2048/1M; NOT
+    ties) -> M>cap / miss -> 2.7ms full-row fallbacks.
+  fixes: (a) graceful spill: filter region overflow -> warp-aggregated global
+    append (no flag, no loss); (b) big-M tail path: tail_cap<M<=GCAP=32768 ->
+    radix+emit direct from global cand (cost ~M not ~N); (c) full-row fallback
+    only M<K or M>GCAP; (d) quad-correlation-corrected margins (sig x2, z=6)
+    + per-K lambda {512:4,1024:8,2048:16} s policy.
+  BUG (exactness, 1 cell): cand row stride left at PAIR_CAP after GCAP buffer
+    introduced -> cross-row contamination (dup indices). sed fix -> 347/347
+    exact incl. all 55 real cells.
+  FINAL iter13 position: overall gm frontier/apex 0.468 (synth 0.477, real
+    0.420). Regimes: BS256-1024/N131-262k 0.65-0.71 (best cells 0.86-0.94);
+    N<=16k 0.30-0.42 EVERYWHERE (launch+A+tail overhead vs sglang_v2 ~4.5us
+    near-floor); BS1 0.35-0.65.
+Next levers (leverage order): (1) small-N full-scan threshold mode (s=N,
+exact counts, no miss, M~K) for N<=16-32k — 68 cells at ~0.35; (2) tail
+single-pass 2048-bin window select (replace byte rounds; tail radix still
+3-9us for M~3K — pass/barrier bound); (3) thr 2-pass data-independent window
+(drop minmax dependency); (4) BS1 cooperative single-wave (smem row cache) —
+hard; op34 lesson caps expectations. HONEST: even all of 1-3 lands ~0.75-0.9
+overall; 1.5x geomean bar needs a qualitatively bigger idea or envelope
+re-scope (16-bit cells? frontier arm weaknesses?).

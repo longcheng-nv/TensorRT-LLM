@@ -26,7 +26,8 @@
 #include <cuda_runtime.h>
 #include <math_constants.h>
 
-#define PAIR_CAP 12288                 // staged pairs per row (96KB dyn smem)
+#define PAIR_CAP 12288                 // smem staging pairs (96KB dyn smem)
+#define GCAP 32768                     // global candidate buffer cap per row
 #define DYN_BYTES (PAIR_CAP * 8)
 
 __device__ inline uint32_t f2u(float f) {
@@ -132,15 +133,16 @@ __device__ void dev_thresholds(const float* xr, long N, int row, int s,
   const long n4s = N / 4;
   const float stride4_f = (float)n4s / (float)s4;
   const int sper = s / NT;  // 2..16, s % NT == 0 (host asserts)
-  uint32_t sv[CMAX];
+  (void)sper;
+  uint32_t sv[CMAX] = {};   // unowned slots stay 0 (never selected)
   if (threadIdx.x == 0) { sscal[2] = (int)0xFFFFFFFFu; sscal[3] = 0; }
   __syncthreads();
   uint32_t lmin = 0xFFFFFFFFu, lmax = 0u;
-  // each thread owns strata j = threadIdx.x + t*NT (t < sper/4 float4 loads)
+  // each thread owns strata j = threadIdx.x + t*NT with j < s4 (s4 may be < NT)
 #pragma unroll
   for (int t = 0; t < CMAX / 4; ++t) {
-    if (t * 4 < sper) {
-      const int j = threadIdx.x + t * NT;  // stratum in [0, s4)
+    const int j = threadIdx.x + t * NT;  // stratum
+    if (j < s4) {
       const uint32_t h = hash3(seed, (uint32_t)row, (uint32_t)j);
       const float u01 = (float)(h >> 8) * (1.0f / 16777216.0f);
       long idx = (long)(((float)j + u01) * stride4_f);
@@ -178,11 +180,11 @@ __device__ void dev_thresholds(const float* xr, long N, int row, int s,
   __syncthreads();
 #pragma unroll
   for (int t = 0; t < CMAX; ++t) {
-    if (t < sper) {
-      const int bin = (int)((sv[t] - kmin) >> shift);
-      hist_add(hist_a, bin, true);
-      hist_add(cst, bin >> 6, true);
-    }
+    // single call site: match_any inside hist_add must see all 32 lanes
+    const bool sel = (threadIdx.x + (t >> 2) * NT) < s4;
+    const int bin = sel ? (int)((sv[t] - kmin) >> shift) : 0;
+    hist_add(hist_a, bin, sel);
+    hist_add(cst, bin >> 6, sel);
   }
   __syncthreads();
   if ((threadIdx.x >> 5) == 0) find_bin2k_warp(hist_a, cst, i_lo, &sscal[0]);
@@ -234,6 +236,9 @@ __device__ void dev_filter(const float* xr, long N, float t_lo,
       const int total = __shfl_sync(~0u, pre, 31);
       int slot = wtot + pre - nb4;
       wtot += total;
+      int nsp = 0;
+      float spv[4];
+      int spi[4];
       if (nb4) {
         const float vv[4] = {v.x, v.y, v.z, v.w};
 #pragma unroll
@@ -241,8 +246,27 @@ __device__ void dev_filter(const float* xr, long N, float t_lo,
           const float f = vv[j];
           if (f >= t_lo) {
             if (slot < rcap) wreg[slot] = make_int2(__float_as_int(f), (int)(i * 4 + j));
+            else { spv[nsp] = f; spi[nsp] = (int)(i * 4 + j); ++nsp; }
             ++slot;
           }
+        }
+      }
+      // graceful spill of region-overflow admits -> global (rare)
+      if (__any_sync(~0u, nsp)) {
+        int p2 = nsp;
+#pragma unroll
+        for (int o = 1; o < 32; o <<= 1) {
+          const int y = __shfl_up_sync(~0u, p2, o);
+          if (lane >= o) p2 += y;
+        }
+        const int tsp = __shfl_sync(~0u, p2, 31);
+        p2 -= nsp;
+        int base = 0;
+        if (lane == 31) base = atomicAdd(&cnt[1], tsp);
+        base = __shfl_sync(~0u, base, 31);
+        for (int u = 0; u < nsp; ++u) {
+          const int gpos = base + p2 + u;
+          if (gpos < GCAP) cand_row[gpos] = make_int2(__float_as_int(spv[u]), spi[u]);
         }
       }
     }
@@ -254,10 +278,19 @@ __device__ void dev_filter(const float* xr, long N, float t_lo,
     const float f = (lane < (int)(N & 3)) ? xr[e] : CUDART_NAN_F;
     const bool adm = (f >= t_lo);
     const unsigned bal = __ballot_sync(~0u, adm);
-    if (adm) {
-      const int rk = __popc(bal & ((1u << lane) - 1));
-      const int slot = wtot + rk;
-      if (slot < rcap) wreg[slot] = make_int2(__float_as_int(f), (int)e);
+    const int rk = __popc(bal & ((1u << lane) - 1));
+    const int slot = wtot + rk;
+    const bool sp = adm && slot >= rcap;
+    if (adm && !sp) wreg[slot] = make_int2(__float_as_int(f), (int)e);
+    const unsigned bsp = __ballot_sync(~0u, sp);
+    if (bsp) {
+      int base = 0;
+      if (lane == 0) base = atomicAdd(&cnt[1], __popc(bsp));
+      base = __shfl_sync(~0u, base, 0);
+      if (sp) {
+        const int gpos = base + __popc(bsp & ((1u << lane) - 1));
+        if (gpos < GCAP) cand_row[gpos] = make_int2(__float_as_int(f), (int)e);
+      }
     }
     wtot += __popc(bal);
   }
@@ -265,15 +298,12 @@ __device__ void dev_filter(const float* xr, long N, float t_lo,
   if (lane == 0) wcnt[wid] = wtot;
   __syncthreads();
   if (threadIdx.x == 0) {
-    int tot = 0, ovf = 0;
+    int tot = 0;
     for (int w = 0; w < nwarp; ++w) {
       wpref[w] = tot;
-      const int c = min(wcnt[w], rcap);
-      ovf |= (wcnt[w] > rcap);
-      tot += c;
+      tot += min(wcnt[w], rcap);  // region overflow already spilled to global
     }
     sscal[6] = atomicAdd(&cnt[1], tot);
-    if (ovf) atomicExch(&cnt[2], 1);
   }
   __syncthreads();
   const int gb = sscal[6];
@@ -281,7 +311,7 @@ __device__ void dev_filter(const float* xr, long N, float t_lo,
   const int wp = wpref[wid];
   for (int e = lane; e < m; e += 32) {
     const int gpos = gb + wp + e;
-    if (gpos < PAIR_CAP) cand_row[gpos] = wreg[e];
+    if (gpos < GCAP) cand_row[gpos] = wreg[e];
   }
   // ticket (release)
   if (threadIdx.x == 0) {
@@ -306,14 +336,14 @@ __device__ void dev_tail(const float* xr, long N, int K, int cap,
   __threadfence();  // acquire other CTAs' candidate data
   if (threadIdx.x == 0) {
     sscal[4] = __ldcg(&cnt[1]);
-    sscal[5] = __ldcg(&cnt[2]);
     sscal[2] = (int)0xFFFFFFFFu;  // kmin (as uint via atomicMin)
     sscal[3] = 0;                 // kmax
   }
   __syncthreads();
   const int M = sscal[4];
-  const bool bad = sscal[5] || M < K || M > cap;
-  if (!bad) {  // coalesced gather + local min/max
+  const bool bad = M < K || M > GCAP;      // full-row fallback (rare)
+  const bool bigm = !bad && M > cap;       // radix/emit direct from global
+  if (!bad && !bigm) {  // coalesced gather + local min/max
     uint32_t lmin = 0xFFFFFFFFu, lmax = 0u;
     for (int p = threadIdx.x; p < M; p += NT) {
       const int2 pr = __ldcg(&cand_row[p]);
@@ -336,7 +366,7 @@ __device__ void dev_tail(const float* xr, long N, int K, int cap,
   if (threadIdx.x == 0) asm volatile("mov.u64 %0, %%globaltimer;" : "=l"(tg1));
   if (dbg && threadIdx.x == 0) {
     dbg[row * 8] = M;
-    dbg[row * 8 + 1] = (sscal[5] ? 4 : 0) | (M < K ? 2 : 0) | (M > cap ? 1 : 0);
+    dbg[row * 8 + 1] = (bigm ? 4 : 0) | (M < K ? 2 : 0) | (M > GCAP ? 1 : 0);
   }
 
   uint32_t u_kth;
@@ -346,7 +376,7 @@ __device__ void dev_tail(const float* xr, long N, int K, int cap,
     int rank = K - 1;
     int gt_total = 0;
     int shift0 = 24;
-    if (!bad) {  // skip leading bytes that are constant across all candidates
+    if (!bad && !bigm) {  // skip leading constant bytes (staged path only)
       const uint32_t kmin = (uint32_t)sscal[2], kmax = (uint32_t)sscal[3];
       while (shift0 > 0 && ((kmin >> shift0) & 255u) == ((kmax >> shift0) & 255u)) {
         prefix |= kmin & (255u << shift0);
@@ -358,10 +388,17 @@ __device__ void dev_tail(const float* xr, long N, int K, int cap,
       for (int bb = threadIdx.x; bb < 256; bb += NT) hist_a[bb] = 0;
       __syncthreads();
       const uint32_t pmask = (shift >= 24) ? 0u : (0xFFFFFFFFu << (shift + 8));
-      if (!bad) {
+      if (!bad && !bigm) {
         const int Mpad = (M + NT - 1) / NT * NT;
         for (int p = threadIdx.x; p < Mpad; p += NT) {
           const uint32_t u = (p < M) ? (uint32_t)spair[p].x : 0u;
+          hist_add(hist_a, (u >> shift) & 255,
+                   p < M && (u & pmask) == (prefix & pmask));
+        }
+      } else if (bigm) {  // radix over global candidates (M <= GCAP)
+        const int Mpad = (M + NT - 1) / NT * NT;
+        for (int p = threadIdx.x; p < Mpad; p += NT) {
+          const uint32_t u = (p < M) ? b2u(__ldcg(&cand_row[p]).x) : 0u;
           hist_add(hist_a, (u >> shift) & 255,
                    p < M && (u & pmask) == (prefix & pmask));
         }
@@ -393,7 +430,11 @@ __device__ void dev_tail(const float* xr, long N, int K, int cap,
   if (!bad) {
     const int Mpad = (M + NT - 1) / NT * NT;
     for (int p = threadIdx.x; p < Mpad; p += NT) {
-      const int2 pr = (p < M) ? spair[p] : make_int2(0, 0);
+      int2 pr = make_int2(0, 0);
+      if (p < M) {
+        if (bigm) { pr = __ldcg(&cand_row[p]); pr.x = (int)b2u(pr.x); }
+        else pr = spair[p];
+      }
       const uint32_t u = (uint32_t)pr.x;
       const bool sgt = p < M && u > u_kth;
       const bool seq = p < M && u == u_kth;
@@ -459,7 +500,7 @@ __global__ void k_apex_fused(const float* __restrict__ xbase, int* __restrict__ 
   const int row = blockIdx.x / ctas_per_row;
   const int sub = blockIdx.x % ctas_per_row;
   const float* xr = xbase + (long)row * row_stride;
-  int2* cand_row = cand + (long)row * PAIR_CAP;
+  int2* cand_row = cand + (long)row * GCAP;
   int* cnt = counts + (long)row * 3;
   extern __shared__ int2 spair[];
   __shared__ int hist_a[2048];  // phase A window hist; tail uses first 256
@@ -510,7 +551,7 @@ __global__ void k_apex_filter(const float* __restrict__ xbase,
   __shared__ int wcnt[32], wpref[32];
   __shared__ int sscal[8];
   dev_filter<NT>(xr, N, thr[row], ctas_per_row, sub, row,
-                 spair, cand + (long)row * PAIR_CAP, counts + (long)row * 3,
+                 spair, cand + (long)row * GCAP, counts + (long)row * 3,
                  tickets, wcnt, wpref, sscal);
 }
 
@@ -524,7 +565,7 @@ __global__ void k_apex_tail(const float* __restrict__ xbase, int* __restrict__ o
   extern __shared__ int2 spair[];
   __shared__ int hist_a[256];
   __shared__ int sscal[8];
-  dev_tail<NT>(xr, N, K, tail_cap, cand + (long)row * PAIR_CAP,
+  dev_tail<NT>(xr, N, K, tail_cap, cand + (long)row * GCAP,
                counts + (long)row * 3, out + (long)row * K, spair, hist_a,
                sscal, row, dbg);
 }

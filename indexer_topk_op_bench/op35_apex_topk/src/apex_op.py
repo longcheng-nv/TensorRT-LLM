@@ -17,6 +17,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 _ext = None
 
 PAIR_CAP = 12288  # must match apex_topk.cu
+GCAP = 32768      # global candidate cap (must match apex_topk.cu)
 
 
 def ext():
@@ -43,19 +44,17 @@ def pick_config(BS, N, K):
     else:
         nt = 512
         cpr = max(1, 148 // BS)
-    if N > 524288:
-        s = 8192
-    elif N > 262144:
-        s = 4096
-    else:
-        s = 2048
+    lam = {512: 4, 1024: 8, 2048: 16}.get(K, 16)  # per-K sample-density target
+    s = min(8192, max(2048, 1 << math.ceil(math.log2(max(1, lam * N // K)))))
     s = min(s, 1 << int(math.log2(max(2, N))))  # s <= N (pow2)
     assert s % 1024 == 0 or s >= 1024, (s,)     # uniform sample loops (s % NT)
     q = K / N
     r0 = s * q
-    sig = math.sqrt(max(1.0, s * q * (1 - q)))
+    # x2: float4-quad samples are spatially correlated (worst case 4-or-none),
+    # doubling the count sd vs IID — validated on op26 synth (miss at plain z=6)
+    sig = 2.0 * math.sqrt(max(1.0, s * q * (1 - q)))
     i_lo = min(s - 1, int(math.ceil(r0 + Z * sig)) - 1)
-    tail_cap = 4096 if K <= 512 else (8192 if K <= 1024 else PAIR_CAP)
+    tail_cap = 8192 if K <= 1024 else PAIR_CAP
     return dict(cpr=cpr, nt=nt, s=s, i_lo=i_lo, split=split, tail_cap=tail_cap)
 
 
@@ -66,7 +65,7 @@ def workspace(BS, K, cfg, device):
     key = (BS, K, str(device))
     if key not in _ws:
         _ws[key] = dict(
-            cand=torch.empty(BS, PAIR_CAP * 2, dtype=torch.int32, device=device),
+            cand=torch.empty(BS, GCAP * 2, dtype=torch.int32, device=device),
             counts=torch.zeros(BS * 3, dtype=torch.int32, device=device),
             tickets=torch.zeros(BS, dtype=torch.int32, device=device),
             thr=torch.empty(BS, dtype=torch.float32, device=device),
