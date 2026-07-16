@@ -5,3 +5,4 @@ optional $ at ~$6/GPU-h public-cloud equivalent).
 | phase | wall time | GPU-h | est tokens (in/out) | note |
 |---|---|---|---|---|
 | setup+frontier analysis | 2026-07-16 ~1h | 0 | see session ledger | rival_long floor map |
+| rung0.1 floor calib | 2026-07-16 ~0.5h | ~0.3 | — | event+nsys, GPU0+1 |
