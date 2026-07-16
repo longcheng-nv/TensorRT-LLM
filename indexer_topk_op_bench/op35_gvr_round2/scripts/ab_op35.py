@@ -118,8 +118,13 @@ def main():
         sl = torch.full((1,), N * cr, dtype=torch.int32, device=DEV)
         out_b = torch.empty(1, K, dtype=torch.int32, device=DEV)
         out_v = torch.empty(1, K, dtype=torch.int32, device=DEV)
+        vf = {k: v for k, v in vflags.items() if not k.endswith('_k2048')}
+        if K == 2048:
+            for k, v in vflags.items():
+                if k.endswith('_k2048'):
+                    vf[k[:-6]] = v
         call_b = lambda: BaseK.launch(lg, pre, sl, out_b, K, compress_ratio=cr, **bflags)
-        call_v = lambda: VarK.launch(lg, pre, sl, out_v, K, compress_ratio=cr, **vflags)
+        call_v = lambda: VarK.launch(lg, pre, sl, out_v, K, compress_ratio=cr, **vf)
         try:
             call_b(); call_v()
         except Exception as e:

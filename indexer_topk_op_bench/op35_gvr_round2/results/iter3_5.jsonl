@@ -1,0 +1,9 @@
+{"cell": "synth_best_K512_N131072", "N": 131072, "K": 512, "base_us": 53.44, "var_us": 53.86, "ratio": 0.9923, "exact_base": true, "exact_var": true}
+{"cell": "synth_best_K1024_N65536", "N": 65536, "K": 1024, "base_us": 50.88, "var_us": 49.79, "ratio": 1.0219, "exact_base": true, "exact_var": true}
+{"cell": "synth_best_K2048_N65536", "N": 65536, "K": 2048, "base_us": 59.3, "var_us": 56.03, "ratio": 1.0583, "exact_base": true, "exact_var": true}
+{"cell": "synth_worst_K512_N32768", "N": 32768, "K": 512, "base_us": 26.59, "var_us": 26.91, "ratio": 0.9881, "exact_base": true, "exact_var": true}
+{"cell": "synth_worst_K1024_N16384", "N": 16384, "K": 1024, "base_us": 26.5, "var_us": 25.41, "ratio": 1.0428, "exact_base": true, "exact_var": true}
+{"cell": "synth_worst_K2048_N16384", "N": 16384, "K": 2048, "base_us": 26.46, "var_us": 23.26, "ratio": 1.1376, "exact_base": true, "exact_var": true}
+{"cell": "real_flash_8k", "N": 2051, "K": 512, "base_us": 19.81, "var_us": 20.67, "ratio": 0.9582, "exact_base": true, "exact_var": true}
+{"cell": "real_pro_4k", "N": 1027, "K": 1024, "base_us": 22.24, "var_us": 21.34, "ratio": 1.042, "exact_base": true, "exact_var": true}
+{"cell": "real_pro_1024k", "N": 262127, "K": 1024, "base_us": 57.28, "var_us": 68.06, "ratio": 0.8416, "exact_base": true, "exact_var": true}

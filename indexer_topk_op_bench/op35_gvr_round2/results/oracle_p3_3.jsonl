@@ -1,0 +1,5 @@
+{"cell": "synth_worst_K1024_N1048576", "N": 1048576, "K": 1024, "base_us": 65.5, "var_us": 59.9, "ratio": 1.0935, "exact_base": true, "exact_var": true}
+{"cell": "synth_worst_K2048_N1048576", "N": 1048576, "K": 2048, "base_us": 69.73, "var_us": 63.62, "ratio": 1.0961, "exact_base": true, "exact_var": true}
+{"cell": "real_flash_512k", "N": 131075, "K": 512, "base_us": 59.14, "var_us": 58.46, "ratio": 1.0115, "exact_base": true, "exact_var": true}
+{"cell": "real_pro_256k", "N": 65539, "K": 1024, "base_us": 50.18, "var_us": 50.59, "ratio": 0.9918, "exact_base": true, "exact_var": true}
+{"cell": "real_v32_128k", "N": 131087, "K": 2048, "base_us": 60.32, "var_us": 60.64, "ratio": 0.9947, "exact_base": true, "exact_var": true}
