@@ -24,3 +24,23 @@ Diagnosis: PR admission = R0+vseed; the vseed pmean rung already covers the tail
 op27's 0.45/0.048 columns bought in the HLS kernel; extra columns = pure M-ary P2 count tax.
 Phase-level conclusions do not transfer across kernel families (omni-kernel rule confirmed).
 Ledger write-back: FALSIFIED domain = qfracs tail-ladder on PR-R0+vseed, K2048, fp32 BS=1, event-paired.
+
+## iter0-final — 2026-07-16 — ATTRIBUTION (nsys 4-arm oracle, 77 cells)
+nsys decomposition (results/nsys_oracle_decomp.csv): P4blk (handoff2+P4+writeback)
+= 23-58%, median ~37% — DOMINANT everywhere (small+large N, synth+real).
+mid (P1b+P2+falsi+handoff1) 17-48%; floor 13-40%; P3 0-26% (only 512K-1M big).
+UB(zero P4blk)=1.578; UB(zero P3+P4blk)=1.771. Campaign pivot: P4blk is the battleground;
+the proposal's scan-side levers (B1/B2/HLS) cap at ~1.07-1.15 — cannot reach +40% alone.
+
+## iter-L4 — 2026-07-16 — WASH (launch-config refinement)
+cs2/cs4/cs8/nt512 overrides vs pick_config on 39 N>=64K cells: aggregate 0.89-0.99;
+per-cell best-of-5 oracle ceiling (kernel-level, dilution-corrected) = 1.025 — noise-level.
+pick_config confirmed near-optimal. Only residual micro-rule: cs8->cs4 boundary at
+N=131072 (4-9% on 6 cells) — candidate for nsys confirm later.
+
+## iter2 plan (from attribution)
+iter2a p4_fused_hist (cs=1): hist built during P3 stream-write (bmin=thr, bmax=pmax
+  snapshot, clamped) -> P4 skips minmax pass + zero + build (~3 barriers + 2 cand passes).
+iter2b distP4 (cs>1): kill handoff2 value-gather; peers keep local cands; leader does
+  scalar searches on DSMEM-merged hist; all CTAs scatter own cands via DSMEM atomic ranks.
+iter2c kNumBins diet: screens running (256 needs scratch relocation >=272 if it wins).
