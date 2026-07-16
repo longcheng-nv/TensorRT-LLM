@@ -79,6 +79,22 @@ flashinfer-python==0.6.11`, symlink ONLY the `flashinfer` package into
 `/tmp/gvrval1/fi_clean`, run with `PYTHONNOUSERSITE=1
 PYTHONPATH=/tmp/gvrval1/fi_clean` (container torch 2.12 wins).
 
+## Radix cuteDSL under the same battery (2026-07-16, umbriel-b200-017)
+
+`radix_topk_correctness.py` — identical battery on the §8 `radix_cutedsl` arm
+(vendored SinglePassMultiCTARadixTopK). Mechanism: pure radix, iterative
+8-bit-digit refinement over the FULL ordered-bit pattern (fp32 4 rounds,
+fp16/bf16 2) — no truncated-bits threshold bin, no fixed tie buffer, so no
+kMaxNumTie hazard class; the shape spread exercises both single-CTA and
+multi-CTA branches. **2245/2245 exact**, and unlike sglang (fp32-only) the
+FULL adversarial set ran at fp32 + fp16 + bf16 (at 16-bit the fp16-collision
+block becomes a true 8192-way boundary tie — worst tie load — still exact).
+SGLang-failing rows / broad sweep / 1740-cell temporal grid all exact.
+
+Final §8 external-arm correctness ranking, all empirically on the same
+battery: FlashInfer = Radix cuteDSL = GVR (unconditional) > SGLang v2
+(conditional). cutlass 4.5.0 env for a fresh node: `harness/setup_bs_env.sh`.
+
 ## Report injection
 
 REPORT.html §8.1 (sglang) + §8.2 (flashinfer) notes are injected by

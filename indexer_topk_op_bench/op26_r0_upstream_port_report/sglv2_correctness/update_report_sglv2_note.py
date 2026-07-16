@@ -103,6 +103,37 @@ over the cap). Script: <code>sglv2_correctness/fi_topk_correctness.py</code>.</p
 <p><b>结论:</b>FlashInfer <code>top_k</code> 在我们能构造的全部数据上<b>无条件精确</b>——包括击垮 SGLang v2 的那些
 真实行与对抗分布。外部臂的正确性排序:FlashInfer = Radix = GVR(无条件)&gt; SGLang v2(条件精确,K=2048 真实数据已越限)。
 脚本:<code>sglv2_correctness/fi_topk_correctness.py</code>。</p></div>
+
+<h3>8.3 · Radix cuteDSL under the same battery — exact on all 2245 checks, all three dtypes / Radix cuteDSL 同套测试全通过</h3>
+<div class="lang-en"><p>
+The identical battery applied to <b>Radix cuteDSL</b> (the §8 <code>radix_cutedsl</code> arm — vendored
+<code>SinglePassMultiCTARadixTopK</code>, same kernel family as the in-tree radix runner): pure radix top-K,
+iterative 8-bit-digit refinement over the <b>full ordered-bit pattern</b> of the score (fp32: 4 digit rounds;
+fp16/bf16: 2) — no truncated-bits histogram threshold bin, no fixed-size tie buffer, hence no SGLang-style
+<code>kMaxNumTie</code> hazard class; the (N, BS) spread exercises both the single-CTA and multi-CTA branches.
+Result (<code>radix_topk_correctness.py</code>, B200): <b>2245 / 2245 checks exact</b> vs <code>torch.topk</code> —
+and unlike SGLang v2 (fp32-only), the FULL battery was run at <b>fp32, fp16 AND bf16</b>: the adversarial set
+(uniform sglang-killer N=128K/1M × K∈{512,1024,2048}, all-equal row, fp16-collision block — which at 16-bit
+becomes a true 8192-way boundary tie, the worst possible tie load) passes at every dtype; the SGLang-failing
+V3.2 rows (256k L52 steps 3/6/12, 128k L52 step 4), the flash/pro/v32 all-layer × all-ISL sweep, and the V3.2
+58-layer × 15-step × {128k, 256k} temporal grid (1740 cells) are all exact.</p>
+<p><b>Verdict:</b> Radix cuteDSL is <b>unconditionally exact</b>, at all three dtypes, on everything that breaks
+SGLang v2. Final correctness ranking of the §8 external arms — now all empirically established on the same
+battery: <b>FlashInfer = Radix cuteDSL = GVR (unconditional) &gt; SGLang v2 (conditional; real V3.2 K=2048 already
+over the cap)</b>. Script: <code>sglv2_correctness/radix_topk_correctness.py</code>.</p></div>
+<div class="lang-zh"><p>
+把同一套测试施加于 <b>Radix cuteDSL</b>(§8 的 <code>radix_cutedsl</code> 臂——vendored
+<code>SinglePassMultiCTARadixTopK</code>,与 in-tree radix runner 同族内核):纯 radix top-K,对分数的<b>完整
+有序位模式</b>做 8-bit 逐位迭代细化(fp32 4 轮;fp16/bf16 2 轮)——没有截位直方图阈值 bin、没有固定容量 tie buffer,
+因此不存在 SGLang 式 <code>kMaxNumTie</code> 危险类;(N, BS) 形状分布同时覆盖 single-CTA 与 multi-CTA 两个分支。
+结果(<code>radix_topk_correctness.py</code>,B200):对 <code>torch.topk</code> <b>2245 / 2245 项检查全部精确</b>——
+且与仅支持 fp32 的 SGLang v2 不同,完整测试在 <b>fp32、fp16、bf16 三个 dtype</b> 各跑了一遍:对抗组
+(uniform sglang-killer N=128K/1M × K∈{512,1024,2048}、全等值行、fp16 碰撞块——16-bit 下它变成真正的 8192 路
+边界 tie,最恶劣的 tie 负载)每个 dtype 都通过;SGLang 失败的 V3.2 行(256k L52 step 3/6/12、128k L52 step 4)、
+flash/pro/v32 全层×全 ISL 扫描、以及 V3.2 58 层×15 步×{128k, 256k} 时序网格(1740 cell)全部精确。</p>
+<p><b>结论:</b>Radix cuteDSL 在三个 dtype 上都<b>无条件精确</b>,包括击垮 SGLang v2 的全部数据。§8 外部臂的正确性
+排序至此全部有同套实验支撑:<b>FlashInfer = Radix cuteDSL = GVR(无条件)&gt; SGLang v2(条件精确;真实 V3.2 K=2048
+已越限)</b>。脚本:<code>sglv2_correctness/radix_topk_correctness.py</code>。</p></div>
 """ + MARK_B + "\n\n"
 
 html = REPORT.read_text()
