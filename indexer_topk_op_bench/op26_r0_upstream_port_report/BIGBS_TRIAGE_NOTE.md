@@ -58,3 +58,22 @@ op22 §10 dispatch-analysis claim "op26_r0auto BS≤64 optimal" stays true, but
 the PR+runner path is an equally good production default — PR#2's dispatch
 guard should target hit-rate/worst-axis routing, NOT BS routing (already
 handled by the runner).
+
+## Follow-up SHIPPED to the PR branch (2026-07-16, commit 018251950f)
+
+`GvrTopKKernel.pick_config` (the (dtype,BS,N)->ctor-kwargs launch-shape policy,
+runner-faithful, incl. CUDA-graph max_seq_len contract) + `GvrTopKKernel.launch`
+(compiled-variant cache) added to gvr_topk_decode.py — kernel file + tests only,
+no device-code / call-site change. Kills the frozen-config artifact class for
+all direct-drive users; PR#2 unifies the runner onto pick_config.
+
+Validation (b200-094):
+- `validate_pickcfg_cs8.py`: **78/78 PASS** — cs=8 exactness (3 dtypes x K
+  {512,1024,2048} x N {131K,262K} x hr {1,mid,0} x BS {1,4}, R0+secant, fp32
+  index-set equal) + 6 autoconfig regimes (cs 1/2/4/8, T/mbpm asserted).
+- `cs8_nsys.py` (nsys cold-L2, fp32 best): auto cs=8 pick beats forced cs4 on
+  8/8 cells (gm **0.943**, -12% at N=262144) and is parity with op26_r0auto
+  (gm 1.005; K2048 op26 +13% = its mc log-interp P2 band, known).
+- Unit tests extended: cs=8 in R0 equivalence grid (large-N gated), multi-wave
+  big-BS cells, pick_config policy lock, launch autoconfig (runs in CI on SM100).
+- ruff format+check green on both files.
