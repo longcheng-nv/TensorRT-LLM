@@ -37,8 +37,28 @@ def table(rows, cols, fmt=None):
     return f"<table>{h}{b}</table>"
 
 
+ALL77 = []
+for _scen in ("best", "worst"):
+    for _K in (512, 1024, 2048):
+        for _N in (4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576):
+            if _N > 2 * _K:
+                ALL77.append(f"synth_{_scen}_K{_K}_N{_N}")
+for _m, _n in (("flash", 9), ("pro", 9), ("v32", 7)):
+    for _isl in ["4k", "8k", "16k", "32k", "64k", "128k", "256k", "512k", "1024k"][:_n]:
+        ALL77.append(f"real_{_m}_{_isl}")
+
+
 def main():
-    verdict = rd("nsys_ab_verdict.csv")
+    fin = rd("final_bundle_verdict.csv")   # clean 2-nsys x3 verdict (49 cells)
+    meas = {r["cell"]: r for r in fin}
+    # cells outside the bundle domain are byte-identical => ratio 1.000
+    verdict = [dict(cell=c,
+                    base_us=meas.get(c, {}).get("base_us", "="),
+                    var_us=meas.get(c, {}).get("var_us", "="),
+                    ratio_med=meas.get(c, {}).get("ratio_med", "1.0"),
+                    ratio_min=meas.get(c, {}).get("ratio_min", "1.0"),
+                    ratio_max=meas.get(c, {}).get("ratio_max", "1.0"))
+               for c in ALL77]
     decomp = rd("nsys_oracle_decomp.csv")
     replay = rd("replay_b1.csv")
 
@@ -81,14 +101,16 @@ harness: op35_gvr_round2/scripts/ · verdicts: nsys cold-L2, single-GPU paired, 
 <h2>{bil("0 · 执行摘要", "0 · Executive summary", "span")}</h2>
 {bil("目标 +40% (geomean t(PR)/t(op35) ≥ 1.40)。本轮判定:提案的扫描侧杠杆 (H1/H2 已在 PR 内、"
      "B1 上限 ~1.07、HLS 尾梯被 vseed 取代) 无法达标;nsys 四臂 oracle 将战场改判为 P4blk "
-     "(握手#2+P4+写回, 中位 ~37%)。已收割 iter3 束 (skip_h1 + p4_fuse_mmz + kNumBins@K2048→512),"
-     "nsys ×3 判决见 §3。+40% 判定为在 GVR 骨架内不可达 (见 §5 定界)。",
+     "(握手#2+P4+写回, 中位 ~37%)。最终收割束 bundle-v2 = skip_h1 + kNumBins@K2048→512 "
+     "(fuse_mmz 因一处真实 −5% cell 按简洁性准则放弃), nsys ×3 干净判决: ALL77 1.039, "
+     "K2048 域 1.133, 0 cell 回退>2.5% (§3)。+40% 判定为在 GVR 骨架内不可达 (见 §5 定界)。",
      "Target +40% (geomean ≥1.40). This round's finding: the proposal's scan-side levers "
      "cannot reach it (H1/H2 already in the PR; B1 ceiling ~1.07; the HLS tail ladder is "
      "superseded by vseed). The nsys 4-arm oracle re-attributes the battleground to P4blk "
-     "(handoff2+P4+writeback, median ~37%). Harvested: the iter3 bundle "
-     "(skip_h1 + p4_fuse_mmz + kNumBins@K2048→512) — nsys ×3 verdict in §3. "
-     "+40% is assessed INFEASIBLE within the GVR skeleton (§5).")}
+     "(handoff2+P4+writeback, median ~37%). Final harvest bundle-v2 = skip_h1 + "
+     "kNumBins@K2048→512 (fuse_mmz dropped per the simplicity criterion after one genuine "
+     "−5% cell): clean nsys ×3 verdict ALL77 1.039, K2048 domain 1.133, zero cells "
+     "regressing >2.5% (§3). +40% is assessed INFEASIBLE within the GVR skeleton (§5).")}
 
 <h2>{bil("1 · 提案对照与差距分析", "1 · Proposal vs code-reality gap analysis", "span")}</h2>
 {bil("PROPOSAL_GVR_NEXT_OPT.html 的 H1 (log-falsi fallback) 与 H2 (分布式 fallback) 在 PR HEAD "
@@ -116,13 +138,22 @@ harness: op35_gvr_round2/scripts/ · verdicts: nsys cold-L2, single-GPU paired, 
 {table(dec_rows, dec_cols)}</details>
 
 <h2>{bil("3 · iter3 收割束 — nsys ×3 判决", "3 · The iter3 harvest bundle — nsys ×3 verdict", "span")}</h2>
-{bil("束 = skip_h1 (删 Phase2 末冗余 cluster 握手) + p4_fuse_mmz (P4 minmax 遍与 hist 清零融合, "
-     "省 2 屏障 + 1 遍) + kNumBins@K2048: 2048→512 (仅 K2048; 全局套用会伤 K1024 大 N)。"
-     "正确性: 77/77 tie-aware value-multiset exact (L1) + nsys 判决轮全绿。",
-     "Bundle = skip_h1 (drop the redundant end-of-P2 cluster handshake) + p4_fuse_mmz (fuse "
-     "P4's min/max pass with the hist zero: −2 barriers, −1 pass) + kNumBins@K2048: 2048→512 "
-     "(K2048 only; applying it globally regresses K1024 large-N). Correctness: 77/77 tie-aware "
-     "value-multiset exact (L1) + all-green verdict rounds.")}
+{bil("最终束 bundle-v2 = skip_h1 (删 Phase2 末冗余 cluster 握手, 仅 cs>1 生效) + "
+     "kNumBins@K2048: 2048→512 (仅 K2048; 全局套用伤 K1024 大 N 0.84)。中途版本含 "
+     "p4_fuse_mmz (省 2 屏障), 因 synth_worst_K1024_N4096 三轮复现 −5% 按简洁性准则放弃。"
+     "正确性: 77/77 tie-aware value-multiset exact (L1 全网格)。判决 = 干净 2 并发 nsys ×3 轮: "
+     "受影响 49 cells geomean 1.062、最差 0.975;束外 28 cells 旗标全关=字节等同 (计 1.000)。"
+     "注: 首轮 8 并发 nsys 判决制造了双向假离群 (flash_8k 假 0.869→真 0.986; 数个假输家实为 +5% 赢家) "
+     "— 饱和多卡 nsys 永不作 ship 判决 (反模式 #16 再验证)。",
+     "Final bundle-v2 = skip_h1 (drop the redundant end-of-P2 cluster handshake; cs>1 only) + "
+     "kNumBins@K2048: 2048→512 (K2048 only; global application regresses K1024 large-N to 0.84). "
+     "An intermediate version included p4_fuse_mmz (−2 barriers) — dropped per the simplicity "
+     "criterion after a ×3-reproducible −5% at synth_worst_K1024_N4096. Correctness: 77/77 "
+     "tie-aware value-multiset exact (full-grid L1). Verdict = clean 2-concurrent nsys ×3 rounds: "
+     "49 affected cells geomean 1.062, worst 0.975; the other 28 cells have all flags off = "
+     "byte-identical (counted 1.000). NOTE: the first 8-concurrent-nsys verdict fabricated "
+     "outliers BOTH ways (flash_8k fake 0.869 → real 0.986; several fake losers were +5% winners) "
+     "— saturated multi-GPU nsys is never a ship verdict (anti-pattern #16 re-confirmed).")}
 {ax_tbl}
 {bil(f"K2048 域 geomean = {gm(k2048):.4f} (n={len(k2048)}); 回退 >3% 的 cell 数 = {len(lose)}。",
      f"K2048-domain geomean = {gm(k2048):.4f} (n={len(k2048)}); cells regressing >3% = {len(lose)}.")}

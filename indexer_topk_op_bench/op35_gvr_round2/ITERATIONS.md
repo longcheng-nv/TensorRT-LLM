@@ -86,3 +86,23 @@ active flag there = p4_fuse_mmz. Per simplicity criterion: DROP fuse_mmz
 FINAL SHIP BUNDLE (bundle-v2) = skip_h1 (cs>1 only) + kNumBins@K2048: 2048->512.
 Domain outside bundle = flags off = byte-identical (28 cs1 non-K2048 cells := 1.000).
 Final clean 2-nsys verdict on the 49 affected cells: RUNNING (logs/final_*.log).
+
+## iter3-FINAL — 2026-07-16 — SHIP CANDIDATE (bundle-v2)
+Bundle-v2 = skip_h1 + kNumBins@K2048:2048->512 (fuse_mmz DROPPED: x3-reproducible
+-5% at synth_worst_K1024_N4096; simplicity criterion).
+Clean 2-concurrent nsys x3 verdict (results/final_bundle_verdict.csv):
+  49 affected cells geomean 1.0621, worst cell 0.975 (ship rule: no cell < -5% PASS);
+  full-77 (28 byte-identical cells = 1.000): ALL 1.0391 / synth-best 1.0402 /
+  synth-worst 1.0439 / real 1.0330; K2048 domain 1.1331 (n=23).
+Exactness: 77/77 L1 full grid (tie-aware value-multiset), kb512 screen 77/77.
+Destination: SEPARATE follow-up PR (per USER: not into #16457). Port = drop the
+handoff#1 arrive/wait in gvr_topk_decode.py + GvrParams K2048 kNumBins 512
+(fp32 cr1+cr4; 16-bit table untouched pending 16-bit gates).
+
+## CAMPAIGN VERDICT vs the +40% ask — INFEASIBLE (double-locked)
+Lock 1 (info floor): exact top-K must read the full row every step (adversary
+hides a new max anywhere) => P2 count pass unsparsifiable; B3 cross-step skip
+cannot verify without reading. Lock 2 (relaxed control, measured): zeroing ALL
+of P3+P4blk (physically impossible) = geomean 1.771 only; floor+P1b+P2 remain.
+Realistic reachable stack (bundle-v2 shipped + distP4 + warp-B1 future) ~1.10-1.25.
+Larger gains need a different algorithm (see op35_apex_topk parallel campaign).
