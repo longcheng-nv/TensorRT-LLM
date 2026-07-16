@@ -414,6 +414,255 @@ def _vs3_block():
 
 VS3_KPI, VS3_REG, VS3_WIN = _vs3_block()
 
+# ---- shipped-head aggregates (§1 KPIs, §5 note, §9b canonical tables) ------
+SHIP_HEAD, OLD_HEAD = "eae374554c", "018251950f"
+vs3_f1 = [r for r in vs3 if r["dtype"] == "fp32" and r["BS"] == "1" and r["sweep"] == "seqlen"]
+new_syn_best = geo([fnum(r["vs_vs_base"]) for r in vs3_f1 if r["family"] == "synth" and r["scenario"] == "best"])
+new_syn_worst = geo([fnum(r["vs_vs_base"]) for r in vs3_f1 if r["family"] == "synth" and r["scenario"] == "worst"])
+new_real_g = geo([fnum(r["vs_vs_base"]) for r in vs3_f1 if r["family"] == "real"])
+new_real_n = sum(1 for r in vs3_f1 if r["family"] == "real")
+new_real_ge1 = sum(1 for r in vs3_f1 if r["family"] == "real" and (fnum(r["vs_vs_base"]) or 0) >= 1.0)
+new_vs_old = geo([fnum(r["vs_vs_pr"]) for r in vs3]) if vs3 else float("nan")
+new_exact = sum(r["vs_exact"] == "True" for r in vs3)
+base_exact_full = sum(r["base_exact"] == "True" for r in vs3)
+old_sub90 = sum(1 for r in vs3 if (fnum(r["pr_vs_base"]) or 1) < 0.90)
+new_sub90 = sum(1 for r in vs3 if (fnum(r["vs_vs_base"]) or 1) < 0.90)
+
+
+def _fx(v):
+    return f"{v:.2f}×" if v >= 1 else f"{v:.3f}×"
+
+
+def _vs3_canonical():
+    """§9b canonical shipped-head per-cell tables (BS=1 fp32, same-run 3-arm)."""
+    if not vs3_f1:
+        return ""
+    out = []
+    for K, lab in (("512", "K512 · V4 Flash"), ("1024", "K1024 · V4 Pro"), ("2048", "K2048 · V3.2")):
+        rs = [r for r in vs3_f1 if r["family"] == "synth" and r["K"] == K]
+        if not rs:
+            continue
+        h = ("<tr><th>N</th><th>base best µs</th><th>NEW best µs</th><th>best ↑</th>"
+             "<th>base worst µs</th><th>NEW worst µs</th><th>worst ↑</th></tr>")
+        b, gb, gw = "", [], []
+        for N in sorted({int(r["N"]) for r in rs}):
+            d = {r["scenario"]: r for r in rs if int(r["N"]) == N}
+            be, wo = d.get("best"), d.get("worst")
+            rb = fnum(be["base"]) / fnum(be["vs"]) if be else None
+            rw = fnum(wo["base"]) / fnum(wo["vs"]) if wo else None
+            if rb: gb.append(rb)
+            if rw: gw.append(rw)
+            b += (f"<tr><td>{N:,}</td><td>{be['base'] if be else '—'}</td><td>{be['vs'] if be else '—'}</td>"
+                  f"<td>{_fx(rb) if rb else '—'}</td><td>{wo['base'] if wo else '—'}</td>"
+                  f"<td>{wo['vs'] if wo else '—'}</td><td>{_fx(rw) if rw else '—'}</td></tr>")
+        out.append(f"<p><b>{lab}</b> — geomean best {geo(gb):.3f}× / worst {geo(gw):.3f}×</p><table>{h}{b}</table>")
+    ORD = {"4k": 0, "8k": 1, "16k": 2, "32k": 3, "64k": 4, "128k": 5, "256k": 6, "512k": 7, "1024k": 8}
+    for m, lab in (("flash", "V4 Flash (K512)"), ("pro", "V4 Pro (K1024)"), ("v32", "V3.2 (K2048)")):
+        rs = sorted([r for r in vs3_f1 if r["family"] == "real" and r["model"] == m],
+                    key=lambda r: ORD.get(r["isl"], 99))
+        if not rs:
+            continue
+        h = ("<tr><th>ISL</th><th>N</th><th>hit</th><th>base µs</th><th>NEW µs</th>"
+             "<th>speedup</th><th>exact</th></tr>")
+        b, g = "", []
+        for r in rs:
+            sp = fnum(r["base"]) / fnum(r["vs"])
+            g.append(sp)
+            b += (f"<tr><td>{r['isl']}</td><td>{int(r['N']):,}</td><td>{fnum(r['hit']):.2f}</td>"
+                  f"<td>{r['base']}</td><td>{r['vs']}</td><td>{_fx(sp)}</td>"
+                  f"<td>{'✓' if r['vs_exact'] == 'True' else '✗'}</td></tr>")
+        out.append(f"<p><b>Real {lab}</b> — geomean {geo(g):.3f}×</p><table>{h}{b}</table>")
+    return ("<details open><summary class='mut'><b>Canonical shipped-head tables (BS=1 fp32, per seq-len) "
+            "/ 当前 HEAD canonical 表（BS=1 fp32，按序列长）</b></summary>"
+            "<div class='lang-en'><p class='mut'>Same-run 3-arm re-measure at the shipped PR head "
+            f"<code>{SHIP_HEAD}</code> (base vs NEW; identical grid to §3/§4). These are the numbers now "
+            "quoted in the PR#16457 body.</p></div>"
+            "<div class='lang-zh'><p class='mut'>在已上线 PR HEAD "
+            f"<code>{SHIP_HEAD}</code> 下的同轮 3 臂重测（base vs NEW；网格与 §3/§4 完全一致）。"
+            "PR#16457 body 现引用的即这组数字。</p></div>"
+            + "".join(out) + "</details>")
+
+
+VS3_TABLES = _vs3_canonical()
+
+# ---- head-provenance note injected into each measured chapter --------------
+HEADNOTE = (
+    f"<div class='lang-en'><p class='mut' style='font-size:12.5px'>⚠ GVR arms in this chapter were measured at the "
+    f"pre-vseed PR head <code>{OLD_HEAD}</code>. The <b>shipped</b> PR#16457 head <code>{SHIP_HEAD}</code> "
+    f"(adds <code>r0_vseed</code> + <code>p4_exact_tail</code>) re-measures the full grid in <b>§9b</b> "
+    f"(NEW/OLD full-grid geomean {new_vs_old:.4f} — conclusions here carry within ~0.6%; every cell beyond "
+    f"that is listed there).</p></div>"
+    f"<div class='lang-zh'><p class='mut' style='font-size:12.5px'>⚠ 本章 GVR 臂在 vseed 之前的 PR HEAD "
+    f"<code>{OLD_HEAD}</code> 上测量。<b>已上线</b>的 PR#16457 HEAD <code>{SHIP_HEAD}</code>"
+    f"（新增 <code>r0_vseed</code> + <code>p4_exact_tail</code>）在 <b>§9b</b> 对完整网格重测"
+    f"（新/旧全网格几何均值 {new_vs_old:.4f}——本章结论在 ~0.6% 内成立;超出的 cell 均在 §9b 列出）。</p></div>")
+
+# ---- operator / arm glossary (paths · provenance · characteristics) --------
+_GLOSS_ROWS_EN = [
+    ("<code>base</code> / <code>gvr_base</code>",
+     "<code>tensorrt_llm/_torch/cute_dsl_kernels/blackwell/top_k/gvr_topk_decode.py</code> with "
+     "<code>enable_r0=False</code>",
+     "TensorRT-LLM in-tree production kernel (upstream <code>main</code>); the flag is const-folded, so this "
+     "arm is byte-identical to the shipped kernel",
+     "GVR = <b>Guess-Verify-Refine</b>: P1 gathers the prev-step top-K (<code>preIdx</code> hint) values + mean "
+     "probe → P2 iterative <b>secant</b> threshold search → P3 candidate collect → P4 snap writeback. "
+     "Hint-based warm start; CuTe DSL, 1–8 CTAs/row via thread-block cluster",
+     "fp32 / bf16 / fp16",
+     "Known low-hit defect: real Flash-512k regime undershoots (&lt;K unique) — 36/2772 grid cells, repaired by PR"),
+    ("<code>PR</code> / <code>gvr_pr</code>",
+     "same file, PR#16457 branch <code>perf/gvr-topk-r0-histogram-ladder</code>, <code>enable_r0=True</code>",
+     "<b>this report's deliverable</b> — the op-bench <code>op26_r0auto</code> levers ported upstream "
+     "(18 commits over <code>main</code>)",
+     "replaces P2 secant with <b>R0 histogram-ladder admission</b> (P1b 256-bin histogram over gathered hint "
+     "values → single-pass multi-threshold rung ladder) + seeded-cluster refine + <b>rank-scatter P4</b> "
+     "(cluster barriers 14→7); shipped head adds <code>r0_vseed</code> (P1 mean probe folded in as a virtual "
+     "rung, zero SMEM growth) + <code>p4_exact_tail</code> (bit-exact boundary-tie repair)",
+     "fp32 / bf16 / fp16",
+     "exact 2772/2772 full grid at shipped head (§9b); §3–§8 measure the pre-vseed head"),
+    ("<code>op26_r0auto</code>",
+     "op-bench standalone operator, <code>indexer_topk_op_bench/</code> "
+     "(driver <code>harness/sweep_op26.py</code>)",
+     "the tuned dev-bench kernel the port migrates FROM; doubles as the cross-run comparability ANCHOR in §8",
+     "same R0 family with bench-side automatic rung/launch dispatch; not a production op",
+     "fp32 / bf16 / fp16",
+     "exact (anchor-gated per run)"),
+    ("<code>radix_cutedsl</code>",
+     "<code>.../blackwell/top_k/single_pass_multi_cta_radix_topk.py</code> "
+     "(<code>SinglePassMultiCTARadixTopKKernel</code>; production runner "
+     "<code>CuteDSLTopKDecodeSinglePassMultiCTARunner</code> in <code>cute_dsl_custom_ops.py</code>)",
+     "TensorRT-LLM in-tree alternative top-K; benched via a vendored verbatim snapshot",
+     "<b>hint-free</b> single-pass multi-CTA radix select over the full row — insensitive to hit-rate; "
+     "the natural rival where the GVR hint is cold",
+     "fp32 / bf16 / fp16",
+     "unconditionally exact (2245/2245 adversarial battery, §8.3)"),
+    ("<code>sglang_v2</code>",
+     "vendored <code>ops/sglang_v2/topk_v2_standalone.cu</code> — sglang@main (2026-07-13) "
+     "<code>topk_impl.cuh</code> device classes (TopKRegister / TopKStreaming / TopKCluster&lt;8&gt;) + the 4 "
+     "upstream kernels verbatim; only the tvm-ffi host layer replaced",
+     "external rival: SGLang's DeepSeek-V3.2/V4 indexer top-K “v2”",
+     "<b>hint-free</b> 2-kernel PDL pipeline (threshold bin + tie bin); <code>plan()</code> untimed "
+     "(production runs it once per step, reused across the ~61 indexer layers)",
+     "<b>fp32 only</b> (kernel contract)",
+     "conditionally exact: tie bin capped at kMaxNumTie=2048 — real V3.2 L52 at 128k/256k crosses the cap "
+     "(end-to-end exact=False, §8.1); V4 margin ≥5.2× safe"),
+    ("<code>flashinfer_topk</code>",
+     "<code>flashinfer.top_k</code> public API, FlashInfer 0.6.11",
+     "external rival: FlashInfer's released top-K",
+     "<b>hint-free</b> whole-row top-K",
+     "runtime-discovered (fp32 + bf16 verified on B200)",
+     "exact on the same battery (2245/2245, §8.2)"),
+    ("§9 <code>OLD</code> / <code>NEW</code>",
+     f"OLD = PR head <code>{OLD_HEAD}</code> (the <code>PR</code> arm of §3–§8); NEW = shipped head "
+     f"<code>{SHIP_HEAD}</code>",
+     "same kernel file, two branch states",
+     f"NEW adds <code>r0_vseed</code> + <code>p4_exact_tail</code>; full-grid NEW/OLD {new_vs_old:.4f}",
+     "—", f"NEW {new_exact}/{len(vs3) or '—'} full grid"),
+]
+_GLOSS_ROWS_ZH = [
+    ("<code>base</code> / <code>gvr_base</code>",
+     "<code>tensorrt_llm/_torch/cute_dsl_kernels/blackwell/top_k/gvr_topk_decode.py</code>,"
+     "<code>enable_r0=False</code>",
+     "TensorRT-LLM 树内生产核（上游 <code>main</code>）;该 flag 常量折叠,此臂与已上线核逐字节一致",
+     "GVR = <b>Guess-Verify-Refine</b>:P1 gather 上一步 top-K(<code>preIdx</code> hint)的值 + 均值探针 → "
+     "P2 <b>secant</b> 迭代阈值搜索 → P3 候选收集 → P4 snap 写回。基于 hint 的 warm start;CuTe DSL,"
+     "经 thread-block cluster 每行 1–8 CTA",
+     "fp32 / bf16 / fp16",
+     "已知低命中缺陷:真实 Flash-512k 区间 undershoot(唯一索引 &lt;K)——全网格 36/2772 cell,被 PR 修复"),
+    ("<code>PR</code> / <code>gvr_pr</code>",
+     "同一文件,PR#16457 分支 <code>perf/gvr-topk-r0-histogram-ladder</code>,<code>enable_r0=True</code>",
+     "<b>本报告交付物</b>——把 op-bench <code>op26_r0auto</code> 的杠杆移植回上游(较 <code>main</code> 18 个提交)",
+     "以 <b>R0 直方图阶梯 admission</b> 取代 P2 secant(P1b 对 gather 到的 hint 值做 256-bin 直方图 → 单遍"
+     "多阈值阶梯)+ seeded-cluster 精修 + <b>rank-scatter P4</b>(cluster barrier 14→7);已上线 HEAD 另含 "
+     "<code>r0_vseed</code>(P1 均值探针折叠为虚拟阶梯列,零 SMEM 增长)与 <code>p4_exact_tail</code>"
+     "(边界 tie 位级精确修复)",
+     "fp32 / bf16 / fp16",
+     "已上线 HEAD 全网格精确 2772/2772(§9b);§3–§8 测的是 vseed 之前的 HEAD"),
+    ("<code>op26_r0auto</code>",
+     "op-bench 独立算子,<code>indexer_topk_op_bench/</code>(驱动 <code>harness/sweep_op26.py</code>)",
+     "移植的<b>来源</b>——调优后的开发台架核;同时充当 §8 跨 run 可比性 ANCHOR",
+     "同属 R0 家族,带台架侧自动阶梯/launch 派发;非生产算子",
+     "fp32 / bf16 / fp16",
+     "精确(每轮 anchor 门控)"),
+    ("<code>radix_cutedsl</code>",
+     "<code>.../blackwell/top_k/single_pass_multi_cta_radix_topk.py</code>"
+     "(<code>SinglePassMultiCTARadixTopKKernel</code>;生产 runner 为 <code>cute_dsl_custom_ops.py</code> 中的 "
+     "<code>CuteDSLTopKDecodeSinglePassMultiCTARunner</code>)",
+     "TensorRT-LLM 树内备选 top-K;以逐字 vendored 快照参测",
+     "<b>无 hint</b> 的单遍多 CTA 基数选择,全行扫描——对命中率不敏感;GVR hint 变冷时的天然对手",
+     "fp32 / bf16 / fp16",
+     "无条件精确(对抗测试组 2245/2245,§8.3)"),
+    ("<code>sglang_v2</code>",
+     "vendored <code>ops/sglang_v2/topk_v2_standalone.cu</code>——sglang@main(2026-07-13)"
+     "<code>topk_impl.cuh</code> 设备类(TopKRegister / TopKStreaming / TopKCluster&lt;8&gt;)+ 4 个上游 kernel "
+     "逐字保留;仅替换 tvm-ffi host 层",
+     "外部对手:SGLang 的 DeepSeek-V3.2/V4 indexer top-K “v2”",
+     "<b>无 hint</b> 的双 kernel PDL 流水线(阈值 bin + tie bin);<code>plan()</code> 不计时"
+     "(生产中每步只跑一次,~61 个 indexer 层复用)",
+     "<b>仅 fp32</b>(kernel 契约)",
+     "条件精确:tie bin 上限 kMaxNumTie=2048——真实 V3.2 L52 在 128k/256k 越限(端到端 exact=False,§8.1);"
+     "V4 余量 ≥5.2× 安全"),
+    ("<code>flashinfer_topk</code>",
+     "<code>flashinfer.top_k</code> 公开 API,FlashInfer 0.6.11",
+     "外部对手:FlashInfer 发布版 top-K",
+     "<b>无 hint</b> 全行 top-K",
+     "运行时自发现(B200 上验证 fp32 + bf16)",
+     "同一测试组精确(2245/2245,§8.2)"),
+    ("§9 <code>OLD</code> / <code>NEW</code>",
+     f"OLD = PR HEAD <code>{OLD_HEAD}</code>(即 §3–§8 的 <code>PR</code> 臂);NEW = 已上线 HEAD "
+     f"<code>{SHIP_HEAD}</code>",
+     "同一 kernel 文件的两个分支状态",
+     f"NEW 新增 <code>r0_vseed</code> + <code>p4_exact_tail</code>;全网格 新/旧 {new_vs_old:.4f}",
+     "—", f"NEW 全网格 {new_exact}/{len(vs3) or '—'}"),
+]
+
+
+def _gloss_table(rows, hdr):
+    h = "<tr>" + "".join(f"<th>{c}</th>" for c in hdr) + "</tr>"
+    b = "".join("<tr>" + "".join(f"<td style='text-align:left'>{c}</td>" for c in r) + "</tr>" for r in rows)
+    return f"<table style='font-size:12.5px'>{h}{b}</table>"
+
+
+GLOSSARY = f"""
+<h2 id="sec-arms">1b · Operator arms — paths · provenance · characteristics / 算子臂说明——路径·出处·特点</h2>
+<div class="lang-en">
+<p>Every chart/table in this report abbreviates the competing kernels to short arm names. This section expands
+each one: where the code lives, where it comes from, and what it does. A phase legend for the GVR kernels:
+<b>P1</b> = gather the <code>preIdx</code> hint's values (+ mean probe) · <b>P1b</b> = 256-bin histogram seed ·
+<b>P2</b> = threshold determination (secant iterations ↔ R0 ladder admission) · <b>P3</b> = candidate
+collection · <b>P4</b> = output writeback (snap ↔ rank-scatter). Throughout, <code>hit</code> =
+|preIdx∩topK|/K (warm-start quality), <code>N</code> = post-compress indexer length
+(compress-ratio cr: V4 = 4, V3.2 = 1), and external arms are hint-free full-row top-K.</p>
+{_gloss_table(_GLOSS_ROWS_EN, ["arm", "kernel / source path", "provenance", "algorithm & hint usage", "dtype", "exactness contract"])}
+</div>
+<div class="lang-zh">
+<p>本报告的图表将参测 kernel 缩写为臂名。本节逐一展开:代码路径、出处、算法特点。GVR 系 kernel 的阶段图例:
+<b>P1</b> = gather <code>preIdx</code> hint 的值(+ 均值探针)· <b>P1b</b> = 256-bin 直方图种子 ·
+<b>P2</b> = 阈值确定(secant 迭代 ↔ R0 阶梯 admission)· <b>P3</b> = 候选收集 · <b>P4</b> = 结果写回
+(snap ↔ rank-scatter)。全文 <code>hit</code> = |preIdx∩topK|/K(warm-start 质量),<code>N</code> =
+压缩后 indexer 长度(压缩比 cr:V4 = 4,V3.2 = 1);外部臂均为无 hint 的全行 top-K。</p>
+{_gloss_table(_GLOSS_ROWS_ZH, ["臂", "kernel / 源码路径", "出处", "算法与 hint 使用", "dtype", "精确性契约"])}
+</div>
+<div class="box">
+<div class="lang-en"><p><b>Measurement heads (which kernel state each chapter measured).</b>
+§3–§8: all GVR arms at the pre-vseed PR head <code>{OLD_HEAD}</code>, re-measured 2026-07-16 through the PR's
+own <code>launch</code>/<code>pick_config</code> shapes (GVR grids on umbriel-b200-094; §8 external arms
+2026-07-15/16 on b200-044/081, cross-node anchor-drift gates median ≤1.002 / p95 ≤1.055).
+<b>§9b: the shipped PR#16457 head <code>{SHIP_HEAD}</code></b> (vseed + P4 exact-tail) re-measures the full
+2772-cell grid same-run vs OLD + base (b200-049) — <b>the canonical current-head numbers</b>, now also quoted
+in the PR body. Full-grid NEW/OLD = {new_vs_old:.4f}: §3–§8 conclusions carry within ~0.6%; the &lt;0.90-vs-base
+tail shrinks {old_sub90}→{new_sub90} cells and exactness closes to {new_exact}/{len(vs3) or "—"}
+(base {base_exact_full}/{len(vs3) or "—"}).</p></div>
+<div class="lang-zh"><p><b>测量 HEAD(各章测的是哪个 kernel 状态)。</b>
+§3–§8:全部 GVR 臂在 vseed 之前的 PR HEAD <code>{OLD_HEAD}</code>,2026-07-16 按 PR 自身
+<code>launch</code>/<code>pick_config</code> 形状重测(GVR 网格在 umbriel-b200-094;§8 外部臂 2026-07-15/16
+在 b200-044/081,跨节点锚漂移门 median ≤1.002 / p95 ≤1.055)。
+<b>§9b:已上线 PR#16457 HEAD <code>{SHIP_HEAD}</code></b>(vseed + P4 exact-tail)对完整 2772-cell 网格
+同轮重测(对 OLD + base,b200-049)——<b>当前 HEAD 的 canonical 数字</b>,PR body 现引用的即这组。
+全网格 新/旧 = {new_vs_old:.4f}:§3–§8 结论在 ~0.6% 内成立;对 base &lt;0.90 的尾部由 {old_sub90} 缩至
+{new_sub90} cell,精确性收口为 {new_exact}/{len(vs3) or "—"}(base {base_exact_full}/{len(vs3) or "—"})。</p></div>
+</div>
+"""
+
 HTML = f"""<!DOCTYPE html>
 <!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
@@ -489,6 +738,8 @@ Charts are interactive — tick arms / scenarios / models to compare.</p></div>
 {kpi(f"{syn_pvo:.3f}", "op26 / PR residual gap (synthetic)", "op26/PR 残余差距（合成）", "#ffbf69")}
 {kpi(real_kpi, "PR vs base — real V4+V3.2 decode geomean", "PR vs 基线——真实 V4+V3.2 解码几何均值", "#6ede8a")}
 {kpi(f"{SYN_EXACT}/{SYN_EXACT}", f"synthetic exactness (+{DTYPE_EXACT}/{DTYPE_EXACT} dtypes)", f"合成精确性（另 dtypes {DTYPE_EXACT}/{DTYPE_EXACT}）", "#6ea8fe")}
+{kpi(f"{new_real_g:.3f}×", f"SHIPPED head {SHIP_HEAD[:10]} vs base — real decode (§9b)", f"已上线 HEAD {SHIP_HEAD[:10]} 对 base——真实解码（§9b）", "#6ede8a")}
+{kpi(f"{new_exact}/{len(vs3) or '—'}", "shipped-head exactness — full dtype×BS grid (§9b)", "已上线 HEAD 精确性——全 dtype×BS 网格（§9b）", "#6ea8fe")}
 </div>
 <div class="lang-en">
 <p>The op-bench had opened a <b>12.5%</b> gap between the shipped production secant kernel and the tuned
@@ -503,6 +754,11 @@ Charts are interactive — tick arms / scenarios / models to compare.</p></div>
 <b>repairs</b> a base-secant undershoot on a low-hit cell.</li>
 <li>Residual ~5% = unified-kernel cluster-barrier structural floor — <b>not safely removable</b> on a dev box
 (a prior cluster-handoff silent bug passed 330/330). Safe levers are exhausted.</li>
+<li><b>Shipped head <code>{SHIP_HEAD}</code></b> (adds <code>r0_vseed</code> + <code>p4_exact_tail</code>, §9):
+real axis <b>{new_real_g:.3f}×</b> vs base ({new_real_ge1}/{new_real_n} ≥ 1.0), synth best/worst
+{new_syn_best:.3f}/{new_syn_worst:.3f}, full-grid exact <b>{new_exact}/{len(vs3) or "—"}</b>
+(base {base_exact_full}/{len(vs3) or "—"}), NEW/OLD {new_vs_old:.4f} with the &lt;0.90-vs-base tail
+{old_sub90}→{new_sub90} cells. Canonical current-head per-cell tables in <b>§9b</b>; the PR body quotes these.</li>
 </ul></div>
 <div class="lang-zh">
 <p>op-bench 显示已上线的生产 secant 核与调优后的 <code>op26_r0auto</code> 之间存在 <b>12.5%</b> 差距。
@@ -515,31 +771,49 @@ Charts are interactive — tick arms / scenarios / models to compare.</p></div>
 （pro {real_pvb_pro:.3f}×，V3.2 {real_pvb_v32:.3f}×），PR 精确 <b>{real_exact}/{len(real)}</b>，
 且 PR <b>修复</b>了一处 base-secant 在低命中 cell 上的 undershoot。</li>
 <li>残余 ~5% = 统一核的 cluster-barrier 结构性地板——在开发盒上<b>无法安全移除</b>（此前一个 cluster-handoff 静默 bug 曾通过 330/330）。安全杠杆已耗尽。</li>
+<li><b>已上线 HEAD <code>{SHIP_HEAD}</code></b>（新增 <code>r0_vseed</code> + <code>p4_exact_tail</code>,§9）:
+真实轴对 base <b>{new_real_g:.3f}×</b>（{new_real_ge1}/{new_real_n} ≥ 1.0）,合成 best/worst
+{new_syn_best:.3f}/{new_syn_worst:.3f},全网格精确 <b>{new_exact}/{len(vs3) or "—"}</b>
+（base {base_exact_full}/{len(vs3) or "—"}）,新/旧 {new_vs_old:.4f},对 base &lt;0.90 尾部
+{old_sub90}→{new_sub90} cell。当前 HEAD 的 canonical 逐 cell 表在 <b>§9b</b>;PR body 引用的即这组。</li>
 </ul></div>
+
+{GLOSSARY}
 
 <h2>2 · Optimization migration / 优化迁移</h2>
 <div class="lang-en">
 <p>All optimization lives in production <code>tensorrt_llm/_torch/cute_dsl_kernels/blackwell/top_k/gvr_topk_decode.py</code>
-only (<b>13 commits</b> on branch <code>omni/op21-gvr-prod</code>). <code>gvr_topk_decode_load_balance.py</code> is
+only (<b>18 commits</b> on PR branch <code>perf/gvr-topk-r0-histogram-ladder</code>, mirrored locally as
+<code>omni/op21-gvr-prod</code>). <code>gvr_topk_decode_load_balance.py</code> is
 study-only and untouched. Every flag defaults OFF when <code>enable_r0=False</code> → base kernel is byte-identical to upstream.</p>
 <table>
 <tr><th>lever</th><th>source</th><th>effect</th><th>exact</th></tr>
 <tr><td>rank-scatter P4</td><td>op#7</td><td>barriers 14→7; my/op26 1.125→1.048</td><td>36/36</td></tr>
 <tr><td>p1b_cache cs-aware</td><td>op26 dispatch_p1bc_mc</td><td>ON all dtypes at cs&gt;1; my/op26 →~1.05</td><td>18/18</td></tr>
 <tr><td>seeded-cluster R0 refine (C1–C7)</td><td>op26 R0</td><td>miss-refine on R0 seed</td><td>52/52</td></tr>
+<tr><td>r0_vseed virtual rung + per-K rung defaults</td><td>§9 campaign (<code>88a563b145</code>)</td>
+<td>fixes cold-hint fat admission (flash-1M BS≥128 0.68–0.79→fp32 1.02–1.03); worst-vs-base tail min 0.676→0.790</td><td>unchanged</td></tr>
+<tr><td>p4_exact_tail boundary-tie radix re-rank</td><td>§9b (<code>eae374554c</code>)</td>
+<td>bit-exact straddling-bin ties; 12 real pro/512k cells repaired; unaffected cells 0.998 (noise)</td><td>2772/2772</td></tr>
 </table></div>
 <div class="lang-zh">
 <p>所有优化只在生产核 <code>tensorrt_llm/_torch/cute_dsl_kernels/blackwell/top_k/gvr_topk_decode.py</code>
-中（分支 <code>omni/op21-gvr-prod</code> 上 <b>13 个提交</b>）。<code>gvr_topk_decode_load_balance.py</code> 仅供研究、未改动。
+中（PR 分支 <code>perf/gvr-topk-r0-histogram-ladder</code> 上 <b>18 个提交</b>,本地镜像为
+<code>omni/op21-gvr-prod</code>）。<code>gvr_topk_decode_load_balance.py</code> 仅供研究、未改动。
 当 <code>enable_r0=False</code> 时所有 flag 默认关闭 → 基线核与上游逐字节一致。</p>
 <table>
 <tr><th>杠杆</th><th>来源</th><th>效果</th><th>精确</th></tr>
 <tr><td>rank-scatter P4</td><td>op#7</td><td>barrier 14→7；my/op26 1.125→1.048</td><td>36/36</td></tr>
 <tr><td>p1b_cache cs-aware</td><td>op26 dispatch_p1bc_mc</td><td>cs&gt;1 时全 dtype 开启；my/op26 →~1.05</td><td>18/18</td></tr>
 <tr><td>seeded-cluster R0 精修（C1–C7）</td><td>op26 R0</td><td>R0 seed 上的 miss 精修</td><td>52/52</td></tr>
+<tr><td>r0_vseed 虚拟阶梯列 + per-K 阶梯默认值</td><td>§9 战役（<code>88a563b145</code>）</td>
+<td>修复冷 hint fat admission（flash-1M BS≥128 0.68–0.79→fp32 1.02–1.03）;对 base 最差尾 0.676→0.790</td><td>不变</td></tr>
+<tr><td>p4_exact_tail 边界 tie 基数重排</td><td>§9b（<code>eae374554c</code>）</td>
+<td>跨界细 bin tie 位级精确;修复 12 个真实 pro/512k cell;未受影响 cell 0.998（噪声）</td><td>2772/2772</td></tr>
 </table></div>
 
 <h2>3 · Synthetic results (op22 §env) / 合成结果</h2>
+{HEADNOTE}
 <div class="lang-en"><p>op22 §env synthetic distribution, fp32 BS=1, same-run nsys cold-L2. The three K buckets are the three
 model families: <b>K=512 → V4 Flash</b>, <b>K=1024 → V4 Pro</b>, <b>K=2048 → V3.2</b>. Tick arms and scenarios to compare.
 <b>Refreshed 2026-07-16 at the PR's own launch-shape contract</b>: base/pr arms driven via
@@ -573,6 +847,7 @@ fixed cs4/T1024 instantiation, so these numbers reflect production shapes.</p></
 <details><summary class="mut">full synthetic grid ({len(synth)} cells) / 完整合成网格</summary>{synth_table()}</details>
 
 <h2>4 · Real-data results (V4 + V3.2 decode-capture) / 真实数据结果</h2>
+{HEADNOTE}
 <div class="lang-en"><p>Real DeepSeek decode-capture top-K inputs, BS=1 fp32, median over 3 GVR-active layers per (model, ISL).
 Three model families: <b>V4 Flash</b> (K512, cr=4), <b>V4 Pro</b> (K1024, cr=4), <b>V3.2</b> (K2048, cr=1).
 Indexer length N = ISL/cr (V4: ISL/4; V3.2: ≈ISL). hit = mean preIdx∩topK hit-rate, where
@@ -623,6 +898,10 @@ V3.2 真实采集覆盖 7 档 ISL（4K–256K；ISL_256K 的物理 kv_len 使 N 
 <li>Real decode fp32: <b>{real_exact}/{len(real)}</b> cells exact vs captured reference — V4 Flash + V4 Pro
 (K512/K1024, cr=4) <b>and</b> V3.2 (K2048, cr=1, {real_exact_v32}/{len(real_v32)}).</li>
 <li>Contract: PR arm requires unique top-K count == K AND gathered logit value-set equal to reference.</li>
+<li><b>Shipped head <code>{SHIP_HEAD}</code> (§9b): {new_exact}/{len(vs3) or "—"} exact over the FULL dtype × BS
+grid</b> — incl. the 12 real pro/512k fp32 boundary-tie cells repaired by <code>p4_exact_tail</code>
+(a pre-existing sub-resolution P4 defect surfaced by a bit-exact audit; §9). base = {base_exact_full}/{len(vs3) or "—"}
+(the 36 misses are all the known Flash-512k secant undershoot, every one repaired by PR).</li>
 </ul></div>
 <div class="lang-zh"><ul>
 <li>合成 fp32：<b>{SYN_EXACT}/{SYN_EXACT}</b> cell 值集精确（best+worst，K∈512/1024/2048，N 4K–1M）。</li>
@@ -630,9 +909,14 @@ V3.2 真实采集覆盖 7 档 ISL（4K–256K；ISL_256K 的物理 kv_len 使 N 
 <li>真实解码 fp32：<b>{real_exact}/{len(real)}</b> cell 与采集参考精确 —— V4 Flash + V4 Pro
 （K512/K1024，cr=4）<b>及</b> V3.2（K2048，cr=1，{real_exact_v32}/{len(real_v32)}）。</li>
 <li>契约：PR 臂要求 top-K 唯一数 == K 且 gather 的 logit 值集与参考相等。</li>
+<li><b>已上线 HEAD <code>{SHIP_HEAD}</code>（§9b）:全 dtype × BS 网格精确 {new_exact}/{len(vs3) or "—"}</b>
+——含被 <code>p4_exact_tail</code> 修复的 12 个真实 pro/512k fp32 边界 tie cell（位级审计发现的预存在
+P4 亚分辨率缺陷;§9）。base = {base_exact_full}/{len(vs3) or "—"}（36 个失败全部是已知 Flash-512k secant
+undershoot,均被 PR 修复）。</li>
 </ul></div>
 
 <h2>6 · Residual vs the op-bench anchor — gap closed by launch shapes / 残余分析</h2>
+{HEADNOTE}
 <div class="lang-en">
 <p><b>2026-07-16 update: the residual is closed on synthetic and mixed on real.</b> Under the PR's
 launch-shape contract, synthetic BS=1 reads <b>PR/op26 time ratio ≈ {syn_pvo:.3f}</b> (PR ~{(1-syn_pvo)*100:.0f}%
@@ -666,6 +950,7 @@ SMEM 竞争对定种精确性不可见:此前一个 cluster-handoff 静默 bug �
 </ul></div>
 
 <h2>7 · BS scaling (latency-bound → throughput-bound) / 批量扩展</h2>
+{HEADNOTE}
 <div class="lang-en"><p>§3–§6 fixed BS=1. This chapter sweeps <b>batch size BS∈{{1…1024}}</b> across
 <b>dtype∈{{fp32,fp16,bf16}}</b> on the SAME synthetic (op22 §env) and real (V4 Flash/Pro + V3.2) inputs,
 replicated to BS rows (single decode step, BS independent rows). <b>Refreshed 2026-07-16 with FULL ISL
@@ -818,6 +1103,7 @@ faster). Missing cells (OOM / not swept) stay blank.</p></div>
 </div>
 
 <h2>8 · External top-K comparison / 外部算子对比</h2>
+{HEADNOTE}
 <div class="lang-en"><p>The same §3 synthetic (op22 §env) and §4 real (V4 Flash/Pro + V3.2) inputs, now benchmarking our best
 in-tree GVR (<code>op26_r0auto</code>) against three external latest top-K kernels — <b>Radix (cuteDSL)</b>,
 <b>SGLang v2</b> (sglang@main DSv4 top-K), <b>FlashInfer top_k</b> (0.6.11) — plus the GVR <code>base</code>/<code>pr</code>
@@ -1082,6 +1368,7 @@ K∈{{512,1024,2048}}、cr∈{{1,4}}、cs∈{{1,4,8}} 全部修复。未受影�
 {VS3_KPI}
 {VS3_REG}
 {VS3_WIN}
+{VS3_TABLES}
 </div>
 
 <h2>10 · Test data · environment · code / 测试数据·环境·代码</h2>
