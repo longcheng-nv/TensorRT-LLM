@@ -20,16 +20,15 @@ from parse_nsys_full import parse_rep  # noqa: E402
 
 def main():
     per = {}   # (cell, arm) -> {round: us}
-    for r in (1, 2, 3):
-        for sh in range(4):
-            rep = Path(f"/tmp/op35_nsys/ab_r{r}_s{sh}.nsys-rep")
-            if not rep.exists():
+    for sh in range(8):
+        rep = Path(f"/tmp/op35_nsys/ab_s{sh}.nsys-rep")
+        if not rep.exists():
+            continue
+        for rng, us in parse_rep(rep).items():
+            parts = rng.split("|")
+            if len(parts) != 4 or parts[0] != "c":
                 continue
-            for rng, us in parse_rep(rep).items():
-                parts = rng.split("|")
-                if len(parts) != 3 or parts[0] != "c":
-                    continue
-                per.setdefault((parts[1], parts[2]), {})[r] = us
+            per.setdefault((parts[1], parts[2]), {})[int(parts[3][1:])] = us
     cells = sorted({c for c, _ in per})
     rows = []
     for c in cells:

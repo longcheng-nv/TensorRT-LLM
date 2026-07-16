@@ -22,7 +22,7 @@ from gvrpkg.top_k.gvr_topk_decode import GvrTopKKernel as BaseK   # noqa: E402
 from gvrpkg35.top_k.gvr_topk_decode import GvrTopKKernel as VarK  # noqa: E402
 
 DEV = "cuda"
-REPS = 15
+REPS = 10
 
 
 def main():
@@ -30,12 +30,15 @@ def main():
     vflags = {k: (tuple(v) if isinstance(v, list) else v)
               for k, v in json.loads(sys.argv[3]).items()}
     fam = sys.argv[4] if len(sys.argv) > 4 else "all"
+    want = set(sys.argv[5].split(",")) if len(sys.argv) > 5 else None
     evict = torch.empty(512 * 1024 * 1024 // 4, dtype=torch.float32, device=DEV)
     prof.start()
     for ci, cell in enumerate(iter_cells(fam)):
         if ci % sh_n != sh_i:
             continue
         cid, lg_row, pre, K, cr, N = load_cell(cell)
+        if want and cid not in want:
+            continue
         lg = lg_row.unsqueeze(0).contiguous().to(DEV)
         pre = pre[:1].contiguous().to(DEV)
         sl = torch.full((1,), N * cr, dtype=torch.int32, device=DEV)
@@ -52,14 +55,15 @@ def main():
         for arm, call in calls.items():
             call()
         torch.cuda.synchronize()
-        for r in range(REPS):
-            for arm, call in calls.items():
-                evict.uniform_()
-                torch.cuda.synchronize()
-                torch.cuda.nvtx.range_push(f"c|{cid}|{arm}")
-                call()
-                torch.cuda.nvtx.range_pop()
-                torch.cuda.synchronize()
+        for rnd in (1, 2, 3):
+            for r in range(REPS):
+                for arm, call in calls.items():
+                    evict.uniform_()
+                    torch.cuda.synchronize()
+                    torch.cuda.nvtx.range_push(f"c|{cid}|{arm}|r{rnd}")
+                    call()
+                    torch.cuda.nvtx.range_pop()
+                    torch.cuda.synchronize()
         print(f"done {cid}", flush=True)
         del lg, pre, sl, outi
         torch.cuda.empty_cache()

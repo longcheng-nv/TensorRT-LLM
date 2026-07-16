@@ -73,3 +73,16 @@ A: skip handoff#1 cluster sync at end of P2 (P3 is CTA-local; admission determin
    cluster-wide after count-merge syncs). B: fuse P4 minmax pass with hist zero
    (staging -> dead smem_ptcnt; saves 2 barriers + 1 pass). C: kNumBins=512.
 Smoke: +2.7% event geomean, exact 6/6, no cell lost. Full-grid L1 running.
+
+## iter3 — 2026-07-16 — L2 VERDICT + saturated-nsys artifact + bundle refinement
+Full-grid nsys x3 (8 concurrent nsys — DISCIPLINE VIOLATION, see below):
+ALL 1.0477, K2048 1.1382 (0 loss), 6 cells <0.97 incl real_flash_8k 0.869.
+Clean 2-concurrent re-verdict of all 6 losers: 5/6 were saturation artifacts
+(flash_8k 0.869->0.986; K512_16384 0.963->1.05 WIN; flash_64k/128k -> 1.05/1.01).
+Anti-pattern #16 confirmed AGAIN: saturated multi-nsys fabricates outliers BOTH ways.
+ONE genuine regression: synth_worst_K1024_N4096 0.949 (x3 reproducible) — only
+active flag there = p4_fuse_mmz. Per simplicity criterion: DROP fuse_mmz
+(~1-2% contribution not worth a -5% cell + code mass).
+FINAL SHIP BUNDLE (bundle-v2) = skip_h1 (cs>1 only) + kNumBins@K2048: 2048->512.
+Domain outside bundle = flags off = byte-identical (28 cs1 non-K2048 cells := 1.000).
+Final clean 2-nsys verdict on the 49 affected cells: RUNNING (logs/final_*.log).
