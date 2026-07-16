@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>GVR Next-Step Optimization Proposal / GVR 下一步优化方案提案 (post-PR#16457)</title>
+<style>
+:root{--bg:#0f1116;--panel:#161a22;--ink:#dde3ee;--mut:#8b93a7;--acc:#6ea8fe;--good:#4ade80;--bad:#f87171;--warn:#fbbf24;--line:#272c36}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font:14px/1.62 "Segoe UI",system-ui,"PingFang SC","Microsoft YaHei",sans-serif;margin:0;padding:0 0 80px}
+.wrap{max-width:1080px;margin:0 auto;padding:24px 28px}
+h1{font-size:23px;margin:18px 0 4px}
+h2{font-size:18px;margin:34px 0 10px;padding:8px 12px;background:var(--panel);border-left:4px solid var(--acc);border-radius:4px}
+h3{font-size:15.5px;margin:22px 0 8px;color:var(--acc)}
+p{margin:8px 0}
+code{background:#1d2330;padding:1px 5px;border-radius:4px;font-size:12.5px;color:#a5c8ff}
+table{border-collapse:collapse;width:100%;margin:10px 0;font-size:12.8px}
+th,td{border:1px solid var(--line);padding:5px 8px;text-align:left;vertical-align:top}
+th{background:#1a2030;color:#b9c4dc}
+tr:nth-child(even) td{background:#141822}
+.mut{color:var(--mut)}
+.good{color:var(--good);font-weight:600}
+.bad{color:var(--bad);font-weight:600}
+.warn{color:var(--warn);font-weight:600}
+.kpi{display:inline-block;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 16px;margin:6px 8px 6px 0}
+.kpi b{display:block;font-size:19px;color:var(--acc)}
+.tag{display:inline-block;font-size:11px;padding:1px 8px;border-radius:10px;border:1px solid var(--line);margin-right:6px;color:var(--mut)}
+.box{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 16px;margin:12px 0}
+.risk{border-left:4px solid var(--bad)}
+.go{border-left:4px solid var(--good)}
+.hold{border-left:4px solid var(--warn)}
+/* ---- CSS-only language toggle (no JS; viewer-safe) ---- */
+.langsw{position:sticky;top:0;z-index:9;background:var(--bg);padding:10px 28px;border-bottom:1px solid var(--line)}
+.langsw label{cursor:pointer;padding:5px 18px;border:1px solid var(--line);border-radius:16px;margin-right:8px;color:var(--mut);user-select:none}
+#l-en:checked ~ .langsw label[for=l-en],
+#l-zh:checked ~ .langsw label[for=l-zh]{background:var(--acc);color:#0b0e14;border-color:var(--acc);font-weight:700}
+input[name=lang]{display:none}
+.lang-en,.lang-zh{display:none}
+#l-en:checked ~ .wrap .lang-en{display:block}
+#l-zh:checked ~ .wrap .lang-zh{display:block}
+</style>
+</head>
+<body>
+<input type="radio" name="lang" id="l-zh" checked>
+<input type="radio" name="lang" id="l-en">
+<div class="langsw">
+  <label for="l-zh">中文</label>
+  <label for="l-en">English</label>
+  <span class="mut" style="font-size:12px">GVR Next-Step Optimization Proposal · 2026-07-16 · anchor data: op26 REPORT §7/§8 (b200-081/094), op22 REPORT (op22rr grids), op21/op27/op29 campaign ledgers, RETROSPECTIVE.md</span>
+</div>
+<div class="wrap">
+
+<!-- ================================================================ ZH -->
+<div class="lang-zh">
+<h1>GVR 下一步优化方案提案（保留 GVR 骨架, post-PR #16457）</h1>
+<p class="mut">依据: op26 报告 §7/§8 rival 全网格 (12,628 实测 cell) · op22 总擂台 (op22rr 网格, op27_hls vs op26_r0auto 逐 cell) · op21 HLS 三步硅上台账 · op29/op31 HBE 战役 · GVR 六月复盘 RETROSPECTIVE.md · 证伪史台账 (12+2 条负结果)。所有提案均先对照证伪史查重。</p>
+
+<div>
+<span class="kpi"><b>1.23×</b>PR 落后 sglang_v2 的 geomean (真实 fp32, 616 cell)</span>
+<span class="kpi"><b>1.2–1.3×</b>PR 16-bit 落后 radix/FlashInfer (seqlen BS=1)</span>
+<span class="kpi"><b>1.41×</b>op27_hls 在 1M/BS=1 fp32 对 op26_r0auto 的优势</span>
+<span class="kpi"><b>0.82–0.86</b>op27_hls 在 4–32K 小 N 对 op26_r0auto 的劣势</span>
+<span class="kpi"><b>1.33–1.75×</b>op29 HBE 已 ship 的 65K–262K 包络内增益</span>
+</div>
+
+<h2>1 · 问题定义: PR 当前的输赢地图</h2>
+<p>PR #16457 (R0 histogram-ladder + rank-scatter P4 + launch/pick_config) 已是最强 in-tree GVR 形态之一 (§7: synth PR/base 1.148, real 1.309, flash-512k undershoot 修复)。对外部竞品的残余劣势集中在四个区域 (§8 全 ISL 回填后的完整地图):</p>
+<table>
+<tr><th>区域</th><th>量级 (t(pr)/t(rival))</th><th>机理归因</th><th>已证结构墙?</th></tr>
+<tr><td>① BS=1 × 短-中 ISL (4k–32k), vs sglang_v2</td><td class="bad">1.4–2.0×</td><td>latency-bound; 单 CTA 占用墙 24.3% (1/148 SM); sglang 8-CTA MLP 单遍</td><td>op34 双重锁死 (oracle 多 CTA collect-only ≈ sglang 持平, 无 rank 尾部余量); op32 NCU: BS=1 短行 dram 0.06%/issue 15%</td></tr>
+<tr><td>② 合成小 N (16K), vs sglang_v2</td><td class="bad">1.4–1.6×</td><td>同① + 固定相位链延迟 (op20 小 N 相位链墙)</td><td>部分 (相位链墙已归因; 非全部)</td></tr>
+<tr><td>③ 16-bit 全 dtype, vs radix/FlashInfer</td><td class="bad">1.2–1.3×</td><td>候选数组字节减半加速全扫描竞品; GVR 压缩路径字节不变</td><td>否 — op21 iter9 p2_native 16-bit 比较已证有效且已 ship 于 op-bench 系</td></tr>
+<tr><td>④ BS≥256 × ISL≥512k, vs sglang_v2</td><td class="bad">1.1–1.4×</td><td>大 BS 吞吐段; sglang 两端强</td><td>否 — §7 已证 launch-shape 修复关闭大 BS harness 伪差; 剩余为真实差距</td></tr>
+</table>
+<p><b>防御性资产</b> (不需要修): 中段 BS 谷 (BS 8–64 × ISL≥128k) PR 反快 sglang 至 2.2×; fp32 BS=1 已微胜 radix (0.98)/FlashInfer (0.96); 正确性上 GVR 无条件精确而 sglang_v2 条件精确 (§8.1)。</p>
+<p><b>理论天花板参照</b> (op23 确定性定界): 对 Radix 的 UB=0.851 / real=0.599 / LB_eff=0.365 —— hint 利用率再调的空间有限, 结构性收益必须来自<b>削减每元素指令数</b>与<b>尾部 fallback 价格</b>, 这正是本提案两条主线。</p>
+
+<h2>2 · 问题一: op21 ms_auto (HLS-op27) 的核心思想能否进一步提升 PR?</h2>
+<p><b>结论: 能, 但必须 N-gate —— HLS 是"大 N 尾部与 16-bit"的解, 不是"小 N"的解。</b>op22rr 逐 cell 同 bundle 直测 (t(op26_r0auto)/t(op27_hls), &gt;1 = op27 快):</p>
+<table>
+<tr><th>轴</th><th>4–32K</th><th>65–131K</th><th>262K</th><th>512K</th><th>1M</th><th>16-bit seqlen gm</th><th>BS-sweep gm</th></tr>
+<tr><td>fp32 BS=1 (seqlen)</td><td class="bad">0.82–0.86</td><td>1.00–1.02</td><td class="good">1.12</td><td class="good">1.14</td><td class="good">1.41</td><td rowspan="2" class="good">1.03–1.15<br>(best bf16 峰 2.09@1M)</td><td rowspan="2" class="bad">0.88–0.98</td></tr>
+<tr><td class="mut">解读</td><td class="mut">HLS 机制税(梯列+fallback 机器)在小 N 不摊销</td><td class="mut">打平</td><td colspan="3" class="mut">log-falsi + dist-msc fallback 把尾部 245µs→56-70µs</td></tr>
+</table>
+<p>HLS-op27 的四个核心技术及其对 PR 的可移植性 (op21/op27 硅上台账数字):</p>
+<table>
+<tr><th>#</th><th>技术</th><th>硅上已证收益 (op-bench 系)</th><th>移植入 PR 的判断</th></tr>
+<tr><td>H1</td><td><b>log-count regula-falsi fallback</b> (R0-miss 后用 ladder 已知 bracket counts 做 log 空间插值, 替代盲 secant)</td><td>iter13: best gm 1.265, K2048/1M/BS1 <b>2.105×</b> (244.7→116.3µs); α 硅不变 (0.2)</td><td class="good">GO — PR 的 R0-miss fallback 目前是原味 secant; H1 是纯 fallback 路径改动, 快路径字节不动, 与 PR "enable_r0=False 字节等同 base" 契约兼容 (falsi 只挂在 enable_r0=True 分支)</td></tr>
+<tr><td>H2</td><td><b>分布式 msc fallback</b> (cluster 内 slice 遍 + count-merge + push-collect)</td><td>iter14+16 (diet 后): 65K-262K un-gate → best 1.279/worst 1.253/real 1.091; 262K 应力 1.24–1.38×; 1M 1.7–2.05×</td><td class="good">GO (N≥65536 gate) — 前提: 用 iter16 的 phase-machine 单调用点写法, 否则 4–5.5% inlining 代码质量税重现; 编译键门控而非运行时分支</td></tr>
+<tr><td>H3</td><td><b>K2048 尾梯</b> (0.75, 0.45, 0.048)</td><td>op27: worst K2048 对基线 1.15→1.44×, real/best 逐 bit 不变</td><td class="good">GO — PR 默认 qfracs=(0.85,0.35) 即 M2D; K2048 加尾列是 dispatch-key 级改动 (per-K qfracs), 已有先例 (op26 per-K hybrid)</td></tr>
+<tr><td>H4</td><td><b>native 16-bit 比较</b> (P2/P3 在 16-bit 数据上不升格 fp32)</td><td>op21 iter9 已 ship (op-bench); P0 iter15: 16-bit 放大 HLS 优势 (o/s bf16 2.040)</td><td class="good">GO — 直接瞄准输赢地图区域③ (16-bit 1.2–1.3× 差距); 注意 16-bit tie 平台契约 kC≥5K 必须全 gate (smoke 抓不到)</td></tr>
+</table>
+<div class="box hold"><b>移植红线 (来自 op27/op22 数据):</b> ms_auto 的小 N (4–32K) 机制税 15–25% 与 BS-sweep gm&lt;1 说明 HLS 机器<b>不能无条件替换</b> PR 快路径 —— 正确形态是 <b>PR 骨架 + H1..H4 作为 N/K/dtype 编译键门控的增量</b>, N&lt;65536 段保持 PR 现状字节不动 (op21 iter14 同款 N-gate 纪律)。op22 §10 v4cap 另证 op27 ms_auto dispatch 在真实解码捕获上有 7–54% regret —— dispatch 规则止步于数据止步处。</div>
+
+<h2>3 · 问题二: PR 算法 deep-dive — 钱花在哪里, 墙在哪里</h2>
+<h3>3.1 相位结构与成本画像</h3>
+<table>
+<tr><th>相位</th><th>做什么</th><th>成本画像 (实测归因)</th><th>剩余杠杆</th></tr>
+<tr><td>P1 gather</td><td>K 次 GMEM 散读 preIdx 值 → pmin/pmax/pmean (+SMEM 值缓存)</td><td>K 次随机访存, 与行长无关; p1b_cache 已免二次 gather</td><td class="mut">近饱和 (P1 self-loop 91k cell 证伪)</td></tr>
+<tr><td>P1b 直方图</td><td>256-bin over K gathered 值 → M rung 阈值</td><td>warp-0 并行抽取 (串行走 10-15µs 已消除)</td><td class="mut">≡ 精确分位数, 已饱和</td></tr>
+<tr><td>P2 ladder</td><td>单遍全 N 多阈值计数准入</td><td><b>issue-bound 81–84%</b> (op29 iter11), ~16 inst/候选带元素; L2 命中 (N≤262K 输入≤1MB≪L2)</td><td class="good">削指令 (块跳过/HBE) — 本提案主线 B</td></tr>
+<tr><td>P3 collect</td><td>ballot-free 两遍候选收集</td><td>over-collect 3.96×K@K512; 全 N 再扫</td><td class="good">块跳过直接受益; kFTarget 收紧 (史上 open)</td></tr>
+<tr><td>P4 rank-scatter</td><td>直方图→前缀→单遍 rank-scatter (+256-bin fine 递归)</td><td>barrier-bound (曾 14→7 对); 随 cand_count 缩放</td><td class="mut">算法已饱和 (fine-hist/interp 双证伪); 收益经由 P3 cand 减少间接到达</td></tr>
+<tr><td>R0-miss fallback</td><td>原味 secant 重搜</td><td>尾部主导: worst/all_ge 几何下曾 240µs 级</td><td class="good">H1/H2 直接替换 — 本提案主线 A</td></tr>
+</table>
+<h3>3.2 三面结构墙 (提案必须绕开, 不许再撞)</h3>
+<p>① <b>单 CTA 占用墙</b>: BS=1 grid=(1,1,1), 24.3% 占用是结构性而非寄存器性 (op8 NCU); 一切"单 CTA 内再优化小 N"皆 ≤4%。② <b>L2 一行式判据</b>: N≤262144 fp32 输入 ≤1MB ≪ 126.5MB L2, "省 HBM 流量/省 pass"类杠杆先验空转 (op14 NCU 一行证伪, op15 warm-L2 终审) —— 因此块跳过的论证必须走<b>省指令</b>而非省流量。③ <b>barrier 经济学</b>: 每对 barrier 必须买到 ≥(1-1/C) 全行遍级别的省工 (op21 iter14 教训), 固定小活的分布式化必输 (dist-P1/P4 证伪)。</p>
+
+<h2>4 · 问题三: 保留 GVR 骨架的进一步优化方案</h2>
+
+<h3>方案 A (P0 优先): HLS fallback 栈整体移植 — H1+H2+H3+H4</h3>
+<p>见 §2 表。综合预期 (按 op21 P0 iter15/iter16 已测组合): 65K–262K 段 real 轴 +9–28% (262K 应力 1.24–1.38×), worst/K2048 尾部 1.15→1.44×, 16-bit 全线; N&lt;65536 逐 bit 不变。<b>这是 PR 输赢地图区域③④的直接解, 且全部为已上硅技术的移植, 风险最低。</b></p>
+
+<h3>方案 B (P1 优先, 用户命题展开): block max-pool 投机跳块 — 把 P2/P3 从"全 N 扫描"变成"稀疏扫描"</h3>
+<p><b>动机链</b>: P2/P3 是 issue-bound 而非访存-bound (墙②③), 每候选带元素 ~16 inst; 真实 preIdx/top-K 空间上强聚簇 (positional 研究: 真实 seg_frac≈0.24 vs IID 0.52, gather footprint 集中) → 大 N 下<b>绝大多数块不含任何候选</b>, 对它们花 1-cmp/elem 甚至 16-inst/elem 都是纯浪费。跳块 = 把这部分指令整体归零。证伪史查重: 最近亲属是 <b>op29 streaming-HBE (已 ship, 同货币: 削指令)</b> 与 <b>op31 HBE-C (教训: 固定 prepass 税 N&lt;512K 必输 → 必须融合进已有遍, 不许加独立遍)</b>; "省流量"表述则会撞墙② —— 本方案全部收益记账在指令侧。</p>
+<table>
+<tr><th>变体</th><th>机制</th><th>正确性</th><th>预期与依据</th><th>风险</th></tr>
+<tr><td><b>B1 融合块最大值边带</b></td><td>P2 ladder 计数遍本来就读全 N —— 顺路为每 tile (512–1024 元素) 记录"tile-max 越过的最高 rung 编号" (u8, 262K/512=512B SMEM)。P3 collect 按选定阈值<b>跳过 rung-class 低于阈值的整 tile</b> (不读不比)</td><td class="good">精确 — tile-max 是本步真值, 跳过判据保守 (max&lt;thr ⇒ 块内无候选)</td><td>P3 从全 N 扫描 → 仅候选覆盖块; 真实数据大 N 下候选块占比经验上 ≪ 25% (聚簇性) → P3 期望省 ≥60% 指令; 参照 op29 同货币收益 1.33–1.75×@65K–262K</td><td>P2 每 tile 增 ~2 inst + 1 SMEM 写; 边带 SMEM 与 P4 hist 复用 (P1b 先例); <b>N-gate ≥65536</b> (op31 固定税教训)</td></tr>
+<tr><td><b>B2 fallback 重扫描跳块</b></td><td>R0-miss/falsi 的每次 recount 遍同样查 B1 边带: rung-class 记录的是分级信息, 新阈值若仍落在某 rung 区间内, 低类块照跳</td><td class="good">精确 (同 B1 保守判据, 以 rung 下界比较)</td><td>fallback 是尾部主价格 (worst 240µs 级) — 与 H1/H2 乘性叠加; dist-msc 的 slice 遍同样可跳</td><td>rung 粒度粗于任意新阈值 → 跳过率打折; 需 host-replay 先测覆盖分布 (iter0 纪律)</td></tr>
+<tr><td><b>B3 跨步投机跳块 (真"投机")</b></td><td>把上一 decode step 的 tile rung-class 持久化到侧缓冲 (per-layer [nTiles] u8); 本步 P2 <b>先只扫"上步高类 + preIdx 覆盖"的块</b>做 ladder 计数, 计数判据 cnt≥K 通过则 P3 同域收集; 未过 → 全扫兜底 (= 现有 fallback 形态)</td><td class="warn">投机+验证: 计数判据只保证"够 K 个", 不保证跳过块中无更大新值 — <b>精确性要求兜底触发条件包含 value-level 检查</b> (选出的第 K 值 ≥ 全局 rung-0 计数所隐含下界), 设计期必须过对抗 gate (op21 iter11 0/72 教训)</td><td>时间相干性依据: logits AR(1) lag-1 ρ≈0.44–0.47, V-collapse 每 15–18 步 (HLS assumption check) → 期望 ~85% 步投机成功, 失败步价格=一次全扫 (≈现 fallback); 上限 = P2 也变稀疏 (B1 只稀疏 P3)</td><td class="bad">需侧张量 → API/调用面改动 (与 HLS Step 3 同一障碍, 曾因此推迟); V-collapse 全层同步 → 失败步聚簇; <b>建议列为 B1/B2 落地后的第二梯队</b>, 且先做 host replay 测投机命中率</td></tr>
+</table>
+<div class="box go"><b>B 方案落地路径 (iter0 先测不建纪律)</b>: ① host replay 用真实捕获统计 tile 候选覆盖率与 rung-class 分布 (预算: 半天, 直接给出 B1 理论上限); ② clock64 相位确认 P3 份额 (仅归因用); ③ B1 kernel (subclass/flag, vendored 不动) → 对抗+真实双轨 gate → nsys ×3 锚定判决; ④ B2 搭车; ⑤ B3 单独立项。判据: worst/real/best 三轴 [见 ship 纪律], 任何单轴 &gt;5% 回退即 N-gate 收紧。</div>
+
+<h3>方案 C (P1, 与 B 合流): op29 streaming-HBE 正式移植入 PR 血统</h3>
+<p>op29 iter12 已在 op-bench ship: 64×64 分块 coalesced 采样 → 单列 A (rank 2×rS_K) → <b>1-cmp/elem 融合 collect</b> → cnt_a≥K 判据 → miss 回退 stock; 守卫 N≥65536 全 K; <b>262K 1.62–1.75× / 131K 1.33–1.48× / 65K 1.03–1.13×</b>, 全部在部署包络 (N≤256K) 内。它与 B1 是同一思想的两种粒度 (HBE=采样列消元, B1=块级消元), 建议合流为一个战役: 先移植 HBE (数字已证), B1 作为其上的增量 A/B。注意 op31 的反例边界: cluster 版 HBE-C 在包络内 wash-to-loss — <b>只移植 op29 的单 CTA streaming 形态</b>。</p>
+
+<h3>方案 D (P2, 诚实定界): BS=1 小 N 区域①②</h3>
+<p>op34 已双重锁死"GVR 骨架在 BS=1 小 N 追平 sglang"整体不可行 (oracle 多 CTA collect-only ≈ 持平, 无 rank 尾部余量)。保骨架下仅存两个未跑杠杆: ① <b>intra-CTA warp 流水线</b> (证伪史标注"最深未触杠杆", Q3'/Q4' 从未实测 — 占用墙是结构性的, 但单 CTA 内的 ILP/相位重叠没试过); ② launch 微调 (OPT_CAMPAIGN cs4-nt512 ~2.2%)。预期天花板低 (≤10%), 列为机会性任务; 区域①②的战略答案是<b>接受 + 靠正确性叙事</b> (sglang_v2 条件精确, §8.1) 而非硬追。</p>
+
+<h3>优先级与预期综合</h3>
+<table>
+<tr><th>优先</th><th>方案</th><th>目标区域</th><th>预期 (锚定已测数字)</th><th>成本</th><th>风险</th></tr>
+<tr><td>P0</td><td>A: HLS 栈移植 (H1–H4)</td><td>③④ + worst 尾部</td><td>65–262K real +9–28%; worst K2048 1.44×; 16-bit 差距 1.2–1.3×→~1.0</td><td>~1 战役 (全部已上硅, 纯移植)</td><td>低 (N-gate + 编译键门控)</td></tr>
+<tr><td>P1</td><td>C→B1→B2: HBE 移植 + 块跳过</td><td>②③④ 大 N 段 + fallback 尾部</td><td>HBE 已证 1.33–1.75×@65–262K; B1 在其上增量 (host replay 定上限)</td><td>~1.5 战役</td><td>中 (SMEM 预算 / 覆盖率假设需 iter0 验证)</td></tr>
+<tr><td>P2</td><td>B3: 跨步投机跳块</td><td>②③ P2 遍本身</td><td>投机成功步 P2 亦稀疏; 期望命中 ~85% (AR(1) 依据)</td><td>~1 战役 + API 改动</td><td class="bad">高 (侧张量 API; 对抗 gate; V-collapse 聚簇)</td></tr>
+<tr><td>P2</td><td>D: warp 流水线 + launch 微调</td><td>①②</td><td>≤10% (机会性)</td><td>~0.5 战役</td><td>低 (但期望低)</td></tr>
+</table>
+
+<h2>5 · Ship 纪律 (从复盘固化, 不可省)</h2>
+<p>① exactness 三轨前置 gate: synth + 真实捕获 + 对抗样本 (uniform/全等值/fp16 碰撞块 — §8.1–8.3 同套 battery 直接复用); 16-bit tie 平台契约 kC≥5K 全 gate。② 判决 = 单卡同进程配对 A/B + nsys ×3 中位 + 锚漂移分位数门 (per-batch p95≤1.15); 三轴 [worst, real, best] 全报, 绝不单轴。③ cold-L2 canonical; warm-L2 A/B 作"省流量类"一票否决器 (B 方案自证省指令即须 warm-L2 下仍赢)。④ 代码质量是货币: 新机器一律编译键门控 (N/K/dtype dispatch), enable_r0=False 字节等同契约不破。⑤ 禁 hit-rate 推理时 dispatch (不可知); 禁数据依赖 dispatch (op27 用户约束)。⑥ 每 iter commit + 证伪即回写台账。</p>
+
+<p class="mut">附: 本提案引用的全部数字可溯源 — op26 REPORT §7/§8 (rival_long.csv), op22 op22rr_{seqlen,bs}_data.csv, op21_gvr_prod/ITERATIONS.md iter13–16, op27_hls_allge_probe/, op29_gvr_hbe/RUNG*_RESULTS.md, op23_op21_bounds/, sglv2_correctness/ (正确性 battery)。</p>
+</div>
+
+<!-- ================================================================ EN -->
+<div class="lang-en">
+<h1>GVR Next-Step Optimization Proposal (GVR skeleton preserved, post-PR #16457)</h1>
+<p class="mut">Grounding: op26 REPORT §7/§8 full rival grid (12,628 measured cells) · op22 arena (op22rr grids, op27_hls vs op26_r0auto per-cell) · op21 HLS three-step silicon ledger · op29/op31 HBE campaigns · RETROSPECTIVE.md · the falsification ledger (12+2 negative results). Every proposal below was checked against the falsification history first.</p>
+
+<div>
+<span class="kpi"><b>1.23×</b>PR deficit vs sglang_v2, geomean (real fp32, 616 cells)</span>
+<span class="kpi"><b>1.2–1.3×</b>PR 16-bit deficit vs radix/FlashInfer (seqlen BS=1)</span>
+<span class="kpi"><b>1.41×</b>op27_hls advantage over op26_r0auto at 1M/BS=1 fp32</span>
+<span class="kpi"><b>0.82–0.86</b>op27_hls DEFICIT at small N 4–32K</span>
+<span class="kpi"><b>1.33–1.75×</b>op29 HBE shipped gain at 65K–262K (in-envelope)</span>
+</div>
+
+<h2>1 · Problem statement: the PR's win/loss map</h2>
+<p>PR #16457 (R0 histogram-ladder + rank-scatter P4 + launch/pick_config) is already among the strongest in-tree GVR forms (§7: synth PR/base 1.148, real 1.309, flash-512k undershoot repaired). Residual deficits vs external rivals concentrate in four regions (§8, after the full-ISL backfill):</p>
+<table>
+<tr><th>Region</th><th>Magnitude (t(pr)/t(rival))</th><th>Mechanism</th><th>Proven structural wall?</th></tr>
+<tr><td>① BS=1 × short-mid ISL (4k–32k), vs sglang_v2</td><td class="bad">1.4–2.0×</td><td>latency-bound; single-CTA occupancy wall 24.3% (1/148 SMs); sglang's 8-CTA MLP single pass</td><td>op34 double-locked (oracle multi-CTA collect-only ≈ sglang parity, no room for the rank tail); op32 NCU: BS=1 short rows dram 0.06% / issue 15%</td></tr>
+<tr><td>② synth small N (16K), vs sglang_v2</td><td class="bad">1.4–1.6×</td><td>same as ① + fixed phase-chain latency (op20 small-N wall)</td><td>partially</td></tr>
+<tr><td>③ 16-bit all dtypes, vs radix/FlashInfer</td><td class="bad">1.2–1.3×</td><td>halved candidate bytes speed up full-scan rivals; GVR's compressed path bytes unchanged</td><td>no — op21 iter9 native-16-bit compares proven and shipped in the op-bench lineage</td></tr>
+<tr><td>④ BS≥256 × ISL≥512k, vs sglang_v2</td><td class="bad">1.1–1.4×</td><td>throughput regime; sglang strong at both BS ends</td><td>no — §7 launch-shape fix closed the big-BS harness artifact; the rest is a real gap</td></tr>
+</table>
+<p><b>Defensive assets</b> (no action needed): the mid-BS valley (BS 8–64 × ISL≥128k) where PR beats sglang up to 2.2×; fp32 BS=1 already slightly ahead of radix (0.98) / FlashInfer (0.96); and the correctness moat — GVR is unconditionally exact while sglang_v2 is only conditionally exact (§8.1).</p>
+<p><b>Ceiling reference</b> (op23 deterministic bounds): vs Radix UB=0.851 / real=0.599 / LB_eff=0.365 — further hint-utilization tuning has limited headroom; structural gains must come from <b>cutting per-element instructions</b> and the <b>tail fallback price</b> — exactly this proposal's two main lines.</p>
+
+<h2>2 · Q1: can op21 ms_auto (HLS-op27) core ideas further improve the PR?</h2>
+<p><b>Yes — but only N-gated. HLS solves the large-N tail and 16-bit, not small N.</b> op22rr same-bundle per-cell measurement (t(op26_r0auto)/t(op27_hls), &gt;1 = op27 faster):</p>
+<table>
+<tr><th>axis</th><th>4–32K</th><th>65–131K</th><th>262K</th><th>512K</th><th>1M</th><th>16-bit seqlen gm</th><th>BS-sweep gm</th></tr>
+<tr><td>fp32 BS=1 (seqlen)</td><td class="bad">0.82–0.86</td><td>1.00–1.02</td><td class="good">1.12</td><td class="good">1.14</td><td class="good">1.41</td><td class="good">1.03–1.15 (peak 2.09 bf16@1M)</td><td class="bad">0.88–0.98</td></tr>
+</table>
+<p>The four core HLS-op27 techniques and their portability into the PR (silicon-ledger numbers):</p>
+<table>
+<tr><th>#</th><th>Technique</th><th>Proven silicon gain (op-bench lineage)</th><th>Port verdict</th></tr>
+<tr><td>H1</td><td><b>log-count regula-falsi fallback</b> (on R0-miss, interpolate in log space from the ladder's known bracket counts instead of blind secant)</td><td>iter13: best gm 1.265, K2048/1M/BS1 <b>2.105×</b> (244.7→116.3µs); α silicon-invariant (0.2)</td><td class="good">GO — the PR's R0-miss fallback is plain secant today; H1 touches only the fallback path, fast path byte-identical, compatible with the "enable_r0=False ≡ base" contract</td></tr>
+<tr><td>H2</td><td><b>distributed msc fallback</b> (cluster slice passes + count-merge + push-collect)</td><td>iter14+16 (after the code diet): 65K–262K un-gated → best 1.279 / worst 1.253 / real 1.091; 262K stress 1.24–1.38×; 1M 1.7–2.05×</td><td class="good">GO (gate N≥65536) — MUST use the iter16 phase-machine single-call-site form, else the 4–5.5% inlining code-mass tax returns; gate by compile key, not runtime branch</td></tr>
+<tr><td>H3</td><td><b>K2048 tail ladder</b> (0.75, 0.45, 0.048)</td><td>op27: worst K2048 vs base 1.15→1.44×, real/best bit-identical</td><td class="good">GO — PR default qfracs=(0.85,0.35); adding the K2048 tail column is a dispatch-key-level change (per-K qfracs), precedented</td></tr>
+<tr><td>H4</td><td><b>native 16-bit compares</b> (P2/P3 without fp32 upconvert)</td><td>op21 iter9 shipped (op-bench); P0 iter15: 16-bit AMPLIFIES the HLS advantage (o/s bf16 2.040)</td><td class="good">GO — directly targets region ③; note the 16-bit tie-plateau contract kC≥5K must be fully gated (smoke tests cannot catch it)</td></tr>
+</table>
+<div class="box hold"><b>Port red line (from op27/op22 data):</b> ms_auto's small-N (4–32K) machinery tax of 15–25% and BS-sweep gm&lt;1 mean the HLS machinery must NOT unconditionally replace the PR fast path — the correct form is <b>PR skeleton + H1..H4 as N/K/dtype compile-key-gated increments</b>, with N&lt;65536 byte-identical to today's PR (the op21 iter14 N-gate discipline). op22 §10 v4cap additionally shows op27 ms_auto dispatch has 7–54% regret on real decode captures — dispatch rules stop where the data stops.</div>
+
+<h2>3 · Q2: PR algorithm deep-dive — where the money goes, where the walls are</h2>
+<h3>3.1 Phase structure and cost profile</h3>
+<table>
+<tr><th>Phase</th><th>What</th><th>Cost profile (measured attribution)</th><th>Remaining lever</th></tr>
+<tr><td>P1 gather</td><td>K random GMEM reads of preIdx values → pmin/pmax/pmean (+SMEM value cache)</td><td>K random accesses, row-length independent</td><td class="mut">saturated (P1 self-loop falsified on 91k cells)</td></tr>
+<tr><td>P1b histogram</td><td>256 bins over the K gathered values → M rung thresholds</td><td>warp-0-parallel extraction (the 10–15µs serial walk already removed)</td><td class="mut">≡ exact quantiles, saturated</td></tr>
+<tr><td>P2 ladder</td><td>single full-N multi-threshold counting pass</td><td><b>issue-bound 81–84%</b> (op29 iter11), ~16 inst/candidate-band element; L2-resident (N≤262K input ≤1MB ≪ L2)</td><td class="good">cut instructions (block skip / HBE) — main line B</td></tr>
+<tr><td>P3 collect</td><td>ballot-free 2-pass candidate collection</td><td>over-collects 3.96×K@K512; rescans full N</td><td class="good">block skip pays directly; kFTarget tightening (historically open)</td></tr>
+<tr><td>P4 rank-scatter</td><td>hist→prefix→one-pass rank-and-scatter (+256-bin fine recursion)</td><td>barrier-bound (14→7 pairs); scales with cand_count</td><td class="mut">algorithm saturated (fine-hist & interp both falsified); gains arrive indirectly via smaller P3 cand</td></tr>
+<tr><td>R0-miss fallback</td><td>plain secant re-search</td><td>tail-dominant: worst/all_ge geometries once cost ~240µs</td><td class="good">replace with H1/H2 — main line A</td></tr>
+</table>
+<h3>3.2 Three structural walls (proposals must route around, not re-hit)</h3>
+<p>① <b>Single-CTA occupancy wall</b>: BS=1 grid=(1,1,1), 24.3% occupancy is structural not register-bound (op8 NCU); all "optimize small-N inside one CTA" levers ≤4%. ② <b>The L2 one-liner</b>: at N≤262144 fp32 the input is ≤1MB ≪ 126.5MB L2 — "save HBM traffic / save passes" levers are void a priori (op14 NCU one-line falsification, op15 warm-L2 verdict) — hence block skipping must be argued in <b>instructions saved</b>, never traffic. ③ <b>Barrier economics</b>: each barrier pair must buy ≥(1-1/C) of a full-row pass of saved work (op21 iter14 lesson); distributing fixed small work always loses (dist-P1/P4 falsified).</p>
+
+<h2>4 · Q3: further optimizations that keep the GVR skeleton</h2>
+
+<h3>Proposal A (P0): port the HLS fallback stack — H1+H2+H3+H4</h3>
+<p>See §2. Combined expectation (per measured op21 P0 iter15/iter16): 65K–262K real axis +9–28% (262K stress 1.24–1.38×), worst/K2048 tail 1.15→1.44×, 16-bit across the board; N&lt;65536 bit-identical. <b>This directly addresses regions ③④ with silicon-proven techniques only — lowest risk.</b></p>
+
+<h3>Proposal B (P1, the user's thesis developed): block max-pool + speculative block skip — turn P2/P3 from full-N scans into sparse scans</h3>
+<p><b>Motivation chain</b>: P2/P3 are issue-bound, not memory-bound (walls ②③), ~16 inst per candidate-band element; real preIdx/top-K are spatially clustered (positional study: real seg_frac≈0.24 vs IID 0.52) → at large N <b>most blocks contain zero candidates</b> — every instruction spent on them is waste. Block skip zeroes that work. Falsification-ledger check: nearest relatives are <b>op29 streaming-HBE (shipped; same currency: instruction cutting)</b> and <b>op31 HBE-C (lesson: a fixed pre-pass tax loses below N~512K → must FUSE into existing passes, never add a standalone pass)</b>; any "saves traffic" framing hits wall ② — all gains here are booked on the instruction side.</p>
+<table>
+<tr><th>Variant</th><th>Mechanism</th><th>Correctness</th><th>Expectation & grounding</th><th>Risk</th></tr>
+<tr><td><b>B1 fused block-max sideband</b></td><td>the P2 ladder pass already reads all N — record per tile (512–1024 elems) the highest rung its max crosses (u8; 262K/512=512B SMEM). P3 then <b>skips whole tiles whose rung-class is below the chosen threshold</b> (no load, no compare)</td><td class="good">exact — tile max is current-step ground truth; skip criterion is conservative (max&lt;thr ⇒ no candidate inside)</td><td>P3: full-N scan → candidate-covered tiles only; on real data at large N covered tiles are empirically ≪25% (clustering) → ≥60% of P3 instructions saved; reference: op29's same-currency 1.33–1.75× @65K–262K</td><td>~2 inst + 1 SMEM write per tile in P2; sideband shares SMEM with the P4 hist (P1b precedent); <b>gate N≥65536</b> (op31 fixed-tax lesson)</td></tr>
+<tr><td><b>B2 fallback rescan skip</b></td><td>every R0-miss/falsi recount pass also consults the B1 sideband; blocks below the bracketing rung stay skipped</td><td class="good">exact (same conservative criterion, compared at rung lower bounds)</td><td>the fallback IS the tail price (~240µs class) — multiplies with H1/H2; dist-msc slice passes skip too</td><td>rung granularity coarser than arbitrary new thresholds → discounted skip rate; host-replay the coverage first (iter0 discipline)</td></tr>
+<tr><td><b>B3 cross-step speculative skip (truly "speculative")</b></td><td>persist the previous decode step's tile rung-classes in a side buffer (per-layer [nTiles] u8); this step's P2 <b>first scans only "previously-hot + preIdx-covered" tiles</b>; if the count criterion cnt≥K passes, P3 collects in the same domain; else full-scan fallback</td><td class="warn">speculate + verify: the count criterion only guarantees "at least K", not that skipped tiles hold no larger new value — <b>exactness requires the verify condition to include a value-level check</b>; must pass the adversarial gate at design time (op21 iter11 0/72 lesson)</td><td>temporal-coherence grounding: logits AR(1) lag-1 ρ≈0.44–0.47, V-collapses every 15–18 steps (HLS assumption check) → expect ~85% speculation hit; a miss costs one full scan (≈ today's fallback). Upside: P2 itself becomes sparse (B1 only sparsifies P3)</td><td class="bad">needs a side tensor → API/call-surface change (the same obstacle that deferred HLS Step 3); V-collapses are all-layer-synchronized → failure steps cluster; <b>second wave after B1/B2</b>, with a host-replay speculation-hit study first</td></tr>
+</table>
+<div class="box go"><b>Line-B execution path (measure-before-build)</b>: ① host replay on real captures for tile candidate coverage & rung-class distributions (half a day; yields B1's theoretical ceiling); ② clock64 phase split for P3 share (attribution only); ③ B1 kernel (subclass/flag; vendored untouched) → adversarial+real dual gate → nsys ×3 anchored verdict; ④ B2 rides along; ⑤ B3 as its own campaign. Verdict rule: report all three axes [worst, real, best]; any axis regressing &gt;5% tightens the N-gate.</div>
+
+<h3>Proposal C (P1, merge with B): port op29 streaming-HBE into the PR lineage</h3>
+<p>op29 iter12 already shipped in the op-bench: 64×64-block coalesced sampling → single column A (rank 2×rS_K) → <b>1-cmp/elem fused collect</b> → cnt_a≥K criterion → miss falls back to stock; guard N≥65536 all K; <b>262K 1.62–1.75× / 131K 1.33–1.48× / 65K 1.03–1.13×</b> — all inside the deployment envelope (N≤256K). HBE and B1 are the same idea at two granularities (HBE = sampled-column elimination, B1 = block-level elimination); run them as one campaign: port HBE first (numbers proven), then A/B B1 on top. Respect the op31 boundary: the cluster HBE-C variant washes-to-loss in-envelope — <b>port only op29's single-CTA streaming form</b>.</p>
+
+<h3>Proposal D (P2, honest scoping): BS=1 small-N regions ①②</h3>
+<p>op34 double-locked "GVR skeleton reaching sglang parity at BS=1 small N" as infeasible. Within the skeleton, exactly two untried levers remain: ① <b>intra-CTA warp pipelining</b> (the ledger's "deepest untouched lever", Q3'/Q4' never actually run); ② launch micro-tuning (cs4-nt512, ~2.2%). Ceiling is low (≤10%) — opportunistic. The strategic answer for ①② is <b>accept + the correctness narrative</b> (sglang_v2 is only conditionally exact, §8.1), not a chase.</p>
+
+<h3>Priority & expectation matrix</h3>
+<table>
+<tr><th>Priority</th><th>Proposal</th><th>Target region</th><th>Expectation (anchored to measured numbers)</th><th>Cost</th><th>Risk</th></tr>
+<tr><td>P0</td><td>A: HLS stack port (H1–H4)</td><td>③④ + worst tail</td><td>65–262K real +9–28%; worst K2048 1.44×; 16-bit gap 1.2–1.3× → ~1.0</td><td>~1 campaign (pure port)</td><td>low (N-gate + compile-key gating)</td></tr>
+<tr><td>P1</td><td>C→B1→B2: HBE port + block skip</td><td>②③④ large-N + fallback tail</td><td>HBE proven 1.33–1.75× @65–262K; B1 incremental on top (host replay sets ceiling)</td><td>~1.5 campaigns</td><td>medium (SMEM budget / coverage assumption needs iter0)</td></tr>
+<tr><td>P2</td><td>B3: cross-step speculative skip</td><td>②③ (P2 pass itself)</td><td>sparse P2 on ~85% of steps (AR(1) grounding)</td><td>~1 campaign + API change</td><td class="bad">high (side tensor API; adversarial gate; V-collapse clustering)</td></tr>
+<tr><td>P2</td><td>D: warp pipelining + launch tuning</td><td>①②</td><td>≤10% (opportunistic)</td><td>~0.5 campaign</td><td>low (but low expectation)</td></tr>
+</table>
+
+<h2>5 · Ship discipline (distilled from the retrospective; non-negotiable)</h2>
+<p>① Three-track exactness gates up front: synth + real captures + adversarial samples (reuse the §8.1–8.3 battery verbatim: uniform / all-equal / fp16-collision); the 16-bit tie-plateau contract kC≥5K fully gated. ② Verdict = single-GPU same-process paired A/B + nsys ×3 median + anchor-drift quantile gate (per-batch p95≤1.15); always report all three axes [worst, real, best]. ③ cold-L2 canonical; warm-L2 A/B as the one-shot veto for any traffic-flavored claim (line B must still win warm to prove it saves instructions). ④ Code mass is currency: all new machinery compile-key gated (N/K/dtype); the enable_r0=False byte-identity contract stays intact. ⑤ Never dispatch on hit-rate (unknowable at inference); no data-dependent dispatch (op27 user constraint). ⑥ Commit per iter; falsifications written back to the ledger immediately.</p>
+
+<p class="mut">Appendix: every number above is traceable — op26 REPORT §7/§8 (rival_long.csv), op22 op22rr_{seqlen,bs}_data.csv, op21_gvr_prod/ITERATIONS.md iter13–16, op27_hls_allge_probe/, op29_gvr_hbe/RUNG*_RESULTS.md, op23_op21_bounds/, sglv2_correctness/ (correctness battery).</p>
+</div>
+
+</div>
+</body>
+</html>
