@@ -49,5 +49,42 @@ headroom (`kMaxNumTie == kMaxTopK`).
   wrong top-K set into sparse attention. sglang_v2 must not be labeled "exact"
   for the K=2048 use case. GVR/radix arms are unconditionally exact.
 
-REPORT.html §8 note is injected by `update_report_sglv2_note.py` (idempotent,
-marker-delimited; REPORT.html itself stays local-only / untracked).
+## FlashInfer top_k under the same battery (2026-07-16, umbriel-b200-017)
+
+`fi_topk_correctness.py` applies the identical battery to flashinfer 0.6.11
+(the §8 `flashinfer_topk` arm; B200 default path = `fast_topk_clusters_exact`,
+8-bit-radix multi-phase refinement over the FULL fp32 bits; `deterministic=True`
+routes to the multi-CTA `radix_topk` path — both modes tested):
+
+1. Adversarial synth: uniform-[0,1) N=128K/1M × K∈{512,1024,2048} (the
+   sglang-killer), all-equal row (total tie), fp16-collision block (8192
+   fp32-distinct values inside one fp16 ulp straddling the K boundary — a
+   16-bit histogram structurally cannot separate them), fp32 + bf16. ALL exact.
+2. The sglang-FAILING real rows (v32 256k L52 steps 3/6/12, 128k L52 step 4)
+   + below-cap controls, both modes. ALL exact.
+3. Broad real sweep: flash 21L×9ISL (K=512) + pro 30L×9ISL (K=1024) + v32
+   bench-layers×7ISL (K=2048), last step, batched. ALL exact.
+4. V3.2 full temporal grid: 58 layers × 15 steps × {128k,256k} = 1740 cells
+   (where sglang's overflow lives). 1740/1740 exact.
+
+**Total 2245/2245 exact.** Mechanism: no fixed tie cap — the per-phase global
+overflow buffer is sized `max_model_len // num_clusters` per cluster (whole
+row fits), so boundary ties are never silently dropped. Verdict: FlashInfer
+top_k is unconditionally exact on everything we can construct, including the
+exact rows/distributions that break sglang v2. Correctness ranking of external
+arms: FlashInfer = Radix = GVR (unconditional) > SGLang v2 (conditional).
+
+Env recipe for a fresh node: `pip install --no-deps --target /tmp/gvrval1/fi_raw
+flashinfer-python==0.6.11`, symlink ONLY the `flashinfer` package into
+`/tmp/gvrval1/fi_clean`, run with `PYTHONNOUSERSITE=1
+PYTHONPATH=/tmp/gvrval1/fi_clean` (container torch 2.12 wins).
+
+## Report injection
+
+REPORT.html §8.1 (sglang) + §8.2 (flashinfer) notes are injected by
+`update_report_sglv2_note.py` (idempotent, marker-delimited; REPORT.html itself
+stays local-only / untracked). `gen_report.py` now calls the injector after
+every full regen, so the block survives regeneration (an 07-16 regen had
+silently wiped the first injection — last-writer hazard). The §8 trend-bullet
+"every rival is exact" is qualified with a pointer to §8.1/§8.2 in both the
+gen_report.py template and (patched in place) the current REPORT.html.

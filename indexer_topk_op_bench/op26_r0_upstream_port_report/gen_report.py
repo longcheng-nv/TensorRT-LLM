@@ -878,7 +878,10 @@ the candidate-array bytes speeds up the memory-bound full scan, while GVR's comp
 <b>2026-07-16 refresh</b>: at the PR launch shapes (fp32-only 256-bit fixed) the 16-bit gap vs the <b>pr</b>
 arm narrows to ~1.20–1.30× (t(pr)/t(rival), seqlen BS=1), and at fp32 BS=1 the pr arm is now slightly
 <b>faster</b> than both Radix (0.98) and FlashInfer (0.96); SGLang v2's lead over pr is ~1.26×.</li>
-<li><b>Correctness:</b> every rival is exact vs <code>torch.topk</code> on all measured cells; refreshed GVR
+<li><b>Correctness:</b> every rival is exact vs <code>torch.topk</code> on all measured cells — but this
+holds only on the benchmark slice: <b>see §8.1/§8.2 below</b> (SGLang v2 is only <i>conditionally</i> exact and
+FAILS on real V3.2 K=2048 rows outside the slice; FlashInfer passed the same full adversarial + all-layer ×
+all-step battery 2245/2245). Refreshed GVR
 pr/op26 exact on all 2772 cells each (full-ISL BS grid) and GVR base exact on 2736/2772 — the 36 misses are
 ALL the known upstream-base real Flash-512k undershoot (hit≈0.06), now exposed across every dtype × BS by the
 full grid, and repaired by the R0 port (pr exact on all of them).</li>
@@ -902,7 +905,9 @@ ISL 分级（BS1024 比值 4k 处 0.92 → ≥64k 处 0.33–0.47);FlashInfer �
 <li><b>随 dtype（最显著）：</b>16-bit 下全扫描竞品明显反超 GVR——<b>Radix 从 1.06（fp32）→ 1.48（fp16）/1.52（bf16）</b>，
 <b>FlashInfer 1.07 → 1.45 / 1.38</b>（合成 seqlen BS=1）。候选数组字节减半加速了访存受限的全扫描,而 GVR 压缩 cuteDSL 路径几乎不动
 ——故 Radix/FlashInfer 在 fp16/bf16 上比 GVR op26 快约 1.5×。</li>
-<li><b>正确性：</b>所有竞品在全部实测 cell 上与 <code>torch.topk</code> 精确;GVR pr/op26 在全部 1122 cell 精确,
+<li><b>正确性：</b>所有竞品在全部实测 cell 上与 <code>torch.topk</code> 精确——但这仅在基准切片内成立:
+<b>见下方 §8.1/§8.2</b>(SGLang v2 仅<i>条件</i>精确,在切片外的真实 V3.2 K=2048 行上实测失败;FlashInfer 通过同一
+对抗 + 全层×全步完整测试 2245/2245)。GVR pr/op26 在全部 1122 cell 精确,
 GVR base 在 2736/2772 精确——36 处 miss 全部是已知的上游 base 真实 Flash-512k undershoot（hit≈0.06),
 全 ISL×BS 网格将其在每个 dtype×BS 上完整暴露,R0 移植全部修复（pr 在这些 cell 全 exact）;刷新后 GVR pr/op26
 各 2772 cell 全精确。<b>2026-07-16 复测</b>:PR launch 形状下（256-bit 仅 fp32）16-bit 对 <b>pr</b> 臂的差距
@@ -1339,6 +1344,12 @@ if(window.Plotly) drawAll(); else window.addEventListener('load',drawAll);
 """
 
 open(os.path.join(HERE, "REPORT.html"), "w").write(HTML)
+# Re-inject marker-delimited chapters that a full regen would otherwise wipe
+# (the git-checkout/last-writer hazard): §8.1/§8.2 correctness notes.
+import subprocess, sys
+_note = os.path.join(HERE, "sglv2_correctness", "update_report_sglv2_note.py")
+if os.path.exists(_note):
+    subprocess.run([sys.executable, _note], check=True)
 print(f"wrote REPORT.html  synth={len(synth)} cells  real={len(real)} cells")
 print(f"synth PR/base={syn_pvb:.3f} op26/PR={syn_pvo:.3f} | real PR/base={real_pvb:.3f} "
       f"(flash {real_pvb_flash:.3f} pro {real_pvb_pro:.3f}) PR-exact={real_exact}/{len(real)}")
