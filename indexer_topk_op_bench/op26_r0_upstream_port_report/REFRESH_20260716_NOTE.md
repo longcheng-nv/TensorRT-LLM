@@ -68,3 +68,23 @@ criterion: **hit ≲0.45 && large N → route secant** (BS handled by runner).
 Magnitude exceeds the prior disclosure envelope (PR body says synth worst min
 0.930 + real BS=1 24/25) — PR body known-limitation quantification pending
 user confirmation.
+
+### CORRECTION (2026-07-16, USER): guard must NOT dispatch on hit-rate
+Hit-rate is unknown at inference time (overlap of current top-K with previous —
+only computable after the fact). The "hit ≲0.45 && large N → secant" criterion
+above is NOT implementable as a host-side dispatch. Runtime-feasible designs:
+(a) in-kernel escape: R0 already counts seed admissions — bail to secant inside
+the kernel when the count signals a cold seed; (b) trailing-hit feedback: kernel
+emits its measured admission/hit counter, host uses the previous step's value as
+this step's predictor (temporal coherence). REPORT §7b wording updated to match.
+
+### Why the 512k rung does NOT show PR/base<1 (asked 2026-07-16)
+Saturated per-element cost (BS=1024, cs=1, fp32 flash): pr ns/elem trend
+0.0014–0.0018 at 256k/1M; at 512k (hit 0.057) pr = 0.0029 (~2x above trend) —
+the R0 cold-seed penalty IS present at 512k, even bigger than at 1M. It's
+invisible in the ratio because base is far sicker there: base = 0.0094 ns/elem
+(~6x above its own trend; 43us at BS=1 vs 19.6us at 1M despite half N) — the
+secant non-convergence + x36 undershoot regime that the PR repairs. At 1M base
+is healthy (on trend), so R0's extra scans surface as PR/base 0.71-0.79.
+Low hit alone is insufficient: 64k rung (hit 0.076, N=16k) shows neither
+pathology — the regression needs low-hit AND large N.

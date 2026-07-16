@@ -95,3 +95,21 @@ list (vs/pr < 0.98). REPORT new-chapter update pending sweep completion.
 ## v3 (occupancy fix): vseed column's per-thread counts REUSE the existing
 smem_ptcnt buffer -> zero smem growth. Bad cell 68.3 -> 56.9us (pr 54.5);
 flash-1M BS128 win intact (51.7us vs pr ~80). vsfull2 re-audit launched.
+
+## Full-envelope audit round 2 (v3, RE-RUN on umbriel-b200-049 2026-07-16 —
+## b200-072 became unreachable mid-sweep; env re-staged via setup_bs_env.sh +
+## vseed_v3.diff onto pristine snapshot; smoke reproduced round-1/2 numbers;
+## cross-node base anchor drift 049/072 med 1.001 p95 1.044 = clean)
+54 batches / 2772 cells, all-idle node, 0 batch errors.
+- vs/pr geomean 0.9963 (r1 v2: 0.9897); vs/base geomean 1.1343.
+- SEVERE (<0.90): 105 -> 16, now ONE coherent cluster: K1024 16-bit BS=128
+  large-N (262k-1M, 0.80-0.89; only 6 cells inside the N<=256K envelope, all
+  at the 262144 boundary) + 2x K2048 16-bit 1M BS256. Same residual 16-bit
+  mechanism flagged in round 1 (not fat-admission, not smem growth).
+- Envelope N<=256K: geomean 0.9960, min 0.890; outside: 0.9977, min 0.803.
+- EXACTNESS: vs fails = exactly the 12 known pre-existing pro/512k fp32
+  3e-6 boundary cells (pr: 0 fails); nothing new introduced.
+- flash-1M regression FIXED where diagnosed: fp32 BS128-1024 vs/base
+  1.02-1.03; 16-bit BS128 0.85-0.87 rising to 0.98-1.00 by BS1024.
+- Verdict: per-K hybrid vseed v3 holds the full envelope at ~0.4% mean tax
+  with the 16-bit BS128 large-N cluster as the single disclosed residual.

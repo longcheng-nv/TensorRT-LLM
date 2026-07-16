@@ -977,6 +977,25 @@ cold-L2, exactness-gated per cell. Every cell with vseed/PR &lt; 0.98 is listed 
 （base / PR / PR+vseed）:合成（op22 §env）seqlen+BS × K∈(512,1024,2048) × best/worst × 3 dtype,加真实
 （V4 Flash/Pro + V3.2）全 ISL seqlen+BS × 3 dtype——54 个 nsys 批次、8 卡、冷 L2、逐 cell 精确性门。
 所有 vseed/PR &lt; 0.98 的 cell 全部列出——绝不隐藏。</p></div>
+<div class="lang-en"><p class="mut"><b>What the audit itself caught (and how it was fixed).</b> Audit round 1
+found (a) a SEVERE perf tail concentrated in K2048/K1024 <b>16-bit big-BS</b> cells (down to 0.72× of PR,
+all cs1/T512/mb3 or T1024/mb1 configs) — root-caused to the extra per-thread count column (+2–4 KB SMEM)
+pushing high-occupancy 16-bit variants over an occupancy cliff (mb-override probe: 68.3→60.5 µs); fixed in
+<b>v3</b> by reusing the existing secant <code>smem_ptcnt</code> buffer for the vseed column — zero SMEM
+growth (bad cell 68.3→56.9 µs vs PR 54.5). And (b) <b>12 exactness fails, all pro/512k fp32</b> (hit 0.23):
+control-proven <b>pre-existing</b> — the pristine PR-head kernel with <code>qfracs=(0.85,)</code> fails
+identically (|miss|=1: picks −0.288984 instead of −0.288981, Δ=3e-6, below the P4 rank-scatter one-level
+fine-recursion resolution ≈ range/1024² ≈ 5e-6; same class as the known op22 §9 2.7e-6 boundary defect).
+vseed only shifts which value pair straddles the bin — the defect needs a second recursion level
+(separate follow-up), it is NOT introduced by this change. The table below is the v3 re-audit.</p></div>
+<div class="lang-zh"><p class="mut"><b>审计自身抓到的问题(及修复)。</b>第一轮审计发现:(a) 严重回退尾集中在
+K2048/K1024 的 <b>16-bit 大 BS</b> cell(最低到 PR 的 0.72×,全部是 cs1/T512/mb3 或 T1024/mb1 配置)——根因是
+多出的 per-thread 计数列(+2–4 KB SMEM)把高占用 16-bit 变体挤过 occupancy 悬崖(mb 降档探针:68.3→60.5 µs);
+<b>v3</b> 修复:vseed 列复用 secant 已有的 <code>smem_ptcnt</code> 缓冲——SMEM 零增长(坏 cell 68.3→56.9 µs,
+PR 54.5)。(b) <b>12 个精确性失败,全部 pro/512k fp32</b>(hit 0.23):对照证明为<b>预存在缺陷</b>——原始 PR-head
+kernel 配 <code>qfracs=(0.85,)</code> 同样失败(|miss|=1:取 −0.288984 而非 −0.288981,Δ=3e-6,低于 P4
+rank-scatter 单层细递归分辨率 ≈ range/1024² ≈ 5e-6;与已知 op22 §9 的 2.7e-6 边界缺陷同类)。vseed 只是改变了
+哪对值跨在 bin 边界上——缺陷需第二层递归修复(独立跟进),非本改动引入。下表为 v3 重审结果。</p></div>
 {VS_FULL_KPI}
 {VS_FULL_REG}
 {VS_FULL_WIN}
