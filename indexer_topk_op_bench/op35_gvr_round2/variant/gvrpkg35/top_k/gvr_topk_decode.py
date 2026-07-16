@@ -267,12 +267,25 @@ class GvrTopKKernel:
         enable_p4_rank_scatter_exact: Optional[bool] = None,
         p4_exact_tail: Optional[bool] = None,
         p3_oracle_frac: Optional[float] = None,
+        floor_oracle: bool = False,
+        p4_oracle_skip: bool = False,
+        kC_override: Optional[int] = None,
+        kNumBins_override: Optional[int] = None,
+        kFTarget_override: Optional[int] = None,
     ):
+        # p4_oracle_skip: run P1..P3 normally, then skip cluster handoff #2 +
+        # Phase 4 + writeback (identity emit instead). Output WRONG;
+        # timing-only diagnostic sizing the [handoff2+P4+writeback] block.
+        self.p4_oracle_skip = bool(p4_oracle_skip)
         # --- op35 DIAGNOSTIC ONLY: p3_oracle_frac scales Phase 3's collect
         # scan bound to frac*slice (output is WRONG for frac<1). Used to
         # measure the P3-scan share of kernel time via ablation A/B.
-        # None (default) = byte-identical to the PR baseline.
+        # floor_oracle: force the identity-output early path right after
+        # Phase 1 (skips P1b/P2/P3/P4 entirely; output WRONG) — measures the
+        # irreducible floor = launch + P1 gather + syncs + writeback.
+        # None/False (default) = byte-identical to the PR baseline.
         self.p3_oracle_frac = p3_oracle_frac
+        self.floor_oracle = bool(floor_oracle)
         # cluster_size: number of CTAs cooperating per row. 1 = single-CTA
         # path; 2/4 = thread-block cluster with DSMEM aggregation. Capped at
         # 16 by B200's per-GPC SM count.
@@ -374,6 +387,13 @@ class GvrTopKKernel:
         self.kC = params.kC
         self.kNumBins = params.kNumBins
         self.kFTarget = params.kFTarget
+        # op35 experiment overrides (None = stock). Compile-key level.
+        if kC_override is not None:
+            self.kC = int(kC_override)
+        if kNumBins_override is not None:
+            self.kNumBins = int(kNumBins_override)
+        if kFTarget_override is not None:
+            self.kFTarget = int(kFTarget_override)
 
         # Kernel-wide constants.
         # self.MAX_REFINE_ITERS: Phase-2 secant refine iteration cap.
@@ -3310,7 +3330,20 @@ class GvrTopKKernel:
         # identical), skip Phase 2-4 and emit identity output instead.
         v_lo = s_thr[1]
         v_hi = s_thr[2]
-        if v_hi <= cutlass.Float32(self.NEG_FLT_MAX) or v_lo >= v_hi:
+        if cutlass.const_expr(self.floor_oracle):
+            # op35 diagnostic floor: skip P1b/P2/P3/P4, PARALLEL identity emit
+            # (leader CTA only at cs>1). Output WRONG; timing-only.
+            do_emit = True
+            if cutlass.const_expr(cluster_size > 1):
+                do_emit = is_leader
+            if do_emit:
+                top_k_fo = cutlass.const_expr(self.top_k)
+                emit_n = cutlass.Int32(top_k_fo) if cutlass.Int32(top_k_fo) < N else N
+                je = cutlass.Int32(tidx)
+                while je < emit_n:
+                    output_indices_row[je] = je
+                    je = je + cutlass.Int32(cutlass.const_expr(self.num_threads))
+        elif v_hi <= cutlass.Float32(self.NEG_FLT_MAX) or v_lo >= v_hi:
             if cutlass.const_expr(cluster_size == 1):
                 if tidx == 0:
                     top_k = cutlass.const_expr(self.top_k)
@@ -3640,7 +3673,7 @@ class GvrTopKKernel:
 
             # Cluster handoff #2: leader's DSMEM gather of peer
             # smem_keys/smem_vals. Skipped at do_cluster_sync=False.
-            if cutlass.const_expr(cluster_size > 1):
+            if cutlass.const_expr(cluster_size > 1 and not self.p4_oracle_skip):
                 if do_cluster_sync:
                     cute.arch.cluster_arrive()
                     cute.arch.cluster_wait()
@@ -3652,7 +3685,19 @@ class GvrTopKKernel:
             # across the runtime ``if is_leader:`` branch in cs>1 mode
             # (DSL forbids first-assigning a variable inside a dynamic if).
             cand_count_p4 = cutlass.Int32(0)
-            if cutlass.const_expr(cluster_size == 1):
+            if cutlass.const_expr(self.p4_oracle_skip):
+                # op35 diagnostic: identity emit instead of handoff2+P4.
+                do_e2 = True
+                if cutlass.const_expr(cluster_size > 1):
+                    do_e2 = is_leader
+                if do_e2:
+                    top_k_o2 = cutlass.const_expr(self.top_k)
+                    emit_n2 = cutlass.Int32(top_k_o2) if cutlass.Int32(top_k_o2) < N else N
+                    je2 = cutlass.Int32(tidx)
+                    while je2 < emit_n2:
+                        output_indices_row[je2] = je2
+                        je2 = je2 + cutlass.Int32(cutlass.const_expr(self.num_threads))
+            elif cutlass.const_expr(cluster_size == 1):
                 # cs=1: the single CTA per row IS the leader.
                 cand_count_p4 = min(s_iscalars[0], cutlass.Int32(self.kC))
                 if cutlass.const_expr(self.enable_p4_rank_scatter):
