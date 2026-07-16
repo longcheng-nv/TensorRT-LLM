@@ -55,3 +55,16 @@ nsys-reps/sqlite live in /tmp only (env-token rule).
 - pro/v32 residual (op26 +2%/+5% at matched large-N): candidate levers =
   op26's K2048 log-interp P2 (see cs8_nsys: op26 mc +13% at K2048) — possible
   PR#2-era kernel port.
+
+## Cold-hit large-BS regression (found in the full-ISL grid, disclosed in §7b)
+Flash 1024k (N=262127, hit≈0.42 = V4 hit-rate valley): pr AND op26 fall to
+**0.68–0.79× of base** at BS≥128/cs=1 (fp32 mild 0.98 at BS≤64; bf16/fp16
+affected at ALL BS 0.76–0.84); v32 256k same shape (0.75–0.87); consistent
+with synth worst large-N 16-bit (0.83–0.90). Both R0 implementations regress
+together, all exact → algorithmic R0-ladder low-hit regime (admission miss →
+extra full-N fallback scans, unmasked once cs=1/throughput-bound), NOT a port
+or config artifact. This is the PR#2 dispatch-guard target and pins its
+criterion: **hit ≲0.45 && large N → route secant** (BS handled by runner).
+Magnitude exceeds the prior disclosure envelope (PR body says synth worst min
+0.930 + real BS=1 24/25) — PR body known-limitation quantification pending
+user confirmation.
