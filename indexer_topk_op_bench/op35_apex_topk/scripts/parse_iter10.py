@@ -17,18 +17,32 @@ rows = db.execute(
 CASES = [(1, 131072), (1, 262144), (1, 1048576), (32, 262144), (256, 262144), (1024, 65536)]
 FRONTIER = {(1, 131072): 11.6, (1, 262144): 15.7, (1, 1048576): 20.6,
             (32, 262144): 24.0, (256, 262144): 105.7, (1024, 65536): 93.0}
-# stream: 1 warm + 30; apex: 1 warm + 30, per cell, in order
-ks = [(n, (e - s) / 1e3) for n, s, e in rows
-      if "stream_reduce" in n or "apex" in n]
+# stream: 1 warm + 30; apex: 1 warm + 30 GROUPS (fused=1 kernel, split=3), in order
+ks = [(n, s, e) for n, s, e in rows if "stream_reduce" in n or "apex" in n]
 i = 0
 print(f"{'cell':>16} {'read':>8} {'apex':>8} {'tax':>6} {'frontier':>9} {'F/apex':>7}")
 for BS, N in CASES:
-    grp = {"k_stream_reduce": [], "k_apex_topk": []}
-    while i < len(ks) and len(grp["k_apex_topk"]) < 31:
-        name = "k_apex_topk" if "apex" in ks[i][0] else "k_stream_reduce"
-        grp[name].append(ks[i][1])
+    reads, groups = [], []
+    cur = None
+    while i < len(ks) and len(groups) < 31:
+        n, s0, e0 = ks[i]
+        if "stream_reduce" in n:
+            reads.append((e0 - s0) / 1e3)
+        elif "thr" in n or "fused" in n:  # group start
+            if cur:
+                groups.append(cur)
+            cur = [s0, e0]
+            if "fused" in n:
+                groups.append(cur)
+                cur = None
+        else:  # filter / tail continue the group
+            cur[1] = e0
+            if "tail" in n:
+                groups.append(cur)
+                cur = None
         i += 1
-    r = st.median(grp["k_stream_reduce"][1:])
-    ap = st.median(grp["k_apex_topk"][1:])
+    spans = [(e0 - s0) / 1e3 for s0, e0 in groups]
+    r = st.median(reads[1:])
+    ap = st.median(spans[1:])
     f = FRONTIER[(BS, N)]
     print(f"BS{BS:<5} N{N:<8} {r:8.2f} {ap:8.2f} {ap / r:6.2f} {f:9.1f} {f / ap:7.2f}")
