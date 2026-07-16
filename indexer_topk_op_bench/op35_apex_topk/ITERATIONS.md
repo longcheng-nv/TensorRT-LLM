@@ -24,3 +24,26 @@ Ledger write-back: WALLS candidate removed (BS1 launch floor NOT a wall down to
 BS1, coordination too heavy at big BS -> v2 = SMEM-atomic staging).
 Next: iter 1 filter v2 (SMEM staging, target F/R <= 1.10) + rung0.2 FR band math
 on real captures + rung0.3 rival source study.
+
+## iter 1 — 2026-07-16 — PIVOT (filter v2) + GO (rung-0.2 band math)
+Hypothesis: SMEM-atomic staging removes big-BS coordination tax.
+Result: v2 exact (3/3 screens); BS1 improved (tax 1.43->1.24, frontier/F 2.75-3.63x)
+but BS256 N262144 COLLAPSED 226us (4.1x tax) — SCAP=2048 overflow -> per-element
+global atomics (probe admit 3% x 262144 = 7.9K >> SCAP). BS1024 slight regress.
+Diagnosis: overflow path is the killer, not SMEM atomics; also probe admit rate
+was unrealistic (production admit ~= c*K/N ~= 0.3-1.5%, not 3%).
+Ledger: (SMEM staging w/o bulk flush, admits>SCAP; nsys) = FALSIFIED-domain;
+fix = periodic bulk flush (no overflow path at any admit count).
+rung-0.2 band math on ALL real captures (25 shapes x 3 layers x fp32/bf16 x 8 seeds):
+  - contiguous 32-blk sampling: miss ~10% (real logits spatially clustered — matches
+    posz finding). blk4: miss 1.5-2%.
+  - IID: miss 2-4/1000+, admit/K med 1.27-1.44.
+  - STRATIFIED-JITTERED (1 elem per N/s stripe): **0 miss / 3312 trials**, admit/K
+    med 1.29-1.39, p95 1.81-2.5, max 3.19; bf16 == fp32 (no tie inflation).
+  => sampling design locked: stratified-jittered, s~1024-4096 (scale w/ q), z=3,
+  in-kernel fallback pass for residual miss risk (correctness anyway).
+Architecture locked (H0 refined): big-BS = self-contained row-per-CTA (sample own
+row -> smem 2-level key-histogram nth-element -> filter own row -> in-CTA tail);
+small-BS = multi-CTA/row single-wave + arrival-counter spin sync; 2 grid modes,
+ONE algorithm (pick_config-style, allowed).
+Next: iter 2 filter v3 (bulk flush) — target F/R tax <= 1.10 at BS256/BS1024.
