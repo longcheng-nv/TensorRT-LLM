@@ -41,12 +41,14 @@ Distinct from concurrent op35_apex_topk (new-algorithm campaign, other session).
 - scripts/replay_b1.py     B1 host replay (rung 1)
 - scripts/ncu_cell.py      NCU single-cell attribution
 
-## Next steps
-1. Parse L2 verdict (parse_nsys_ab.py) -> 3-axis + no-cell-lost check.
-2. If green: iter3 = harvest candidate for follow-up PR (kernel diffs live in
-   variant/gvrpkg35; port = 3 small blocks + GvrParams K2048 kNumBins 512).
-3. Remaining unexplored: distP4 (cluster handoff2 + leader-P4 parallelization,
-   biggest remaining block), P4 warp0-ized searches (~2-3 barriers), B1 sideband.
-4. Honest bound: realistic stack ceiling ~1.15-1.25x avg vs the +40% ask —
-   document double-lock unless distP4 surprises.
-5. Final deliverable: bilingual HTML report + COST.md + memory + commits.
+## FINAL STATE (2026-07-16 end of session)
+- Bundle-v2 SHIP CANDIDATE = skip_h1 + GvrParams K2048 kNumBins 2048->512.
+  Clean nsys x3: full-77 1.0391 / K2048 domain 1.1331 / worst cell 0.975 / 77/77
+  exact. results/final_bundle_verdict.csv; REPORT.html generated.
+- fuse_mmz DROPPED (x3-reproducible -5% at synth_worst_K1024_N4096).
+- +40% double-locked INFEASIBLE (info floor + measured relaxed control 1.771).
+- NEXT SESSION: (1) port bundle-v2 to a follow-up PR branch off #16457 HEAD
+  (drop handoff#1 arrive/wait pair + params-table kNumBins; run PR unit grid +
+  16-bit gates before touching 16-bit rows); (2) distP4 campaign (biggest
+  remaining block: P4blk 29-58% at cs>1) — design sketch in ITERATIONS.md iter2
+  plan; (3) optional warp0-ized P4 searches, B1 (warp,window) sideband @512K-1M.

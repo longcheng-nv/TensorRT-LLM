@@ -26,3 +26,6 @@ long-session with ~1h prompt-cache TTL => bulk of input is cache-read.
 | output (incl thinking) | ~250-350k | ~$19-26 |
 | **session total (est)** | | **~$40-60** |
 NOTE: estimates; the authoritative number is the session /cost readout.
+
+## Final tally addendum
+- final clean verdicts (2-GPU nsys ×2 sweeps + re-verdicts): +1.5 GPU-h → total ~19.8 GPU-h.
