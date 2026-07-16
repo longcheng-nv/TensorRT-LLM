@@ -1,0 +1,9 @@
+
+=== flash L22 — kernel-sim rung admission, window [K,5120] ===
+  128k N=  32771 hit=0.70 | rung(q.85) thr=0.1821 cnt=   894* | rung(q.35) cnt=   194  | ADMIT=True | mean_cnt=235 med_cnt=305 q(hit)_cnt=512 | range=[-0.42,5.50]
+  256k N=  65538 hit=0.28 | rung(q.85) thr=-0.6426 cnt= 11622  | rung(q.35) cnt=   878* | ADMIT=True | mean_cnt=1717 med_cnt=1887 q(hit)_cnt=499 | range=[-1.37,3.55]
+  512k N= 131075 hit=0.06 | rung(q.85) thr=0.4039 cnt= 79977  | rung(q.35) cnt=  9580  | ADMIT=False | mean_cnt=17752 med_cnt=18094 q(hit)_cnt=447 | range=[-0.35,4.33]
+ 1024k N= 262127 hit=0.42 | rung(q.85) thr=1.6138 cnt=  4408* | rung(q.35) cnt=   385  | ADMIT=True | mean_cnt=633 med_cnt=715 q(hit)_cnt=512 | range=[0.51,6.79]
+
+=== pro L30 — kernel-sim rung admission, window [K,5120] ===
+ 1024k N= 262127 hit=0.27 | rung(q.85) thr=-0.6826 cnt= 36690  | rung(q.35) cnt=  1956* | ADMIT=True | mean_cnt=2354 med_cnt=4877 q(hit)_cnt=1000 | range=[-1.96,6.62]
