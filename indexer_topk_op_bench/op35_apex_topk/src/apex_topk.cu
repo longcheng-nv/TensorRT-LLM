@@ -121,6 +121,55 @@ __device__ void find_bin2k_warp(const int* hist, const int* cst, int rank, int* 
   }
 }
 
+// Generic windowed exact-select: finds the (rank0+1)-th largest key and the
+// count strictly above it, over n keys read as keys[p*stride] (smem or global;
+// xf=true applies b2u to raw float bits). <=3-4 passes (>=11 bits/pass).
+// ALL threads call; hist[2048], cst[32], sscal shared scratch.
+template <int NT>
+__device__ void window_select(const uint32_t* keys, int stride, int n, int rank0,
+                              uint32_t kmin, uint32_t kmax, bool xf,
+                              int* hist, int* cst, int* sscal,
+                              uint32_t* out_kth, int* out_gt) {
+  const int wid = threadIdx.x >> 5;
+  uint32_t lo = kmin, hi = kmax;
+  int rank = rank0;
+  int gt_above = 0;
+  while (lo < hi) {
+    const uint32_t span = hi - lo;
+    int hb = 31;
+    while (!((span >> hb) & 1u)) --hb;
+    const int shift = (hb >= 11) ? (hb - 10) : 0;
+    for (int b = threadIdx.x; b < 2048; b += NT) hist[b] = 0;
+    for (int b = threadIdx.x; b < 32; b += NT) cst[b] = 0;
+    __syncthreads();
+    const int npad = (n + NT - 1) / NT * NT;
+    for (int p = threadIdx.x; p < npad; p += NT) {
+      uint32_t u = 0;
+      if (p < n) {
+        u = keys[(long)p * stride];
+        if (xf) u = b2u((int)u);
+      }
+      const bool sel = p < n && u >= lo && u <= hi;
+      const int bin = sel ? (int)((u - lo) >> shift) : 0;
+      hist_add(hist, bin, sel);
+      hist_add(cst, bin >> 6, sel);
+    }
+    __syncthreads();
+    if (wid == 0) find_bin2k_warp(hist, cst, rank, &sscal[0]);
+    __syncthreads();
+    const int bin = sscal[0];
+    gt_above += sscal[1];
+    rank -= sscal[1];
+    const uint32_t nlo = lo + ((uint32_t)bin << shift);
+    hi = (shift == 0) ? nlo : min(hi, nlo + (((uint32_t)1 << shift) - 1));
+    lo = nlo;
+    __syncthreads();
+    if (shift == 0) break;
+  }
+  *out_kth = lo;
+  *out_gt = gt_above;
+}
+
 template <int NT>
 __device__ void dev_thresholds(const float* xr, long N, int row, int s,
                                int i_lo, uint32_t seed, int* hist_a, int* cst,
@@ -327,8 +376,8 @@ __device__ void dev_filter(const float* xr, long N, float t_lo,
 template <int NT>
 __device__ void dev_tail(const float* xr, long N, int K, int cap,
                          const int2* cand_row, int* cnt, int* out_row,
-                         int2* spair, int* hist_a, int* sscal, int row,
-                         int* dbg) {
+                         int2* spair, int* hist_a, int* cst, int* sscal,
+                         int row, int* dbg) {
   const int lane = threadIdx.x & 31;
   const int wid = threadIdx.x >> 5;
   long tg0 = 0, tg1 = 0, tg2 = 0, tg3 = 0;
@@ -371,45 +420,29 @@ __device__ void dev_tail(const float* xr, long N, int K, int cap,
 
   uint32_t u_kth;
   int count_gt, need_eq;
-  {
+  if (!bad) {
+    const uint32_t kmin = bigm ? 0u : (uint32_t)sscal[2];
+    const uint32_t kmax = bigm ? 0xFFFFFFFFu : (uint32_t)sscal[3];
+    const uint32_t* keys = bigm ? reinterpret_cast<const uint32_t*>(cand_row)
+                                : reinterpret_cast<const uint32_t*>(spair);
+    window_select<NT>(keys, 2, M, K - 1, kmin, kmax, bigm, hist_a, cst, sscal,
+                      &u_kth, &count_gt);
+    need_eq = K - count_gt;
+  } else {  // full-row fallback: byte-round radix (rare)
     uint32_t prefix = 0;
     int rank = K - 1;
     int gt_total = 0;
-    int shift0 = 24;
-    if (!bad && !bigm) {  // skip leading constant bytes (staged path only)
-      const uint32_t kmin = (uint32_t)sscal[2], kmax = (uint32_t)sscal[3];
-      while (shift0 > 0 && ((kmin >> shift0) & 255u) == ((kmax >> shift0) & 255u)) {
-        prefix |= kmin & (255u << shift0);
-        shift0 -= 8;
-      }
-    }
-    for (int shift = shift0; shift >= 0; shift -= 8) {
+    for (int shift = 24; shift >= 0; shift -= 8) {
       __syncthreads();
       for (int bb = threadIdx.x; bb < 256; bb += NT) hist_a[bb] = 0;
       __syncthreads();
       const uint32_t pmask = (shift >= 24) ? 0u : (0xFFFFFFFFu << (shift + 8));
-      if (!bad && !bigm) {
-        const int Mpad = (M + NT - 1) / NT * NT;
-        for (int p = threadIdx.x; p < Mpad; p += NT) {
-          const uint32_t u = (p < M) ? (uint32_t)spair[p].x : 0u;
-          hist_add(hist_a, (u >> shift) & 255,
-                   p < M && (u & pmask) == (prefix & pmask));
-        }
-      } else if (bigm) {  // radix over global candidates (M <= GCAP)
-        const int Mpad = (M + NT - 1) / NT * NT;
-        for (int p = threadIdx.x; p < Mpad; p += NT) {
-          const uint32_t u = (p < M) ? b2u(__ldcg(&cand_row[p]).x) : 0u;
-          hist_add(hist_a, (u >> shift) & 255,
-                   p < M && (u & pmask) == (prefix & pmask));
-        }
-      } else {
-        const long Npad = (N + NT - 1) / NT * NT;
-        for (long e = threadIdx.x; e < Npad; e += NT) {
-          const float f = (e < N) ? xr[e] : CUDART_NAN_F;
-          const uint32_t u = f2u(f);
-          hist_add(hist_a, (u >> shift) & 255,
-                   f == f && (u & pmask) == (prefix & pmask));
-        }
+      const long Npad = (N + NT - 1) / NT * NT;
+      for (long e = threadIdx.x; e < Npad; e += NT) {
+        const float f = (e < N) ? xr[e] : CUDART_NAN_F;
+        const uint32_t u = f2u(f);
+        hist_add(hist_a, (u >> shift) & 255,
+                 f == f && (u & pmask) == (prefix & pmask));
       }
       __syncthreads();
       if (wid == 0) find_bin_warp(hist_a, rank, &sscal[0]);
@@ -521,7 +554,7 @@ __global__ void k_apex_fused(const float* __restrict__ xbase, int* __restrict__ 
   if (mode == 2) return;  // probe (probe script resets counts)
   if (!sscal[7]) return;
   dev_tail<NT>(xr, N, K, PAIR_CAP, cand_row, cnt, out + (long)row * K, spair,
-               hist_a, sscal, row, dbg);
+               hist_a, cst, sscal, row, dbg);
 }
 
 __global__ void k_apex_thr(const float* __restrict__ xbase,
@@ -563,11 +596,83 @@ __global__ void k_apex_tail(const float* __restrict__ xbase, int* __restrict__ o
   const int row = blockIdx.x;
   const float* xr = xbase + (long)row * row_stride;
   extern __shared__ int2 spair[];
-  __shared__ int hist_a[256];
+  __shared__ int hist_a[2048];
+  __shared__ int cst[32];
   __shared__ int sscal[8];
   dev_tail<NT>(xr, N, K, tail_cap, cand + (long)row * GCAP,
                counts + (long)row * 3, out + (long)row * K, spair, hist_a,
-               sscal, row, dbg);
+               cst, sscal, row, dbg);
+}
+
+// small-N mode: whole row staged in smem as ordered keys; exact window select
+// + emission, no sampling / no candidate buffers / no miss path. grid = rows.
+__global__ void k_apex_small(const float* __restrict__ xbase, int* __restrict__ out,
+                             long row_stride, long N, int K) {
+  constexpr int NT = 512;
+  const int row = blockIdx.x;
+  const int lane = threadIdx.x & 31;
+  const float* xr = xbase + (long)row * row_stride;
+  const float4* xr4 = reinterpret_cast<const float4*>(xr);
+  extern __shared__ uint32_t skey[];
+  __shared__ int hist[2048], cst[32], sscal[8];
+  if (threadIdx.x == 0) { sscal[2] = (int)0xFFFFFFFFu; sscal[3] = 0; }
+  __syncthreads();
+  const long n4full = N / 4;
+  uint32_t lmin = 0xFFFFFFFFu, lmax = 0u;
+  for (long i = threadIdx.x; i < n4full; i += NT) {
+    const float4 v = xr4[i];
+    const uint32_t u0 = f2u(v.x), u1 = f2u(v.y), u2 = f2u(v.z), u3 = f2u(v.w);
+    skey[i * 4] = u0; skey[i * 4 + 1] = u1;
+    skey[i * 4 + 2] = u2; skey[i * 4 + 3] = u3;
+    lmin = min(min(min(lmin, u0), min(u1, u2)), u3);
+    lmax = max(max(max(lmax, u0), max(u1, u2)), u3);
+  }
+  for (long e = n4full * 4 + threadIdx.x; e < N; e += NT) {  // partial tail
+    const uint32_t u = f2u(xr[e]);
+    skey[e] = u;
+    lmin = min(lmin, u);
+    lmax = max(lmax, u);
+  }
+#pragma unroll
+  for (int o = 16; o; o >>= 1) {
+    lmin = min(lmin, __shfl_down_sync(~0u, lmin, o));
+    lmax = max(lmax, __shfl_down_sync(~0u, lmax, o));
+  }
+  if (lane == 0) {
+    atomicMin((unsigned*)&sscal[2], lmin);
+    atomicMax((unsigned*)&sscal[3], lmax);
+  }
+  __syncthreads();
+  uint32_t u_kth;
+  int count_gt;
+  window_select<NT>(skey, 1, (int)N, K - 1, (uint32_t)sscal[2],
+                    (uint32_t)sscal[3], false, hist, cst, sscal, &u_kth, &count_gt);
+  const int need_eq = K - count_gt;
+  if (threadIdx.x == 0) { sscal[4] = 0; sscal[5] = 0; }
+  __syncthreads();
+  int* out_row = out + (long)row * K;
+  const int n = (int)N;
+  const int npad = (n + NT - 1) / NT * NT;
+  for (int p = threadIdx.x; p < npad; p += NT) {
+    const uint32_t u = (p < n) ? skey[p] : 0u;
+    const bool sgt = p < n && u > u_kth;
+    const bool seq = p < n && u == u_kth;
+    const unsigned bgt = __ballot_sync(~0u, sgt);
+    const unsigned beq = __ballot_sync(~0u, seq);
+    int base_gt = 0, base_eq = 0;
+    if (lane == 0) {
+      if (bgt) base_gt = atomicAdd(&sscal[4], __popc(bgt));
+      if (beq) base_eq = atomicAdd(&sscal[5], __popc(beq));
+    }
+    base_gt = __shfl_sync(~0u, base_gt, 0);
+    base_eq = __shfl_sync(~0u, base_eq, 0);
+    const unsigned lmask = (1u << lane) - 1;
+    if (sgt) out_row[base_gt + __popc(bgt & lmask)] = p;
+    if (seq) {
+      const int slot = base_eq + __popc(beq & lmask);
+      if (slot < need_eq) out_row[count_gt + slot] = p;
+    }
+  }
 }
 
 static void set_dyn(const void* fn, int bytes) {
@@ -626,4 +731,19 @@ void apex_topk(torch::Tensor x, torch::Tensor out, torch::Tensor cand,
       row_stride, N, K, tail_cap, dp);
 }
 
-PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) { m.def("apex_topk", &apex_topk); }
+void apex_small(torch::Tensor x, torch::Tensor out, long N, int K) {
+  static bool init = false;
+  if (!init) {
+    set_dyn((const void*)k_apex_small, 32768 * 4);
+    init = true;
+  }
+  const int rows = x.size(0);
+  const int dynb = (int)(((N + 3) / 4) * 16);
+  k_apex_small<<<rows, 512, dynb>>>(x.data_ptr<float>(), out.data_ptr<int>(),
+                                    x.size(1), N, K);
+}
+
+PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+  m.def("apex_topk", &apex_topk);
+  m.def("apex_small", &apex_small);
+}
