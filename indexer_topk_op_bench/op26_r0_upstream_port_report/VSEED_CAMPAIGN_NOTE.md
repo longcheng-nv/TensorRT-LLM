@@ -58,3 +58,19 @@ explicit max/min threshold. Smoke exact. Round 2 pending: {base, pr, vseed-v2,
 vs2 = qfracs=(0.85,)+vseed} — vs2 REPLACES the q.35 rung with pmean (2 columns
 total = zero column tax) since the estimator study shows pmean covers q.35's
 admission region on all observed cells.
+
+## Round 2 (25 cells x {base, pr, vseed-v2, vs2}, nsys cold-L2, all exact)
+vs2 (qfracs=(0.85,)+pmean, 2 columns) kills the guard tax (flash 128k/512k,
+pro 128k/1024k: 0.99-1.01 vs pr) and fixes MORE than v2 on the regression
+cells (16-bit 1M BS1 1.16-1.17x, bf16 BS1024 1.41x, fp32 BS1 1.16x). BUT
+v32-64k BS1 vs2/pr = 0.86: pmean count 4007 is admissible-but-FAT (kC/K=3 at
+K2048), while pr's miss->refine converges to a slimmer threshold — a fat admit
+can lose to a good 2-pass miss. K2048 keeps the q.35 rung.
+
+## WINNER: per-K hybrid (zero new kernel code beyond the vseed flag)
+  K512/K1024: r0_qfracs=(0.85,) + r0_vseed  (pmean replaces q.35; 2 columns)
+  K2048:      r0_qfracs=(0.85,0.35) + r0_vseed  (3 columns)
+Full-envelope validation (REPORT grid: synth seqlen+BS x 3K x 2scen x 3dtype +
+real 3-model all-ISL seqlen+BS x 3dtype, 54 nsys batches, 8 GPUs b200-072)
+launched -> vsfull_results; aggregate_vsfull.py emits vsfull.csv + regression
+list (vs/pr < 0.98). REPORT new-chapter update pending sweep completion.
