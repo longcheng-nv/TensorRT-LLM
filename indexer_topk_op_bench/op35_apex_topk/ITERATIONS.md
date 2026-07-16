@@ -75,3 +75,36 @@ append is FREE (tail re-ranks).
 Next: full APEX kernel v0 = stratified-sample+threshold (in-kernel redundant per
 CTA at small BS / per-row at big BS) + v10 filter + last-CTA tail select + miss/
 overflow retry; then 3-track exactness gate; then frontier A/B on the op26 grids.
+
+## iter 10-11 — 2026-07-16 — APEX kernel v0/v1/v2 E2E (b200-072; read anchors == 038)
+v0 fused kernel (A sample+16bit-hist band -> B v10 filter -> C last-CTA tail,
+in-CTA full-row radix fallback, no 2nd launch, graph-compatible). Exactness:
+32/32 synth+oddN+bf16-plateau+const-row+self-clean GREEN from first run, and
+held through v1/v2. nsys iter10: E2E tax 3-15x over read — three root causes
+attributed via mode={1,2,3} phase probes + in-kernel globaltimer + NCU:
+  1. 16-bit-truncated t_lo inflates M on dense data (uniform: M=8152@1M vs
+     band ~1.7K) AND z=3 misses at BS1024 (P(miss/row)~0.003, Poisson tail;
+     badflags=2 -> 250us full-row fallback). FIX (v1): 4-round exact 32-bit
+     sample threshold (=rung0.2 band math exactly) + z=6 + s scaled {2k,4k,8k}
+     + float4-granular strata (4 samples/sector, 4x traffic cut; quad
+     correlation absorbed by z=6 + exact fallback). badflags -> 0 everywhere.
+  2. tail emit was 14us @BS1 (global re-scan of 2368 sparse segments +
+     per-element same-address smem atomic). FIX (v2): cand as int2{bits,idx}
+     pairs (1x8B ldcg), 64KB dynamic smem pair staging, warp-aggregated
+     ballot emission from smem. emit -> 0.8us. gather prefix-scan+binary-search
+     -> 6.2us (still slow: sparse segment scatter is structural).
+  3. NCU @BS1024 mode1: 48 regs/thread -> Block Limit Registers = 1 CTA/SM at
+     NT=1024 (occupancy 50%) — the fused fat kernel halves residency vs
+     standalone v10 (<=32 regs). __launch_bounds__(NT,2048/NT) FALSIFIED:
+     forces hot-loop spills, BS32 A+B 58->84us. Register pressure must be
+     solved by SPLITTING, not clamping.
+Current spans (event probe, cold-L2): BS1 full ~30-31us event (~22 span) vs
+frontier 11.6 — NOT competitive yet. Decision for iter12 (architecture):
+  a. filter admits -> per-warp regions in 96KB dynamic smem, ONE end-of-CTA
+     flush (block prefix + 1 global atomicAdd reserve + coalesced copy).
+     Kills nseg/segcap/warr/scan/binary-search; tail gather becomes a
+     coalesced M x 8B read. Overflow (region or global cap) -> flag+fallback
+     unchanged (constant-row degenerate covered).
+  b. BS>=32 (cpr==1): split into 3 lean kernels (thr/filter/tail) to restore
+     v10 register count & 2 CTA/SM; BS<=16 keep single fused launch (<=148
+     CTAs, occupancy irrelevant, launch latency dominant).
