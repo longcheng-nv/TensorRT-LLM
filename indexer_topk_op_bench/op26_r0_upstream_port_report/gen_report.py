@@ -360,6 +360,60 @@ def _vs_full_block():
 
 VS_FULL_KPI, VS_FULL_REG, VS_FULL_WIN = _vs_full_block()
 
+vs3 = read_csv("vseed_harness/vsfull3.csv")
+
+def _vs3_block():
+    """§9b: SHIPPED PR-head re-measure — vseed (@88a563b145) + P4 exact-tail
+    fix (@eae374554c) on the PR branch vs the OLD PR head (@018251950f) and
+    base. Column mapping in vsfull3.csv: pr = OLD head, vs = NEW head."""
+    if not vs3:
+        return ("<p class='mut'><b>New-PR-head re-measure sweep in flight</b> — auto-fills from "
+                "<code>vseed_harness/vsfull3.csv</code> on regen. / 新 PR HEAD 重测进行中,完成后自动填充。</p>",
+                "", "")
+    g_all = geo([fnum(r["vs_vs_pr"]) for r in vs3])
+    g_base = geo([fnum(r["vs_vs_base"]) for r in vs3])
+    g_real = geo([fnum(r["vs_vs_base"]) for r in vs3 if r["family"] == "real"])
+    ex_ok = sum(r["vs_exact"] == "True" for r in vs3)
+    ex_tot = sum(r["vs_exact"] in ("True", "False") for r in vs3)
+    ex_pr = sum(r["pr_exact"] == "True" for r in vs3)
+    reg = sorted((r for r in vs3 if (fnum(r["vs_vs_pr"]) or 1) < 0.98),
+                 key=lambda r: fnum(r["vs_vs_pr"]))
+    win = sorted((r for r in vs3 if (fnum(r["vs_vs_pr"]) or 1) > 1.05),
+                 key=lambda r: -fnum(r["vs_vs_pr"]))
+    kpis = (f"<div class='kpis'>"
+            f"<div class='kpi'><div class='v' style='color:#6ede8a'>{g_all:.3f}×</div>"
+            f"<div class='l lang-en'>geomean NEW/OLD PR head, all {len(vs3)} cells</div>"
+            f"<div class='l lang-zh'>新/旧 PR HEAD 几何均值(全 {len(vs3)} cell)</div></div>"
+            f"<div class='kpi'><div class='v' style='color:#6ede8a'>{g_base:.3f}× / {g_real:.3f}×</div>"
+            f"<div class='l lang-en'>NEW head vs base: all / real-capture cells</div>"
+            f"<div class='l lang-zh'>新 HEAD 对 base:全部 / 真实数据</div></div>"
+            f"<div class='kpi'><div class='v' style='color:#6ea8fe'>{ex_ok}/{ex_tot}</div>"
+            f"<div class='l lang-en'>NEW head exactness (OLD head: {ex_pr}/{ex_tot})</div>"
+            f"<div class='l lang-zh'>新 HEAD 精确性(旧 HEAD:{ex_pr}/{ex_tot})</div></div>"
+            f"<div class='kpi'><div class='v' style='color:#ff7a7a'>{len(reg)}</div>"
+            f"<div class='l lang-en'>cells &lt;0.98 vs OLD head (all listed)</div>"
+            f"<div class='l lang-zh'>对旧 HEAD &lt;0.98 的 cell(全列出)</div></div>"
+            f"</div>")
+    def rtab3(rows, ratio_color):
+        h = ("<tr><th>family</th><th>cell</th><th>K</th><th>dtype</th><th>N</th><th>BS</th>"
+             "<th>hit</th><th>OLD µs</th><th>NEW µs</th><th>NEW/OLD</th><th>NEW/base</th></tr>")
+        b = ""
+        for r in rows:
+            cell = r["scenario"] or f"{r['model']}/{r['isl']}"
+            hit = f"{fnum(r['hit']):.2f}" if fnum(r["hit"]) is not None else ""
+            b += (f"<tr><td>{r['family']}</td><td>{cell}</td><td>{r['K']}</td><td>{r['dtype']}</td>"
+                  f"<td>{r['N']}</td><td>{r['BS']}</td><td>{hit}</td><td>{r['pr']}</td><td>{r['vs']}</td>"
+                  f"<td style='color:{ratio_color}'>{r['vs_vs_pr']}</td><td>{r['vs_vs_base']}</td></tr>")
+        return f"<table>{h}{b}</table>"
+    reg_html = (f"<details><summary class='mut'>ALL cells &lt;0.98 vs OLD PR head: {len(reg)} "
+                f"/ 完整回退清单</summary>{rtab3(reg, '#ff7a7a')}</details>"
+                if reg else "<p><b>No cell regresses more than 2% vs the old PR head. / 无超过 2% 的回退。</b></p>")
+    win_html = (f"<details><summary class='mut'>top wins vs OLD PR head (&gt;1.05): {len(win)} cells "
+                f"/ 主要收益</summary>{rtab3(win[:40], '#6ede8a')}</details>")
+    return kpis, reg_html, win_html
+
+VS3_KPI, VS3_REG, VS3_WIN = _vs3_block()
+
 HTML = f"""<!DOCTYPE html>
 <!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
@@ -1004,6 +1058,31 @@ rank-scatter 单层细递归分辨率 ≈ range/1024² ≈ 5e-6;与已知 op22 �
 {VS_FULL_KPI}
 {VS_FULL_REG}
 {VS_FULL_WIN}
+
+<h3>9b · Shipped to the PR branch + P4 exact-tail correctness fix — final re-measure /
+上 PR 分支 + P4 精确性修复 — 最终重测</h3>
+<div class="box">
+<div class="lang-en"><p>Both changes are now ON the PR branch: <b>vseed + per-K rung defaults</b>
+(<code>88a563b145</code>) and the <b>P4 straddling-fine-bin exact tie resolution</b>
+(<code>eae374554c</code>, ambiguity-gated MSB-first 8-bit-digit radix select over order-preserving
+integer keys; fp32 default ON, 16-bit kernels byte-identical). The exact-tail fix closes the
+pre-existing 3e-6 boundary defect (§9 audit finding b): the 12 real Pro/512k fp32 cells go
+value-exact at every BS, and adversarial 5e-8-spaced / 1-ulp bitwise tie bands repair across
+K∈{{512,1024,2048}}, cr∈{{1,4}}, cs∈{{1,4,8}}. Unaffected-cell cost is noise (paired cold-L2 A/B
+geomean 0.998); repair-active rows (previously WRONG results) pay ~1.3× at BS=1. The table below
+re-measures the FULL report grid with the NEW PR head vs the OLD head (@<code>018251950f</code>)
+and base.</p></div>
+<div class="lang-zh"><p>两项改动均已上 PR 分支:<b>vseed + per-K 阶梯默认值</b>(<code>88a563b145</code>)与
+<b>P4 跨界细 bin 精确 tie 判决</b>(<code>eae374554c</code>,歧义门控的 MSB 优先 8-bit 数位基数选择,
+基于保序整数键;fp32 默认开启,16-bit 内核字节不变)。该修复关闭了预存在的 3e-6 边界缺陷(§9 审计发现 b):
+12 个真实 Pro/512k fp32 cell 在所有 BS 下变为值精确,对抗性 5e-8 间隔 / 1-ulp 位级 tie 带在
+K∈{{512,1024,2048}}、cr∈{{1,4}}、cs∈{{1,4,8}} 全部修复。未受影响 cell 代价为噪声(配对冷 L2 A/B 几何均值
+0.998);修复实际生效的行(此前结果是错的)在 BS=1 付出 ~1.3×。下表以新 PR HEAD 对旧 HEAD
+(@<code>018251950f</code>)与 base 重测完整报告网格。</p></div>
+{VS3_KPI}
+{VS3_REG}
+{VS3_WIN}
+</div>
 
 <h2>10 · Test data · environment · code / 测试数据·环境·代码</h2>
 <div class="box">

@@ -113,3 +113,24 @@ flash-1M BS128 win intact (51.7us vs pr ~80). vsfull2 re-audit launched.
   1.02-1.03; 16-bit BS128 0.85-0.87 rising to 0.98-1.00 by BS1024.
 - Verdict: per-K hybrid vseed v3 holds the full envelope at ~0.4% mean tax
   with the 16-bit BS128 large-N cluster as the single disclosed residual.
+
+## SHIPPED to PR branch + P4 exact-tail fix + final re-measure (2026-07-16, b200-049)
+- vseed + per-K rung defaults -> PR branch @88a563b145 (r0_vseed default ON with
+  enable_r0; K512/K1024 qfracs=(0.85,) iff vseed, K2048 keeps (0.85,0.35); explicit
+  vseed-off retains the old ladder for all K).
+- NEW: P4 exact-tail fix @eae374554c closes the 3e-6 boundary defect (audit
+  finding b): ambiguity-gated (tie set overfills remaining slots) MSB-first
+  8-bit-digit radix select over order-preserving int keys (4 levels = bit-exact
+  fp32), warp-parallel digit scan, all scratch reused (zero SMEM growth);
+  fp32-only default (16-bit kernels byte-identical; forcing it on 16-bit hits
+  every plateau row ~1.4x - do not). Unit test plants 5e-8 + 1-ulp tie bands.
+- vsfull3 re-measure (54 batches, 2772 cells x {base, OLD head @018251950f,
+  NEW head @eae374554c}): NEW exact 2772/2772 (12 pro/512k fp32 now exact;
+  base keeps its 36 known flash/512k undershoot fails). NEW/OLD geomean 0.9943
+  (envelope 0.9937); NEW/base 1.1322 vs OLD/base 1.1388, but worst tail
+  0.676->0.790 and <0.90-vs-base count 174->106; real axis NEW 1.196 >= OLD
+  1.190. Severe NEW/OLD <0.90 = 25: 14 = known vseed K1024 16-bit BS128
+  large-N residual, 9 = pro/512k fp32 repair-active rows paying the
+  correctness price (previously WRONG results), 2 = K2048 16-bit 1M BS256.
+- REPORT.html new §9b (auto-fills from vseed_harness/vsfull3.csv).
+- Neutrality A/B harness: vseed_harness/ab_tail_neutrality.py.
