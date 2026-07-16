@@ -36,3 +36,25 @@ Insert P1's pmean as an extra rung in the M-ary count pass (const-folded flag,
   admission rule (last m in window) picks it → P3/P4 back to base cost.
 - true-miss cells (512k): pmean's measured count improves the fallback bracket.
 Scripts: study_p1_estimator.py (+_out), study_p1_L22.txt. A/B pending below.
+
+## Round 1 A/B (nsys cold-L2, b200-072 GPU1, 25 cells x {base,pr,vseed-v1}, all exact)
+Regression cells FIXED: flash-1M fp32 BS128/256/512/1024 vs/base = 1.01/1.02/
+1.01/1.00 (vs/pr 1.29-1.42); 16-bit BS1024 0.70 -> 0.96-0.97; fp32 BS1 1.10
+(beats base); v32-256k 1.41/1.20/1.17 (BS 1/128/1024). Guard tax: R0-win cells
+(flash 128k/64k, pro 128k/1024k, v32 64k @BS1) vs/pr 0.95-0.97 (~3-5%).
+16-bit 1M BS1/BS64 only partially recovered (0.83-0.86 vs base) — separate
+16-bit mechanism, not fat-admission.
+
+## m3 control (config-only qfracs=(0.85,.50,.35), 10 cells, 4 arms, all exact)
+m3 == vseed on the regression cells (fp32 1M BS128/1024: 1.03/1.00 vs 1.01/1.00)
+AND same guard tax (0.95-0.96) -> the tax is the EXTRA COUNT COLUMN itself, not
+v1's insert step. vseed beats m3 on v32-256k BS1 (1.40 vs 1.25 over base; pmean
+adapts to the value distribution, fixed rank-quantile rungs don't). vseed >= m3
+everywhere -> config-only M3 is a viable zero-code fallback but strictly weaker.
+
+## v2 (implemented): pmean parked in last rung column BY P1 (zero extra sync),
+admission = explicit argmin count in window (unsorted-safe), fallback bracket =
+explicit max/min threshold. Smoke exact. Round 2 pending: {base, pr, vseed-v2,
+vs2 = qfracs=(0.85,)+vseed} — vs2 REPLACES the q.35 rung with pmean (2 columns
+total = zero column tax) since the estimator study shows pmean covers q.35's
+admission region on all observed cells.

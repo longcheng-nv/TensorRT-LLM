@@ -1,0 +1,71 @@
+245a246
+>         r0_vseed: bool = False,
+419a421,432
+>         # --- vseed prototype (2026-07-16): fold P1's pmean (the secant init
+>         # probe) into the M-ary R0 count pass as one extra "virtual rung".
+>         # Fixes the flash-1M fat-admission regression (the coarse q.85 rung
+>         # admits ~4400 candidates where pmean admits ~630 -> 7x P3/P4 cand
+>         # cost) and, on a true miss, donates a measured interior bracket
+>         # point to the fallback refine. Const-folded: r0_vseed=False kernels
+>         # are byte-identical to before. M_qf = rungs P1b places from qneeds;
+>         # M_thr = total columns counted/admitted (M_qf + 1 when vseed).
+>         self.r0_vseed = bool(r0_vseed) and bool(enable_r0) and self.M_thr > 0
+>         self.M_qf = self.M_thr
+>         if self.r0_vseed:
+>             self.M_thr = self.M_qf + 1
+621a635,636
+>         s_mt_thr=None,   # r0_vseed: P1 also parks pmean in the last rung
+>         # column (visibility via P1's own trailing barrier -> zero extra sync).
+734a750,751
+>                     if cutlass.const_expr(self.r0_vseed):
+>                         s_mt_thr[self.M_thr - 1] = pmean
+769a787,788
+>                 if cutlass.const_expr(self.r0_vseed):
+>                     s_mt_thr[self.M_thr - 1] = pmean
+803c822
+<         M = cutlass.const_expr(self.M_thr)
+---
+>         M = cutlass.const_expr(self.M_qf)
+884c903
+<         M = cutlass.const_expr(self.M_thr)
+---
+>         M = cutlass.const_expr(self.M_qf)
+3041a3061
+>             s_mt_thr=s_mt_thr,    # r0_vseed: park pmean in the last rung column
+3135,3136c3155,3158
+<                     # tightest admissible rung = LAST m with count in [K, kC]
+<                     # (ascending thresholds => non-increasing counts in m).
+---
+>                     # tightest admissible rung = SMALLEST count in [K, kC].
+>                     # (Explicit argmin: with r0_vseed the pmean column is not
+>                     # sorted into the rung order; for sorted rungs this is
+>                     # equivalent to the old "last m in window" rule.)
+3137a3160
+>                     best_c = cutlass.Int32(2147483647)
+3140c3163,3164
+<                         if cm >= cutlass.Int32(self.top_k) and cm <= cutlass.Int32(self.kC):
+---
+>                         if (cm >= cutlass.Int32(self.top_k) and cm <= cutlass.Int32(self.kC)
+>                                 and cm < best_c):
+3141a3166
+>                             best_c = cm
+3184,3191c3209,3218
+<                                 if s_mt_cnt[m] > cutlass.Int32(self.kC):
+<                                     blo = s_mt_thr[m]
+<                                     clo = s_mt_cnt[m]
+<                             for m in cutlass.range_constexpr(M):
+<                                 mm = cutlass.const_expr(M - 1) - m
+<                                 if s_mt_cnt[mm] < cutlass.Int32(self.top_k):
+<                                     bhi = s_mt_thr[mm]
+<                                     chi = s_mt_cnt[mm]
+---
+>                                 cm = s_mt_cnt[m]
+>                                 tm = s_mt_thr[m]
+>                                 if cm > cutlass.Int32(self.kC) and (
+>                                         clo < cutlass.Int32(0) or tm > blo):
+>                                     blo = tm
+>                                     clo = cm
+>                                 if cm < cutlass.Int32(self.top_k) and (
+>                                         chi < cutlass.Int32(0) or tm < bhi):
+>                                     bhi = tm
+>                                     chi = cm
