@@ -24,10 +24,13 @@
 // CUDA-graph compatible: no host sync; counters/tickets self-clean.
 #include <torch/extension.h>
 #include <cuda_runtime.h>
+#include <cuda_fp16.h>
+#include <cuda_bf16.h>
 #include <math_constants.h>
 
 #define PAIR_CAP 12288                 // smem staging pairs (96KB dyn smem)
 #define GCAP 32768                     // global candidate buffer cap per row
+#define SEED_XOR(sd) (sd)
 #define DYN_BYTES (PAIR_CAP * 8)
 
 __device__ inline uint32_t f2u(float f) {
@@ -47,6 +50,48 @@ __device__ inline uint32_t hash3(uint32_t a, uint32_t b, uint32_t c) {
   h ^= h >> 16; h *= 0x7FEB352Du; h ^= h >> 15; h *= 0x846CA68Bu; h ^= h >> 16;
   return h;
 }
+
+// dtype traits: every dtype loads 16B groups; EPL = elements per load
+template <typename T>
+__device__ inline uint4 ldraw(const T* base, long g) {
+  return reinterpret_cast<const uint4*>(base)[g];
+}
+template <typename T> __device__ inline uint4 padraw();
+template <> __device__ inline uint4 padraw<float>() {
+  return make_uint4(0x7FC00000u, 0x7FC00000u, 0x7FC00000u, 0x7FC00000u);
+}
+template <> __device__ inline uint4 padraw<__nv_bfloat16>() {
+  return make_uint4(0x7FC07FC0u, 0x7FC07FC0u, 0x7FC07FC0u, 0x7FC07FC0u);
+}
+template <> __device__ inline uint4 padraw<__half>() {
+  return make_uint4(0x7E007E00u, 0x7E007E00u, 0x7E007E00u, 0x7E007E00u);
+}
+template <typename T> __device__ inline void cvtgrp(const uint4& r, float* out);
+template <> __device__ inline void cvtgrp<float>(const uint4& r, float* out) {
+  out[0] = __uint_as_float(r.x); out[1] = __uint_as_float(r.y);
+  out[2] = __uint_as_float(r.z); out[3] = __uint_as_float(r.w);
+}
+template <> __device__ inline void cvtgrp<__nv_bfloat16>(const uint4& r, float* out) {
+  const __nv_bfloat162* h = reinterpret_cast<const __nv_bfloat162*>(&r);
+#pragma unroll
+  for (int t = 0; t < 4; ++t) {
+    const float2 f = __bfloat1622float2(h[t]);
+    out[t * 2] = f.x; out[t * 2 + 1] = f.y;
+  }
+}
+template <> __device__ inline void cvtgrp<__half>(const uint4& r, float* out) {
+  const __half2* h = reinterpret_cast<const __half2*>(&r);
+#pragma unroll
+  for (int t = 0; t < 4; ++t) {
+    const float2 f = __half22float2(h[t]);
+    out[t * 2] = f.x; out[t * 2 + 1] = f.y;
+  }
+}
+__device__ inline float to_f(float v) { return v; }
+__device__ inline float to_f(__nv_bfloat16 v) { return __bfloat162float(v); }
+__device__ inline float to_f(__half v) { return __half2float(v); }
+template <typename T> struct EPL_OF { static constexpr int v = 8; };
+template <> struct EPL_OF<float> { static constexpr int v = 4; };
 
 // warp-aggregated histogram add; ALL 32 lanes must call (uniform control flow)
 __device__ inline void hist_add(int* hist, int bin, bool sel) {
@@ -170,37 +215,32 @@ __device__ void window_select(const uint32_t* keys, int stride, int n, int rank0
   *out_gt = gt_above;
 }
 
-template <int NT>
-__device__ void dev_thresholds(const float* xr, long N, int row, int s,
+template <int NT, typename T>
+__device__ void dev_thresholds(const T* xr, long N, int row, int s,
                                int i_lo, uint32_t seed, int* hist_a, int* cst,
                                int* sscal, float* sthr) {
   constexpr int CMAX = 16;  // max samples per thread (s <= 16*NT)
   const int wid = threadIdx.x >> 5;
   const int lane = threadIdx.x & 31;
-  const float4* xr4 = reinterpret_cast<const float4*>(xr);
-  const int s4 = s / 4;
-  const long n4s = N / 4;
-  const float stride4_f = (float)n4s / (float)s4;
-  const int sper = s / NT;  // 2..16, s % NT == 0 (host asserts)
-  (void)sper;
   uint32_t sv[CMAX] = {};   // unowned slots stay 0 (never selected)
   if (threadIdx.x == 0) { sscal[2] = (int)0xFFFFFFFFu; sscal[3] = 0; }
   __syncthreads();
   uint32_t lmin = 0xFFFFFFFFu, lmax = 0u;
-  // each thread owns strata j = threadIdx.x + t*NT with j < s4 (s4 may be < NT)
+  // SCALAR strata (iter15): one independent element per stratum — no quad
+  // correlation, honest IID order-statistic margins (sig x1, z=6)
+  const float stride_s = (float)N / (float)s;
 #pragma unroll
-  for (int t = 0; t < CMAX / 4; ++t) {
+  for (int t = 0; t < CMAX; ++t) {
     const int j = threadIdx.x + t * NT;  // stratum
-    if (j < s4) {
+    if (j < s) {
       const uint32_t h = hash3(seed, (uint32_t)row, (uint32_t)j);
       const float u01 = (float)(h >> 8) * (1.0f / 16777216.0f);
-      long idx = (long)(((float)j + u01) * stride4_f);
-      if (idx >= n4s) idx = n4s - 1;
-      const float4 v = xr4[idx];
-      sv[t * 4] = f2u(v.x); sv[t * 4 + 1] = f2u(v.y);
-      sv[t * 4 + 2] = f2u(v.z); sv[t * 4 + 3] = f2u(v.w);
-      lmin = min(min(min(lmin, sv[t * 4]), min(sv[t * 4 + 1], sv[t * 4 + 2])), sv[t * 4 + 3]);
-      lmax = max(max(max(lmax, sv[t * 4]), max(sv[t * 4 + 1], sv[t * 4 + 2])), sv[t * 4 + 3]);
+      long idx = (long)(((float)j + u01) * stride_s);
+      if (idx >= N) idx = N - 1;
+      const uint32_t u = f2u(to_f(xr[idx]));
+      sv[t] = u;
+      lmin = min(lmin, u);
+      lmax = max(lmax, u);
     }
   }
 #pragma unroll
@@ -230,7 +270,7 @@ __device__ void dev_thresholds(const float* xr, long N, int row, int s,
 #pragma unroll
   for (int t = 0; t < CMAX; ++t) {
     // single call site: match_any inside hist_add must see all 32 lanes
-    const bool sel = (threadIdx.x + (t >> 2) * NT) < s4;
+    const bool sel = (threadIdx.x + t * NT) < s;
     const int bin = sel ? (int)((sv[t] - kmin) >> shift) : 0;
     hist_add(hist_a, bin, sel);
     hist_add(cst, bin >> 6, sel);
@@ -246,56 +286,58 @@ __device__ void dev_thresholds(const float* xr, long N, int row, int s,
 // ---------------- phase B device body ----------------
 // Stages admits into per-warp regions of spair, then one block flush to the
 // row's dense global candidate buffer. Returns is_last via sscal[7].
-template <int NT>
-__device__ void dev_filter(const float* xr, long N, float t_lo,
+template <int NT, typename T>
+__device__ void dev_filter(const T* xr, long N, float t_lo,
                            int ctas_per_row, int sub, int row, int2* spair,
                            int2* cand_row, int* cnt, int* tickets, int* wcnt,
                            int* wpref, int* sscal) {
+  constexpr int EPL = EPL_OF<T>::v;  // elements per 16B load
   const int wid = threadIdx.x >> 5;
   const int lane = threadIdx.x & 31;
   const int nwarp = NT / 32;
   const int rcap = PAIR_CAP / nwarp;
   int2* wreg = spair + wid * rcap;
-  const float4* xr4 = reinterpret_cast<const float4*>(xr);
-  const long n4 = (N + 3) / 4;
-  const long n4full = N / 4;
+  const long ng = (N + EPL - 1) / EPL;
+  const long ngfull = N / EPL;
   int wtot = 0;
-  const long chunk = (n4 + ctas_per_row - 1) / ctas_per_row;
+  const long chunk = (ng + ctas_per_row - 1) / ctas_per_row;
   const long begin = (long)sub * chunk;
-  const long end = min(n4, begin + chunk);
-  const long endf = min(end, n4full);
+  const long end = min(ng, begin + chunk);
+  const long endf = min(end, ngfull);
   const long iters = (endf > begin) ? (endf - begin + NT - 1) / NT : 0;
-  const float4 PAD = make_float4(CUDART_NAN_F, CUDART_NAN_F, CUDART_NAN_F, CUDART_NAN_F);
+  const uint4 PAD = padraw<T>();
   const long i0 = begin + threadIdx.x;
-  float4 a = (iters > 0 && i0 < endf) ? xr4[i0] : PAD;
-  float4 b = (iters > 1 && i0 + NT < endf) ? xr4[i0 + NT] : PAD;
+  uint4 a = (iters > 0 && i0 < endf) ? ldraw(xr, i0) : PAD;
+  uint4 b = (iters > 1 && i0 + NT < endf) ? ldraw(xr, i0 + NT) : PAD;
   for (long it = 0; it < iters; ++it) {
     const long inx = i0 + (it + 2) * NT;
-    float4 nxt = (it + 2 < iters && inx < endf) ? xr4[inx] : PAD;
-    const float4 v = a;
+    uint4 nxt = (it + 2 < iters && inx < endf) ? ldraw(xr, inx) : PAD;
     const long i = i0 + it * NT;
-    const int nb4 = (v.x >= t_lo) + (v.y >= t_lo) + (v.z >= t_lo) + (v.w >= t_lo);
-    if (__any_sync(~0u, nb4)) {
-      int pre = nb4;
+    float vv[EPL];
+    cvtgrp<T>(a, vv);
+    int nb = 0;
+#pragma unroll
+    for (int j = 0; j < EPL; ++j) nb += (vv[j] >= t_lo);
+    if (__any_sync(~0u, nb)) {
+      int pre = nb;
 #pragma unroll
       for (int o = 1; o < 32; o <<= 1) {
         const int y = __shfl_up_sync(~0u, pre, o);
         if (lane >= o) pre += y;
       }
       const int total = __shfl_sync(~0u, pre, 31);
-      int slot = wtot + pre - nb4;
+      int slot = wtot + pre - nb;
       wtot += total;
       int nsp = 0;
-      float spv[4];
-      int spi[4];
-      if (nb4) {
-        const float vv[4] = {v.x, v.y, v.z, v.w};
+      float spv[EPL];
+      int spi[EPL];
+      if (nb) {
 #pragma unroll
-        for (int j = 0; j < 4; ++j) {
+        for (int j = 0; j < EPL; ++j) {
           const float f = vv[j];
           if (f >= t_lo) {
-            if (slot < rcap) wreg[slot] = make_int2(__float_as_int(f), (int)(i * 4 + j));
-            else { spv[nsp] = f; spi[nsp] = (int)(i * 4 + j); ++nsp; }
+            if (slot < rcap) wreg[slot] = make_int2(__float_as_int(f), (int)(i * EPL + j));
+            else { spv[nsp] = f; spi[nsp] = (int)(i * EPL + j); ++nsp; }
             ++slot;
           }
         }
@@ -321,10 +363,10 @@ __device__ void dev_filter(const float* xr, long N, float t_lo,
     }
     a = b; b = nxt;
   }
-  // partial last float4 slot (N % 4 != 0), once, by warp 0 of the owning CTA
-  if ((N & 3) && n4full >= begin && n4full < end && wid == 0) {
-    const long e = n4full * 4 + lane;
-    const float f = (lane < (int)(N & 3)) ? xr[e] : CUDART_NAN_F;
+  // partial last group (N % EPL != 0), once, by warp 0 of the owning CTA
+  if ((N % EPL) && ngfull >= begin && ngfull < end && wid == 0) {
+    const long e = ngfull * EPL + lane;
+    const float f = (lane < (int)(N % EPL)) ? to_f(xr[e]) : CUDART_NAN_F;
     const bool adm = (f >= t_lo);
     const unsigned bal = __ballot_sync(~0u, adm);
     const int rk = __popc(bal & ((1u << lane) - 1));
@@ -372,9 +414,9 @@ __device__ void dev_filter(const float* xr, long N, float t_lo,
   __syncthreads();
 }
 
-// ---------------- phase C device body ----------------
-template <int NT>
-__device__ void dev_tail(const float* xr, long N, int K, int cap,
+// ---------------- phase C device body ----------------// ---------------- phase C device body ----------------
+template <int NT, typename T>
+__device__ void dev_tail(const T* xr, long N, int K, int cap,
                          const int2* cand_row, int* cnt, int* out_row,
                          int2* spair, int* hist_a, int* cst, int* sscal,
                          int row, int* dbg) {
@@ -420,29 +462,42 @@ __device__ void dev_tail(const float* xr, long N, int K, int cap,
 
   uint32_t u_kth;
   int count_gt, need_eq;
-  if (!bad) {
-    const uint32_t kmin = bigm ? 0u : (uint32_t)sscal[2];
-    const uint32_t kmax = bigm ? 0xFFFFFFFFu : (uint32_t)sscal[3];
-    const uint32_t* keys = bigm ? reinterpret_cast<const uint32_t*>(cand_row)
-                                : reinterpret_cast<const uint32_t*>(spair);
-    window_select<NT>(keys, 2, M, K - 1, kmin, kmax, bigm, hist_a, cst, sscal,
-                      &u_kth, &count_gt);
+  if (!bad && bigm) {  // direct global select (M <= GCAP)
+    window_select<NT>(reinterpret_cast<const uint32_t*>(cand_row), 2, M, K - 1,
+                      0u, 0xFFFFFFFFu, true, hist_a, cst, sscal, &u_kth, &count_gt);
     need_eq = K - count_gt;
-  } else {  // full-row fallback: byte-round radix (rare)
+  } else {
     uint32_t prefix = 0;
     int rank = K - 1;
     int gt_total = 0;
-    for (int shift = 24; shift >= 0; shift -= 8) {
+    int shift0 = 24;
+    if (!bad) {  // byte-skip via kmin/kmax (staged path)
+      const uint32_t kmin = (uint32_t)sscal[2], kmax = (uint32_t)sscal[3];
+      while (shift0 > 0 && ((kmin >> shift0) & 255u) == ((kmax >> shift0) & 255u)) {
+        prefix |= kmin & (255u << shift0);
+        shift0 -= 8;
+      }
+    }
+    for (int shift = shift0; shift >= 0; shift -= 8) {
       __syncthreads();
       for (int bb = threadIdx.x; bb < 256; bb += NT) hist_a[bb] = 0;
       __syncthreads();
       const uint32_t pmask = (shift >= 24) ? 0u : (0xFFFFFFFFu << (shift + 8));
-      const long Npad = (N + NT - 1) / NT * NT;
-      for (long e = threadIdx.x; e < Npad; e += NT) {
-        const float f = (e < N) ? xr[e] : CUDART_NAN_F;
-        const uint32_t u = f2u(f);
-        hist_add(hist_a, (u >> shift) & 255,
-                 f == f && (u & pmask) == (prefix & pmask));
+      if (!bad) {
+        const int Mpad = (M + NT - 1) / NT * NT;
+        for (int p = threadIdx.x; p < Mpad; p += NT) {
+          const uint32_t u = (p < M) ? (uint32_t)spair[p].x : 0u;
+          hist_add(hist_a, (u >> shift) & 255,
+                   p < M && (u & pmask) == (prefix & pmask));
+        }
+      } else {
+        const long Npad = (N + NT - 1) / NT * NT;
+        for (long e = threadIdx.x; e < Npad; e += NT) {
+          const float f = (e < N) ? to_f(xr[e]) : CUDART_NAN_F;
+          const uint32_t u = f2u(f);
+          hist_add(hist_a, (u >> shift) & 255,
+                   f == f && (u & pmask) == (prefix & pmask));
+        }
       }
       __syncthreads();
       if (wid == 0) find_bin_warp(hist_a, rank, &sscal[0]);
@@ -490,7 +545,7 @@ __device__ void dev_tail(const float* xr, long N, int K, int cap,
   } else {
     const long Npad = (N + NT - 1) / NT * NT;
     for (long e = threadIdx.x; e < Npad; e += NT) {
-      const float f = (e < N) ? xr[e] : CUDART_NAN_F;
+      const float f = (e < N) ? to_f(xr[e]) : CUDART_NAN_F;
       const uint32_t u = f2u(f);
       const bool ok = (f == f);
       const bool sgt = ok && u > u_kth;
@@ -524,15 +579,15 @@ __device__ void dev_tail(const float* xr, long N, int K, int cap,
 }
 
 // ---------------- kernels ----------------
-template <int NT>
-__global__ void k_apex_fused(const float* __restrict__ xbase, int* __restrict__ out,
+template <int NT, typename T>
+__global__ void k_apex_fused(const T* __restrict__ xbase, int* __restrict__ out,
                              int2* __restrict__ cand, int* __restrict__ counts,
                              int* __restrict__ tickets, long row_stride, long N,
                              int K, int ctas_per_row, int s, int i_lo,
                              uint32_t seed, int mode, int* __restrict__ dbg) {
   const int row = blockIdx.x / ctas_per_row;
   const int sub = blockIdx.x % ctas_per_row;
-  const float* xr = xbase + (long)row * row_stride;
+  const T* xr = xbase + (long)row * row_stride;
   int2* cand_row = cand + (long)row * GCAP;
   int* cnt = counts + (long)row * 3;
   extern __shared__ int2 spair[];
@@ -541,7 +596,7 @@ __global__ void k_apex_fused(const float* __restrict__ xbase, int* __restrict__ 
   __shared__ int wcnt[32], wpref[32];
   __shared__ int sscal[8];
   __shared__ float sthr[2];
-  dev_thresholds<NT>(xr, N, row, s, i_lo, seed, hist_a, cst, sscal, sthr);
+  dev_thresholds<NT, T>(xr, N, row, s, i_lo, seed, hist_a, cst, sscal, sthr);
   const float t_lo = sthr[0];
   if (mode == 1) {
     if (threadIdx.x == 0 && sub == 0 && dbg) {
@@ -549,57 +604,59 @@ __global__ void k_apex_fused(const float* __restrict__ xbase, int* __restrict__ 
     }
     return;
   }
-  dev_filter<NT>(xr, N, t_lo, ctas_per_row, sub, row, spair, cand_row,
+  dev_filter<NT, T>(xr, N, t_lo, ctas_per_row, sub, row, spair, cand_row,
                  cnt, tickets, wcnt, wpref, sscal);
   if (mode == 2) return;  // probe (probe script resets counts)
   if (!sscal[7]) return;
-  dev_tail<NT>(xr, N, K, PAIR_CAP, cand_row, cnt, out + (long)row * K, spair,
+  dev_tail<NT, T>(xr, N, K, PAIR_CAP, cand_row, cnt, out + (long)row * K, spair,
                hist_a, cst, sscal, row, dbg);
 }
 
-__global__ void k_apex_thr(const float* __restrict__ xbase,
+template <typename T>
+__global__ void k_apex_thr(const T* __restrict__ xbase,
                            float* __restrict__ thr, long row_stride, long N,
                            int s, int i_lo, uint32_t seed) {
   constexpr int NT = 512;
   const int row = blockIdx.x;
-  const float* xr = xbase + (long)row * row_stride;
+  const T* xr = xbase + (long)row * row_stride;
   __shared__ int hist_a[2048];
   __shared__ int cst[32];
   __shared__ int sscal[8];
   __shared__ float sthr[2];
-  dev_thresholds<NT>(xr, N, row, s, i_lo, seed, hist_a, cst, sscal, sthr);
+  dev_thresholds<NT, T>(xr, N, row, s, i_lo, seed, hist_a, cst, sscal, sthr);
   if (threadIdx.x == 0) thr[row] = sthr[0];
 }
 
-template <int NT>
-__global__ void k_apex_filter(const float* __restrict__ xbase,
+template <int NT, typename T>
+__global__ void k_apex_filter(const T* __restrict__ xbase,
                               const float* __restrict__ thr,
                               int2* __restrict__ cand, int* __restrict__ counts,
                               int* __restrict__ tickets, long row_stride, long N,
                               int ctas_per_row) {
   const int row = blockIdx.x / ctas_per_row;
   const int sub = blockIdx.x % ctas_per_row;
-  const float* xr = xbase + (long)row * row_stride;
+  const T* xr = xbase + (long)row * row_stride;
   extern __shared__ int2 spair[];
   __shared__ int wcnt[32], wpref[32];
   __shared__ int sscal[8];
-  dev_filter<NT>(xr, N, thr[row], ctas_per_row, sub, row,
+  dev_filter<NT, T>(xr, N, thr[row], ctas_per_row, sub, row,
                  spair, cand + (long)row * GCAP, counts + (long)row * 3,
                  tickets, wcnt, wpref, sscal);
 }
 
-__global__ void k_apex_tail(const float* __restrict__ xbase, int* __restrict__ out,
+template <typename T>
+__global__ void k_apex_tail(const T* __restrict__ xbase, int* __restrict__ out,
                             const int2* __restrict__ cand, int* __restrict__ counts,
                             long row_stride, long N, int K, int tail_cap,
                             int* __restrict__ dbg) {
   constexpr int NT = 512;
   const int row = blockIdx.x;
-  const float* xr = xbase + (long)row * row_stride;
+  const T* xr = xbase + (long)row * row_stride;
   extern __shared__ int2 spair[];
   __shared__ int hist_a[2048];
   __shared__ int cst[32];
   __shared__ int sscal[8];
-  dev_tail<NT>(xr, N, K, tail_cap, cand + (long)row * GCAP,
+  dev_tail<NT, T>(xr, N, K, tail_cap, cand + (long)row * GCAP,
                counts + (long)row * 3, out + (long)row * K, spair, hist_a,
                cst, sscal, row, dbg);
 }
@@ -679,6 +736,47 @@ static void set_dyn(const void* fn, int bytes) {
   cudaFuncSetAttribute(fn, cudaFuncAttributeMaxDynamicSharedMemorySize, bytes);
 }
 
+template <typename T>
+static void launch_apex(const T* xp, torch::Tensor& out, torch::Tensor& cand,
+                        torch::Tensor& counts, torch::Tensor& tickets,
+                        torch::Tensor& thr, int rows, long row_stride, long N,
+                        int K, int ctas_per_row, int nt, int s, int i_lo,
+                        long seed, int tail_cap, int mode, bool split, int* dp) {
+  static bool init_done = false;
+  if (!init_done) {
+    set_dyn((const void*)k_apex_fused<512, T>, DYN_BYTES);
+    set_dyn((const void*)k_apex_filter<512, T>, DYN_BYTES);
+    set_dyn((const void*)k_apex_filter<1024, T>, DYN_BYTES);
+    set_dyn((const void*)k_apex_tail<T>, DYN_BYTES);
+    init_done = true;
+  }
+  if (!split) {
+    k_apex_fused<512, T><<<rows * ctas_per_row, 512, DYN_BYTES>>>(
+        xp, out.data_ptr<int>(), reinterpret_cast<int2*>(cand.data_ptr<int>()),
+        counts.data_ptr<int>(), tickets.data_ptr<int>(), row_stride, N, K,
+        ctas_per_row, s, i_lo, (uint32_t)SEED_XOR(seed), mode, dp);
+    return;
+  }
+  k_apex_thr<T><<<rows, 512>>>(xp, thr.data_ptr<float>(), row_stride, N, s,
+                               i_lo, (uint32_t)SEED_XOR(seed));
+  if (mode < 2) return;
+  if (nt == 1024)
+    k_apex_filter<1024, T><<<rows * ctas_per_row, 1024, DYN_BYTES>>>(
+        xp, thr.data_ptr<float>(), reinterpret_cast<int2*>(cand.data_ptr<int>()),
+        counts.data_ptr<int>(), tickets.data_ptr<int>(), row_stride, N,
+        ctas_per_row);
+  else
+    k_apex_filter<512, T><<<rows * ctas_per_row, 512, DYN_BYTES>>>(
+        xp, thr.data_ptr<float>(), reinterpret_cast<int2*>(cand.data_ptr<int>()),
+        counts.data_ptr<int>(), tickets.data_ptr<int>(), row_stride, N,
+        ctas_per_row);
+  if (mode < 3) return;
+  k_apex_tail<T><<<rows, 512, tail_cap * 8>>>(
+      xp, out.data_ptr<int>(),
+      reinterpret_cast<const int2*>(cand.data_ptr<int>()),
+      counts.data_ptr<int>(), row_stride, N, K, tail_cap, dp);
+}
+
 void apex_topk(torch::Tensor x, torch::Tensor out, torch::Tensor cand,
                torch::Tensor counts, torch::Tensor tickets, torch::Tensor thr,
                long N, int K, int ctas_per_row, int nt, int s, int i_lo,
@@ -686,49 +784,22 @@ void apex_topk(torch::Tensor x, torch::Tensor out, torch::Tensor cand,
   const int rows = x.size(0);
   const long row_stride = x.size(1);
   int* dp = dbg.numel() ? dbg.data_ptr<int>() : nullptr;
-  static bool init_done = false;
-  if (!init_done) {
-    set_dyn((const void*)k_apex_fused<512>, DYN_BYTES);
-    set_dyn((const void*)k_apex_fused<1024>, DYN_BYTES);
-    set_dyn((const void*)k_apex_filter<512>, DYN_BYTES);
-    set_dyn((const void*)k_apex_filter<1024>, DYN_BYTES);
-    set_dyn((const void*)k_apex_tail, DYN_BYTES);
-    init_done = true;
-  }
-  if (!split) {
-    if (nt == 1024)
-      k_apex_fused<1024><<<rows * ctas_per_row, 1024, DYN_BYTES>>>(
-          x.data_ptr<float>(), out.data_ptr<int>(),
-          reinterpret_cast<int2*>(cand.data_ptr<int>()), counts.data_ptr<int>(),
-          tickets.data_ptr<int>(), row_stride, N, K, ctas_per_row, s, i_lo,
-          (uint32_t)seed, mode, dp);
-    else
-      k_apex_fused<512><<<rows * ctas_per_row, 512, DYN_BYTES>>>(
-          x.data_ptr<float>(), out.data_ptr<int>(),
-          reinterpret_cast<int2*>(cand.data_ptr<int>()), counts.data_ptr<int>(),
-          tickets.data_ptr<int>(), row_stride, N, K, ctas_per_row, s, i_lo,
-          (uint32_t)seed, mode, dp);
-    return;
-  }
-  k_apex_thr<<<rows, 512>>>(x.data_ptr<float>(),
-                                           thr.data_ptr<float>(), row_stride, N,
-                                           s, i_lo, (uint32_t)seed);
-  if (mode < 2) return;
-  if (nt == 1024)
-    k_apex_filter<1024><<<rows * ctas_per_row, 1024, DYN_BYTES>>>(
-        x.data_ptr<float>(), thr.data_ptr<float>(),
-        reinterpret_cast<int2*>(cand.data_ptr<int>()), counts.data_ptr<int>(),
-        tickets.data_ptr<int>(), row_stride, N, ctas_per_row);
+  if (x.scalar_type() == torch::kFloat32)
+    launch_apex<float>(x.data_ptr<float>(), out, cand, counts, tickets, thr,
+                       rows, row_stride, N, K, ctas_per_row, nt, s, i_lo, seed,
+                       tail_cap, mode, split, dp);
+  else if (x.scalar_type() == torch::kBFloat16)
+    launch_apex<__nv_bfloat16>(
+        reinterpret_cast<const __nv_bfloat16*>(x.data_ptr<at::BFloat16>()),
+        out, cand, counts, tickets, thr, rows, row_stride, N, K, ctas_per_row,
+        nt, s, i_lo, seed, tail_cap, mode, split, dp);
+  else if (x.scalar_type() == torch::kHalf)
+    launch_apex<__half>(
+        reinterpret_cast<const __half*>(x.data_ptr<at::Half>()),
+        out, cand, counts, tickets, thr, rows, row_stride, N, K, ctas_per_row,
+        nt, s, i_lo, seed, tail_cap, mode, split, dp);
   else
-    k_apex_filter<512><<<rows * ctas_per_row, 512, DYN_BYTES>>>(
-        x.data_ptr<float>(), thr.data_ptr<float>(),
-        reinterpret_cast<int2*>(cand.data_ptr<int>()), counts.data_ptr<int>(),
-        tickets.data_ptr<int>(), row_stride, N, ctas_per_row);
-  if (mode < 3) return;
-  k_apex_tail<<<rows, 512, tail_cap * 8>>>(
-      x.data_ptr<float>(), out.data_ptr<int>(),
-      reinterpret_cast<const int2*>(cand.data_ptr<int>()), counts.data_ptr<int>(),
-      row_stride, N, K, tail_cap, dp);
+    TORCH_CHECK(false, "apex_topk: unsupported dtype");
 }
 
 void apex_small(torch::Tensor x, torch::Tensor out, long N, int K) {

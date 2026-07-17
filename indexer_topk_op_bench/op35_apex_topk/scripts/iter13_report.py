@@ -15,6 +15,8 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent / "results/iter13"
 RIVAL = HERE.parents[1] / "op26_r0_upstream_port_report/rival_long.csv"
 rep = sys.argv[1] if len(sys.argv) > 1 else str(ROOT / "apex_fp32_run1.nsys-rep")
+DT = sys.argv[2] if len(sys.argv) > 2 else "fp32"
+JSONL = sys.argv[3] if len(sys.argv) > 3 else str(ROOT / f"apex_{DT}.jsonl")
 
 
 def parse_rep_span(rep):
@@ -46,7 +48,7 @@ span = parse_rep_span(rep)
 frontier = defaultdict(lambda: float("inf"))
 best_arm = {}
 for r in csv.DictReader(open(RIVAL)):
-    if r["dtype"] != "fp32" or r.get("us_span") in (None, ""):
+    if r["dtype"] != DT or r.get("us_span") in (None, ""):
         continue
     if r["family"] == "synth":
         key = ("synth", r["scenario"], int(r["K"]), int(r["N"]), int(r["BS"]))
@@ -57,7 +59,7 @@ for r in csv.DictReader(open(RIVAL)):
         frontier[key] = v
         best_arm[key] = r["op"]
 
-recs = [json.loads(l) for l in open(ROOT / "apex_fp32.jsonl")]
+recs = [json.loads(l) for l in open(JSONL)]
 rows_out = []
 for r in recs:
     if "error" in r:
@@ -75,7 +77,7 @@ for r in recs:
     rows_out.append(dict(r, us_span=us, frontier=fr, arm=best_arm[key],
                          speedup=fr / us))
 
-with open(ROOT / "joined.json", "w") as f:
+with open(ROOT / f"joined_{DT}.json", "w") as f:
     json.dump(rows_out, f)
 
 

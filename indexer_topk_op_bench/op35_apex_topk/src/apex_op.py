@@ -36,28 +36,26 @@ Z = 6.0
 SEED = 0x0035A9E5
 
 
-N_SMALL = 32768  # whole-row-in-smem mode threshold (fp32)
+N_SMALL = 0  # row-in-smem single-CTA mode FALSIFIED (iter14) — disabled
 
 
 def pick_config(BS, N, K):
     if N <= N_SMALL:
         return dict(small=True, split=False)
-    split = BS >= 32
+    split = BS >= 32 and N > 32768  # small-N: 1 fused launch beats 3-kernel split
     if split:
         nt = 1024
         cpr = max(1, 256 // BS)
     else:
         nt = 512
         cpr = max(1, 148 // BS)
-    lam = {512: 4, 1024: 8, 2048: 16}.get(K, 16)  # per-K sample-density target
-    s = min(8192, max(2048, 1 << math.ceil(math.log2(max(1, lam * N // K)))))
+    s = min(8192, max(1024, 1 << math.ceil(math.log2(max(1, 8 * N // K)))))
     s = min(s, 1 << int(math.log2(max(2, N))))  # s <= N (pow2)
     assert s % 1024 == 0 or s >= 1024, (s,)     # uniform sample loops (s % NT)
     q = K / N
     r0 = s * q
-    # x2: float4-quad samples are spatially correlated (worst case 4-or-none),
-    # doubling the count sd vs IID — validated on op26 synth (miss at plain z=6)
-    sig = 2.0 * math.sqrt(max(1.0, s * q * (1 - q)))
+    # scalar strata are spatially independent -> IID margins (iter15)
+    sig = math.sqrt(max(1.0, s * q * (1 - q)))
     i_lo = min(s - 1, int(math.ceil(r0 + Z * sig)) - 1)
     tail_cap = 8192 if K <= 1024 else PAIR_CAP
     return dict(small=False, cpr=cpr, nt=nt, s=s, i_lo=i_lo, split=split,
@@ -84,7 +82,10 @@ _EMPTY = None
 
 def apex_topk(x, K, N=None, cfg=None, ws=None, mode=3, dbg=None):
     global _EMPTY
-    assert x.dtype == torch.float32 and x.dim() == 2 and x.is_contiguous()
+    assert x.dtype in (torch.float32, torch.bfloat16, torch.float16)
+    assert x.dim() == 2 and x.is_contiguous()
+    if cfg is not None and cfg.get("small"):
+        assert x.dtype == torch.float32  # small kernel is fp32-only (disabled)
     BS = x.size(0)
     if N is None:
         N = x.size(1)

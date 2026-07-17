@@ -39,11 +39,13 @@ REAL_ISLS = {"flash": ["4k", "8k", "16k", "32k", "64k", "128k", "256k", "512k", 
 REAL_BS_ISL = "128k"
 
 
-def build_call_apex(K, N, BS, logits_row):
+DT = {"fp32": torch.float32, "bf16": torch.bfloat16, "fp16": torch.float16}
+
+
+def build_call_apex(K, N, BS, logits_row, dtype):
     W = ((N + 63) // 64) * 64
-    x = torch.full((BS, W), torch.finfo(torch.float32).min, dtype=torch.float32,
-                   device=DEV)
-    x[:, :N] = logits_row[:, :N].float()
+    x = torch.full((BS, W), torch.finfo(dtype).min, dtype=dtype, device=DEV)
+    x[:, :N] = logits_row[:, :N].to(dtype)
     cfg = pick_config(BS, N, K)
     ws = workspace(BS, K, cfg, x.device)
     call = lambda: apex_topk(x, K, N=N, cfg=cfg, ws=ws)  # noqa: E731
@@ -78,12 +80,12 @@ def load_done(path):
     return done
 
 
-def run_cell(f, rec_base, K, N, BS, logits_row, rc, rw):
+def run_cell(f, rec_base, K, N, BS, logits_row, rc, rw, dtype):
     base = rec_base["range_cold"][2:]
     try:
-        call, keep, getter = build_call_apex(K, N, BS, logits_row)
-        rec_base["exact"] = bool(exact_check(getter, logits_row[0, :N].float(),
-                                             N, K, BS))
+        call, keep, getter = build_call_apex(K, N, BS, logits_row, dtype)
+        ref_row = logits_row[0, :N].to(dtype).float()
+        rec_base["exact"] = bool(exact_check(getter, ref_row, N, K, BS))
         measure_cell(call, base, rc, rw)
         del call, keep
     except Exception as e:
@@ -99,10 +101,11 @@ def main():
     ap.add_argument("--gpu", type=int, default=0)
     ap.add_argument("--reps", type=int, default=10)
     ap.add_argument("--reps-warm", type=int, default=10)
-    ap.add_argument("--out", default=str(HERE.parent / "results/iter13/apex_fp32.jsonl"))
+    ap.add_argument("--dtype", default="fp32", choices=["fp32", "bf16", "fp16"])
+    ap.add_argument("--out", default="")
     a = ap.parse_args()
     torch.cuda.set_device(a.gpu)
-    out = Path(a.out)
+    out = Path(a.out or str(HERE.parent / f"results/iter13/apex_{a.dtype}.jsonl"))
     out.parent.mkdir(parents=True, exist_ok=True)
     done = load_done(out)
     f = open(out, "a")
@@ -118,12 +121,12 @@ def main():
                         continue
                     b = SYNTH.get_bundle(scen, K, torch.float32, N)
                     lg = b["logits"]
-                    base = f"apex_v3|{scen}|{K}|fp32|{N}|{BS}"
+                    base = f"apex_v3|{scen}|{K}|{a.dtype}|{N}|{BS}"
                     rec = dict(family="synth", scenario=scen, op="apex_v3", K=K,
-                               dtype="fp32", N=N, BS=BS, isl="",
+                               dtype=a.dtype, N=N, BS=BS, isl="",
                                range_cold=f"c|{base}", range_warm=f"w|{base}",
                                reps_cold=a.reps, reps_warm=a.reps_warm)
-                    run_cell(f, rec, K, N, BS, lg, a.reps, a.reps_warm)
+                    run_cell(f, rec, K, N, BS, lg, a.reps, a.reps_warm, DT[a.dtype])
                 print(f"[synth {scen} K{K}] done", flush=True)
         # ---- real: seqlen (BS1) + bs grid at 128k ----
         for model in ("flash", "pro", "v32"):
@@ -140,12 +143,12 @@ def main():
                 K, N = b["K"], b["N"]
                 if ("real", "", model, K, N, BS, isl) in done:
                     continue
-                base = f"apex_v3|{model}|{isl}|fp32|{N}|{BS}"
+                base = f"apex_v3|{model}|{isl}|{a.dtype}|{N}|{BS}"
                 rec = dict(family="real", model=model, op="apex_v3", K=K,
-                           dtype="fp32", N=N, BS=BS, isl=isl,
+                           dtype=a.dtype, N=N, BS=BS, isl=isl,
                            range_cold=f"c|{base}", range_warm=f"w|{base}",
                            reps_cold=a.reps, reps_warm=a.reps_warm)
-                run_cell(f, rec, K, N, BS, b["logits"], a.reps, a.reps_warm)
+                run_cell(f, rec, K, N, BS, b["logits"], a.reps, a.reps_warm, DT[a.dtype])
             print(f"[real {model}] done", flush=True)
     finally:
         prof.stop()
