@@ -24,21 +24,24 @@ FINAL CAMPAIGN POSITION (@9bfda350b3, mixed dispatch):
   (full envelope, --dtype fp32|bf16|fp16), iter11_ncu_target.
 - Ledgers: ITERATIONS.md (iter0-17 + VERDICT), WALLS.md, FALSIFIED.md.
 
-## If reopened, the ONLY remaining structural idea
-Persistent single-wave cooperative kernel: 148 resident CTAs stream a row
-work-queue; thr/filter/tail of DIFFERENT rows pipeline across the wave; zero
-launch overhead; grid-sync via atomics (single wave => safe). Bounded upside
-estimate +10-25% overall (NOT 3x) — it fixes launch + wave exposure, not the
-filter tax or the small-N true floor. Kill fast if BS-large N131-262k cells
-do not clear 1.0x.
+## Disposition 1 (regime campaign) EXECUTED and KILLED (iter18, 2026-07-17)
+User chose the persistent/pipelining attack on BS>=128 x N131-262k. Kill line
+(regime cells >= 1.0x) triggered: 0/60 cells across ALL mechanisms —
+python pipe (~260us host floor), C++ chunked 3-stream pipe (0.675 -> 0.481,
+narrow-grid machine-fill loss > hidden exposure), all-fused (wash, iter17),
+__noinline__ register isolation (48 REG unchanged). Cost autopsy: regime
+arithmetic ceiling ~1.18x (filter alone = 1.6x read vs frontier 1.9x read)
+— the 1.5x-class win does not exist in this family on this regime. Discovered
+en route: NT1024 was ALWAYS 1 CTA/SM (filter 39-40 REG; v10 baseline too).
+apex_pipe kept as opt-in (cfg["pipeline"]=True). PDL grid-boundary overlap
+left unexplored (bounded ~10-15%, cannot bridge to the bar).
 
-## Alternative dispositions (user decision)
-1. Re-scope objective to "beat frontier on the BS>=128 x N>=131k regime"
-   (currently 0.70, cells to 0.94; persistent kernel might clear 1.0-1.2x).
-2. Harvest components: the exact-sample-threshold band (rung0.2 math, z=6
-   scalar strata), the smem-staged filter flush, and the tie-aware ballot
-   emission are reusable in GVR-family kernels (op26_r0auto post-PR#16457).
-3. Close campaign; keep as negative result + REPORT (like op34).
+## Remaining dispositions (user decision)
+2. Harvest components: exact-sample-threshold band (rung0.2 math, z=6 scalar
+   strata), smem-staged filter flush, tie-aware ballot emission — reusable in
+   GVR-family kernels (op26_r0auto post-PR#16457).
+3. Close campaign; negative-result REPORT (like op34) + COST accounting per
+   the original user objective.
 
 ## Gotchas (carried; full list in prior version @31b19b9ad1 + FALSIFIED.md)
 - match_any/ballot call sites must be warp-uniform, single-call-site predicated.
