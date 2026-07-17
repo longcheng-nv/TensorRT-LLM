@@ -9,3 +9,7 @@
   gm 0.507/0.516/0.512 (fp32/bf16/fp16), 1041/1041 exact.
 - Per-CTA serial pass count is the currency at real clocks: single-CTA-per-row
   designs lose outright (iter14: N32768 1-CTA = 55us vs 20us sampled).
+- WALL (iter18): regime BS>=128 x N131-262k arithmetic ceiling ~1.18x — even
+  with thr+tail free, filter(1.6x read) vs frontier(1.9x read) caps the win.
+  All overlap mechanisms falsified (host pipe / C++ chunked pipe / all-fused /
+  noinline). NT1024 has ALWAYS been 1 CTA/SM (filter 39-40 REG) — baseline.

@@ -23,6 +23,7 @@
 //                keeps v10-level registers (2 CTAs/SM at NT=1024).
 // CUDA-graph compatible: no host sync; counters/tickets self-clean.
 #include <torch/extension.h>
+#include <ATen/cuda/CUDAContext.h>
 #include <cuda_runtime.h>
 #include <cuda_fp16.h>
 #include <cuda_bf16.h>
@@ -745,33 +746,46 @@ static void launch_apex(const T* xp, torch::Tensor& out, torch::Tensor& cand,
   static bool init_done = false;
   if (!init_done) {
     set_dyn((const void*)k_apex_fused<512, T>, DYN_BYTES);
+    set_dyn((const void*)k_apex_fused<1024, T>, DYN_BYTES);
     set_dyn((const void*)k_apex_filter<512, T>, DYN_BYTES);
     set_dyn((const void*)k_apex_filter<1024, T>, DYN_BYTES);
     set_dyn((const void*)k_apex_tail<T>, DYN_BYTES);
     init_done = true;
   }
+  cudaStream_t st = at::cuda::getCurrentCUDAStream();
   if (!split) {
-    k_apex_fused<512, T><<<rows * ctas_per_row, 512, DYN_BYTES>>>(
-        xp, out.data_ptr<int>(), reinterpret_cast<int2*>(cand.data_ptr<int>()),
-        counts.data_ptr<int>(), tickets.data_ptr<int>(), row_stride, N, K,
-        ctas_per_row, s, i_lo, (uint32_t)SEED_XOR(seed), mode, dp);
+    if (nt == 1024)
+      k_apex_fused<1024, T><<<rows * ctas_per_row, 1024, DYN_BYTES, st>>>(
+          xp, out.data_ptr<int>(), reinterpret_cast<int2*>(cand.data_ptr<int>()),
+          counts.data_ptr<int>(), tickets.data_ptr<int>(), row_stride, N, K,
+          ctas_per_row, s, i_lo, (uint32_t)SEED_XOR(seed), mode, dp);
+    else
+      k_apex_fused<512, T><<<rows * ctas_per_row, 512, DYN_BYTES, st>>>(
+          xp, out.data_ptr<int>(), reinterpret_cast<int2*>(cand.data_ptr<int>()),
+          counts.data_ptr<int>(), tickets.data_ptr<int>(), row_stride, N, K,
+          ctas_per_row, s, i_lo, (uint32_t)SEED_XOR(seed), mode, dp);
     return;
   }
-  k_apex_thr<T><<<rows, 512>>>(xp, thr.data_ptr<float>(), row_stride, N, s,
-                               i_lo, (uint32_t)SEED_XOR(seed));
-  if (mode < 2) return;
-  if (nt == 1024)
-    k_apex_filter<1024, T><<<rows * ctas_per_row, 1024, DYN_BYTES>>>(
-        xp, thr.data_ptr<float>(), reinterpret_cast<int2*>(cand.data_ptr<int>()),
-        counts.data_ptr<int>(), tickets.data_ptr<int>(), row_stride, N,
-        ctas_per_row);
-  else
-    k_apex_filter<512, T><<<rows * ctas_per_row, 512, DYN_BYTES>>>(
-        xp, thr.data_ptr<float>(), reinterpret_cast<int2*>(cand.data_ptr<int>()),
-        counts.data_ptr<int>(), tickets.data_ptr<int>(), row_stride, N,
-        ctas_per_row);
-  if (mode < 3) return;
-  k_apex_tail<T><<<rows, 512, tail_cap * 8>>>(
+  // split stages; mode: 1=thr 2=thr+filter 3=all 4=filter-only 5=tail-only
+  if (mode != 4 && mode != 5) {
+    k_apex_thr<T><<<rows, 512, 0, st>>>(xp, thr.data_ptr<float>(), row_stride,
+                                        N, s, i_lo, (uint32_t)SEED_XOR(seed));
+    if (mode < 2) return;
+  }
+  if (mode != 5) {
+    if (nt == 1024)
+      k_apex_filter<1024, T><<<rows * ctas_per_row, 1024, DYN_BYTES, st>>>(
+          xp, thr.data_ptr<float>(),
+          reinterpret_cast<int2*>(cand.data_ptr<int>()), counts.data_ptr<int>(),
+          tickets.data_ptr<int>(), row_stride, N, ctas_per_row);
+    else
+      k_apex_filter<512, T><<<rows * ctas_per_row, 512, DYN_BYTES, st>>>(
+          xp, thr.data_ptr<float>(),
+          reinterpret_cast<int2*>(cand.data_ptr<int>()), counts.data_ptr<int>(),
+          tickets.data_ptr<int>(), row_stride, N, ctas_per_row);
+    if (mode < 3 || mode == 4) return;
+  }
+  k_apex_tail<T><<<rows, 512, tail_cap * 8, st>>>(
       xp, out.data_ptr<int>(),
       reinterpret_cast<const int2*>(cand.data_ptr<int>()),
       counts.data_ptr<int>(), row_stride, N, K, tail_cap, dp);
@@ -802,6 +816,86 @@ void apex_topk(torch::Tensor x, torch::Tensor out, torch::Tensor cand,
     TORCH_CHECK(false, "apex_topk: unsupported dtype");
 }
 
+// C++-side chunked 3-stream pipeline for split mode: thr(c) -> filter(c) ->
+// tail(c) chained by events; chunks overlap across streams. Host cost ~us.
+template <typename T>
+static void launch_pipe(const T* xp, torch::Tensor& out, torch::Tensor& cand,
+                        torch::Tensor& counts, torch::Tensor& tickets,
+                        torch::Tensor& thr, int rows, long row_stride, long N,
+                        int K, int ctas_per_row, int nt, int s, int i_lo,
+                        long seed, int tail_cap, int chunks) {
+  static cudaStream_t st[3] = {nullptr, nullptr, nullptr};
+  static cudaEvent_t evs[64];
+  static bool sinit = false;
+  if (!sinit) {
+    for (int i = 0; i < 3; ++i)
+      cudaStreamCreateWithFlags(&st[i], cudaStreamNonBlocking);
+    for (int i = 0; i < 64; ++i)
+      cudaEventCreateWithFlags(&evs[i], cudaEventDisableTiming);
+    set_dyn((const void*)k_apex_filter<512, T>, DYN_BYTES);
+    set_dyn((const void*)k_apex_filter<1024, T>, DYN_BYTES);
+    set_dyn((const void*)k_apex_tail<T>, DYN_BYTES);
+    sinit = true;
+  }
+  cudaStream_t cur = at::cuda::getCurrentCUDAStream();
+  cudaEventRecord(evs[63], cur);
+  for (int i = 0; i < 3; ++i) cudaStreamWaitEvent(st[i], evs[63], 0);
+  const int cb = (rows + chunks - 1) / chunks;
+  int ei = 0;
+  int2* candp = reinterpret_cast<int2*>(cand.data_ptr<int>());
+  for (int i0 = 0; i0 < rows; i0 += cb) {
+    const int rc = min(cb, rows - i0);
+    const T* xv = xp + (long)i0 * row_stride;
+    int* ov = out.data_ptr<int>() + (long)i0 * K;
+    int2* cv = candp + (long)i0 * GCAP;
+    int* cnv = counts.data_ptr<int>() + (long)i0 * 3;
+    int* tkv = tickets.data_ptr<int>() + i0;
+    float* thv = thr.data_ptr<float>() + i0;
+    k_apex_thr<T><<<rc, 512, 0, st[0]>>>(xv, thv, row_stride, N, s, i_lo,
+                                         (uint32_t)seed);
+    cudaEventRecord(evs[ei], st[0]);
+    cudaStreamWaitEvent(st[1], evs[ei], 0);
+    if (nt == 1024)
+      k_apex_filter<1024, T><<<rc * ctas_per_row, 1024, DYN_BYTES, st[1]>>>(
+          xv, thv, cv, cnv, tkv, row_stride, N, ctas_per_row);
+    else
+      k_apex_filter<512, T><<<rc * ctas_per_row, 512, DYN_BYTES, st[1]>>>(
+          xv, thv, cv, cnv, tkv, row_stride, N, ctas_per_row);
+    cudaEventRecord(evs[ei + 1], st[1]);
+    cudaStreamWaitEvent(st[2], evs[ei + 1], 0);
+    k_apex_tail<T><<<rc, 512, tail_cap * 8, st[2]>>>(
+        xv, ov, cv, cnv, row_stride, N, K, tail_cap, nullptr);
+    ei += 2;
+    if (ei >= 60) ei = 0;  // pool reuse (chunks capped by host policy)
+  }
+  cudaEventRecord(evs[62], st[2]);
+  cudaStreamWaitEvent(cur, evs[62], 0);
+}
+
+void apex_pipe(torch::Tensor x, torch::Tensor out, torch::Tensor cand,
+               torch::Tensor counts, torch::Tensor tickets, torch::Tensor thr,
+               long N, int K, int ctas_per_row, int nt, int s, int i_lo,
+               long seed, int tail_cap, int chunks) {
+  const int rows = x.size(0);
+  const long row_stride = x.size(1);
+  if (x.scalar_type() == torch::kFloat32)
+    launch_pipe<float>(x.data_ptr<float>(), out, cand, counts, tickets, thr,
+                       rows, row_stride, N, K, ctas_per_row, nt, s, i_lo, seed,
+                       tail_cap, chunks);
+  else if (x.scalar_type() == torch::kBFloat16)
+    launch_pipe<__nv_bfloat16>(
+        reinterpret_cast<const __nv_bfloat16*>(x.data_ptr<at::BFloat16>()),
+        out, cand, counts, tickets, thr, rows, row_stride, N, K, ctas_per_row,
+        nt, s, i_lo, seed, tail_cap, chunks);
+  else if (x.scalar_type() == torch::kHalf)
+    launch_pipe<__half>(
+        reinterpret_cast<const __half*>(x.data_ptr<at::Half>()),
+        out, cand, counts, tickets, thr, rows, row_stride, N, K, ctas_per_row,
+        nt, s, i_lo, seed, tail_cap, chunks);
+  else
+    TORCH_CHECK(false, "apex_pipe: unsupported dtype");
+}
+
 void apex_small(torch::Tensor x, torch::Tensor out, long N, int K) {
   static bool init = false;
   if (!init) {
@@ -817,4 +911,5 @@ void apex_small(torch::Tensor x, torch::Tensor out, long N, int K) {
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("apex_topk", &apex_topk);
   m.def("apex_small", &apex_small);
+  m.def("apex_pipe", &apex_pipe);
 }

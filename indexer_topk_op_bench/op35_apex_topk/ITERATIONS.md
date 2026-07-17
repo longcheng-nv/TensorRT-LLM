@@ -202,3 +202,31 @@ achievable by ANY exact top-K kernel at these shapes:
 Remaining unexplored idea (bounded upside): persistent single-wave
 cooperative kernel (cross-row pipelining of thr/filter/tail + zero launches).
 Estimated +10-25% overall, NOT 3x. Not pursued; documented in RESUME.
+
+## iter 18 — 2026-07-17 — REGIME CAMPAIGN (disposition 1) — KILLED per criterion
+Objective re-scoped (user): beat frontier on BS>=128 x N>=131k via cross-phase
+pipelining ("persistent" family). Kill line: regime cells must clear 1.0x.
+Probes, in order:
+  a. Python 3-stream chunked pipeline: FALSIFIED — host orchestration floor
+     ~260us flat (stream switches + event churn at us-kernel scale).
+  b. C++ 3-stream chunked pipeline (static stream/event pools, ~us host):
+     FALSIFIED — regime gm 0.675 (seq) -> 0.481 (pipe). Chunking narrows each
+     stage's grid (BS64: 64-CTA filter waves ~ 0.43 wave); machine-fill loss
+     exceeds hidden thr/tail exposure. Full-width sequential stages already
+     saturate within-stage; only the 2 stage boundaries are exposed.
+  c. all-fused per-row pipelining: already measured iter17 = wash (occupancy).
+  d. __noinline__ register isolation: FALSIFIED — fused stays 48 REG (+64
+     STACK); ptxas allocates worst-case across ABI calls. ALSO discovered:
+     even lean k_apex_filter is 39-40 REG -> NT1024 was ALWAYS 1 CTA/SM
+     (v10 baseline too) — "2 CTA/SM" never existed; numbers are the baseline.
+  e. Cost autopsy of regime cells (nsys per-kernel): BS512/N262144/K512 =
+     thr 66 (scalar-sample scatter, 2M sectors) + filter 153 (1.6x read) +
+     tail 26. ARITHMETIC CEILING: even with thr+tail FREE, filter-only vs
+     frontier = 180/153 ~ 1.18x. The 1.5x-class win does not exist in this
+     family on this regime; 1.0x regime geomean needs near-perfect overlap
+     that mechanisms (a)-(d) show is not available.
+VERDICT: kill criterion triggered (0/60 regime cells >= 1.0x across all
+mechanisms). Disposition-1 campaign CLOSED. Remaining artifacts: C++
+apex_pipe (opt-in, cfg["pipeline"]=True) kept for the record; PDL
+grid-boundary overlap left unexplored (bounded upside ~10-15%, cannot clear
+the 1.18x arithmetic ceiling gap to 1.5x).

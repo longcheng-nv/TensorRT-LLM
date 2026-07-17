@@ -35,3 +35,9 @@ Inherited red lines (do NOT re-propose without citing revival condition):
   scale identically (0.93 vs 0.94); regime-matched.
 - (float4-quad strata + IID margins) = FALSIFIED on spatially-clustered data —
   correlation halves effective sample count; scalar strata or sig x2.
+- (host-side multi-stream pipelining at us-kernel scale; python) = FALSIFIED —
+  ~260us host floor.
+- (chunked 3-stream C++ pipeline; split stages; regime) = FALSIFIED — narrow
+  per-chunk grids lose more machine-fill than exposure hidden (0.675->0.481).
+- (__noinline__ device-fn register isolation on fat fused kernel) = FALSIFIED —
+  48 REG unchanged, +STACK.

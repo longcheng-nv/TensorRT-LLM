@@ -80,6 +80,15 @@ def workspace(BS, K, cfg, device):
 
 
 _EMPTY = None
+_streams = None
+
+
+def apex_topk_pipelined(x, K, N, cfg, ws, dbg, chunks=4):
+    # C++-side chunked 3-stream pipeline (thr/filter/tail overlap across chunks)
+    ext().apex_pipe(x, ws["out"], ws["cand"], ws["counts"], ws["tickets"],
+                    ws["thr"], N, K, cfg["cpr"], cfg["nt"], cfg["s"],
+                    cfg["i_lo"], SEED, cfg["tail_cap"], chunks)
+    return ws["out"]
 
 
 def apex_topk(x, K, N=None, cfg=None, ws=None, mode=3, dbg=None):
@@ -103,6 +112,10 @@ def apex_topk(x, K, N=None, cfg=None, ws=None, mode=3, dbg=None):
         if _EMPTY is None:
             _EMPTY = torch.empty(0, dtype=torch.int32, device=x.device)
         dbg = _EMPTY
+    if (cfg["split"] and mode == 3 and cfg.get("pipeline", False)
+            and x.size(0) >= 64):  # chunked pipe FALSIFIED iter18; opt-in only
+        return apex_topk_pipelined(x, K, N, cfg, ws, dbg,
+                                   chunks=cfg.get("chunks", 4))
     ext().apex_topk(x, ws["out"], ws["cand"], ws["counts"], ws["tickets"],
                     ws["thr"], N, K, cfg["cpr"], cfg["nt"], cfg["s"],
                     cfg["i_lo"], SEED, cfg["tail_cap"], mode, cfg["split"], dbg)
