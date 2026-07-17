@@ -149,3 +149,56 @@ single-pass 2048-bin window select (replace byte rounds; tail radix still
 hard; op34 lesson caps expectations. HONEST: even all of 1-3 lands ~0.75-0.9
 overall; 1.5x geomean bar needs a qualitatively bigger idea or envelope
 re-scope (16-bit cells? frontier arm weaknesses?).
+
+## iter 14 — 2026-07-16 — FALSIFIED x2 (small-N single-CTA; window-select tail)
+(a) row-in-smem single-CTA-per-row kernel (N<=32768, 1 DRAM read, exact in-smem
+select): gm 0.468 -> 0.392. Per-CTA serial instruction cost at real effective
+clocks (~0.5-1GHz for micro kernels; DVFS-idle falsified hot-vs-cold 55/61us)
+fully devours the traffic win: N32768 BS1 = 55us vs sampling path ~20us.
+LEDGER: (single-CTA-per-row whole-row designs; any N; nsys) = FALSIFIED —
+per-CTA pass serialization is the currency, parallelism-free designs lose.
+(b) window_select (2048-bin) for the staged tail: 2 hist_adds/key + 2080-word
+zero per pass loses to byte-skip 256-bin rounds at M~1-4K. Kept ONLY for the
+big-M global path. Violated one-variable discipline (a+b landed together;
+cost an extra sweep to untangle).
+
+## iter 15 — 2026-07-16 — scalar strata + sig x1 (GO, 0.488)
+Quad-correlation root-caused to float4-granular sampling; scalar strata
+restore IID margins: sig x1 z=6, s = clamp(pow2(8N/K),1024,8192). No misses,
+no catastrophic tail (worst 0.27 = small-N overhead, not fallback). gm 0.488.
+
+## iter 16 — 2026-07-17 — 16-bit support DONE; 16-bit-as-lever FALSIFIED
+bf16/fp16 templated pipeline (uint4 16B loads = 8 halves, half->float exact
+convert, internals unchanged). EXACT: 1041/1041 all-dtype envelope cells.
+Recon had suggested frontier scales only 0.94x at 16-bit (and sglang_v2
+absent from the 16-bit frontier) => structural tailwind. MEASURED: apex
+16/32 time ratio 0.93 vs frontier 0.94 — REGIME-matched (BW cells: we 0.78,
+frontier 0.71; small-N: both ~1.0-1.2). Relative position UNCHANGED:
+0.506/0.501 (bf16/fp16). LEDGER: (16-bit dtype as relative-position lever;
+whole envelope; nsys) = FALSIFIED — the aggregate 0.94 was dilution, not
+frontier weakness.
+
+## iter 17 — 2026-07-17 — mixed dispatch; FINAL CAMPAIGN POSITION
+All-fused vs split experiment: wash overall (0.501 vs 0.500) but
+complementary (fused wins N<=65536 launch-bound; split wins BW-bound).
+Mixed dispatch (split only BS>=32 && N>65536):
+  **FINAL: fp32 0.507 · bf16 0.516 · fp16 0.512 (geomean frontier/apex,
+  347 cells each, 1041/1041 exact incl. all real captures)**
+Best regime BS128-1024 x N131-262k ~0.70 (cells to 0.94); worst N<=16k ~0.4.
+
+## VERDICT — 2026-07-17 — +50% over composite frontier: STRUCTURALLY INFEASIBLE
+for the sampling-filter-select family on this envelope. The rung-0 feasibility
+case rested on floor = max(bytes/7TBps, 4us launch); that floor is not
+achievable by ANY exact top-K kernel at these shapes:
+- launch-bound cells (N<=16k): the true floor includes threshold acquisition
+  + emission; sglang_v2/flashinfer already sit at 4.5-8us ~ 1.1-1.5x of the
+  TRUE floor. Beating them 1.5x would require < 1 launch + < 1 row pass.
+- BW-bound cells: frontier ~1.6-1.9x pure-read; our filter tax alone is
+  1.14-1.31x, +thr +tail => ~2.0-2.4x read. Beating frontier 1.5x requires
+  total <= 1.1-1.27x pure-read — BELOW the measured filter-only floor.
+- Instruction/pass tax: micro-kernel phases cost ~3x boost-clock estimates
+  (NCU: IPC 1.13, not DVFS); every added pass/barrier is 3x more expensive
+  than paper math. This killed all "clever" multi-pass structures.
+Remaining unexplored idea (bounded upside): persistent single-wave
+cooperative kernel (cross-row pipelining of thr/filter/tail + zero launches).
+Estimated +10-25% overall, NOT 3x. Not pursued; documented in RESUME.

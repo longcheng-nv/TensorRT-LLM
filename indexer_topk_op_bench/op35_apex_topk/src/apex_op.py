@@ -42,7 +42,9 @@ N_SMALL = 0  # row-in-smem single-CTA mode FALSIFIED (iter14) — disabled
 def pick_config(BS, N, K):
     if N <= N_SMALL:
         return dict(small=True, split=False)
-    split = BS >= 32 and N > 32768  # small-N: 1 fused launch beats 3-kernel split
+    # mixed dispatch (iter17): fused single launch wins <=65536 (launch-bound),
+    # split 3-kernel wins above (filter occupancy at NT1024 dominates)
+    split = BS >= 32 and N > 65536
     if split:
         nt = 1024
         cpr = max(1, 256 // BS)
