@@ -105,8 +105,11 @@ anchor transfer via per-batch gvr_pr/sglang_v2 as always.
     route sgl_bx everywhere else. Composite same-node vs sglang_v2:
     pr-only 0.722 -> 1.015 (oracle 1.016). Exact 275/275 folded checks
     both runs + battery 93/93 (escape validated under forced overflow).
-- Formal ship gate still owes: op26 full-grid 2245 battery on sgl_bx
-  (run at campaign close before any upstream port).
+- Formal ship gate CLOSED same day: bx_topk_correctness.py (the exact
+  fi/radix §8.2/8.3 battery, fp32 single-mode = 2233 cells) — 2233/2233
+  PASS, 14 escape re-runs landing precisely on the over-cap rows (uniform
+  sglang-killers, all-equal, fp16-collision, the 4 real V3.2 L52 rows
+  where vendored sglang measurably fails). Log src/trackb/bx_2245_battery.log.
 - NEXT: A2 distP4 (largest remaining lever; only helps pr-routed region
   + could widen it), then feasibility pivot gate.
 
