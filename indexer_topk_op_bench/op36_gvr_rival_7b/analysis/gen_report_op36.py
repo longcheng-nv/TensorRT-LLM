@@ -278,6 +278,151 @@ def a2_table():
     return hdr + rows + "</table>"
 
 
+# ------------------------------------------------------------ §6 charts
+# Static SVG (viewer strips <script>): categorical slots 1-3 of the validated
+# dataviz reference palette, fixed assignment order: ship=blue, sglang=green,
+# gvr_pr=magenta. Light surface only (report is fixed-light house style).
+C_SHIP, C_SGL, C_PR = "#2a78d6", "#008300", "#e87ba4"
+BSS = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024]
+
+
+def ship_time(k, o):
+    """Per-cell ship-arm time on the b_screen scale (a2 anchor-transferred)."""
+    m, isl, bs = k
+    if routed(k, bmeta):
+        if (m, isl) in A2_SHIP and k in a2cells and \
+                all(a2cells[k].get(x) for x in ("gvr_a2", "gvr_pr")):
+            ak = a2cells[k]
+            return o["gvr_pr"] * ak["gvr_a2"] / ak["gvr_pr"]
+        return o["gvr_pr"]
+    return o["sgl_bx"]
+
+
+def svg_panel(title, xlabels, series, ylab, ref=None, w=340, h=230, logy=False,
+              yzero=True):
+    """series = [(name, color, [y or None per x]), ...]; returns one SVG."""
+    import math as _m
+    ml, mr, mt, mb = 44, 8, 22, 34
+    pw, ph = w - ml - mr, h - mt - mb
+    ys = [v for _, _, vs in series for v in vs if v]
+    lo = 0.0 if (yzero and not logy) else min(ys) * 0.92
+    hi = max(ys) * 1.06
+    if ref is not None:
+        lo, hi = min(lo, ref * 0.92), max(hi, ref * 1.08)
+    tf = (lambda v: _m.log(v)) if logy else (lambda v: v)
+    Y = lambda v: mt + ph * (1 - (tf(v) - tf(lo if lo > 0 or not logy else min(ys))) /
+                             (tf(hi) - tf(lo if lo > 0 or not logy else min(ys))))
+    X = lambda i: ml + pw * (i / max(1, len(xlabels) - 1))
+    p = [f'<svg viewBox="0 0 {w} {h}" width="{w}" height="{h}" '
+         f'style="font-family:system-ui;background:#fff">']
+    p.append(f'<text x="{ml}" y="14" font-size="11" fill="#24435f" '
+             f'font-weight="600">{title}</text>')
+    # y grid: 4 ticks
+    for i in range(5):
+        v = lo + (hi - lo) * i / 4
+        y = Y(v)
+        p.append(f'<line x1="{ml}" y1="{y:.1f}" x2="{w - mr}" y2="{y:.1f}" '
+                 f'stroke="#e4ebf2" stroke-width="1"/>')
+        p.append(f'<text x="{ml - 5}" y="{y + 3.5:.1f}" font-size="9" '
+                 f'fill="#667" text-anchor="end">{v:.2f}</text>' if hi < 10 else
+                 f'<text x="{ml - 5}" y="{y + 3.5:.1f}" font-size="9" '
+                 f'fill="#667" text-anchor="end">{v:.0f}</text>')
+    if ref is not None:
+        y = Y(ref)
+        p.append(f'<line x1="{ml}" y1="{y:.1f}" x2="{w - mr}" y2="{y:.1f}" '
+                 f'stroke="#8a99a8" stroke-width="1.2" stroke-dasharray="5,4"/>')
+        p.append(f'<text x="{w - mr - 2}" y="{y - 3:.1f}" font-size="8.5" '
+                 f'fill="#8a99a8" text-anchor="end">sglang_v2 = 1.0</text>')
+    for i, xl in enumerate(xlabels):
+        p.append(f'<text x="{X(i):.1f}" y="{h - mb + 14}" font-size="8.5" '
+                 f'fill="#667" text-anchor="end" '
+                 f'transform="rotate(-38 {X(i):.1f} {h - mb + 14})">{xl}</text>')
+    p.append(f'<text x="12" y="{mt + ph / 2:.0f}" font-size="9" fill="#667" '
+             f'text-anchor="middle" transform="rotate(-90 12 {mt + ph / 2:.0f})">'
+             f'{ylab}</text>')
+    for name, col, vs in series:
+        pts = [(X(i), Y(v)) for i, v in enumerate(vs) if v]
+        d = "M" + " L".join(f"{x:.1f} {y:.1f}" for x, y in pts)
+        # sglang dashed: in the BS=1 panels the ship line hugs it (guard-eps
+        # apart) — the dash keeps the overlapping pair distinguishable.
+        dash = ' stroke-dasharray="6,4"' if name == "sglang_v2" else ""
+        p.append(f'<path d="{d}" fill="none" stroke="{col}" '
+                 f'stroke-width="2"{dash}/>')
+        for x, y in pts:
+            p.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="3.6" fill="{col}" '
+                     f'stroke="#fff" stroke-width="1.4"/>')
+    p.append("</svg>")
+    return "".join(p)
+
+
+def legend3():
+    it = [("op36 ship", C_SHIP), ("sglang_v2", C_SGL), ("gvr_pr (PR#16457)", C_PR)]
+    s = '<div style="font-size:0.8em;margin:2px 0 4px">'
+    for n, c in it:
+        s += (f'<span style="margin-right:16px"><span style="display:inline-block;'
+              f'width:14px;height:3px;background:{c};vertical-align:middle;'
+              f'border-radius:2px"></span> <span style="color:#333">{n}</span></span>')
+    return s + "</div>"
+
+
+def chart_seqlen():
+    panels, tbl = [], []
+    for m in ("flash", "pro", "v32"):
+        xls, s_sgl, s_pr, s_ship = [], [], [], []
+        for isl in ISLS:
+            k = (m, isl, 1)
+            o = bcells.get(k, {})
+            if not all(o.get(x) for x in ("gvr_pr", "sgl_bx", "sglang_v2")):
+                continue
+            xls.append(isl)
+            s_sgl.append(o["sglang_v2"])
+            s_pr.append(o["gvr_pr"])
+            s_ship.append(ship_time(k, o))
+            tbl.append((m, isl, o["sglang_v2"], o["gvr_pr"], ship_time(k, o)))
+        panels.append(svg_panel(
+            f"{m} · BS=1", xls,
+            [("gvr_pr", C_PR, s_pr), ("sglang_v2", C_SGL, s_sgl),
+             ("op36 ship", C_SHIP, s_ship)], "µs (nsys cold-L2)"))
+    rows = "".join(f"<tr><td>{m}/{i}</td><td>{a:.2f}</td><td>{b:.2f}</td>"
+                   f"<td>{c:.2f}</td><td>{a / c:.3f}</td></tr>"
+                   for m, i, a, b, c in tbl)
+    return ('<div style="display:flex;flex-wrap:wrap;gap:8px">'
+            + "".join(panels) + "</div>"
+            + '<details><summary><span class="zh">数据表</span>'
+              '<span class="en">data table</span></summary>'
+              "<table><tr><th>cell</th><th>sglang_v2 µs</th><th>gvr_pr µs</th>"
+              "<th>ship µs</th><th>ship speedup vs sgl</th></tr>"
+            + rows + "</table></details>")
+
+
+def chart_bs():
+    panels, tbl = [], []
+    for m in ("flash", "pro", "v32"):
+        xls, r_pr, r_ship = [], [], []
+        for bs in BSS:
+            cs = [(k, o) for k, o in full if k[0] == m and k[2] == bs]
+            if not cs:
+                continue
+            xls.append(str(bs))
+            r_pr.append(gm([o["sglang_v2"] / o["gvr_pr"] for _, o in cs]))
+            r_ship.append(gm([o["sglang_v2"] / ship_time(k, o) for k, o in cs]))
+            tbl.append((m, bs, r_pr[-1], r_ship[-1], len(cs)))
+        panels.append(svg_panel(
+            f"{m} · gm over ISL 4k-1M", xls,
+            [("gvr_pr", C_PR, r_pr), ("op36 ship", C_SHIP, r_ship)],
+            "speedup vs sglang_v2 (gm)", ref=1.0, yzero=False))
+    rows = "".join(f"<tr><td>{m}</td><td>{bs}</td><td>{a:.3f}</td>"
+                   f"<td>{b:.3f}</td><td>{n}</td></tr>"
+                   for m, bs, a, b, n in tbl)
+    return ('<div style="display:flex;flex-wrap:wrap;gap:8px">'
+            + "".join(panels) + "</div>"
+            + '<details><summary><span class="zh">数据表</span>'
+              '<span class="en">data table</span></summary>'
+              "<table><tr><th>model</th><th>BS</th><th>gvr_pr / sgl</th>"
+              "<th>ship / sgl</th><th>n ISLs</th></tr>"
+            + rows + "</table></details>")
+
+
 # ------------------------------------------------------------ §7 algorithm
 # Flow diagram (pure CSS boxes, no <script>) + pseudocode for the ship scheme.
 # Kernel structure cross-checked against variant/gvrpkg36/top_k/gvr_topk_decode.py
@@ -616,6 +761,35 @@ harness = op26 rival_harness clone (src/) · 16 commits, single-day campaign</p>
     f"+Track B dispatch {f3(comp_r1)} → +A2 {f3(comp_ship)} (3-arm oracle {f3(comp_oracle3)}). "
     "Per-(model, ISL) grid below; green = ship ≥ 1.0.")}
 {grid_table()}
+
+{h3("6a · Seq-len sweep (BS=1) — 绝对时延对比", "6a · Seq-len sweep (BS=1) — absolute latency")}
+{bi("BS=1 时 ship 表全部路由到 sgl_bx(BS∉[32,128]),因此 ship 线贴着 sglang_v2 —— 只差 "
+    "0.4-0.8% 守卫税;gvr_pr 单臂在 BS=1 全线更慢(1-CTA 骨架启动地板),这正是 Track B "
+    "存在的理由。",
+    "At BS=1 the ship table routes everything to sgl_bx (BS∉[32,128]), so the ship line "
+    "hugs sglang_v2 — separated only by the 0.4-0.8% guard tax; gvr_pr alone is slower across "
+    "the whole sweep at BS=1 (the 1-CTA skeleton launch floor), which is exactly why Track B "
+    "exists.")}
+{legend3()}
+{chart_seqlen()}
+
+{h3("6b · BS-scaling — 对 sglang_v2 的加速比 (每 BS 沿 ISL 取 gm)",
+    "6b · BS-scaling — speedup vs sglang_v2 (gm over ISLs per BS)")}
+{bi("中批量谷清晰可见:gvr_pr 线在 BS 32-128 明显上抬(flash/pro 0.80-0.82,v32 0.89-0.93 "
+    "—— sglang cluster 池在此饱和退化),但因混入小 N cell 整体仍 <1.0;ship 线只在 N≥65536 "
+    "路由 pr(+A2),把谷区推过 1.0(flash 1.04-1.08 / pro 1.07-1.09 / v32 1.10-1.13),"
+    "其余 BS 段经 sgl_bx 贴平 1.0,全轴不低于 0.986。这就是 §3b \"(N,BS) 区域而非 N 带\" "
+    "的图形形态:凸起属于 (大 N × 中 BS) 交集,不属于任何单轴。",
+    "The mid-BS valley is plainly visible: the gvr_pr line lifts sharply at BS 32-128 "
+    "(flash/pro 0.80-0.82, v32 0.89-0.93 — where sglang's cluster pool saturates and "
+    "degrades) yet stays <1.0 overall because small-N cells drag the geomean; the ship line "
+    "routes pr (+A2) only at N≥65536, pushing the valley over 1.0 (flash 1.04-1.08 / pro "
+    "1.07-1.09 / v32 1.10-1.13) while hugging 1.0 via sgl_bx at every other BS — never below "
+    "0.986 across the axis. This is the graphical form of §3b's \"an (N,BS) region, not an "
+    "N-band\": the bump lives in the (large-N × mid-BS) intersection, not on either axis "
+    "alone.")}
+{legend3()}
+{chart_bs()}
 
 {h2("7 · Ship 方案算法:流程图与伪代码", "7 · The ship scheme: flow diagram & pseudocode")}
 {bi("下图为最终推荐方案(§6 三臂路由)的端到端算法流程;三臂输出契约一致(每行精确 top-K "
