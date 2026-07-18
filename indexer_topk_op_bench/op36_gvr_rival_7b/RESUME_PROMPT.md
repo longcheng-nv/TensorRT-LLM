@@ -20,6 +20,18 @@ Key facts:
 - bundle-v2 kernel diffs ready in op35_gvr_round2/variant/gvrpkg35/
   (default-off flags skip_h1 + K2048 kNumBins 512).
 
+## State after iter4-in-flight (2026-07-18) — Track B built, screening running
+- NODE: umbriel-b200-093 now (047 gone). Same-node composites only.
+- Track B port DONE + battery 93/93 (src/trackb/, battery_bx.py, arm
+  sgl_bx in ops_op36.py). Screening 25 batches 8-way IN FLIGHT →
+  results/b_screen (resume: relaunch drive_op36_shard.sh W W 8 with
+  OPS="gvr_pr,sglang_v2,sgl_bx" OUT=results/b_screen; .done markers skip).
+- Analysis: analysis/trackb_verdict.py results/b_screen (anchor drift +
+  guard ε + dispatch threshold + hole close-up). Anchor checkpoint GREEN.
+- NEXT after screening: verdict re-run ≤2-way on decisive batches (incl.
+  ε outlier pro/16k/BS1 + threshold-boundary batches), fix per-model
+  dispatch table, update ITERATIONS, then A2 distP4 → feasibility gate.
+
 ## State after iter3 (2026-07-18) — A0 CLOSED
 - A0 ship table: skip_h1 ON {K512@N>=262144, K2048(+kb512)}, OFF K1024;
   composite vs sglang 0.726->0.738 same-node, zero regression; verdict

@@ -10,6 +10,11 @@ Arms:
   gvr_a0            : Track A0 = gvrpkg35 (PR head eae374554c + default-off
                       flags) at launch contract, skip_h1=True +
                       kNumBins_override=512 for K2048 only (op35 bundle-v2)
+  sgl_bx            : Track B = exactness PORT of sglang v2 (trackb/, per-row
+                      tie-overflow flag + radix escape; battery 93/93). Timed
+                      call = one transform launch, same contract as sglang_v2
+                      (plan untimed, fp32-only, 64-aligned -inf pad). The only
+                      in-kernel delta vs sglang_v2 is the guard branch.
   sglang_v2 / radix_cutedsl / flashinfer_topk / op26_r0auto : ops_rival verbatim
 """
 import sys
@@ -21,19 +26,50 @@ _HERE = Path(__file__).resolve().parent
 _BENCH = _HERE.parents[1]                       # indexer_topk_op_bench/
 _REPORT = _BENCH / "op26_r0_upstream_port_report"
 _OP35 = _BENCH / "op35_gvr_round2" / "variant"
-for p in (_REPORT / "rival_harness", _REPORT / "refresh_harness", _OP35):
+for p in (_REPORT / "rival_harness", _REPORT / "refresh_harness", _OP35,
+          _HERE / "trackb"):
     sys.path.insert(0, str(p))
 
 import ops_rival as OR                                        # noqa: E402
 import ops_refresh as ORF                                     # noqa: E402
 from gvrpkg35.top_k.gvr_topk_decode import GvrTopKKernel as Gvr35  # noqa: E402
+import sgl_bx_op as BX                                        # noqa: E402
 
 DEV = "cuda"
-OP36_ARMS = ["gvr_a0"]
+OP36_ARMS = ["gvr_a0", "sgl_bx"]
 
 
 def ops_for_op36(dtype_name, K):
-    return OR.ops_for_rival(dtype_name, K) + OP36_ARMS
+    arms = list(OP36_ARMS)
+    if dtype_name != "fp32":
+        arms.remove("sgl_bx")        # fp32-only, same contract as sglang_v2
+    return OR.ops_for_rival(dtype_name, K) + arms
+
+
+def _build_bx(K, dtype, N, BS, cr, logits_row, preidx_row):
+    """Track B port: identical build shape to the ops_rival sglang_v2 arm
+    (64-aligned -inf pad, plan untimed) + overflow flags (zeroed in plan; the
+    timed transform only ever SETs them, so they stay valid across reps).
+    preIdx unused (hint-free is faster at small N — op34). out_getter applies
+    the radix escape so the harness exact gate sees the SHIPPED output."""
+    if dtype != torch.float32:
+        raise ValueError("sgl_bx is fp32-only (kernel contract)")
+    W = ((N + 63) // 64) * 64
+    logits = torch.full((BS, W), torch.finfo(dtype).min, dtype=dtype, device=DEV)
+    logits[:, :N] = logits_row[:, :N].to(dtype)
+    logits = logits.contiguous()
+    seq_nod = torch.full((BS,), N, dtype=torch.int32, device=DEV)
+    out = torch.empty((BS, K), dtype=torch.int32, device=DEV)
+    md, fl = BX.plan(seq_nod)
+    torch.cuda.synchronize()
+    call = (lambda: BX.topk_bx(logits, seq_nod, K, out=out, metadata=md,
+                               flags=fl, max_seq_len=N))
+    call()                                     # warm (JIT compile + populate)
+
+    def _shipped():
+        BX.escape_rerun(logits, seq_nod, K, out, fl)
+        return out
+    return call, [logits, seq_nod, out, md, fl], {"flags": "tb_guard"}, _shipped
 
 
 def _build_a0(K, dtype, N, BS, cr, logits_row, preidx_row):
@@ -60,6 +96,8 @@ def _build_a0(K, dtype, N, BS, cr, logits_row, preidx_row):
 def build_call_op36(op, K, dtype, N, BS, cr, logits_row, preidx_row):
     if op == "gvr_a0":
         return _build_a0(K, dtype, N, BS, cr, logits_row, preidx_row)
+    if op == "sgl_bx":
+        return _build_bx(K, dtype, N, BS, cr, logits_row, preidx_row)
     if op in ("gvr_base", "gvr_pr"):
         return ORF.build_call_rival(op, K, dtype, N, BS, cr,
                                     logits_row, preidx_row)

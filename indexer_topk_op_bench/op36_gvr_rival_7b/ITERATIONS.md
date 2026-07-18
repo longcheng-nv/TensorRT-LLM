@@ -48,3 +48,27 @@ and K2048 (+kNumBins 512); OFF for K1024. Composite vs sglang same-node:
 A0 CLOSED. Campaign axis confirms baseline arithmetic: skeleton levers
 move single points, not the sglang gap. Weight shifts to Track B (4-16k,
 99 cells, gm 0.60) + A2 distP4.
+
+## iter4 (2026-07-18) — Track B build + battery + screening (IN FLIGHT)
+NODE CHANGE: umbriel-b200-093 (047 gone); composites same-node only,
+anchor transfer via per-batch gvr_pr/sglang_v2 as always.
+- Track B port built: src/trackb/{topk_impl_exact.cuh, topk_v2_exact_
+  standalone.cu, sgl_bx_op.py} — vendored sglang_v2 verbatim + per-row
+  tie-overflow flag at ALL 4 truncation sites (Register/Streaming phase-4,
+  cluster rank-0 phase-4, cluster non-primary local cap — the last catches
+  the edge where capped peer contributions sum to exactly kMaxNumTie) +
+  flags zeroed in the UNTIMED plan kernel + host radix_cutedsl escape.
+- BATTERY 93/93 PASS (battery_bx.py): random all-paths flags=0; all-tie +
+  near-tie (>2048 distinct fp32 in one fp16 coarse bin) forced overflow →
+  flagged + escaped exact on Register2/4, Streaming, fused small-batch
+  cluster, persistent cluster; single-rank-chunk edge; mixed batch reruns
+  only flagged rows; TEETH: vendored sglang_v2 provably INEXACT on the
+  same rows. Unconditional-exactness moat validated.
+- sgl_bx arm registered (ops_op36; fp32-only, ops_rival sglang_v2 build
+  shape, plan untimed, out_getter ships the escaped output). Smoke green.
+- Screening launched: 25 batches × {gvr_pr, sglang_v2, sgl_bx}, 8-way,
+  results/b_screen. Anchor checkpoint @11 batches GREEN (pr med
+  0.997-1.039, sgl med ≈1.000 vs b200-081 baseline).
+- EARLY (partial, 4k-128k): guard ε gm 1.010 (max 1.091 pro/16k/BS1 —
+  re-check at verdict); hole bx/sgl 0.991 vs pr 0.551; best dispatch
+  thresholds flash N<32768 / pro N<65536 (wider than the hole).
