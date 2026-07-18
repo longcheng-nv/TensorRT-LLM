@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Indexer Top-K 算子谱系与算法分析 / Operator Genealogy &amp; Algorithm Analysis</title>
+<style>
+:root{
+  --bg:#fafbfc; --fg:#1a2330; --muted:#5a6b80; --line:#d8e0ea;
+  --card:#ffffff; --accent:#0b6e99; --code-bg:#0f172a; --code-fg:#dbe7f3;
+  --gvr:#b3860a; --op21:#a3540f; --op26:#7038b8; --radix:#1668a8; --sgl:#c22f4f; --ext:#4a8a1f;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:15px/1.65 "Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif}
+input[name=lang]{position:absolute;left:-9999px}
+.page{max-width:1180px;margin:0 auto;padding:24px 32px 80px}
+.langbar{position:sticky;top:0;z-index:50;display:flex;gap:0;justify-content:flex-end;
+  padding:10px 0;background:linear-gradient(var(--bg) 80%,transparent)}
+.langbar label{cursor:pointer;padding:5px 18px;border:1px solid var(--line);
+  background:var(--card);color:var(--muted);font-weight:600;font-size:13px;user-select:none}
+.langbar label:first-of-type{border-radius:8px 0 0 8px}
+.langbar label:last-of-type{border-radius:0 8px 8px 0;border-left:none}
+#lang-zh:checked ~ .page .en{display:none}
+#lang-en:checked ~ .page .zh{display:none}
+#lang-zh:checked ~ .page .langbar label[for=lang-zh],
+#lang-en:checked ~ .page .langbar label[for=lang-en]{
+  background:var(--accent);color:#fff;border-color:var(--accent)}
+h1{font-size:26px;line-height:1.3;margin:8px 0 4px}
+h2{font-size:20px;margin:44px 0 10px;padding-bottom:6px;border-bottom:2px solid var(--line)}
+h3{font-size:16.5px;margin:28px 0 8px}
+h4{font-size:14.5px;margin:18px 0 6px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+p{margin:8px 0}
+.sub{color:var(--muted);font-size:13.5px;margin-bottom:18px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 20px;margin:14px 0}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13.5px}
+th,td{border:1px solid var(--line);padding:6px 10px;text-align:left;vertical-align:top}
+th{background:#eef3f8;font-weight:600}
+tr:nth-child(even) td{background:#f6f9fc}
+code{font-family:"JetBrains Mono","Cascadia Code",Consolas,monospace;font-size:12.5px;
+  background:#edf2f7;border-radius:4px;padding:1px 5px}
+pre{background:var(--code-bg);color:var(--code-fg);border-radius:10px;
+  padding:14px 18px;overflow-x:auto;font-family:"JetBrains Mono","Cascadia Code",Consolas,monospace;
+  font-size:12.3px;line-height:1.5;margin:10px 0}
+pre code{background:none;padding:0;color:inherit;font-size:inherit}
+pre.flow{background:#10233a;color:#cfe3f5}
+pre.tree{background:#132032;color:#d7e6f5;font-size:12.6px}
+.badge{display:inline-block;font-size:11px;font-weight:700;border-radius:5px;
+  padding:1px 8px;margin-right:6px;color:#fff;vertical-align:2px}
+.b-gvr{background:var(--gvr)} .b-op21{background:var(--op21)} .b-op26{background:var(--op26)}
+.b-radix{background:var(--radix)} .b-sgl{background:var(--sgl)} .b-ext{background:var(--ext)}
+.b-exact{background:#2a7d4f} .b-cond{background:#b8722a}
+.lin{border-left:4px solid var(--accent);background:#eef6fb;padding:10px 14px;border-radius:0 8px 8px 0;margin:10px 0;font-size:13.5px}
+.toc{columns:2;column-gap:36px;font-size:14px}
+.toc a{color:var(--accent);text-decoration:none}
+.toc a:hover{text-decoration:underline}
+.src{font-size:12px;color:var(--muted);font-family:Consolas,monospace}
+.kv{display:grid;grid-template-columns:170px 1fr;gap:2px 14px;font-size:13.5px;margin:8px 0}
+.kv b{color:var(--muted);font-weight:600}
+.note{font-size:12.5px;color:var(--muted)}
+.hl{color:#ffd479}
+.cy{color:#7fd4c1} .pk{color:#f2a0b5} .bl{color:#8fc3f0} .gn{color:#a5d68f} .or{color:#f0b06a}
+@media print{.langbar{display:none}}
+</style>
+</head>
+<body>
+<input type="radio" id="lang-zh" name="lang" checked>
+<input type="radio" id="lang-en" name="lang">
+<div class="page">
+<div class="langbar"><label for="lang-zh">中文</label><label for="lang-en">English</label></div>
+
+<h1><span class="zh">DeepSeek Indexer Top-K：16 个算子的谱系与算法分析报告</span><span class="en">DeepSeek Indexer Top-K: Genealogy &amp; Algorithm Analysis of 16 Operators</span></h1>
+<p class="sub">
+<span class="zh">对象 = <code>op22_temporal_fixed_hr_bench/REPORT.html</code> 方法表中的全部基准臂。问题定义：每行给定 N 个压缩 logits（fp32/bf16/fp16，N 至 262K+）、K∈{512,1024,2048} 与上一 decode 步的 top-K 索引提示 <code>preIdx</code>，输出<b>精确</b> top-K 索引集。所有算法描述与伪代码均落实到实际内核源码（文中标注 文件:行号）。生成日期 2026-07-18。</span>
+<span class="en">Subject = every benchmark arm in the method table of <code>op22_temporal_fixed_hr_bench/REPORT.html</code>. Problem: per row, given N compressed logits (fp32/bf16/fp16, N up to 262K+), K∈{512,1024,2048}, and the previous decode step's top-K index hint <code>preIdx</code>, emit the <b>exact</b> top-K index set. All algorithm descriptions and pseudocode are grounded in the actual kernel sources (file:line cited throughout). Generated 2026-07-18.</span>
+</p>
+
+<div class="card">
+<h3 style="margin-top:0"><span class="zh">目录</span><span class="en">Contents</span></h3>
+<div class="toc">
+<div>§0 <a href="#s0"><span class="zh">总览表（16 臂）</span><span class="en">Overview table (16 arms)</span></a></div>
+<div>§1 <a href="#s1"><span class="zh">谱系总图</span><span class="en">Genealogy diagram</span></a></div>
+<div>§2 <a href="#s2"><span class="zh">共享词汇：GVR P1–P4 与 radix-直方图骨架</span><span class="en">Shared vocabulary: GVR P1–P4 &amp; radix-histogram skeletons</span></a></div>
+<div>§3 <a href="#s3"><span class="zh">GVR base（cuteDSL，#14602）</span><span class="en">GVR base (cuteDSL, #14602)</span></a></div>
+<div>§4 <a href="#s4"><span class="zh">GVR multi-CTA（cuteDSL，PR#15198）</span><span class="en">GVR multi-CTA (cuteDSL, PR#15198)</span></a></div>
+<div>§5 <a href="#s5"><span class="zh">op#21 ms_auto 家族（pre-HLS / HLS / op25 / op27）</span><span class="en">op#21 ms_auto family (pre-HLS / HLS / op25 / op27)</span></a></div>
+<div>§6 <a href="#s6"><span class="zh">op#26 家族（logP2+RS / logP2-MC / R0 auto）</span><span class="en">op#26 family (logP2+RS / logP2-MC / R0 auto)</span></a></div>
+<div>§7 <a href="#s7"><span class="zh">op#29 HBE-noB（SGLang v2 分叉）</span><span class="en">op#29 HBE-noB (SGLang v2 fork)</span></a></div>
+<div>§8 <a href="#s8"><span class="zh">Radix 家族（cuteDSL / 单CTA CUDA / 多CTA CUDA）</span><span class="en">Radix family (cuteDSL / single-CTA CUDA / multi-CTA CUDA)</span></a></div>
+<div>§9 <a href="#s9"><span class="zh">SGLang 家族（StreamingTopK v1 → v2）</span><span class="en">SGLang family (StreamingTopK v1 → v2)</span></a></div>
+<div>§10 <a href="#s10"><span class="zh">FlashInfer top_k（0.6.11）</span><span class="en">FlashInfer top_k (0.6.11)</span></a></div>
+<div>§11 <a href="#s11"><span class="zh">横向对比：精确性 / 提示利用 / 遍数 / 调度域</span><span class="en">Cross-cutting: exactness / hint usage / passes / dispatch regimes</span></a></div>
+<div>§12 <a href="#s12"><span class="zh">性能结论汇总（op22 报告）</span><span class="en">Headline performance (from op22 report)</span></a></div>
+</div>
+</div>
+
+<h2 id="s0">§0 <span class="zh">总览表</span><span class="en">Overview table</span></h2>
+<table>
+<tr><th>#</th><th><span class="zh">臂（报告名）</span><span class="en">Arm (report label)</span></th><th><span class="zh">家族</span><span class="en">Family</span></th><th><span class="zh">实现 / 源码</span><span class="en">Impl / source</span></th><th><span class="zh">精确性</span><span class="en">Exactness</span></th><th><span class="zh">提示（preIdx）</span><span class="en">Hint (preIdx)</span></th><th>§</th></tr>
+<tr><td>1</td><td>GVR (cuteDSL) — base</td><td><span class="badge b-gvr">GVR</span></td><td class="src">harness/gvr_cutedsl_op.py → ops/cute_vendored/…/gvr_topk_decode.py (#14602)</td><td><span class="badge b-exact">EXACT</span></td><td><span class="zh">P1 均值种子</span><span class="en">P1 mean seed</span></td><td><a href="#s3">§3</a></td></tr>
+<tr><td>2</td><td>GVR multi-CTA (cuteDSL, PR#15198)</td><td><span class="badge b-gvr">GVR</span></td><td class="src">harness/gvr_multicta_cutedsl_op.py → gvr_topk_decode_cluster.py</td><td><span class="badge b-exact">EXACT</span></td><td><span class="zh">同 base</span><span class="en">same as base</span></td><td><a href="#s4">§4</a></td></tr>
+<tr><td>3</td><td>GVR op#21 ms_auto (pre-HLS)</td><td><span class="badge b-op21">op21</span></td><td class="src">op21_gvr_prod/src/gvr_ms_op.py + gvr_msc_op.py（OP21_FB_LOGFALSI=0, OP21_FB_DIST=0）</td><td><span class="badge b-exact">EXACT</span></td><td rowspan="4"><span class="zh">P1b 阶梯：prevK 顺序统计量直接放置 M 元阈值梯</span><span class="en">P1b ladder: prevK order statistics place the M-ary threshold ladder</span></td><td rowspan="4"><a href="#s5">§5</a></td></tr>
+<tr><td>4</td><td>GVR op#21 ms_auto (HLS)</td><td><span class="badge b-op21">op21</span></td><td class="src"><span class="zh">同上，HLS ship 缺省（OP21_FB_LOGFALSI=1，dist 门 n≥65536）@51be558e77 — 报告主测对象</span><span class="en">same, HLS ship defaults (OP21_FB_LOGFALSI=1, dist gate n≥65536) @51be558e77 — object under test</span></td><td><span class="badge b-exact">EXACT</span></td></tr>
+<tr><td>5</td><td>GVR op#21 ms_auto (HLS-op25)</td><td><span class="badge b-op21">op21</span></td><td class="src"><span class="zh">同上 + op25 ship（w3a 梯 0.92/0.45/0.048 @K512/1024 + N门 slot2 + fp32 C=8）</span><span class="en">same + op25 ship (w3a ladder 0.92/0.45/0.048 @K512/1024 + N-gated slot2 + fp32 C=8)</span></td><td><span class="badge b-exact">EXACT</span></td></tr>
+<tr><td>6</td><td>GVR op#21 ms_auto (HLS-op27)</td><td><span class="badge b-op21">op21</span></td><td class="src"><span class="zh">op25 + K2048 尾梯 (0.75,0.45,0.048)；K512/K1024 与 op25 位同</span><span class="en">op25 + K2048 tail ladder (0.75,0.45,0.048); K512/K1024 bit-identical to op25</span></td><td><span class="badge b-exact">EXACT</span></td></tr>
+<tr><td>7</td><td>GVR op#26 logP2+RS (single-CTA)</td><td><span class="badge b-op26">op26</span></td><td class="src">op26_gvr_logfalsi_rs/src/gvr_op26_op.py（⊂ op#7 _P4Kernel）</td><td><span class="badge b-exact">EXACT</span></td><td rowspan="3"><span class="zh">P1 种子（1CTA/MC）；R0 版直方图梯级</span><span class="en">P1 seed (1cta/MC); R0 histogram rungs</span></td><td rowspan="3"><a href="#s6">§6</a></td></tr>
+<tr><td>8</td><td>GVR op#26 logP2 (multi-CTA, PR#15198)</td><td><span class="badge b-op26">op26</span></td><td class="src">gvr_op26_op.py:GvrOp26ClusterKernel（⊂ PR#15198 cluster）</td><td><span class="badge b-exact">EXACT</span></td></tr>
+<tr><td>9</td><td>GVR op#26 R0 (auto 1CTA/MC dispatch)</td><td><span class="badge b-op26">op26</span></td><td class="src">gvr_op26_r0_op.py + gvr_op26_r0mc_op.py → <b>PR#16457 上游</b></td><td><span class="badge b-exact">EXACT</span></td></tr>
+<tr><td>10</td><td>GVR op#29 HBE-noB (1-pass sample-column)</td><td><span class="badge b-sgl">SGL-fork</span></td><td class="src">op29_gvr_hbe/src/gvr29/…/topk_hbe.cuh（SGLang v2 分叉 / fork）</td><td><span class="badge b-exact">EXACT</span></td><td><span class="zh">不用（行采样估计，hint-free）</span><span class="en">none (row-sample estimator, hint-free)</span></td><td><a href="#s7">§7</a></td></tr>
+<tr><td>11</td><td>Radix (cuteDSL)</td><td><span class="badge b-radix">Radix</span></td><td class="src">harness/radix_cutedsl_op.py → single_pass_multi_cta_radix_topk.py（≡ FlashInfer radix 的 CuTe-DSL 转写 / transliteration）</td><td><span class="badge b-exact">EXACT</span></td><td rowspan="3"><span class="zh">盲提示（hint-blind）</span><span class="en">hint-blind</span></td><td rowspan="3"><a href="#s8">§8</a></td></tr>
+<tr><td>12</td><td>Radix single-CTA (CUDA)</td><td><span class="badge b-radix">Radix</span></td><td class="src">harness/radix_cuda_op.py → ops/radix_cuda/_kernel_core.inc（TRT-LLM indexerTopK 系）</td><td><span class="badge b-exact">EXACT</span></td></tr>
+<tr><td>13</td><td>Radix multi-CTA (CUDA)</td><td><span class="badge b-radix">Radix</span></td><td class="src"><span class="zh">同上，split+merge 双内核 + default_blocks_per_row</span><span class="en">same file, split+merge two-kernel + default_blocks_per_row</span></td><td><span class="badge b-exact">EXACT</span></td></tr>
+<tr><td>14</td><td>SGLang StreamingTopK</td><td><span class="badge b-sgl">SGLang</span></td><td class="src">harness/sglang_streaming_op.py → ops/sglang_streaming/topk/streaming.cuh（fp32, K≤1024）</td><td><span class="badge b-cond">COND</span> <span class="zh">tie≤1024</span><span class="en">ties≤1024</span></td><td rowspan="2"><span class="zh">盲提示</span><span class="en">hint-blind</span></td><td rowspan="2"><a href="#s9">§9</a></td></tr>
+<tr><td>15</td><td>SGLang v2 top-K (main 2026-07)</td><td><span class="badge b-sgl">SGLang</span></td><td class="src">harness/sglang_v2_op.py → ops/sglang_v2/…/topk_impl.cuh + topk_v2_upstream.cuh</td><td><span class="badge b-cond">COND</span> <span class="zh">tie-bin≤2048</span><span class="en">tie-bin≤2048</span></td></tr>
+<tr><td>16</td><td>FlashInfer top_k (0.6.11)</td><td><span class="badge b-ext">EXT</span></td><td class="src">op28_ext_topk/ops_ext.py → flashinfer topk.cuh（FilteredTopK / RadixTopKMultiCTA 启发式二选一）</td><td><span class="badge b-exact">EXACT</span></td><td><span class="zh">盲提示</span><span class="en">hint-blind</span></td><td><a href="#s10">§10</a></td></tr>
+</table>
+<p class="note"><span class="zh">EXACT = 无条件精确；COND = 条件精确（阈值 bin 候选缓冲有上限，越限则可能不精确 — V3.2 L52 实测已触发 sglang_v2 越限 FAIL）。</span><span class="en">EXACT = unconditionally exact; COND = conditionally exact (threshold-bin candidate buffer is capped; overflow can break exactness — real V3.2 L52 rows have been measured to overflow sglang_v2's cap).</span></p>
+
+<h2 id="s1">§1 <span class="zh">谱系总图</span><span class="en">Genealogy diagram</span></h2>
+<p><span class="zh">三条独立血统：<b>GVR 血统</b>（提示播种的阈值选择，in-tree 六个月战役产物）、<b>Radix 血统</b>(盲提示 radix-select)、<b>SGLang 血统</b>（粗直方图 + tie-bin 精选）。op#29 是跨血统杂交：GVR 战役的推测式融合思想嫁接到 SGLang v2 代码基上。箭头标注 = 每条边引入的算法增量。</span>
+<span class="en">Three independent bloodlines: the <b>GVR line</b> (hint-seeded threshold selection, product of the 6-month in-tree campaign), the <b>Radix line</b> (hint-blind radix-select), and the <b>SGLang line</b> (coarse histogram + tie-bin exact select). op#29 is a cross-bloodline hybrid: the GVR campaign's speculative-fusion idea grafted onto the SGLang v2 codebase. Edge labels = the algorithmic delta each edge introduces.</span></p>
+<pre class="tree">
+<span class="hl">══════════ GVR 血统 / GVR bloodline（hint-seeded, CuTe-DSL）══════════</span>
+
+ <span class="cy">GVR base #14602</span>  (P1 mean-seed → P2 secant → P3 collect → P4 hist-snap)   §3
+   │
+   ├─(+DSMEM cluster row-slicing, relaxed arrive/wait count-merge,
+   │   leader gather+P4)──────────► <span class="cy">GVR multi-CTA  PR#15198</span>              §4
+   │                                   │
+   │                                   ├─(+log-count P2 @K1024/2048)──► <span class="pk">op26 logP2-MC</span>   §6B
+   │                                   └─(+R0 rung ladder cluster port
+   │                                      +leader rank-scatter P4)────► <span class="pk">op26 R0-MC</span>      §6C
+   │
+   ├─(op#7: +exact rank-scatter P4)──► <span class="gn">op#7 _P4Kernel</span>  (shipped PR#15709)
+   │                                   │
+   │                                   ├─(+op13 logP2 dispatch table
+   │                                   │  +fb_fix corrected P3)───────► <span class="pk">op26 logP2+RS 1CTA</span> §6A
+   │                                   │      │
+   │                                   │      └─(+P1b 256-bin hist →
+   │                                   │         quantile rungs, 1-pass
+   │                                   │         M-ary R0 + R1 falsi)─► <span class="pk">op26 R0 1CTA</span>
+   │                                   │             │
+   │                                   │   (auto: mc iff N≥64K&amp;BS≤64;   │
+   │                                   │    plain iff N&lt;gate)           ▼
+   │                                   │        <span class="pk">op26 R0 auto</span> ══► <b>upstream PR#16457</b> §6C
+   │
+   └─(op18 multi-thresh → op19 sandwich →)─► <span class="or">op21 gvr_ms / gvr_msc</span>       §5
+         P1b rank-quantile ladder + fused P2+P3 slot-collect
+         + sandwich band + rank-scatter P4 + C∈{4,8} cluster (msc)
+           │
+           ├─ <span class="or">pre-HLS</span>   (OP21_FB_LOGFALSI=0 → blind-bisect fallback)
+           ├─(+log-falsi fallback iter13 + dist fallback iter14/16)─► <span class="or">HLS</span> (ship)
+           ├─(+w3a ladder 0.92/.45/.048 @K512/1024
+           │   + slot2 gate n&lt;64K + fp32 C=8)──────────────────────► <span class="or">HLS-op25</span>
+           └─(+K2048 tail ladder 0.75/.45/.048; K512/1024 bit-same)─► <span class="or">HLS-op27</span>
+                                                                       (§9 env 臂)
+
+<span class="hl">══════════ Radix 血统 / Radix bloodline（hint-blind）══════════</span>
+
+ <span class="bl">TRT-LLM indexerTopK.cu</span> (nested fp16→fp32 radix, 2048 bins)
+   ├──► <span class="bl">Radix single-CTA (CUDA)</span>  1 CTA/row, cub::BlockRadixSort finisher   §8B
+   └─(+split: per-chunk local topK w/ idx+val aux
+       +merge kernel: topK over bp·K cands)──► <span class="bl">Radix multi-CTA (CUDA)</span>    §8C
+
+ <span class="gn">FlashInfer RadixTopKMultiCTA</span> (topk.cuh) ◄══ same algorithm ══► <span class="bl">Radix (cuteDSL)</span> §8A
+   (256-bin 8-bit rounds, triple-buffered global hist,        (CuTe-DSL transliteration,
+    inter-CTA barrier, gt/eq 2-pass collect)                   production #14297 rival)
+
+ <span class="gn">FlashInfer top_k 0.6.11</span> = heuristic dispatch { FilteredTopK (1 CTA/row,
+    candidate-recycling refine) | RadixTopKMultiCTA }                     §10
+
+<span class="hl">══════════ SGLang 血统 / SGLang bloodline（hint-blind, CUDA C++）══════════</span>
+
+ <span class="pk">SGLang StreamingTopK v1</span> (top512: TMA 2-pass, 4096-bin coarse hist,
+   kMaxTies=1024, K≤1024)                                                 §9D
+   │
+   └─(rewrite: +register single-pass path, +8-CTA DSMEM cluster path,
+      +host plan kernel, +fp32-boundary classify, tie cap 1024→2048,
+      K→2048, +PDL epilogue)──► <span class="pk">SGLang v2 (main 2026-07)</span>                 §9E
+            │
+            └─(GVR-campaign graft: fuse 2 passes → 1 via hint-free
+               row-sample column prediction; noB = drop insurance col;
+               guard N≥65536, streaming-only)──► <span class="cy">op#29 HBE-noB</span>           §7
+</pre>
+<div class="lin">
+<span class="zh"><b>关键回灌关系：</b>op26 是"HLS-op25 的思想回灌到经典 GVR 内核"（sweep_op22rr.py:75-78 原话）——op21 战役在生产 sandwich 内核上验证的 log 空间插值、定理-3 内点瞄准 (m*)、h 空间分位阶梯，被逐一移植回 base/op#7/cluster 血统，最终以 op26 R0 auto 形态上游化（PR#16457）。op#29 则反向取材：把 GVR 验证过的"推测阈值 + 融合收集"嫁接到 SGLang v2 的 bin-精确机制上，且最终<b>抛弃了 preIdx 提示</b>（改用行采样估计），脱离了 GVR 的提示血统。</span>
+<span class="en"><b>Key back-port relations:</b> op26 is "HLS-op25 ideas ported back to the classic GVR kernels" (verbatim, sweep_op22rr.py:75-78) — log-space interpolation, the Theorem-3 interior aim (m*), and the h-space quantile ladder, each validated on the op21 production sandwich kernel, were transplanted one by one back into the base/op#7/cluster line, culminating in op26 R0 auto going upstream (PR#16457). op#29 borrows in the opposite direction: it grafts GVR's validated "speculative threshold + fused collect" onto SGLang v2's bin-exactness machinery, and ultimately <b>abandons the preIdx hint</b> (replaced by a row-sample estimator), leaving the GVR hint lineage entirely.</span>
+</div>
+
+<h2 id="s2">§2 <span class="zh">共享词汇</span><span class="en">Shared vocabulary</span></h2>
+<div class="card">
+<h3 style="margin-top:0"><span class="zh">GVR 骨架（P1–P4）</span><span class="en">The GVR skeleton (P1–P4)</span></h3>
+<p><span class="zh">GVR = Guess-Verify-Refine。统一思想：找一个标量阈值 t 使 <code>count_ge(row,t) ∈ [K, kC]</code>（kC = 候选上限，5120/6144），把 ≥t 的候选收进 SMEM，再在候选内做精确第 K 名选择。preIdx（上一步 top-K 索引）是时间先验，用来播种 t。</span>
+<span class="en">GVR = Guess-Verify-Refine. Unifying idea: find a scalar threshold t with <code>count_ge(row,t) ∈ [K, kC]</code> (kC = candidate cap, 5120/6144), collect the ≥t candidates into SMEM, then exactly rank-select the K-th inside the candidates. preIdx (previous step's top-K indices) is the temporal prior that seeds t.</span></p>
+<table>
+<tr><th><span class="zh">相位</span><span class="en">Phase</span></th><th><span class="zh">职责</span><span class="en">Role</span></th></tr>
+<tr><td><b>P1</b></td><td><span class="zh">收集 K 个 preIdx 的值 → (pmin, pmax, pmean)，播种阈值/括号</span><span class="en">gather K preIdx values → (pmin, pmax, pmean), seed threshold/bracket</span></td></tr>
+<tr><td><b>P2</b></td><td><span class="zh">阈值精化（secant/regula-falsi 计数迭代，或单遍 M 元阶梯），直到 count∈[K,kC]（done=1）或放弃（done=2）</span><span class="en">threshold refinement (secant/regula-falsi count iterations, or a single-pass M-ary ladder) until count∈[K,kC] (done=1) or give-up (done=2)</span></td></tr>
+<tr><td><b>P3</b></td><td><span class="zh">前缀和 + 流写：把所有 ≥t 的元素收进 SMEM 候选缓冲</span><span class="en">prefix-sum + stream-write of all elements ≥t into the SMEM candidate buffer</span></td></tr>
+<tr><td><b>P4</b></td><td><span class="zh">候选内精确 top-K：histogram-snap（base）或 op#7 精确 rank-scatter</span><span class="en">exact top-K within candidates: histogram-snap (base) or op#7 exact rank-scatter</span></td></tr>
+</table>
+<h3><span class="zh">Radix / 直方图骨架</span><span class="en">Radix / histogram skeleton</span></h3>
+<p><span class="zh">盲提示血统的共同 DNA：把 float 映射为<b>降序有序整数键</b>（负数保位，正数取反补），逐字节（或粗 fp16 bin）建直方图 → 前缀和定位第 K 名所在 bin → 严格更优 bin 直接发射，阈值 bin 内做精选（radix 细化 / 块排序 / tie-select）。SGLang 血统把"阈值 bin 精选"做成显式 tie-buffer + 4 轮 8-bit 精确 radix；其精确性因此以 tie-buffer 容量为条件。</span>
+<span class="en">Common DNA of the hint-blind lines: map floats to a <b>descending ordered integer key</b> (negatives keep bits, positives flipped), histogram per byte (or a coarse fp16 bin) → prefix-sum locates the K-th bin → strictly-better bins emit directly, and the threshold bin is refined exactly (radix refinement / block sort / tie-select). The SGLang line turns "threshold-bin refinement" into an explicit tie buffer + a 4-round 8-bit exact radix; its exactness is therefore conditional on tie-buffer capacity.</span></p>
+</div>
+
+<h2 id="s3">§3 <span class="badge b-gvr">GVR</span> GVR base（cuteDSL, #14602）</h2>
+<div class="kv">
+<b><span class="zh">源码</span><span class="en">Source</span></b><span class="src">ops/cute_vendored/blackwell/top_k/gvr_topk_decode.py（GvrTopKKernel, 1681 行/lines）</span>
+<b><span class="zh">发射</span><span class="en">Launch</span></b><span>grid=(rows,1,1)，block 512/1024（bs≤#SMs 且 N≥65536 → 1024），PDL；<span class="zh">SMEM：keys[kC]f32 + vals[kC]i32 + hist[kNumBins] + ptcnt[threads]</span><span class="en">SMEM: keys[kC]f32 + vals[kC]i32 + hist[kNumBins] + ptcnt[threads]</span></span>
+<b><span class="zh">角色</span><span class="en">Role</span></b><span><span class="zh">op22 报告全部 speedup 的<b>分母基线</b>；家族根节点（cluster 文件注释中的 "V5"）</span><span class="en"><b>denominator baseline</b> of every speedup in the op22 report; family root ("V5" in the cluster file's comments)</span></span>
+</div>
+<p><span class="zh"><b>P1</b>（:305-478）：各线程跨步收集 K 个 preIdx 值（cr=1 时偏移 <code>(row%next_n)+1</code>，cr=4 时 0），warp redux + 块归约得 (pmin,pmax,pmean)，以 <b>pmean 为初始猜测</b>、[pmin,pmax] 为括号。<b>P2</b>（:623-756）：<code>block_count_ge</code>（128/256-bit 向量化 + 4 路展开）统计 ≥t 的个数并缓存每线程计数供 P3 复用；线性 secant <code>f=(clo−kFT)/(clo−chi)</code>，夹到 [0.05,0.95]（iter0 ≤0.5），至多 15 轮；耗尽 → 强制端点，done=2。<b>P3</b>（:765-980）：done≠1 时先做 ≤10 轮 retry-shrink 二分压到 ≤kC（注意：这一"一侧退出"逻辑会接受 count&lt;K —— 正是 op26 fb_fix 修复的 bug），然后 warp 5 级 shfl 前缀和 + 流写候选。<b>P4</b>（:1105-1409）：cand&gt;K 时建 kNumBins 直方图 → 并行第 K bin 搜索 → snap 收敛环精确到 <code>cgt&lt;K≤cge</code> → 两遍 ballot 写回（先 &gt;thr 再 ==thr tie）。preIdx <b>只</b>在 P1 用作种子，没有单独的快路径发射。</span>
+<span class="en"><b>P1</b> (:305-478): threads stride-gather the K preIdx values (offset <code>(row%next_n)+1</code> at cr=1, 0 at cr=4), warp redux + block reduce yield (pmin,pmax,pmean); <b>pmean is the initial guess</b>, [pmin,pmax] the bracket. <b>P2</b> (:623-756): <code>block_count_ge</code> (128/256-bit vectorized, 4-way unrolled) counts ≥t and caches per-thread counts for P3 reuse; linear secant <code>f=(clo−kFT)/(clo−chi)</code> clamped to [0.05,0.95] (≤0.5 on iter0), up to 15 iterations; exhaustion → forced endpoint, done=2. <b>P3</b> (:765-980): if done≠1, a ≤10-iter retry-shrink bisection brings count ≤kC (note: this one-sided exit accepts count&lt;K — exactly the bug op26's fb_fix repairs), then a 5-level shfl warp prefix-sum + stream-write of candidates. <b>P4</b> (:1105-1409): for cand&gt;K, build a kNumBins histogram → parallel K-th-bin search → snap-convergence loop to the exact boundary <code>cgt&lt;K≤cge</code> → two-pass ballot writeback (&gt;thr first, then ==thr ties). preIdx is used <b>only</b> as the P1 seed; there is no separate fast-path emit.</span></p>
+<pre class="flow">
+        ┌─────────────┐    ┌──────────────────┐    ┌────────────────┐    ┌──────────────────┐
+preIdx─►│ P1 gather K  │───►│ P2 secant ≤15it  │───►│ P3 collect ≥t  │───►│ P4 hist+snap      │─►topK
+ row ──►│ →min/max/mean│    │ count_ge(row,t)  │    │ prefix+stream  │    │ exact k-th, ballot│
+        └─────────────┘    │ t∈[K,kC]? done=1 │    │ →smem[≤kC]     │    │ writeback + ties  │
+                           └───────┬──────────┘    └────────────────┘    └──────────────────┘
+                             done=2│ (give-up) → retry-shrink bisect（≤10）→ P3
+</pre>
+<pre><code># GVR base — 1 CTA / row (gvr_topk_decode.py)
+row = blockIdx; N = seqLen(row)/cr
+if N &lt;= K: emit identity, pad -1; return
+# P1: guess from previous-step top-K
+for i in stride(K): idx = preIdx[i]+offset; acc min/max/sum(input[idx])
+(pmin,pmax,pmean) = block_reduce();  bracket=[pmin,pmax]; t=pmean; done=0
+# P2: linear secant on counts, &lt;=15 iters
+c = block_count_ge(input,N,t)                  # caches per-thread counts
+if c in [K,kC]: done=1 else update_bracket(c)
+while iter&lt;15 and not done:
+    f = clamp((clo-kFTarget)/(clo-chi), .05, .95)   # iter0: f&lt;=0.5
+    t = vlo + (vhi-vlo)*f
+    c = block_count_ge(input,N,t); done = c in [K,kC]; update_bracket
+if not done: t = (clo&lt;=2*kC ? vlo : vhi); done=2
+# P3: collect candidates &gt;= t
+if done!=1: retry_shrink_bisect(&lt;=10 iters until c&lt;=kC)   # one-sided!
+prefix = warp_scan(cached_counts) + block_prefix(warp_totals)
+for i in stride(N): if input[i]&gt;=t: smem_keys/vals[wc++] = (input[i], i)
+# P4: exact k-th among cand candidates
+if   cand==K: emit
+elif cand&gt;K : hist(kNumBins) → kth_bin_search → snap loop until cgt&lt;K&lt;=cge
+              ballot_emit(v&gt;thr); ballot_emit(v==thr ties); pad(-FLT_MAX,-1)
+else        : emit all + pad</code></pre>
+<div class="lin"><span class="zh"><b>谱系</b>：根节点。参数表 <code>GvrParams</code> 按 (dtype,K,cr) 给 kFTarget/kC(5120/6144)/kNumBins(512-2048)；MAX_REFINE_ITERS=15。</span><span class="en"><b>Lineage</b>: the root. <code>GvrParams</code> supplies kFTarget/kC(5120/6144)/kNumBins(512-2048) per (dtype,K,cr); MAX_REFINE_ITERS=15.</span></div>
+
+<h2 id="s4">§4 <span class="badge b-gvr">GVR</span> GVR multi-CTA（cuteDSL, PR#15198）</h2>
+<div class="kv">
+<b><span class="zh">源码</span><span class="en">Source</span></b><span class="src">gvr_topk_decode_cluster.py（GvrTopKClusterKernel, 2292 行/lines）；host auto-dispatch: harness/gvr_multicta_cutedsl_op.py:_resolve_config</span>
+<b><span class="zh">发射</span><span class="en">Launch</span></b><span>grid=(rows·cs,1,1)，cluster=(cs,1,1)，cs∈{1,2,4}（N&lt;65536→1；rows≤16 且 rows·4≤SMs→4；rows·2≤SMs→2）</span>
+<b><span class="zh">op22 结论</span><span class="en">op22 verdict</span></b><span><span class="zh">胜 GVR base 1.15–1.23×（低 BS 大 N 域）</span><span class="en">beats GVR base 1.15–1.23× (low-BS large-N regime)</span></span>
+</div>
+<p><span class="zh">把<b>一行切给 cluster_size 个 CTA</b>：CTA r 拥有 <code>[r·slice_base, …)</code>，slice_base 按 vec_w 对齐向下取整（varlen MISALIGNED_ADDRESS 修复，承重 bug fix），尾 CTA 吸收余数。P1 每 CTA 冗余算全量 preIdx（secant 数学确定 → 各 CTA 天然锁步，零通信）。P2 每 CTA 只数自己的切片，切片计数写 <code>s_cluster_partial</code>，<code>cluster_arrive_relaxed()+cluster_wait()</code> 后 DSMEM 读所有 peer 求和 —— 主导的 secant 循环被 cs 路并行化。P3 各 CTA 收自己切片的候选（retry-shrink 关闭 cluster 聚合避免死锁）；随后 <b>leader DSMEM 逐条收拢</b>所有 peer 的候选到自己的缓冲，P4 仅 leader 执行（与 base 相同）。peer 在末尾再做一次 arrive/wait 保持 SMEM 映射直到 leader 读完（缺此 → LAUNCH_FAILURE）。可选 Shift-E：切片缓存进 SMEM 让 6-10 轮 secant 读 SMEM（默认关）。cs=1 时逐字节退化为 base。</span>
+<span class="en">Splits <b>one row across cluster_size CTAs</b>: CTA r owns <code>[r·slice_base, …)</code>, slice_base rounded down to a vec_w multiple (the load-bearing varlen MISALIGNED_ADDRESS fix); the last CTA absorbs the remainder. P1 runs redundantly per CTA over the full preIdx (secant math is deterministic → CTAs stay in lock-step with zero communication). In P2 each CTA counts only its slice, writes the partial to <code>s_cluster_partial</code>, then after <code>cluster_arrive_relaxed()+cluster_wait()</code> DSMEM-reads all peers and sums — the dominant secant loop is parallelized cs-way. In P3 each CTA collects its own slice's candidates (retry-shrink runs with cluster aggregation off to avoid deadlock); then the <b>leader DSMEM-gathers</b> every peer's candidates into its own buffer and P4 runs leader-only (same as base). Peers hold a final arrive/wait to keep their SMEM mapped until the leader finishes (omit → LAUNCH_FAILURE). Optional Shift-E caches the slice in SMEM so 6-10 secant rounds read SMEM (default off). cs=1 degenerates byte-for-byte to base.</span></p>
+<pre class="flow">
+ row ──┬── CTA0 slice ─┐    per-CTA count_ge(slice,t)     ┌─ leader: DSMEM-gather
+       ├── CTA1 slice ─┤        │                          │  peers' cand chunks
+       ├── CTA2 slice ─┼──► s_cluster_partial[peer]        │  → merged cand buffer
+       └── CTA3 slice ─┘        │ cluster_arrive_relaxed   │  → P4 hist+snap (leader only)
+                                ▼ + cluster_wait           │
+                     Σ peers via ld.shared::cluster ──► secant update (lock-step all CTAs)
+                                │ …≤15 iters…              ▲
+                     P3: per-CTA collect own slice ────────┘   final arrive/wait (SMEM keepalive)
+</pre>
+<div class="lin"><span class="zh"><b>谱系</b>：继承 base 全部四相 + P4 原样；新增 = 行切片 + DSMEM 计数合并 + leader 候选收拢/独占 P4 + vec_w 对齐修复。同步原语（mapa/ld.shared::cluster、relaxed arrive/wait）后被 op21-msc 与 op26-MC 复用。</span><span class="en"><b>Lineage</b>: inherits all four phases + P4 verbatim from base; adds row slicing + DSMEM count-merge + leader candidate-gather/leader-only P4 + the vec_w alignment fix. Its sync primitives (mapa/ld.shared::cluster, relaxed arrive/wait) are later reused by op21-msc and op26-MC.</span></div>
+
+<h2 id="s5">§5 <span class="badge b-op21">op21</span> op#21 ms_auto <span class="zh">家族：sandwich 内核与四个基准态</span><span class="en">family: the sandwich kernel and its four benchmark states</span></h2>
+<div class="kv">
+<b><span class="zh">源码</span><span class="en">Source</span></b><span class="src">op21_gvr_prod/src/gvr_ms_op.py（GvrSandwichKernel, 单CTA/1-CTA, 2245 行）+ gvr_msc_op.py（GvrMsClusterKernel C∈{4,8} + gvr_ms_auto dispatch, 1694 行）</span>
+<b><span class="zh">发射</span><span class="en">Launch</span></b><span>gvr_ms: grid=(rows,)，block 512/1024；gvr_msc: grid=(rows·C,)，cluster=(C,1,1)，block 1024；<span class="zh">融合收集路径仅当 bs≤#SMs 且 4K≤5120（K512/K1024 融合，K2048 不融合）</span><span class="en">fused-collect path only when bs≤#SMs and 4K≤5120 (K512/K1024 fuse, K2048 doesn't)</span></span>
+<b><span class="zh">前驱链</span><span class="en">Predecessors</span></b><span>op8(rank-scatter P4 port) → op13(P2 cand) → op14(1-pass secant) → op16(dual-thresh) → op17(portfolio) → op18(multi-thresh) → op19(sandwich) → <b>op21</b> → op25 → op27</span>
+</div>
+<p><span class="zh">生产多策略内核。核心颠覆：<b>不再迭代猜阈值，而是让 preIdx 的经验顺序统计量一次放好 M 个阈值</b>。<b>P1 stats-stash</b>（place_mode=5）：收集 prevK 值的同时把值存进（尚空闲的）P3 缓冲，省 ~25% L2 重收集。<b>P1b rank-quantile</b>（:1506-1597）：对 stash 的 prevK 值建 QBINS(64-256) 直方图，Hillis-Steele 后缀扫描，在后缀计数越过 <code>qfracs[m]·K_valid</code> 的 bin 边放置阈值列 1..M-1；列 0 钉在 pmin（count≥K 保证）；16-bit 时阈值量化到 dtype 格点。<b>P2 M 元阶梯 + sandwich</b>：<code>block_count_collect_multi</code> 单次向量化全行遍历<b>同时</b>数 M 个阈值的 count <b>并</b>把 ≥thr[pred_col] 的元素塞进每线程 SMEM slot（P2+P3 融合）；tid0 选 best_m（最高的 count≥K 列，下界）与 up_m（首个 count&lt;K 列，上界）——两阈值夹住第 K 名，band = 两 count 之差，band≤kC 即 done=1。<b>P3</b>：sandwich 路径只收窄带 (up_thr, best_thr] 的 band 个候选（能复用 slot 就不重扫），带上方 m0 个必胜元素直接发射；fallback 路径 (done=2) 是 <b>HLS log-falsi 精化</b>（见下）。<b>P4</b>：band 内精确第 (K−m0) 名，rank-scatter（iter5）+ 小 bin 快路径（iter6：≤32 → warp0 寄存器排名）。</span>
+<span class="en">The production multi-strategy kernel. Core inversion: <b>stop iterating threshold guesses — let preIdx's empirical order statistics place M thresholds at once</b>. <b>P1 stats-stash</b> (place_mode=5): while gathering prevK values, stash them into the (still free) P3 buffer, saving ~25% L2 re-gather. <b>P1b rank-quantile</b> (:1506-1597): histogram the stashed prevK into QBINS (64-256) bins, Hillis-Steele suffix scan, place ladder columns 1..M-1 at the bin edges where the suffix count crosses <code>qfracs[m]·K_valid</code>; column 0 pinned to pmin (count≥K guaranteed); 16-bit thresholds are quantized to the dtype grid. <b>P2 M-ary ladder + sandwich</b>: <code>block_count_collect_multi</code> makes ONE vectorized row pass that <b>simultaneously</b> counts all M thresholds <b>and</b> appends every element ≥thr[pred_col] into per-thread SMEM slots (P2+P3 fused); tid0 picks best_m (highest column with count≥K, lower bound) and up_m (first column with count&lt;K, upper bound) — the two thresholds sandwich the K-th rank; band = count difference; band≤kC ⇒ done=1. <b>P3</b>: the sandwich path collects only the band candidates in (up_thr, best_thr] (reusing the fused slots when possible), the m0 guaranteed winners above the band emit directly; the fallback path (done=2) is the <b>HLS log-falsi refine</b> (below). <b>P4</b>: exact (K−m0)-th within the band, rank-scatter (iter5) + small-bin fast paths (iter6: ≤32 → warp0 register ranking).</span></p>
+<pre class="flow">
+        ┌──────────────────┐  ┌─────────────────────┐  ┌──────────────────────────────┐
+preIdx─►│P1 gather+stash    │─►│P1b: hist(prevK,QBINS)│─►│P2 ONE pass: count M thresholds│
+        │→min/max/mean      │  │suffix-scan → place M │  │ + fused slot-collect @pred_col│
+        └──────────────────┘  │thresholds at qfracs·K│  └──────────┬───────────────────┘
+                              └─────────────────────┘   sandwich?  │
+       ┌────────────────────────────────────────────────────┬──────┴──────┐
+  done=1 (band≤kC)                                     done=2 (no valid pair)
+       ▼                                                     ▼
+┌───────────────────────────┐                    ┌───────────────────────────────┐
+│P3 narrow band (up,best]   │                    │HLS fallback: known-count skip  │
+│(slots reuse / band rescan)│                    │geo hi-expand ≤12 → log-falsi   │
+│emit m0 sure winners       │                    │≤30 aim m*=K·(kC/K)^0.2 → base  │
+├───────────────────────────┤                    │collect + base hist-snap P4     │
+│P4 band rank-scatter:      │                    └───────────────────────────────┘
+│exact (K−m0)-th, fastpaths │
+└───────────────────────────┘
+</pre>
+<pre><code># op21 gvr_ms — sandwich kernel (gvr_ms_op.py:1599-1943)
+P1 : gather prevK once → (pmin,pmax,pmean); stash prevK values into smem_keys
+P1b: hist = QBINS histogram of stashed prevK over [pmin,pmax]
+     suffix = parallel_suffix_scan(hist)
+     thr[0]=pmin; thr[m] = bin_edge where suffix crosses qfracs[m-1]*Kvalid
+     quantize thr[] to dtype grid (16-bit)
+# P2: ONE fused pass — count M thresholds + collect at pred_col
+for r in 0..R-1 while band &gt; band_accept(64):
+    (cnt[0..M-1], slots) = count_collect_multi(input, thr[])   # 1 row pass
+    best_m = max m with cnt[m]&gt;=K ;  up_m = best_m+1
+    m0 = cnt[up_m]              # guaranteed winners above the band
+    band = cnt[best_m] - cnt[up_m]
+if valid sandwich and band&lt;=kC: done=1
+else: done=2; bracket=[best_thr,next_thr]; stash known counts →iscalars[5],[6]
+# P3/P4
+if done==1:
+    cand = collect band (up_thr, best_thr]     # from slots if usable, else rescan
+    emit m0 winners directly
+    P4_band: exact (K-m0)-th via rank-scatter / small-bin fast paths
+else:                                          # HLS fallback (iter13+)
+    skip entry/hi passes where ladder counts already known
+    if hi unknown: geometric hi-expansion (&lt;=12) until count(hi)&lt;K
+    loop &lt;=30:                                 # log-count regula falsi
+        t = (log2(mstar)-log2(chi)) / (log2(clo)-log2(chi))   # mstar=K*(kC/K)^0.2
+        thr = hi + t*(lo-hi);  c = count_ge(input,thr)
+        if c in [K,kC]: break; update bracket (Illinois midpoint safeguard)
+    base_collect + base_histogram_snap</code></pre>
+<h3><span class="zh">四个基准态（同一内核、不同旋钮）</span><span class="en">The four benchmark states (one kernel, different knobs)</span></h3>
+<table>
+<tr><th><span class="zh">臂</span><span class="en">Arm</span></th><th><span class="zh">定义 = 前态 + 增量</span><span class="en">Definition = predecessor + delta</span></th><th><span class="zh">旋钮</span><span class="en">Knobs</span></th></tr>
+<tr><td><b>pre-HLS</b></td><td><span class="zh">iter13 前 ship 态：fallback 为盲二分（leader-only），stock 梯 (0.75,0.5,0.25)，无 dist fallback</span><span class="en">pre-iter13 ship state: blind-bisection fallback (leader-only), stock ladder (0.75,0.5,0.25), no dist fallback</span></td><td><code>OP21_FB_LOGFALSI=0, OP21_FB_DIST=0</code></td></tr>
+<tr><td><b>HLS</b><br><span class="note">(<span class="zh">报告主测对象</span><span class="en">object under test</span>)</span></td><td><span class="zh">+ iter13 log-falsi fallback（log₂ 计数域 regula-falsi，内点瞄准 m*=K·(kC/K)^0.2）+ iter14/16 分布式 cluster fallback（单计数点 _fb_dist 驱动环，msc 域 n≥65536）@51be558e77</span><span class="en">+ iter13 log-falsi fallback (regula-falsi in log₂-count space, interior aim m*=K·(kC/K)^0.2) + iter14/16 distributed cluster fallback (single-count-site _fb_dist driver, msc regime n≥65536) @51be558e77</span></td><td><code>OP21_FB_LOGFALSI=1</code>, dist <span class="zh">门</span><span class="en">gate</span> n≥65536</td></tr>
+<tr><td><b>HLS-op25</b></td><td><span class="zh">+ w3a 梯 <b>(0.92,0.45,0.048)</b> @K512/K1024（0.92 列修 h&gt;0.75 pair01 悬崖；0.048 尾列盖 all_ge 极点）+ slot_scale=2 门到 n&lt;65536 + fp32 C=8 cluster 加宽；K2048 保持 stock。op22 结论：worst/real +3~16%，best −3~6%</span><span class="en">+ w3a ladder <b>(0.92,0.45,0.048)</b> @K512/K1024 (the 0.92 column fixes the h&gt;0.75 pair01 cliff; the 0.048 tail covers the all_ge pole) + slot_scale=2 gated to n&lt;65536 + fp32 C=8 cluster widening; K2048 stays stock. op22 verdict: +3–16% on worst/real, −3–6% on best</span></td><td><code>_QFRACS_SHIP</code>@:1999, <code>OP25_SLOTCAP=2</code>, C8 <span class="zh">规则</span><span class="en">rule</span> gvr_msc_op.py:1665</td></tr>
+<tr><td><b>HLS-op27</b></td><td><span class="zh">+ K2048 尾梯 <b>(0.75,0.45,0.048)</b>（换低两列覆盖 all_ge 尾部）；K512/K1024 与 op25 <b>位同</b>。上硅结论：worst K2048 gm 1.96×，best −1.2% / real −0.7%。§9 env 章 9 臂集用的就是这个态</span><span class="en">+ K2048 tail ladder <b>(0.75,0.45,0.048)</b> (swaps the two lower columns for the all_ge tail); K512/K1024 <b>bit-identical</b> to op25. Silicon verdict: worst K2048 gm 1.96×, best −1.2% / real −0.7%. This is the state used in the §9 env 9-arm set</span></td><td><code>OP27_K2048_TAIL=1</code>(<span class="zh">默认</span><span class="en">default</span>), <code>OP27_R2=0</code></td></tr>
+</table>
+<h3>ms_auto dispatch（gvr_msc_op.py:1647-1673）</h3>
+<pre><code>if dt16 and n&gt;=65536 and n&gt;=32768*bs:                    → msc C=8   # 16-bit huge-N low-BS
+if K&gt;=2048 and n&gt;=196608 and bs&lt;=4:                      → msc C=8   # K2048 huge-N
+if fp32 and K&lt;2048 and bs&lt;=8
+   and (n&gt;=131072 or (n&gt;=65536 and K&gt;=1024)):             → msc C=8   # op25 Step-4 widening
+if n&gt;=65536 and bs*4&lt;=NUM_SMS:                            → msc C=4   # mid-N low-BS default
+else:                                                     → gvr_ms    # 1-CTA: small-N / high-BS</code></pre>
+<div class="lin"><span class="zh"><b>谱系</b>：<code>GvrSandwichKernel(GvrMultiThreshKernel)</code> 继承 base 的 P3/P4/count_ge 机器；<code>GvrMsClusterKernel(GvrSandwichKernel)</code> 复用 §4 cluster 的 DSMEM 原语并新增 <code>st.shared::cluster</code> 远端存储（iter7）合并 M 计数。相对 base 的改变：均值种子+串行 secant → 分位阶梯+sandwich 单遍；盲二分 fallback → log-falsi；全行 P3 重扫 → 融合 slot 收集+窄带收集；运行时 snap → 精确 rank-scatter P4；单 CTA → 可选 C-CTA 行分块 cluster（分布式 P1/P4/fallback）。<b>注意</b>：生产 ms_auto 只用上面的静态规则集（无数据依赖表 —— 用户指令；hit-rate 永不可用作 dispatch 输入）。</span>
+<span class="en"><b>Lineage</b>: <code>GvrSandwichKernel(GvrMultiThreshKernel)</code> inherits base's P3/P4/count_ge machinery; <code>GvrMsClusterKernel(GvrSandwichKernel)</code> reuses §4's DSMEM primitives and adds <code>st.shared::cluster</code> remote stores (iter7) for the M-count merge. Changes vs base: mean seed + serial secant → quantile ladder + single-pass sandwich; blind-bisection fallback → log-falsi; whole-row P3 rescan → fused slot-collect + narrow-band collect; runtime snap → exact rank-scatter P4; single CTA → optional C-CTA row-chunked cluster (distributed P1/P4/fallback). <b>Note</b>: production ms_auto uses only the static rule set above (no data-dependent tables — user directive; hit-rate is never a legal dispatch input).</span></div>
+
+<h2 id="s6">§6 <span class="badge b-op26">op26</span> op#26 <span class="zh">家族：HLS 思想回灌经典内核 → 上游化</span><span class="en">family: HLS ideas back-ported to the classic kernels → upstreamed</span></h2>
+<p><span class="zh">op26 的立项逻辑（sweep_op22rr.py:75-78 原话）："HLS-op25 的思想回灌到经典 GVR 内核"。三个臂 = 同一回灌运动的三站：先在单 CTA 上装 log 空间 P2 + 修正 fallback（A），再把 log-P2 移植进 cluster 内核（B），最后用 R0 直方图梯级<b>整体取代 secant 循环</b>并做 1CTA/MC 自动调度（C，即 PR#16457 上游版本）。</span>
+<span class="en">op26's charter (verbatim from sweep_op22rr.py:75-78): "HLS-op25 ideas ported back to the classic GVR kernels". The three arms are three stations of the same back-port campaign: install log-space P2 + a corrected fallback on the single-CTA kernel (A), port log-P2 into the cluster kernel (B), then <b>replace the secant loop entirely</b> with the R0 histogram-rung round plus 1CTA/MC auto-dispatch (C — the version upstreamed in PR#16457).</span></p>
+
+<h3 id="s6a">§6A — op#26 logP2+RS (single-CTA)　<span class="src">gvr_op26_op.py:GvrOp26Kernel ⊂ op#7 _P4Kernel（:154-437）</span></h3>
+<p><span class="zh">子类化 op#7 内核（带精确 rank-scatter P4 的那支），只覆写 P2/P3，P1/P4 全继承 —— "op13 GvrP2C 模式"，vendored 文件零改动。<b>P2 门控 log-count secant</b>：<code>p2_log</code> 时插值取 <code>f = log₂(clo/kFT)/log₂(clo/chi)</code>（op13 iter8 公式）—— indexer logits 的 CCDF 近指数，插值必须活在 log 空间；<code>p2_secant2</code>（iter5 "V3"）改为对<b>最近两个实测 (thr,count) 点</b>做 log-secant，免疫 P1 未测种子（cnt_hi=1 是假设值！hit≈0 的行 pmax 之上可有 ≥K 个元素）和 regula-falsi 端点冻结。全部 vendored 括号钳制与精确性守卫不动。<b>P3 fb_fix 修正 fallback（常开）</b>：取代 vendored 的一侧 retry-shrink（它在<b>首个</b> count≤kCC 就退出、包括 count&lt;K —— 真实数据 "-1 slots" 红牌的根因）。P2 放弃时把两端计数标为未知(−1)，强制阈值处重数一次，然后 ≤30 轮有界环：先测 hi 端、再测 lo 端、再以 log-falsi 瞄准内点 <code>m* = K·(kC/K)^0.2</code>（HLS 定理-3 格点最优）；只接受 count∈[kK,kCC]；带上/下扩展守卫；耗尽落在<b>实测的 undershoot 侧</b>（fail-soft，保证不溢出 SMEM）。<b>P2 调度表 <code>dispatch_p2_op26</code>（:94-146）</b>就是"logn P2 候选表"：按 (dtype,K,N) 给 (use_log, kCC, kFT, secant2)，移植自 op13 iter8c ship 表 —— 亮点：K512 fp32 N≤65536 用<b>线性窄表</b>（kCC=1536, kFT=1280；K512-log 是 op13 的硬证伪）；K2048 fp32 N≥8192 → 窄 kCC=4096, kFT=2048（贴边瞄准）；16-bit K2048 N=262144 是唯一 secant2 单元。<b>P4</b>：精确 rank-scatter，门 <code>dispatch_rs_op26</code>：fp32 全开、16-bit 仅 BS≥256，其余 histogram-snap。</span>
+<span class="en">Subclasses the op#7 kernel (the branch carrying exact rank-scatter P4), overriding only P2/P3 and inheriting P1/P4 — the "op13 GvrP2C pattern", zero edits to vendored files. <b>P2 gated log-count secant</b>: with <code>p2_log</code>, interpolation becomes <code>f = log₂(clo/kFT)/log₂(clo/chi)</code> (op13 iter8 formula) — the indexer-logit CCDF is near-exponential, so interpolation must live in log space; <code>p2_secant2</code> (iter5 "V3") instead runs a log-secant through the <b>last two MEASURED (thr,count) points</b>, immune to the unmeasured P1 seed (cnt_hi=1 is an assumption! a hit≈0 row can hold ≥K elements above pmax) and to regula-falsi endpoint freezing. All vendored bracket clamps and exactness guards untouched. <b>P3 fb_fix corrected fallback (always on)</b>: replaces the vendored one-sided retry-shrink (which exits on the FIRST count≤kCC, INCLUDING count&lt;K — the root cause of the real-data "-1 slots" red card). On P2 give-up it marks both end-counts unknown (−1), recounts at the forced threshold, then a ≤30-iter bounded loop: measure hi, then lo, then log-falsi aimed at the interior <code>m* = K·(kC/K)^0.2</code> (the HLS Theorem-3 grid optimum); accept ONLY count∈[kK,kCC]; expand-up/down guards; exhaustion lands on the <b>measured undershoot side</b> (fail-soft, no SMEM overflow possible). <b>The P2 dispatch table <code>dispatch_p2_op26</code> (:94-146)</b> is the "logn P2-candidate table": per (dtype,K,N) it returns (use_log, kCC, kFT, secant2), ported from the op13 iter8c ship table — highlights: K512 fp32 N≤65536 uses <b>linear-narrow</b> (kCC=1536, kFT=1280; K512-log is op13's hard falsification); K2048 fp32 N≥8192 → narrow kCC=4096, kFT=2048 (edge aim); 16-bit K2048 N=262144 is the sole secant2 cell. <b>P4</b>: exact rank-scatter gated by <code>dispatch_rs_op26</code>: fp32 everywhere, 16-bit only at BS≥256, histogram-snap elsewhere.</span></p>
+<pre><code># op26 logP2+RS (1-CTA)  — gvr_op26_op.py
+use_log,kCC,kFT,sec2 = dispatch_p2_op26(dtype,K,N)      # op13 iter8c ship table
+rs_on = dispatch_rs_op26(dtype,BS)                       # fp32 || BS&gt;=256
+P1: (inherited op#7) preIdx gather → pmin/pmax/pmean; t=pmean
+P2: c = count_ge(row,t); done = c in [K,kCC]
+    while iter&lt;15 and not done:
+        if sec2 and two measured pts:  t = log_secant(v_prev,c_prev, v_last,c_last → log2(kFT))
+        elif use_log:  f = log2(clo/kFT) / log2(clo/chi)     # log-count interp
+        else:          f = (clo-kFT) / (clo-chi)             # linear (stock)
+        clamp f; t = vlo + rng*f; c = count_ge(row,t); accept c in [K,kCC]
+P3 (fb_fix, if done!=1):
+    mark both end-counts unknown; recount at forced t
+    for 30 iters: measure hi → measure lo → log-falsi aim m*=K*(kC/K)^0.2
+        accept c in [K,kCC]; expand-up/down guards
+    exhaustion → measured undershoot side (fail-soft)
+    → op#7 collect candidates &gt;= t
+P4: rs_on ? exact rank-scatter : histogram_snap</code></pre>
+<div class="lin"><span class="zh"><b>谱系</b>：⊂ op#7 _P4Kernel（继承 P1/P3收集/精确RS P4）；吸收 op13 p2c_v2 表 + HLS 定理-3 m*。修复 base/op#7 的一侧 retry-shrink 截断 bug。</span><span class="en"><b>Lineage</b>: ⊂ op#7 _P4Kernel (inherits P1 / P3 collect / exact-RS P4); absorbs the op13 p2c_v2 table + HLS Theorem-3 m*. Fixes the one-sided retry-shrink truncation bug of base/op#7.</span></div>
+
+<h3 id="s6b">§6B — op#26 logP2 (multi-CTA, PR#15198)　<span class="src">gvr_op26_op.py:GvrOp26ClusterKernel ⊂ GvrTopKClusterKernel（:440-551）</span></h3>
+<p><span class="zh">整体继承 §4 cluster 内核，<b>唯一改动 = 在 vendored cluster secant 里注入 log-count 插值分支</b>（:486-499）。cluster P3 交接、每切片收集、leader-only P4 全部原样 —— 每切片 retry 语义使移植 fb_fix 成为独立的高风险改动，故此臂无 fb_fix、无 secant2。门控比 1cta 表更粗：<code>p2_log = K∈{1024,2048}</code>（全 dtype）；K512 保持 stock（op26_dry 复证 op13 的 K512-log 证伪：131K 0.91 / 1M 0.85），兼作同进程漂移 QA 锚。<code>_resolve_config_mc</code> 与 §4 的 _resolve_config 逐字相同，保证 A/B 差异纯算法。</span>
+<span class="en">Wholesale inherits the §4 cluster kernel; the <b>only change = injecting the log-count interpolation branch into the vendored cluster secant</b> (:486-499). Cluster P3 handoff, per-slice collect, leader-only P4 all stock — per-slice retry semantics make porting fb_fix a separate, riskier change, so this arm has no fb_fix and no secant2. Gating is coarser than the 1cta table: <code>p2_log = K∈{1024,2048}</code> (all dtypes); K512 stays stock (op26_dry corroborated op13's K512-log falsification: 131K 0.91 / 1M 0.85) and doubles as a same-process drift-QA anchor. <code>_resolve_config_mc</code> is a verbatim copy of §4's _resolve_config so the A/B delta is purely algorithmic.</span></p>
+
+<h3 id="s6c">§6C — op#26 R0 (auto 1CTA/MC dispatch) → <b>PR#16457</b>　<span class="src">gvr_op26_r0_op.py + gvr_op26_r0mc_op.py</span></h3>
+<p><span class="zh"><b>R0 = "round 0"</b>：用一次 <b>M 元 count_ge 单遍</b>取代整个 P2 secant 循环，猜测来自当前步 preIdx 提示值的直方图（不是复用上一步的结果，而是首轮阈值播种）。流程：<b>P1</b>（vendored；可选 p1b_cache 把收集到的 K 个值存 SMEM 免二次 GMEM 收集）→ <b>P1b <code>phase1b_hspace_rungs</code></b>（:402-476）：对 prevK 值在 [pmin,pmax] 上建 <b>256-bin SMEM 直方图</b>，warp0 并行分段扫描（32 lane 各管 SEG=8 bin，5 步 shfl_up 包含扫描）抽出 M 个编译期 h 空间分位"梯级"阈值（梯级 m 在从顶累计首次达到 <code>qneeds[m]=⌈q_m·K⌉</code> 的 bin 触发）——把分布脆弱的 pmean 种子（主机筛查：3/72 首过准入）换成 216/216 静态准入（HLS-op25 w3a 血统）→ <b>R0</b>（:583-587）：一次 <code>block_count_ge_multi</code> 同时数 M 个梯级（M 个静态寄存器计数器；从 op18 逐字拷贝——op18 基类无法菱形组合）→ <b>准入</b>：取 count∈[K,kC] 的最紧梯级，其缓存计数列<b>零重数</b>直通 P3；miss → 用实测梯级构造括号 → <b>R1 内联一击</b>：括号两端均已实测时，在 log-falsi 几何中心 <code>√(K·kC)</code> 处补一次单阈值计数 → 仍未中才进继承的 fb_fix P3（R0 只交出<b>实测</b>括号，结构性免疫未测种子 bug 类）。qfracs 默认 <b>M2D=(0.85,0.35)</b>（M=2 遍近乎免费 ×1.02，准入 96.8%，R1 兜底；M=4 UH4 被硅证伪——准入≠延迟）。</span>
+<span class="en"><b>R0 = "round 0"</b>: a single <b>M-ary count_ge pass</b> replaces the whole P2 secant loop, with guesses derived from a histogram of the current step's preIdx hint values (first-round threshold seeding, not reuse of previous results). Flow: <b>P1</b> (vendored; optional p1b_cache stashes the K gathered values in SMEM to skip a 2nd GMEM gather) → <b>P1b <code>phase1b_hspace_rungs</code></b> (:402-476): build a <b>256-bin SMEM histogram</b> over the prevK values within [pmin,pmax]; a warp-0-parallel segmented scan (32 lanes × SEG=8 bins, 5-step shfl_up inclusive scan) extracts M compile-time h-space quantile "rungs" (rung m fires at the bin where the from-the-top cumulative first reaches <code>qneeds[m]=⌈q_m·K⌉</code>) — replacing the distribution-fragile pmean seed (host screen: 3/72 first-pass admission) with 216/216 static admission (HLS-op25 w3a lineage) → <b>R0</b> (:583-587): ONE <code>block_count_ge_multi</code> counting all M rungs simultaneously (M static register counters; copied verbatim from op18 — the op18 base can't diamond-compose) → <b>admission</b>: tightest rung with count∈[K,kC] wins; its cached per-thread count column seeds P3 with <b>zero recount</b>; miss → build a bracket from the measured rungs → <b>R1 inline shot</b>: if both bracket ends are measured, one extra single-threshold count at the log-falsi geometric center <code>√(K·kC)</code> → only then fall through to the inherited fb_fix P3 (R0 hands over only <b>measured</b> brackets, structurally immune to unmeasured-seed bugs). qfracs default <b>M2D=(0.85,0.35)</b> (the M=2 pass is ~free ×1.02, admits 96.8%, R1 covers the rest; M=4 UH4 was silicon-falsified — admission ≠ latency).</span></p>
+<pre class="flow">
+                 ┌── N≥65536 且/AND BS≤64 ────────────► op26_r0mc   (cluster R0)
+gvr_r0_auto ─────┼── N &lt; gate(fp32:65536 / 16bit:16384) ► gvr_cutedsl_op26  (§6A plain — R0 梯级是净税/net tax below gate)
+                 └── else ──────────────────────────────► gvr_r0_op26 (1-CTA R0)
+</pre>
+<pre><code># op26 R0 (1-CTA)  — gvr_op26_r0_op.py:483-690
+P1 : preIdx gather → pmin,pmax,pmean   (p1b_cache: stash K vals in smem)
+P1b: 256-bin smem hist over prevK values in [pmin,pmax]
+     warp0 segmented-scan → M rungs thr[m] at qneeds[m]=ceil(q_m*K)   # q=(0.85,0.35)
+R0 : counts[0..M-1] = block_count_ge_multi(row, thr[])   # ONE pass, M reg counters
+     best_m = tightest m with counts[m] in [K,kC]
+     if best_m &gt;= 0:
+         t = thr[best_m]; done=1
+         reuse cached per-thread column → P3 with ZERO recount
+     else:
+         bracket = [deepest rung &gt; kC, shallowest rung &lt; K]; done=2
+         if both ends measured:                            # R1: one falsi shot
+             c = count_ge(row, aim=sqrt(K*kC));  accept c in [K,kC] else tighten
+P3 : fb_fix bounded refine if done!=1 ; then op#7 collect ≥ t
+P4 : rank-scatter (dispatch_rs_op26) else histogram_snap</code></pre>
+<p><span class="zh"><b>cluster R0</b>（GvrOp26R0ClusterKernel）：P1b 每 CTA 冗余（各 CTA 梯级位同，零 DSMEM 协调），R0 用 <code>block_count_ge_multi_slice</code> + 一次 cluster arrive/wait 合并 M 列，fb_fix 以 cluster-safe 方式移植（:577-677）；另加可选 <code>p4_rs</code>（op#7 精确 rank-scatter 作 leader P4，除 bf16-K512 外全开）与 <code>p4_coop</code>（cluster 协作 P4，默认关）。<b>其它旋钮</b>：kC-diet <code>dispatch_kc_op26</code> 给 K512 设 kC=3072（省 16KB SMEM/CTA；kC≥5K 是 16-bit tie 安全<b>契约</b>，1536 不安全）；p1b_cache 16-bit 开 / fp32 关（kC=6144 处占用回退）。<b>调度经验依据</b>：MC 在大 N 低 BS 赢 1.07-2.6×（随 N 增长）、BS≥128 洗牌（行数饱和 SM）、小 N 亏（cluster 税）。</span>
+<span class="en"><b>Cluster R0</b> (GvrOp26R0ClusterKernel): P1b runs per-CTA-redundantly (bit-identical rungs across CTAs, zero DSMEM coordination), R0 uses <code>block_count_ge_multi_slice</code> + one cluster arrive/wait merging M columns, fb_fix ported cluster-safely (:577-677); plus optional <code>p4_rs</code> (op#7 exact rank-scatter as leader P4, ON except bf16-K512) and <code>p4_coop</code> (cluster-cooperative P4, default OFF). <b>Other knobs</b>: kC-diet <code>dispatch_kc_op26</code> sets kC=3072 for K512 (saves 16KB SMEM/CTA; kC≥5K is a 16-bit tie-safety <b>contract</b>, 1536 is unsafe); p1b_cache ON for 16-bit / OFF for fp32 (occupancy regression at kC=6144). <b>Dispatch evidence</b>: MC wins big-N low-BS 1.07-2.6× (growing with N), washes at BS≥128 (rows saturate the SMs), loses at small N (cluster tax).</span></p>
+<div class="lin"><span class="zh"><b>谱系</b>：<code>GvrOp26R0Kernel ⊂ GvrOp26Kernel ⊂ op#7 _P4Kernel</code>（§6A 的 fb_fix/RS/op13 表全部可用作兜底）+ op18 的 block_count_ge_multi（逐字拷贝）+ HLS-op25 w3a 分位阶梯方法论 + PR#15198 cluster（MC 支）。<b>PR#16457</b> 以 <code>enable_r0=True</code> 默认上游化，<code>enable_r0=False</code> 与 R0 前 base 字节相同。</span>
+<span class="en"><b>Lineage</b>: <code>GvrOp26R0Kernel ⊂ GvrOp26Kernel ⊂ op#7 _P4Kernel</code> (all of §6A — fb_fix/RS/op13 table — available as fallback) + op18's block_count_ge_multi (verbatim copy) + the HLS-op25 w3a quantile-rung methodology + the PR#15198 cluster (MC branch). <b>PR#16457</b> upstreams this with <code>enable_r0=True</code> default; <code>enable_r0=False</code> is byte-identical to the pre-R0 base.</span></div>
+
+<h2 id="s7">§7 <span class="badge b-sgl">SGL-fork</span> op#29 HBE-noB（1-pass sample-column）</h2>
+<div class="kv">
+<b><span class="zh">源码</span><span class="en">Source</span></b><span class="src">op29_gvr_hbe/src/gvr29/sgl_kernel/deepseek_v4/topk_hbe.cuh（TopKHbeStreaming ⊂ TopKStreaming, :75-305）；host: gvr29_standalone.cu:448-530</span>
+<b><span class="zh">发射</span><span class="en">Launch</span></b><span>grid=batch, block=kBlockSize, dyn smem = capA·8B（noB）；<span class="zh">仅 streaming 域：门 = use_hbe ∧ ¬cluster_eligible ∧ N≥65536</span><span class="en">streaming regime only: gate = use_hbe ∧ ¬cluster_eligible ∧ N≥65536</span></span>
+<b><span class="zh">op22 结论</span><span class="en">op22 verdict</span></b><span><span class="zh">iter12 ship：全 K 参战域 1.03–1.75× 优于 sglang_v2，精确性门 324/324</span><span class="en">iter12 ship: 1.03–1.75× over sglang_v2 across all K in the engaged regime, exactness gate 324/324</span></span>
+</div>
+<p><span class="zh">HBE = Hint-Boundary-Exact，但注意 iter6 转向后它已<b>不用提示</b>（quantile-of-hint max() 破坏单侧安全，且 hint 收集本身是真实的 DRAM 税；<code>pre_idx</code> 参数保留但未用）。基线（SGLang v2 streaming）= 两遍全 N DRAM：遍1 建 4096-bin 直方图找阈值 bin b*，遍2 按 b* 收集 —— 已坐在盲提示信息下界（两遍 ~6.8 TB/s）。HBE 用预测的阈值 bin <b>把两遍融合成一遍</b>：<b>H0 行采样估计器</b>：读 64 个等距 chunk × 64 连续元素 = 4096 个合并采样（iter8 修复早期逐元素跨步收集的 DRAM burst 灾难），建 mini 直方图，按<b>候选预算</b>（非值分位）放推测收集列：binA @采样秩 2·rS_K（候选目标 ≈2K）、binB @8·rS_K（≈8K），rS_K = n_samp·K/N —— 目标 ≥2K 候选的列除非 ~2× 向下采样噪声否则必在真 b* 之下（尾部由 miss 兜底吸收）。<b>H1 唯一融合遍</b>：单遍 DRAM：v≥vA → {val,idx} 入 SMEM bufA（超 capA 溢到 global spillA）。<b>noB 变体（iter12 ship，默认）</b>删掉 B 保险列：融合遍每元素只 1 次比较 —— iter11 归因：融合遍 issue-bound 81-84%、带内元素 ~16 指令/个，而 B 列在真实 bundle 上 0/18 触发；删除后 K1024/K2048 翻到 1.33-1.75×、N=65536 转正。<b>H2 有效性 + 候选 mini-hist</b>：tierA = cntA∈[K, capA+spill]；有效则<b>只对候选</b>建 mini 直方图（iter9 教训：全行内联 hist 让融合遍 issue-bound 到 1.4 TB/s）→ 精确全局 b* → 按 [v_lo(b*), v_hi(b*+1)) 重分类候选、直接发射 above、收 tie、<code>handle_tie</code> 边界精选。<b>miss</b> → 整套回落 stock 3 遍（罕见）。精确性无条件：b* 永远来自完整/候选直方图 + 同一 handle_tie 机器。</span>
+<span class="en">HBE = Hint-Boundary-Exact — but note that after the iter6 pivot it is <b>hint-free</b> (quantile-of-hint max() broke one-sided safety, and the hint gather itself is a real DRAM tax; the <code>pre_idx</code> param is reserved but unused). The baseline (SGLang v2 streaming) = two full-N DRAM passes: pass 1 builds the 4096-bin histogram and finds threshold bin b*, pass 2 collects by b* — already sitting at the hint-blind information floor (~6.8 TB/s on 2 passes). HBE <b>fuses the two passes into ONE</b> using a predicted threshold bin: <b>H0 row-sample estimator</b>: read 64 evenly-spaced chunks × 64 contiguous elements = 4096 coalesced samples (iter8 fixed the DRAM-burst disaster of per-element strided gather), build a mini-histogram, and place speculative collect columns by <b>candidate budget</b> (not value quantile): binA @sample-rank 2·rS_K (cand target ≈2K), binB @8·rS_K (≈8K), rS_K = n_samp·K/N — a column targeting ≥2K candidates sits at/below the true b* except under ~2× downward sampling noise (the tail is absorbed by the miss fallback). <b>H1 the ONE fused pass</b>: a single DRAM pass: v≥vA → append {val,idx} to SMEM bufA (spill to global spillA past capA). <b>The noB variant (iter12 ship, default)</b> drops the B insurance column: 1 compare per element in the fused pass — iter11 attribution: the fused pass is issue-bound 81-84%, each in-band element costs ~16 instructions, and column B fired 0/18 on real bundles; dropping it flipped K1024/K2048 to 1.33-1.75× and turned N=65536 positive. <b>H2 validity + candidate mini-hist</b>: tierA = cntA∈[K, capA+spill]; if valid, build the mini-histogram <b>over candidates only</b> (iter9 lesson: the full-row inline hist made the fused pass issue-bound at 1.4 TB/s) → exact global b* → reclassify candidates against [v_lo(b*), v_hi(b*+1)), emit above directly, collect ties, <code>handle_tie</code> boundary-exact select. <b>Miss</b> → fall back to the stock 3-pass path (rare). Exactness is unconditional: b* always comes from a full/candidate histogram + the same handle_tie machinery.</span></p>
+<pre class="flow">
+       ┌───────────────────────┐   ┌──────────────────────────┐   ┌──────────────────────────┐
+ row ─►│H0 sample 64×64 elems   │──►│H1 ONE fused DRAM pass     │──►│H2 tierA valid?            │
+       │mini-hist → place binA  │   │ v≥vA → bufA{val,idx}      │   │ Y: mini-hist over cands   │
+       │@cand-budget 2K (noB:   │   │ (spill→global past capA)  │   │    → exact b* → classify  │
+       │ no binB insurance col) │   │ 1 cmp/elem (noB)          │   │    emit + handle_tie      │
+       └───────────────────────┘   └──────────────────────────┘   │ N: stock 3-pass fallback  │
+                                                                   └──────────────────────────┘
+</pre>
+<pre><code># op29 HBE-noB — topk_hbe.cuh:90-304  (kColB=false shipped)
+# H0: hint-free row-sample estimator
+sample 64 chunks × 64 contiguous elems → mini-hist ; rS_K = n_samp*K/N
+binA = find_threshold(rank = 2*rS_K)        # candidate target ≈ 2K
+vA = lower_bound(binA); zero histogram
+# H1: ONE fused DRAM pass
+for (val,idx) in row:
+    if val &gt;= vA:
+        p = atomicAdd(cnt_a); (p &lt; capA ? bufA[p] : spillA_g[..]) = {val,idx}
+# H2: validity + exact threshold from candidates
+tierA = (cnt_a &gt;= K) and (cnt_a &lt;= capA + spillA_used)
+if tierA:
+    mini-hist over candidates (bufA + spill)
+    b* = find_threshold(K)                  # exact global threshold bin
+    classify candidates vs [v_lo(b*), v_hi(b*+1)): emit above + collect ties
+    handle_tie(...)                         # boundary-exact tie select (SGLang v2)
+else:
+    TopKStreaming::forward(...)             # MISS → full 3-pass fallback (rare)</code></pre>
+<div class="lin"><span class="zh"><b>谱系</b>：SGLang v2 的分叉（<code>TopKHbeStreaming : TopKStreaming</code>，handle_tie 机器逐字复用），不是 CuTe GVR 相位内核。PLAN.md 核心命题：HBE = GVR 的推测融合收集（HLS/op21 验证）× SGLang 的 bin-精确（op28 门 459/459 验证）× 分层 tie-select 的<b>原语重组</b>。与 op26/op21 是思想亲缘（推测式提示），非代码亲缘——且最终连提示都抛弃了。后继：op30/op31（HBE-C cluster，包络内 wash-to-loss，已关闭）。</span>
+<span class="en"><b>Lineage</b>: a fork of SGLang v2 (<code>TopKHbeStreaming : TopKStreaming</code>, handle_tie machinery reused verbatim), NOT a CuTe GVR phase kernel. PLAN.md core thesis: HBE = <b>primitive recomposition</b> of GVR's speculative fused collect (validated in HLS/op21) × SGLang's bin-exactness (validated by the op28 gate 459/459) × tiered tie-select. Its kinship with op26/op21 is conceptual (speculative hinting), not code — and even the hint was ultimately dropped. Successors: op30/op31 (HBE-C cluster; wash-to-loss inside the envelope, closed).</span></div>
+
+<h2 id="s8">§8 <span class="badge b-radix">Radix</span> Radix <span class="zh">家族（盲提示）</span><span class="en">family (hint-blind)</span></h2>
+
+<h3 id="s8a">§8A — Radix (cuteDSL)　<span class="src">ops/cute_vendored/blackwell/top_k/single_pass_multi_cta_radix_topk.py（≡ FlashInfer RadixTopKMultiCTA 的 CuTe-DSL 转写）</span></h3>
+<p><span class="zh">自述"FlashInfer-style single-pass multi-CTA radix"（:14,152）：<code>to_ordered</code>、三缓冲直方图、gt/eq 两遍收集与 FlashInfer <code>RadixTopKMultiCTA</code> 逐行相同——同一算法的两种语言（§10）。<b>①有序键装载</b>：各 CTA 把自己的 chunk 装入 SMEM，float → <b>降序有序 uint</b>（负数保位、正数 <code>~bits &amp; 0x7FFFFFFF</code>，越大的 float → 越小的 int，前缀和从 bin 0 向上找边界）；fp32→u32，16-bit→u16。<b>②多轮 radix select</b>：8-bit radix（256 bin），fp32 4 轮 / 16-bit 2 轮；每轮：对匹配运行前缀 prefix 的元素建每 CTA 256-bin 直方图，多 CTA <code>atomicAdd</code> 进 <b>row_states 三缓冲全局直方图</b>（缓冲轮换 <code>(iter·rounds+round)%3</code>），CTA 间屏障（GPU-scope <code>ld.acquire/red.release</code> PTX），块前缀和选中 <code>prefix≥rem_k</code> 首 bin，更新 prefix 与 rem_k。<b>③收集</b>：遍1 严格 &gt;pivot——每 CTA <b>一次</b>批量全局 atomicAdd 领连续槽段；屏障；遍2 ==pivot 逐元素 atomicAdd、槽满即弃（等值元素任取 K 个都是按值正确的 top-K → 无条件精确）。<b>④持久轮转</b>：group 按 <code>row += num_groups</code> 轮转多行；CTA0 结尾自清 row_states 供复用。</span>
+<span class="en">Self-described "FlashInfer-style single-pass multi-CTA radix" (:14,152): <code>to_ordered</code>, the triple-buffered histogram, and the gt/eq two-pass collect are line-for-line FlashInfer's <code>RadixTopKMultiCTA</code> — one algorithm in two languages (§10). <b>① Ordered-key load</b>: each CTA loads its chunk into SMEM, float → <b>descending ordered uint</b> (negatives keep bits, positives <code>~bits &amp; 0x7FFFFFFF</code>; larger float → smaller int, so the prefix-sum finds the boundary from bin 0 up); fp32→u32, 16-bit→u16. <b>② Multi-round radix select</b>: 8-bit radix (256 bins), 4 rounds fp32 / 2 rounds 16-bit; per round: per-CTA 256-bin histogram over elements matching the running prefix, multi-CTA <code>atomicAdd</code> into the <b>triple-buffered global histogram</b> in row_states (rotation <code>(iter·rounds+round)%3</code>), inter-CTA barrier (GPU-scope <code>ld.acquire/red.release</code> PTX), block prefix-sum picks the first bin with <code>prefix≥rem_k</code>, update prefix and rem_k. <b>③ Collect</b>: pass 1, strictly &gt;pivot — ONE batched global atomicAdd per CTA reserves a contiguous slot range; barrier; pass 2, ==pivot per-element atomicAdd, dropping once K slots fill (any K-subset of equal-valued elements is value-correct → unconditionally exact). <b>④ Persistent round-robin</b>: groups rotate rows via <code>row += num_groups</code>; CTA0 self-cleans row_states at kernel end for reuse.</span></p>
+<pre><code># Radix cuteDSL / FlashInfer RadixTopKMultiCTA — same algorithm
+group = bid / ctas_per_group;  cta = bid % ctas_per_group
+for row = group; row &lt; num_rows; row += num_groups:
+    smem_ord[i] = to_ordered(row_chunk[i])          # descending ordered key
+    prefix = 0; rem_k = K
+    for r in range(num_rounds):                     # 4 (fp32) / 2 (fp16/bf16)
+        shift = ordered_bits - (r+1)*8
+        hist[256] = histogram of (ord&gt;&gt;shift)&amp;0xFF where ord matches prefix
+        if multi_cta: atomicAdd → global triple-buffered hist; inter_cta_barrier()
+        psum = inclusive_prefix(hist)
+        b = first bucket with psum[b] &gt;= rem_k
+        prefix |= b &lt;&lt; shift;  rem_k -= psum[b-1]
+    pivot = prefix
+    gt = count(ord &lt; pivot)                         # float &gt; pivot
+    base = atomicAdd(out_counter, gt)               # ONE atomic per CTA
+    write all (ord &lt; pivot) at base+local++
+    inter_cta_barrier()
+    for ord == pivot: p = atomicAdd(out_counter,1); if p &lt; K: out[p] = idx</code></pre>
+<div class="kv"><b><span class="zh">发射</span><span class="en">Launch</span></b><span>block=1024（FlashInfer 惯例/convention）；grid = min(SMs//cpg, rows)·cpg；<span class="zh">单 CTA 分支当 SMs//rows≤1 或行能塞进一个 CTA 的 SMEM（B300 fp32 ~57K）</span><span class="en">single-CTA branch when SMs//rows≤1 or the row fits one CTA's SMEM (~57K fp32 on B300)</span>；PDL</span>
+<b><span class="zh">角色</span><span class="en">Role</span></b><span><span class="zh">"最强盲提示对手"（报告方法表原话）—— HLS 的报价对象（REAL fp32 Radix/HLS 1.226×）</span><span class="en">"strongest hint-blind rival" (method table verbatim) — the target HLS ratios are quoted against (REAL fp32 Radix/HLS 1.226×)</span></span></div>
+
+<h3 id="s8b">§8B — Radix single-CTA (CUDA)　<span class="src">ops/radix_cuda/_kernel_core.inc:topKPerRowJob（TRT-LLM indexerTopK 系, kNumBins=2048）</span></h3>
+<p><span class="zh">与 §8A 完全不同的 radix 设计：<b>嵌套 fp16→fp32</b>。<b>步 0（fp16 快路径）</b>：每个 fp32 转 fp16、序翻转、取 11 bit 入 2048 bin 直方图，cub::BlockScan 前缀和，严格更优 bin 直接发射；阈值 bin ≤2048 个则拷入 FinalItems 缓冲，<b>cub::BlockRadixSort 降序块排序</b>补齐余下 K−found。<b>步 1-3（fp32 精化，仅当步 0 阈值 bin 溢出）</b>：从头对原始 fp32 位重建直方图：11/11/10 bit 三级，按累积 logitPattern 掩码匹配；步 0 的推测候选在步 1 开头丢弃防重计。步 3 逐元素处理剩余等位 tie（atomicAdd 限界写）。无条件精确：阈值 bin 要么 ≤2048 被完整排序，要么被 fp32 位精化到确切边界。</span>
+<span class="en">A completely different radix design from §8A: <b>nested fp16→fp32</b>. <b>Step 0 (fp16 fast path)</b>: each fp32 cast to fp16, order-flipped, top 11 bits into a 2048-bin histogram, cub::BlockScan prefix-sum; strictly-better bins emit directly; if the threshold bin holds ≤2048 items they are copied to a FinalItems buffer and a <b>cub::BlockRadixSort descending block sort</b> fills the remaining K−found. <b>Steps 1-3 (fp32 refine, only if step 0's threshold bin overflowed)</b>: rebuild the histogram from the raw fp32 bits in 11/11/10-bit stages, masked by the accumulated logitPattern; step 0's speculative candidates are discarded at step 1 start to avoid double-counting. Step 3 handles remaining equal-bit ties per-element (atomicAdd-bounded writes). Unconditionally exact: the threshold bin is either fully sorted (≤2048) or refined to the exact fp32 boundary.</span></p>
+<pre><code># Radix single-CTA CUDA — topKPerRowJob (1 CTA/row, 512 thr, ≤4 passes)
+if len &lt;= K: write [0..len), pad -1; return
+cont = histStep&lt;0&gt;()          # fp16 11-bit, 2048 bins: emit bins&lt;thr,
+                              #   stash thr-bin cands (≤2048) in FinalItems
+if cont: cont = histStep&lt;1&gt;() # fp32 bits[31:21]   (restart, pattern-masked)
+if cont: cont = histStep&lt;2&gt;() # fp32 bits[20:10]
+if cont:        histStep&lt;3&gt;() # fp32 bits[9:0] → exact per-element emit
+if !cont: BlockRadixSort(FinalItems) DESC; append top (K-found)</code></pre>
+
+<h3 id="s8c">§8C — Radix multi-CTA (CUDA)　<span class="src"><span class="zh">同文件；launchMultiCTA（radix_topk.cu:120）— split+merge 双内核</span><span class="en">same file; launchMultiCTA (radix_topk.cu:120) — split+merge two-kernel</span></span></h3>
+<p><span class="zh">与 §8A 的本质对比：<b>没有跨 CTA 共享直方图</b>。<b>split 内核</b>（grid=(rows, bp)，512 线程）：每个 (row,y) CTA 对自己的子段跑同一个 topKPerRowJob，产出该段的<b>局部 top-K</b>，把索引<b>和 fp32 值</b>写入 aux 缓冲。<b>merge 内核</b>（grid=rows，1024 线程）：把 bp·K 个候选值当作输入行再跑一次 topKPerRowJob，经 aux 索引携带原始索引发射。bp 由 <code>defaultBlocksPerRow</code>（L2/SM 感知启发式，≤10，基准中强制 ≥2）决定。正确性：全局 top-K 元素必在其所在段的局部 top-K 内 → 候选并集覆盖 → merge 精确。</span>
+<span class="en">The essential contrast with §8A: <b>no shared cross-CTA histogram</b>. <b>Split kernel</b> (grid=(rows,bp), 512 threads): each (row,y) CTA runs the same topKPerRowJob on its sub-range, producing that chunk's <b>local top-K</b>, writing indices <b>and fp32 values</b> to aux buffers. <b>Merge kernel</b> (grid=rows, 1024 threads): treats the bp·K candidate values as its input row and runs topKPerRowJob again, emitting original indices carried through the aux array. bp comes from <code>defaultBlocksPerRow</code> (an L2/SM-aware heuristic, ≤10, forced ≥2 in the bench). Correctness: a global top-K element is top-K within its own chunk → the candidate union covers → the merge is exact.</span></p>
+<pre class="flow">
+ row ──┬─ chunk0 ─► topKPerRowJob ─► aux(idx+val)[0] ─┐
+       ├─ chunk1 ─► topKPerRowJob ─► aux[1] ──────────┼─► merge kernel: topKPerRowJob
+       └─ chunk… ─► topKPerRowJob ─► aux[…] ──────────┘   over bp·K candidates → topK
+       (kernel 1: grid rows×bp, 512thr)                   (kernel 2: grid rows, 1024thr)
+</pre>
+<p class="note"><span class="zh">op22 结论：Radix single-CTA (CUDA) 比 GVR base 慢 1.6-2.2×。</span><span class="en">op22 verdict: Radix single-CTA (CUDA) runs 1.6-2.2× slower than GVR base.</span></p>
+
+<h2 id="s9">§9 <span class="badge b-sgl">SGLang</span> SGLang <span class="zh">家族（v1 → v2）</span><span class="en">family (v1 → v2)</span></h2>
+
+<h3 id="s9d">§9D — SGLang StreamingTopK (v1)　<span class="src">ops/sglang_streaming/topk/streaming.cuh（top512::StreamingTopK&lt;K&gt;；fp32, K≤kMaxTopK=1024）</span></h3>
+<p><span class="zh">单 CTA/行、1024 线程、TMA 双缓冲流水（cp.async.bulk + mbarrier，2 stage × 8192 元素）。<b>A 粗直方图遍</b>：流式读全行，每元素 fp16 化 + 序翻转取高 12 bit（4096 bin）atomicAdd。<b>B 找阈值 bin</b>：warp 包含和 + warp 间接力，从<b>顶部</b>找 <code>above&lt;K ≤ above+count</code> 的 bin。<b>C 散射遍</b>（复用同一 TMA 流水）：bin&gt;thr → atomicAdd(counter_gt) 写索引；bin==thr → 候选 {idx,score} 入 tie_buffer，<b>上限 kMaxTies=1024</b>——这就是条件精确的条件。<b>D 精确 tie 精化</b>：先页翻译 above 必胜者，再对 ≤1024 个 tie 候选跑 <b>4 轮 8-bit 全 fp32 位精确 radix</b>（索引破平），恰好填满 K−above 槽。</span>
+<span class="en">One CTA/row, 1024 threads, TMA double-buffered pipeline (cp.async.bulk + mbarrier, 2 stages × 8192 elems). <b>A coarse-histogram pass</b>: stream the row; per element, fp16-cast + order-flip, top 12 bits (4096 bins), atomicAdd. <b>B find threshold bin</b>: warp inclusive sums + inter-warp relay, working from the <b>top</b> to the bin with <code>above&lt;K ≤ above+count</code>. <b>C scatter pass</b> (same TMA pipeline): bin&gt;thr → atomicAdd(counter_gt), write index; bin==thr → stash {idx,score} in the tie buffer, <b>capped at kMaxTies=1024</b> — this is the conditional-exactness condition. <b>D exact tie refine</b>: page-translate the sure winners, then run a <b>4-round 8-bit exact radix on the full fp32 key</b> (index tie-break) over the ≤1024 tie candidates, filling exactly K−above slots.</span></p>
+<pre><code># SGLang v1 StreamingTopK — 2 passes over N + tie refine
+Pass A (TMA):  for x in row: atomicAdd(hist4096[coarse12(x)], 1)
+Phase B:       thr = bin where (len - prefix_from_top) &lt; K &lt;= … + hist[bin]
+Pass C (TMA):  for x,idx in row:
+                 if coarse12(x) &gt; thr:  p=atomicAdd(cnt_gt); if p&lt;K: out[p]=idx
+                 elif coarse12(x)==thr: p=atomicAdd(cnt_eq); if p&lt;1024: tie[p]={idx,x}
+Phase D:       radix4×8(tie[0:min(cnt_eq,1024)]) → fill K-above slots, idx tie-break</code></pre>
+
+<h3 id="s9e">§9E — SGLang v2 top-K (main 2026-07)　<span class="src">ops/sglang_v2/sgl_kernel/deepseek_v4/topk_impl.cuh + csrc/topk_v2_upstream.cuh（vendored verbatim @main 2026-07-13）</span></h3>
+<p><span class="zh">v1 的全面重写：kMaxTopK 1024→2048、tie 缓冲 1024→<b>kMaxNumTie=2048</b>，并升级成<b>四路径 + host plan</b>：<b>TopKRegister&lt;L&gt;</b>（seq≤8192/16384：行读进寄存器<b>一次</b>，直方图与收集遍复用寄存器 → 全局内存单遍）；<b>TopKStreaming</b>（seq&gt;16384：两遍向量化全局读）；<b>TopKCluster&lt;8&gt;</b>（长行：8 CTA cluster 各管连续 chunk，1024-bin 直方图做<b>一击 DSMEM all-reduce</b>——每 rank 管 1/8 bin、按 lane 收 8 个 peer 值 warp::reduce_sum 再散回，无 leader；非主 rank 2 次 atomicAdd 挂跨 rank 前缀 + 把 tie 候选 peer-push 进 rank0 缓冲；<b>rank0 独自解 ≤2048 tie bin</b>）；<b>topk_plan</b> 内核扫批次 seq_len 分布、从调优表选 cluster_threshold、把长行压进持久 cluster 池工作表（基准中 plan 不计时；生产跨 ~61 层复用）。共同内核算法升级点：pass 2 不再逐元素重算 fp16 bin，而是预计算阈值 bin 的 fp32 上下界 <code>v_hi/v_lo</code> 直接分类（热遍去掉 F2F+位操作）；<code>handle_tie</code> 按候选数分层精选（≤32 单 warp 排名 / ≤64/128 双四 warp / ≤1024/2048 → 4 轮精确 radix）。<b>精确性条件 = 阈值粗 bin ≤2048 个元素</b>；越限则静默丢候选 → 可能不精确（源码 :201-207 明示；真实 V3.2 L52 行已实测越限 FAIL——本仓验证记录）。</span>
+<span class="en">A full rewrite of v1: kMaxTopK 1024→2048, tie buffer 1024→<b>kMaxNumTie=2048</b>, upgraded to <b>four device paths + a host plan</b>: <b>TopKRegister&lt;L&gt;</b> (seq≤8192/16384: the row is read into registers <b>once</b> and reused by both histogram and collect → a single global-memory pass); <b>TopKStreaming</b> (seq&gt;16384: two vectorized global passes); <b>TopKCluster&lt;8&gt;</b> (long rows: an 8-CTA cluster, each owning a contiguous chunk; the 1024-bin histogram is merged by a <b>one-shot DSMEM all-reduce</b> — each rank owns 1/8 of the bins, gathers 8 peer values by lane, warp::reduce_sum, scatters back, no leader; non-primary ranks do 2 atomicAdds for cross-rank prefixes + peer-push tie candidates into rank 0's buffer; <b>rank 0 alone resolves the ≤2048 tie bin</b>); the <b>topk_plan</b> kernel scans the batch's seq_len distribution, picks cluster_threshold from a tuned table, and compacts long rows into the persistent cluster pool's work list (untimed in the bench; production reuses it across ~61 layers). Shared inner upgrades: pass 2 no longer recomputes the fp16 bin per element — precomputed fp32 bounds <code>v_hi/v_lo</code> of the threshold bin classify directly (removing F2F+bit-twiddling from the hot pass); <code>handle_tie</code> is a layered exact select by candidate count (≤32 single-warp rank / ≤64/128 dual-quad warp / ≤1024/2048 → 4-round exact radix). <b>Exactness condition = threshold coarse bin ≤2048 elements</b>; overflow silently drops candidates → potentially non-exact (source :201-207 says so explicitly; real V3.2 L52 rows have been measured to overflow it — this repo's validation record).</span></p>
+<pre><code># SGLang v2 host dispatch — topk_v2_upstream.cuh:347
+use_cluster = max_seq_len &gt; cluster_floor  &amp;&amp;  batch &lt;= 512
+             # cluster_floor = 32768 (batch&lt;=15) else 65536
+if use_cluster:
+    if batch &lt;= 15: topk_small_batch_kernel        # fused cluster+streaming, 1 launch
+    else: topk_persistent_cluster_kernel (long)    # + topk_main_kernel&lt;3&gt; (2 launches)
+elif max_seq_len &lt;= 8192 : topk_main_kernel&lt;0&gt;     # Register L=2
+elif max_seq_len &lt;= 16384: topk_main_kernel&lt;1&gt;     # Register L=4
+else:                      topk_main_kernel&lt;2&gt;     # Register4 | Streaming
+
+# inner (all paths): coarse fp16 hist → find_threshold →
+#   classify by fp32 bounds v_hi/v_lo → count_gt emit / tie[≤2048] →
+#   handle_tie: layered exact select (warp-rank … 4-round radix, idx tie-break)</code></pre>
+<p class="note"><span class="zh">op22 §9 env 结论：SGLang v2 是包络最快臂（vs GVR base：BEST 1.933× / WORST 1.469×）。8-CTA cluster 路径就是 op34 复盘里"sglang 靠 8-CTA MLP 取胜"的机制。</span><span class="en">op22 §9 env verdict: SGLang v2 is the fastest arm in the envelope (vs GVR base: BEST 1.933× / WORST 1.469×). The 8-CTA cluster path is the mechanism behind op34's "sglang wins via 8-CTA" retrospective.</span></p>
+
+<h2 id="s10">§10 <span class="badge b-ext">EXT</span> FlashInfer top_k（0.6.11）</h2>
+<div class="kv">
+<b><span class="zh">源码</span><span class="en">Source</span></b><span class="src">flashinfer topk.cuh：TopKDispatch(:3342) → ShouldUseFilteredTopK(:3223) → FilteredTopKUnifiedKernel(:2287) | RadixTopKMultiCTA(:2099)；harness 经 op28_ext_topk/ops_ext.py:build_call_ext</span>
+<b><span class="zh">调度</span><span class="en">Dispatch</span></b><span><span class="zh">fp32 非确定性（基准情形）：N≤32768 → FilteredTopK；更大 N 且低 BS → RadixTopKMultiCTA（rows &gt; N/16384 则仍 Filtered）</span><span class="en">fp32 non-det (the bench case): N≤32768 → FilteredTopK; larger N at low BS → RadixTopKMultiCTA (Filtered again if rows &gt; N/16384)</span></span>
+</div>
+<p><span class="zh"><b>radix 路径</b>与 §8A 同一算法（§8A 即其 CuTe-DSL 转写）。<b>FilteredTopK 路径</b>（候选回收压缩变体，1 CTA/行，block 1024，128KB 动态 SMEM）：①全行粗 fp16 直方图（高 8 bit）②Hillis-Steele 后缀和（8 步）找 <code>hist[bin]&gt;topk ∧ hist[bin+1]≤topk</code> 的阈值 bin，扣除必胜者 ③<b>渐进 radix 精化</b>：4 轮，每轮只对<b>存活候选集</b>（压缩进 16K 双缓冲 SMEM 索引暂存）按有序 fp32 键的下一字节重建直方图，候选数逐轮收缩；SMEM 候选缓冲溢出 → <code>s_refine_overflow</code> 触发全行重扫兜底（<b>不丢候选</b> —— 与 SGLang 的本质区别）④收集发射：&gt;threshold 经 atomicAdd 追加；==pivot 边界元素恰好填满剩余槽。无条件精确是结构性的。int32 契约变体 <code>topk_clusters_exact</code>（fast_topk_clusters_exact.cuh）快 ~2-5%。</span>
+<span class="en">The <b>radix path</b> is the same algorithm as §8A (§8A is its CuTe-DSL transliteration). The <b>FilteredTopK path</b> (candidate-recycling compaction variant, 1 CTA/row, block 1024, 128KB dynamic SMEM): ① coarse fp16 histogram over the whole row (top 8 bits) ② Hillis-Steele suffix sum (8 steps) finds the threshold bin with <code>hist[bin]&gt;topk ∧ hist[bin+1]≤topk</code>, subtract sure winners ③ <b>progressive radix refine</b>: 4 rounds, each histogramming the next byte of the ordered fp32 key <b>only over the surviving candidate set</b> (compacted into a 16K double-buffered SMEM index scratch), shrinking per round; SMEM candidate overflow → <code>s_refine_overflow</code> triggers a full-row re-scan fallback (<b>no candidate is ever dropped</b> — the essential difference vs SGLang) ④ collect + emit: &gt;threshold appended via atomicAdd; ==pivot boundary elements fill exactly the remaining slots. Unconditional exactness is structural. The int32-contract sibling <code>topk_clusters_exact</code> (fast_topk_clusters_exact.cuh) is ~2-5% faster.</span></p>
+<pre><code># FlashInfer FilteredTopK — 1 CTA/row, 1024 thr, 128KB smem
+hist256 = coarse fp16-high-8bit histogram over row          # pass 1
+suffix  = hillis_steele_suffix(hist256)                     # 8 steps
+thr_bin = bin with hist[bin]&gt;k &amp;&amp; hist[bin+1]&lt;=k;  k -= hist[thr_bin+1]
+cand    = indices in thr_bin  (compact → smem double buffer, 16384 slots)
+for round in 0..3:                                          # fp32: shifts 24/16/8/0
+    hist over next byte of ordered key, CANDIDATES ONLY
+    narrow to the k-th byte value; compact survivors; k -= winners emitted
+    if smem overflow: s_refine_overflow → full-row rescan fallback (no drop)
+emit &gt;threshold via atomicAdd(s_counter)
+fill remaining slots with ==pivot boundary elements (atomicAdd(s_last_remain,-1))</code></pre>
+
+<h2 id="s11">§11 <span class="zh">横向对比</span><span class="en">Cross-cutting comparison</span></h2>
+<table>
+<tr><th><span class="zh">臂</span><span class="en">Arm</span></th><th><span class="zh">全 N 遍数（典型）</span><span class="en">Passes over N (typical)</span></th><th><span class="zh">提示利用</span><span class="en">Hint usage</span></th><th><span class="zh">精确性</span><span class="en">Exactness</span></th><th><span class="zh">并行形态</span><span class="en">Parallel shape</span></th></tr>
+<tr><td>GVR base</td><td><span class="zh">1 + secant 迭代数（P2 每轮 1 遍）+ P3 1 遍</span><span class="en">1 + #secant iters (1 pass each) + 1 (P3)</span></td><td><span class="zh">P1 均值种子</span><span class="en">P1 mean seed</span></td><td><span class="badge b-exact">EXACT</span></td><td>1 CTA/row</td></tr>
+<tr><td>GVR multi-CTA</td><td><span class="zh">同上但每 CTA 只扫 1/cs 切片</span><span class="en">same, but each CTA scans a 1/cs slice</span></td><td><span class="zh">同 base</span><span class="en">same</span></td><td><span class="badge b-exact">EXACT</span></td><td>cluster cs∈{2,4}</td></tr>
+<tr><td>op21 (HLS*)</td><td><span class="zh">sandwich 命中：<b>1 融合遍</b>（count M + collect）+ 窄带收集；fallback：+log-falsi 遍数</span><span class="en">sandwich hit: <b>1 fused pass</b> (count M + collect) + narrow-band collect; fallback: +log-falsi passes</span></td><td><span class="zh">prevK 顺序统计量放整个阈值梯（最激进）</span><span class="en">prevK order statistics place the whole ladder (most aggressive)</span></td><td><span class="badge b-exact">EXACT</span></td><td>1 CTA / msc C∈{4,8}</td></tr>
+<tr><td>op26 R0</td><td><span class="zh">R0 命中：<b>1 M元遍</b> + P3 零重数；miss：+R1 一遍 +fb_fix</span><span class="en">R0 hit: <b>1 M-ary pass</b> + zero-recount P3; miss: +1 R1 pass +fb_fix</span></td><td><span class="zh">prevK 256-bin 直方图 → 分位梯级</span><span class="en">prevK 256-bin hist → quantile rungs</span></td><td><span class="badge b-exact">EXACT</span></td><td>auto 1CTA/MC</td></tr>
+<tr><td>op29 HBE-noB</td><td><b>1</b><span class="zh">（融合）+ 采样 4096 元素；miss → 3</span><span class="en"> (fused) + 4096-elem sample; miss → 3</span></td><td><span class="zh">无（行采样）</span><span class="en">none (row sample)</span></td><td><span class="badge b-exact">EXACT</span></td><td>1 CTA/row streaming</td></tr>
+<tr><td>Radix cuteDSL / FI-radix</td><td><span class="zh">1 装载 + 各轮在 SMEM 上（fp32 4 轮）+ 2 收集遍（SMEM）</span><span class="en">1 load + rounds on SMEM (4 for fp32) + 2 collect passes (SMEM)</span></td><td>—</td><td><span class="badge b-exact">EXACT</span></td><td><span class="zh">多 CTA 组 + 全局屏障</span><span class="en">multi-CTA groups + global barrier</span></td></tr>
+<tr><td>Radix 1CTA CUDA</td><td>1–4</td><td>—</td><td><span class="badge b-exact">EXACT</span></td><td>1 CTA/row</td></tr>
+<tr><td>Radix MC CUDA</td><td><span class="zh">split 1-4 遍/段 + merge（bp·K 上）</span><span class="en">split 1-4 per chunk + merge (over bp·K)</span></td><td>—</td><td><span class="badge b-exact">EXACT</span></td><td><span class="zh">双内核，无共享直方图</span><span class="en">two-kernel, no shared hist</span></td></tr>
+<tr><td>SGLang v1</td><td>2 (TMA)</td><td>—</td><td><span class="badge b-cond">COND</span> ties≤1024</td><td>1 CTA/row</td></tr>
+<tr><td>SGLang v2</td><td><span class="zh">1（register）/ 2（streaming/cluster）</span><span class="en">1 (register) / 2 (streaming/cluster)</span></td><td>—</td><td><span class="badge b-cond">COND</span> tie-bin≤2048</td><td>register / streaming / 8-CTA cluster + plan</td></tr>
+<tr><td>FlashInfer</td><td><span class="zh">Filtered：1 hist + 4 轮收缩候选 + 收集；radix 同 §8A</span><span class="en">Filtered: 1 hist + 4 shrinking-candidate rounds + collect; radix as §8A</span></td><td>—</td><td><span class="badge b-exact">EXACT</span></td><td><span class="zh">启发式二选一</span><span class="en">heuristic dispatch</span></td></tr>
+</table>
+<p><span class="zh"><b>三条设计公理贯穿谱系：</b>① GVR 血统拿 <b>preIdx 时间先验</b>换遍数——提示质量越高（hr 高），越接近 1 遍；逆风（hr 0.05）付 fallback 税，这正是 op22 best/worst 两极的机理。② 盲提示血统的天花板 = 信息下界遍数（radix：多轮但在 SMEM；SGLang v2 register：全局 1 遍）——op29 证明只有<b>推测</b>能把 streaming 域压到全局 1 遍。③ 精确性工程上是"阈值 bin 内怎么办"的问题：radix 精化到底（无条件）、块排序（无条件）、tie-buffer 精选（有条件，容量即条件）。</span>
+<span class="en"><b>Three design axioms run through the genealogy:</b> ① The GVR line trades the <b>preIdx temporal prior</b> for passes — the better the hint (high hr), the closer to 1 pass; adversarial data (hr 0.05) pays the fallback tax, which is precisely the mechanism behind the op22 best/worst poles. ② The hint-blind lines' ceiling = information-floor passes (radix: many rounds but on SMEM; SGLang v2 register: 1 global pass) — op29 shows only <b>speculation</b> pushes the streaming regime to 1 global pass. ③ Exactness is, in engineering terms, the question "what do you do inside the threshold bin": radix-refine to the bottom (unconditional), block-sort it (unconditional), or tie-buffer select (conditional — capacity is the condition).</span></p>
+
+<h2 id="s12">§12 <span class="zh">性能结论汇总（op22 报告口径）</span><span class="en">Headline performance (op22 report basis)</span></h2>
+<p class="note"><span class="zh">口径：全部 speedup 分母 = GVR (cuteDSL) base；BEST/WORST = op24 顺/逆风极点（hr≈0.55 / hr=0.05），REAL = 真实捕获锚；§9 env 为 fp32 9 臂包络。</span><span class="en">Basis: all speedups are over GVR (cuteDSL) base; BEST/WORST = op24 tailwind/adversarial poles (hr≈0.55 / hr=0.05), REAL = real-capture anchor; §9 env is the fp32 9-arm envelope.</span></p>
+<table>
+<tr><th><span class="zh">对比</span><span class="en">Comparison</span></th><th>BEST</th><th>WORST</th><th>REAL</th></tr>
+<tr><td>Radix/HLS fp32（&gt;1 ⇒ HLS <span class="zh">更快</span><span class="en">faster</span>）</td><td>1.363×</td><td>1.091×</td><td>1.226×</td></tr>
+<tr><td>HLS vs GVR base（fp32/bf16/fp16）</td><td>1.52 / 1.41 / 1.50</td><td>0.93 / 0.90 / 0.89</td><td>1.41 / 1.33 / 1.32</td></tr>
+<tr><td>HLS vs Radix cuteDSL（fp32/bf16/fp16）</td><td>1.36 / 1.09 / 1.08</td><td>1.09 / 0.88 / 0.84</td><td>1.23 / 1.01 / 0.97</td></tr>
+<tr><td>pre-HLS(op21 legacy) vs Radix fp32</td><td>0.721×</td><td>0.977×</td><td>1.089×</td></tr>
+<tr><td>§9 env：GVR(op27_hls)/base</td><td>1.272×</td><td>1.001×</td><td>—</td></tr>
+<tr><td>§9 env：SGLang v2/base</td><td>1.933×</td><td>1.469×</td><td>—</td></tr>
+</table>
+<ul>
+<li><span class="zh">GVR multi-CTA (cuteDSL) 胜 base <b>1.15–1.23×</b>；HLS-op25 相对 HLS 在 worst/real <b>+3–16%</b>、best <b>−3–6%</b>；HLS-op27 上硅 worst K2048 gm <b>1.96×</b>（best −1.2% / real −0.7%）。</span><span class="en">GVR multi-CTA (cuteDSL) beats base <b>1.15–1.23×</b>; HLS-op25 adds <b>3–16%</b> over HLS on worst/real, concedes <b>3–6%</b> on best; HLS-op27 silicon: worst K2048 gm <b>1.96×</b> (best −1.2% / real −0.7%).</span></li>
+<li><span class="zh">Radix single-CTA (CUDA) 比 base <b>慢 1.6–2.2×</b>；SGLang StreamingTopK 场景平坦、盲提示。</span><span class="en">Radix single-CTA (CUDA) is <b>1.6–2.2× slower</b> than base; SGLang StreamingTopK is scenario-flat, hint-blind.</span></li>
+<li><span class="zh">op29 HBE-noB：参战域（N≥65536 streaming）对 sglang_v2 <b>1.03–1.75×</b>，精确门 324/324。</span><span class="en">op29 HBE-noB: <b>1.03–1.75×</b> over sglang_v2 in the engaged regime (N≥65536 streaming), exactness gate 324/324.</span></li>
+<li><span class="zh">外部臂（op28 口径）：SGLang v2 ≈ FlashInfer 的 1.35×，但 FlashInfer 无条件精确（SGLang v2 tie-bin 越限已在真实 V3.2 L52 上触发）。</span><span class="en">External arms (op28 basis): SGLang v2 ≈ 1.35× FlashInfer, but FlashInfer is unconditionally exact (SGLang v2's tie-bin overflow has been triggered on real V3.2 L52 rows).</span></li>
+<li><span class="zh">数据代际提示：报告 §3–8 用原始 op22 战役数据（内核 @f51f50f4da，beta 极点 hr 0.90/0.05）；§1–2 与 §9 为 iter16 HEAD @51be558e77 重测（op24 极点）；§10 为 V4 decode 捕获。跨章比较必须对齐代际。</span><span class="en">Dataset-generation caveat: report §3–8 use the original op22 campaign data (kernel @f51f50f4da, beta poles hr 0.90/0.05); §1–2 and §9 are the iter16 HEAD @51be558e77 re-test (op24 poles); §10 is the V4 decode capture. Cross-section comparisons must align generations.</span></li>
+</ul>
+
+<p class="note" style="margin-top:40px;border-top:1px solid var(--line);padding-top:12px">
+<span class="zh">本报告由四路并行源码考证汇总生成（op22 REPORT.html 方法表提取 + gvr_topk_decode(_cluster).py + gvr_ms(c)_op.py + gvr_op26*(r0/mc)_op.py + topk_hbe.cuh + radix/_kernel_core.inc + sglang streaming.cuh/topk_impl.cuh + flashinfer topk.cuh 逐相位读源），全部行号引用以 2026-07-18 工作区状态为准。伪代码为语言无关重述，非可编译代码。</span>
+<span class="en">This report was synthesized from four parallel source-audit passes (op22 REPORT.html method-table extraction + phase-by-phase reads of gvr_topk_decode(_cluster).py, gvr_ms(c)_op.py, gvr_op26*(r0/mc)_op.py, topk_hbe.cuh, radix/_kernel_core.inc, sglang streaming.cuh/topk_impl.cuh, flashinfer topk.cuh); all line references reflect the workspace state on 2026-07-18. Pseudocode is a language-agnostic restatement, not compilable code.</span>
+</p>
+
+</div>
+</body>
+</html>
