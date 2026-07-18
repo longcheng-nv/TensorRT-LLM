@@ -1,0 +1,4 @@
+results/*/nsys_reps/
+*.nsys-rep
+*.sqlite
+*.log
