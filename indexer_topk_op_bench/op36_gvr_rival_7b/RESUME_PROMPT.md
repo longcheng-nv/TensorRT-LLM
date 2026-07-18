@@ -20,17 +20,21 @@ Key facts:
 - bundle-v2 kernel diffs ready in op35_gvr_round2/variant/gvrpkg35/
   (default-off flags skip_h1 + K2048 kNumBins 512).
 
-## State after iter4-in-flight (2026-07-18) — Track B built, screening running
+## State after iter4 (2026-07-18) — TRACK B CLOSED (shipped-in-campaign)
 - NODE: umbriel-b200-093 now (047 gone). Same-node composites only.
-- Track B port DONE + battery 93/93 (src/trackb/, battery_bx.py, arm
-  sgl_bx in ops_op36.py). Screening 25 batches 8-way IN FLIGHT →
-  results/b_screen (resume: relaunch drive_op36_shard.sh W W 8 with
-  OPS="gvr_pr,sglang_v2,sgl_bx" OUT=results/b_screen; .done markers skip).
-- Analysis: analysis/trackb_verdict.py results/b_screen (anchor drift +
-  guard ε + dispatch threshold + hole close-up). Anchor checkpoint GREEN.
-- NEXT after screening: verdict re-run ≤2-way on decisive batches (incl.
-  ε outlier pro/16k/BS1 + threshold-boundary batches), fix per-model
-  dispatch table, update ITERATIONS, then A2 distP4 → feasibility gate.
+- Track B DONE: src/trackb/ port + overflow guard, battery 93/93, arm
+  sgl_bx; screening 25/25 + verdict 6/6 (results/b_screen, b_verdict;
+  analysis/trackb_verdict.py). Guard ε 0.4-0.8%; hole 0.583->0.991.
+- SHIP TABLE: gvr_pr(+A0 flags) iff N>=65536 & 32<=BS<=128 (mid-BS
+  valley, 26 win-cells 1.05-1.57x); sgl_bx else. Composite vs sglang
+  0.722 -> 1.015 (oracle 1.016), first >1.0. Pure N-threshold DEGENERATE
+  (always-bx 0.992) — pr wins are a (N,BS) region, not an N-band.
+- Owes at campaign close: op26 full-grid 2245 battery on sgl_bx.
+- NEXT: A2 distP4 (kill handoff2 value-ship + parallelize leader P4;
+  P4blk med 37%, zero-P4blk UB 1.578) — gains land ONLY in the pr-routed
+  region + may widen it; then A1 escape residual, A3 C>8, PIVOT GATE
+  (composite 1.015 < 1.10 target; gate arithmetic now needs pr to beat
+  sglang inside its own routed region by enough to lift gm ~9%).
 
 ## State after iter3 (2026-07-18) — A0 CLOSED
 - A0 ship table: skip_h1 ON {K512@N>=262144, K2048(+kb512)}, OFF K1024;

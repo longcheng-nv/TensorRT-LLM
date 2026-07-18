@@ -90,3 +90,22 @@ anchor transfer via per-batch gvr_pr/sglang_v2 as always.
   matches PLAN arithmetic (D=1.030 ceiling for parity-path dispatch).
 - Verdict re-run (<=2-way, 6 batches: flash_4k, pro_16k, v32_16k,
   flash_256k, pro_512k, v32_128k) IN FLIGHT -> results/b_verdict.
+
+### iter4 VERDICT (6/6 batches, <=2-way, anchors green) — TRACK B CLOSED
+- Consistency vs screening: abs-time drift med 1.000 / p95 1.028;
+  bx/sgl ratio |diff| med 0.0045. Screening CONFIRMED.
+- Guard ε at 2-way: gm 1.004, worst 1.030 (flash/256k/BS16). The
+  pro/16k/BS1 1.091 was an 8-concurrent artifact (now 0.93-1.02).
+- Hole cells re-measured: bx/sgl 0.998 (n=33). Parity confirmed.
+- R1 on verdict batches: 1.037 vs oracle 1.038, ZERO pr-routed
+  regressions (batch set oversamples the pr region by design; the ship
+  composite stays the full-grid 1.015).
+- TRACK B SHIP TABLE (shape-keyed, inference-known keys only):
+    route gvr_pr (with iter3 A0 flag table) iff N>=65536 AND 32<=BS<=128;
+    route sgl_bx everywhere else. Composite same-node vs sglang_v2:
+    pr-only 0.722 -> 1.015 (oracle 1.016). Exact 275/275 folded checks
+    both runs + battery 93/93 (escape validated under forced overflow).
+- Formal ship gate still owes: op26 full-grid 2245 battery on sgl_bx
+  (run at campaign close before any upstream port).
+- NEXT: A2 distP4 (largest remaining lever; only helps pr-routed region
+  + could widen it), then feasibility pivot gate.
