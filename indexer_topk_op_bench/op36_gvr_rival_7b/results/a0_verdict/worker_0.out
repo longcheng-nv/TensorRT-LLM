@@ -1,0 +1,4 @@
+=== verdict [0/gpu0]: real_pro_bs_fp32_512k (10:38:47) ===
+=== verdict [0/gpu0]: real_flash_bs_fp32_256k (10:41:41) ===
+=== verdict [0/gpu0]: real_pro_bs_fp32_64k (10:43:59) ===
+VERDICTWORKER0DONE

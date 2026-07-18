@@ -1,0 +1,4 @@
+=== op36 batch [1/gpu1]: real_pro_bs_fp32_4k (10:26:13) ===
+=== op36 batch [1/gpu1]: real_pro_bs_fp32_64k (10:27:27) ===
+=== op36 batch [1/gpu1]: real_pro_bs_fp32_1024k (10:28:47) ===
+OP36WORKER1DONE

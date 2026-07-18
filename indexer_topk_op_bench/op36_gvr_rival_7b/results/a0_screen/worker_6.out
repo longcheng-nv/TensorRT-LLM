@@ -1,0 +1,4 @@
+=== op36 batch [6/gpu6]: real_flash_bs_fp32_32k (10:26:13) ===
+=== op36 batch [6/gpu6]: real_flash_bs_fp32_512k (10:27:44) ===
+=== op36 batch [6/gpu6]: real_v32_bs_fp32_64k (10:30:41) ===
+OP36WORKER6DONE

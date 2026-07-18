@@ -33,3 +33,18 @@ Anchors: gvr_pr med 1.022 / p95 1.073 vs report; sglang med 1.000 / p95
   (base beats pr 1.3-1.5x in the disclosed §7b low-hit BS≥128 region).
   skip_h1's flash-1024k win overlaps this — measure residual after A0
   verdict before building.
+
+## iter3 (2026-07-18) — A0 VERDICT + shape-gated close
+Verdict re-run (≤2-way, 6 pole batches) CONFIRMS screening bit-for-bit
+(a0/pr gm identical to 3 decimals; drift ~1.0): pro-512k 0.813 is REAL.
+Mechanism: skip_h1 loses where hit is warm at large N (K1024/N=131072,
+0.72@BS1..0.91@BS1024, one-signed), wins where hit is cold (flash-1024k
+hit≈0.42, 1.21). op35 "0 lost" verdict was BS=1-only + different launch
+shapes — recorded as a LEARNING, not a contradiction.
+SHIP TABLE (shape-keyed, no hit dispatch): skip_h1 ON for K512@N>=262144
+and K2048 (+kNumBins 512); OFF for K1024. Composite vs sglang same-node:
+0.726 -> 0.738 (+1.7%), gated arm vs pr: flash 1.021/pro 1.000/v32 1.031
+(v32 min 0.956 single rung — watch at ship gate).
+A0 CLOSED. Campaign axis confirms baseline arithmetic: skeleton levers
+move single points, not the sglang gap. Weight shifts to Track B (4-16k,
+99 cells, gm 0.60) + A2 distP4.
