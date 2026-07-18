@@ -20,6 +20,17 @@ Key facts:
 - bundle-v2 kernel diffs ready in op35_gvr_round2/variant/gvrpkg35/
   (default-off flags skip_h1 + K2048 kNumBins 512).
 
+## State after iter3 (2026-07-18) — A0 CLOSED
+- A0 ship table: skip_h1 ON {K512@N>=262144, K2048(+kb512)}, OFF K1024;
+  composite vs sglang 0.726->0.738 same-node, zero regression; verdict
+  re-run confirmed screening exactly (ITERATIONS iter3).
+- GOTCHA fixed iter2: GVR arms must use launch/pick_config contract
+  (refresh_harness pattern); iter1 frozen-shape data INVALID (archived).
+- NEXT (priority): Track B small-N 8-CTA exact path (the 99-cell 0.60
+  hole; port+fix-tie-overflow beats from-scratch per apex); then A2
+  distP4; A1 escape residual AFTER A0 gating (overlapping wins); A3 C>8.
+- Feasibility gate pending after B+A2 first verdicts (PLAN.md).
+
 ## State after setup (2026-07-18)
 
 - Campaign skeleton committed: PLAN.md, analysis/baseline_7b.py (extracts
