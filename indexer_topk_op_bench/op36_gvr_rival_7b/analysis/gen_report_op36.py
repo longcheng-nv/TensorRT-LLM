@@ -278,6 +278,116 @@ def a2_table():
     return hdr + rows + "</table>"
 
 
+# ------------------------------------------------------------ §7 algorithm
+# Flow diagram (pure CSS boxes, no <script>) + pseudocode for the ship scheme.
+# Kernel structure cross-checked against variant/gvrpkg36/top_k/gvr_topk_decode.py
+# (GvrTopKKernel docstring + dist_p4 sites), TRACKA2_DESIGN.md (SYNC1-6) and
+# src/trackb/topk_v2_exact_standalone.cu (impl families, plan routing).
+FLOW_HTML = """
+<div style="font-size:0.82em;line-height:1.35">
+<style>
+.fn{border:1.5px solid #3b6ea5;border-radius:6px;padding:6px 10px;background:#f4f8fb;
+    margin:0 auto;max-width:640px;text-align:center}
+.fd{border:1.5px solid #b8860b;border-radius:6px;padding:6px 10px;background:#fdf6e3;
+    margin:0 auto;max-width:640px;text-align:center}
+.fa{text-align:center;color:#3b6ea5;font-weight:bold;padding:1px 0}
+.fcols{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:4px}
+.fcol{border:1.5px solid #3b6ea5;border-radius:6px;padding:8px}
+.fcol h4{margin:2px 0 6px;font-size:1em;color:#24435f;text-align:center}
+.fcond{text-align:center;color:#885;font-size:0.92em;min-height:2.6em}
+.fstep{border:1px solid #c5d3e0;border-radius:4px;padding:3px 6px;margin:4px 0;background:#fff}
+.fgreen{background:#eef7ee}.fesc{border-style:dashed;background:#fdf0f0}
+</style>
+<div class="fn"><span class="zh">每个 decode step 输入:indexer logits[BS, N] (fp32) · K∈{512,1024,2048} · 上一步 top-K 索引 preIdx</span><span class="en">Per decode step: indexer logits[BS, N] (fp32) · K∈{512,1024,2048} · prev-step top-K indices preIdx</span></div>
+<div class="fa">▼</div>
+<div class="fd"><span class="zh"><b>host 端 shape 路由</b>(仅用推理期可知的 N / BS / K;命中率永不参与 — 红线)</span><span class="en"><b>Host-side shape dispatch</b> (inference-known N / BS / K only; hit-rate never participates — red line)</span></div>
+<div class="fcols">
+<div class="fcol fgreen">
+<h4><span class="zh">规则 3(默认):sgl_bx</span><span class="en">Rule 3 (default): sgl_bx</span></h4>
+<div class="fcond"><span class="zh">N&lt;65536 或 BS∉[32,128]<br>(248/275 cells)</span><span class="en">N&lt;65536 or BS∉[32,128]<br>(248/275 cells)</span></div>
+<div class="fstep"><span class="zh"><b>plan kernel</b>(非关键路径):按 seq_len 分桶 Register2 (≤8k) / Register4 (≤16k) / Streaming / 8-CTA cluster 池;<b>清零 per-row 溢出旗标</b></span><span class="en"><b>plan kernel</b> (off critical path): bucket rows → Register2 (≤8k) / Register4 (≤16k) / Streaming / 8-CTA cluster pool; <b>zero per-row overflow flags</b></span></div>
+<div class="fa">▼</div>
+<div class="fstep"><span class="zh"><b>transform kernel</b>:fp16 4096-bin 直方图 → 阈值 bin b* → 双 fp32 边界收集(&gt;hi 直写,[lo,hi] 进 tie 缓冲, cap 2048)→ P4 补齐</span><span class="en"><b>transform kernel</b>: fp16 4096-bin histogram → threshold bin b* → collect by two fp32 boundaries (&gt;hi direct, [lo,hi] → tie buffer, cap 2048) → P4 fill</span></div>
+<div class="fa">▼</div>
+<div class="fstep"><span class="zh"><b>[op36 守卫]</b> 4 个截断点置 overflow_flag</span><span class="en"><b>[op36 guard]</b> overflow_flag set at all 4 truncation sites</span></div>
+<div class="fa">▼</div>
+<div class="fstep fesc"><span class="zh"><b>escape</b>(数据罕见,实测仅 V3.2 L52 类行):被标行经 radix_cutedsl 精确重跑 → <b>无条件精确</b></span><span class="en"><b>escape</b> (data-rare; only V3.2 L52-class rows in real captures): flagged rows re-run through radix_cutedsl → <b>unconditional exactness</b></span></div>
+<div class="fcond"><span class="zh">洞 0.60→0.99,守卫税 ε 0.4-0.8%</span><span class="en">hole 0.60→0.99, guard tax ε 0.4-0.8%</span></div>
+</div>
+<div class="fcol">
+<h4><span class="zh">规则 2:gvr_pr + A0 旗标</span><span class="en">Rule 2: gvr_pr + A0 flags</span></h4>
+<div class="fcond"><span class="zh">N≥65536 且 BS∈[32,128](中批量谷)</span><span class="en">N≥65536 &amp; BS∈[32,128] (mid-BS valley)</span></div>
+<div class="fstep"><span class="zh"><b>P1</b> 按 preIdx gather 上一步 top-K 值 → min/max/mean 种子</span><span class="en"><b>P1</b> gather prev top-K values at preIdx → min/max/mean seed</span></div>
+<div class="fstep"><span class="zh"><b>P1b</b> gather 值上建 256-bin 直方图 → M 级 rung 阈值梯 (R0)</span><span class="en"><b>P1b</b> 256-bin histogram over gathered values → M rung thresholds (R0)</span></div>
+<div class="fstep"><span class="zh"><b>P2</b> 单遍全行读:多阈值 rung-ladder 计数准入;全 miss → secant 回退。A0: skip_h1 删 P2 末冗余 cluster 握手 (per-K 门), kNumBins 512@K2048</span><span class="en"><b>P2</b> ONE full-row read: multi-threshold rung-ladder admission count; all-rungs-miss → secant fallback. A0: skip_h1 drops the redundant end-of-P2 cluster handshake (per-K gated); kNumBins 512@K2048</span></div>
+<div class="fstep"><span class="zh"><b>P3</b> 准入区间第二遍读:ballot-free 收集候选进 smem</span><span class="en"><b>P3</b> second read of admitted range: ballot-free candidate collect into smem</span></div>
+<div class="fstep"><span class="zh"><b>P4</b>(leader 路径)handoff2 值汇聚 → leader 256-bin 直方图 → rank-and-scatter 精确 top-K → 写回</span><span class="en"><b>P4</b> (leader path) handoff2 value-gather → leader 256-bin histogram → rank-and-scatter exact top-K → writeback</span></div>
+<div class="fcond"><span class="zh">26 谷区 cell 1.05-1.57× vs bx</span><span class="en">26 valley cells 1.05-1.57× vs bx</span></div>
+</div>
+<div class="fcol">
+<h4><span class="zh">规则 1:gvr dist_p4 (+A0)</span><span class="en">Rule 1: gvr dist_p4 (+A0)</span></h4>
+<div class="fcond"><span class="zh">路由区内 K512@N≥262k 或 K2048@N≥164k(cs&gt;1)</span><span class="en">routed ∧ (K512@N≥262k or K2048@N≥164k) (cs&gt;1)</span></div>
+<div class="fstep"><span class="zh">P1-P3 与规则 2 相同;P4 换分布式:</span><span class="en">P1-P3 as rule 2; P4 goes distributed:</span></div>
+<div class="fstep"><span class="zh">杀 handoff2 值搬运;各 CTA 把 (min,max) f32-bits 写自家 DSMEM 槽 <b>S1</b> → red.relaxed.cluster 全簇建直方图 <b>S2-3</b> → leader 标量搜 b* 并广播 <b>S4-5</b> → 各 CTA 就地 scatter 写回;罕见 b* 歧义 → gather 回退保精确 <b>S6</b>(共 6 次 release-sync)</span><span class="en">kill the handoff2 value-ship; each CTA publishes (min,max) f32-bits in its own DSMEM slot <b>S1</b> → cluster-wide histogram via red.relaxed.cluster <b>S2-3</b> → leader scalar-searches b*, broadcasts <b>S4-5</b> → every CTA scatters its own candidates in place; rare b*-tie ambiguity → gather fallback, exact <b>S6</b> (6 release-syncs total)</span></div>
+<div class="fcond"><span class="zh">6 cells 同时胜 pr 与 bx(至 1.36 vs sglang);N≤131k 被 sync 税吃掉 → 只在大 N 开</span><span class="en">6 cells beat BOTH pr and bx (up to 1.36 vs sglang); sync tax dominates at N≤131k → large-N only</span></div>
+</div>
+</div>
+<div class="fa">▼</div>
+<div class="fn"><span class="zh">输出:每行精确 top-K 索引(三臂全部无条件精确)→ 稀疏注意力 gather</span><span class="en">Output: exact per-row top-K indices (all three arms unconditionally exact) → sparse-attention gather</span></div>
+</div>
+"""
+
+PSEUDO_HTML = """
+<pre style="background:#f7f9fb;border:1px solid #c5d3e0;border-radius:6px;padding:10px 14px;font-size:0.78em;overflow-x:auto">
+# ---------- host dispatch (ship table; shape keys only, hit-rate never used) ----------
+def indexer_topk_decode(logits, K, N, BS, preIdx):
+    routed = (N >= 65536) and (32 <= BS <= 128)              # GVR mid-BS valley
+    if not routed:
+        return sgl_bx(logits, K)                             # rule 3 (default)
+    if (K == 512 and N >= 262144) or (K == 2048 and N >= 163775):
+        return gvr(logits, K, preIdx, A0_FLAGS | DIST_P4)    # rule 1 (large-N, cs&gt;1)
+    return gvr(logits, K, preIdx, A0_FLAGS)                  # rule 2
+    # A0_FLAGS: skip_h1 ON {K512@N&gt;=262144, K2048}, OFF K1024; kNumBins=512 @K2048 only
+
+# ---------- sgl_bx = vendored sglang v2 + unconditional-exactness guard ----------
+plan_kernel:                                   # untimed, once per decode step
+    bucket rows by N: Register2(&lt;=8192) | Register4(&lt;=16384) | Streaming | cluster pool
+    overflow_flag[0:BS] = 0                                  # [op36 guard]
+
+transform_kernel(row):                         # per impl family, same skeleton
+    P1  hist[4096] += popcount per fp16 coarse bin           # one full-row read
+    P2  b* = bin where suffix_count crosses K
+    P3  emit idx where x &gt; hi(b*); candidates in [lo(b*), hi(b*)] -&gt; tie buf (cap 2048)
+    P4  fill the remaining K-slots from tie buf
+        if ties_needed &gt; ties_collected:                     # cap truncated
+            overflow_flag[row] = 1     # [op36: 4 sites — Register/Streaming P4,
+                                       #  cluster rank-0 P4, per-rank local cap]
+escape:                                        # data-rare (14/2245 classes; real: V3.2 L52)
+    for row where overflow_flag[row]: out[row] = radix_topk_exact(logits[row], K)
+
+# ---------- gvr = Guess-Verify-Refine, 1 CTA (or cs-CTA cluster) per row ----------
+gvr_kernel(row):
+    P1   seed = min/max/mean over logits[preIdx]             # prev-step guess
+    P1b  rungs[M] = thresholds from 256-bin hist over the gathered values   # R0
+    P2   one full-row pass: count admissions per rung        # verify
+         r* = first rung with count &gt;= K;  all-miss -&gt; secant refine loop
+         # skip_h1 (A0): drop redundant end-of-P2 cluster handshake (cs&gt;1)
+    P3   second pass over admitted range: ballot-free collect -&gt; smem keys/vals
+    P4   exact top-K among candidates:
+      if not DIST_P4:                                        # leader path (pr)
+          handoff2: peer CTAs ship candidate values to leader
+          leader: 256-bin hist -&gt; rank-and-scatter -&gt; writeback
+      else:                                                  # dist_p4 (A2), cs&gt;1
+          each CTA writes own (min,max) f32-bits to own DSMEM slot;   SYNC1
+          cluster-wide hist build via red.relaxed.cluster.add;        SYNC2-3
+          leader scalar-searches split bin b*, broadcasts;            SYNC4-5
+          distributed scatter: every CTA writes its own candidates;
+          rare b*-tie ambiguity -&gt; gather fallback (exact);           SYNC6
+          # relaxed atomics ordered by release cluster_arrive()/wait()
+          # (cluster_arrive_relaxed has NO release -- stale-DSMEM hazard)
+</pre>
+"""
+
 ZH, EN = "zh", "en"
 
 
@@ -507,7 +617,35 @@ harness = op26 rival_harness clone (src/) · 16 commits, single-day campaign</p>
     "Per-(model, ISL) grid below; green = ship ≥ 1.0.")}
 {grid_table()}
 
-{h2("7 · 证伪与学习台账", "7 · Falsification & learnings ledger")}
+{h2("7 · Ship 方案算法:流程图与伪代码", "7 · The ship scheme: flow diagram & pseudocode")}
+{bi("下图为最终推荐方案(§6 三臂路由)的端到端算法流程;三臂输出契约一致(每行精确 top-K "
+    "索引),差异只在 kernel 内部。结构与 gvrpkg36 内核实现逐相位对齐"
+    "(GvrTopKKernel docstring / TRACKA2_DESIGN.md SYNC1-6 / "
+    "topk_v2_exact_standalone.cu impl 族)。",
+    "The end-to-end algorithm of the final recommendation (the §6 three-arm dispatch); all "
+    "three arms share the output contract (exact per-row top-K indices) and differ only "
+    "inside the kernel. The structure is phase-aligned with the gvrpkg36 implementation "
+    "(GvrTopKKernel docstring / TRACKA2_DESIGN.md SYNC1-6 / topk_v2_exact_standalone.cu "
+    "impl families).")}
+{FLOW_HTML}
+{h3("伪代码", "Pseudocode")}
+{PSEUDO_HTML}
+{bi("为何这套组合胜过 sglang_v2:小 N / 极端 BS 段用的就是 sglang 自己的骨架(8-CTA MLP,"
+    "启动地板 4.7-6.7µs,GVR 1-CTA 骨架的 ~9.7µs 地板在此无解),只付 0.4-0.8% 守卫税换回"
+    "无条件精确;中批量谷(N≥65536, BS 32-128)sglang 的 cluster 池饱和退化,而 GVR 借 "
+    "preIdx 时间先验把全行读降到 2 遍 + 单遍多阈值准入,快 1.05-1.57×;大 N 大 K 处 P4 "
+    "串行 leader 成为瓶颈(op35 归因中位 37%),dist_p4 把直方图与 scatter 摊到全 cluster,"
+    "再赢至 1.36×。",
+    "Why this combination beats sglang_v2: at small N / extreme BS the dispatch uses sglang's "
+    "OWN skeleton (8-CTA MLP, 4.7-6.7µs launch floor — unbeatable by the GVR 1-CTA skeleton's "
+    "~9.7µs floor), paying only the 0.4-0.8% guard tax to buy back unconditional exactness; "
+    "in the mid-BS valley (N≥65536, BS 32-128) sglang's cluster pool saturates and degrades, "
+    "while GVR exploits the preIdx temporal prior to get away with 2 full-row reads + a "
+    "single-pass multi-threshold admission — 1.05-1.57× faster; at large N·K the serial "
+    "leader P4 becomes the bottleneck (op35 attribution: median 37%), and dist_p4 spreads "
+    "the histogram + scatter across the whole cluster for a further win up to 1.36×.")}
+
+{h2("8 · 证伪与学习台账", "8 · Falsification & learnings ledger")}
 <ul>
 <li>{bi("纯 N 阈值 dispatch:退化为 always-bx — pr 无任何净胜 N 带;残余优势是 (N,BS) 区域。",
         "Pure N-threshold dispatch: degenerates to always-bx — pr wins no N-band; the residual "
@@ -537,7 +675,7 @@ harness = op26 rival_harness clone (src/) · 16 commits, single-day campaign</p>
         "(§5); A1/A3 dropped at the gate without burning silicon.", "span")}</li>
 </ul>
 
-{h2("8 · 流程台账", "8 · Process ledger")}
+{h2("9 · 流程台账", "9 · Process ledger")}
 <ol>
 <li>{bi("iter0 骨架 + 算术定界(PLAN.md 红线/pivot 门/测量纪律先行)",
         "iter0 skeleton + bound arithmetic (PLAN.md red lines / pivot gate / measurement "
@@ -567,7 +705,7 @@ harness = op26 rival_harness clone (src/) · 16 commits, single-day campaign</p>
     "are same-node only, cross-node claims only via per-batch anchor transfer (pr/sgl medians "
     "all green). 16 commits, single-day campaign, all results cell-resumable.")}
 
-{h2("9 · 生产移植方案(摘要)", "9 · Production-port plan (summary)")}
+{h2("10 · 生产移植方案(摘要)", "10 · Production-port plan (summary)")}
 {bi("完整方案见 <code>PROD_PORT_PLAN.md</code>。要点:① sgl_bx 作为新 CUDA op 进 "
     "gvrpkg(vendored sglang v2 内核 + 4 点溢出守卫 + plan 融合清零),escape 走既有 "
     "radix_cutedsl;② shape 路由进 GVR host 端 pick_config 层(3 条规则,全部编译期/启动期"
