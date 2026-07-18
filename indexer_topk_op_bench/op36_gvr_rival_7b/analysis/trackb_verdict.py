@@ -170,6 +170,29 @@ def main():
               f"dispatch {gm(all_disp):.3f} (oracle {gm(all_oracle):.3f})")
         print(f"  thresholds: {chosen}")
 
+    # ---- 3b. (N, BS)-keyed rules — pr's residual wins are the mid-BS valley
+    # at large N (N>=65536, BS 32-256), not an N-band. Both keys are
+    # inference-known shapes (NOT hit-rate — red line respected).
+    print("\n== 3b. (N, BS)-keyed dispatch rules ==")
+    full = [((m, isl, bs, n), o) for (m, isl, bs), o0 in cells.items()
+            for n, o in [(next((r["N"] for r in rows
+                                if (r["model"], r["isl"], r["BS"]) == (m, isl, bs)),
+                          None), o0)]
+            if all(o.get(x) for x in ("gvr_pr", "sgl_bx", "sglang_v2"))]
+    rules = {
+        "always_bx": lambda n, bs: False,
+        "R1 N>=64k,BS32-128": lambda n, bs: n >= 65536 and 32 <= bs <= 128,
+        "R2 N>=64k,BS32-256": lambda n, bs: n >= 65536 and 32 <= bs <= 256,
+    }
+    for name, rule in rules.items():
+        vals = [o["sglang_v2"] / (o["gvr_pr"] if rule(n, bs) else o["sgl_bx"])
+                for (m, isl, bs, n), o in full]
+        reg = sum(1 for (m, isl, bs, n), o in full
+                  if rule(n, bs) and o["gvr_pr"] > 1.02 * o["sgl_bx"])
+        print(f"  {name:20s} gm {gm(vals):.3f}  pr-routed regressions {reg}")
+    vals = [o["sglang_v2"] / min(o["gvr_pr"], o["sgl_bx"]) for _, o in full]
+    print(f"  {'oracle':20s} gm {gm(vals):.3f}")
+
     # ---- 4. the 99-cell hole close-up -----------------------------------------
     print("\n== 4. ISL 4-16k hole (pr vs bx vs sglang) ==")
     hole = [(m, isl, bs, ops) for (m, isl, bs), ops in cells.items()

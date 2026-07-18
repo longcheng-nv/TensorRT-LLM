@@ -72,3 +72,21 @@ anchor transfer via per-batch gvr_pr/sglang_v2 as always.
 - EARLY (partial, 4k-128k): guard ε gm 1.010 (max 1.091 pro/16k/BS1 —
   re-check at verdict); hole bx/sgl 0.991 vs pr 0.551; best dispatch
   thresholds flash N<32768 / pro N<65536 (wider than the hole).
+
+### iter4 screening FULL GRID (25/25, anchors green all batches)
+- guard ε (bx/sglang): gm 1.008 ALL (bands 1.009/1.007/1.007); worst
+  1.091 pro/16k/BS1. The exactness guard costs ~0.8%.
+- hole (4-16k, 99 cells): pr 0.583 -> bx 0.991. PARITY DELIVERED.
+- pure N-threshold DEGENERATES to always-bx (0.992): pr never beats
+  sglang on any N-band gm. pr's residual wins are a coherent (N, BS)
+  REGION instead: N>=65536 & BS in [32,256] (26 cells, 1.05-1.57x vs bx)
+  = the known GVR mid-BS valley. Both keys inference-known (no red line).
+- RULE VERDICT (composite gm vs sglang, 275 cells, same-node b200-093):
+    always_bx 0.992 | R1 (pr iff N>=65536 & 32<=BS<=128) 1.015 |
+    R2 (BS<=256) 1.012 | oracle 1.016
+  R1 captures ~all of oracle with 1 pr-routed regression cell.
+  **Composite crosses 1.0 for the first time: 0.722 (pr-only, this node)
+  -> 1.015 with Track B + R1 dispatch.** Target 1.10 still not reached —
+  matches PLAN arithmetic (D=1.030 ceiling for parity-path dispatch).
+- Verdict re-run (<=2-way, 6 batches: flash_4k, pro_16k, v32_16k,
+  flash_256k, pro_512k, v32_128k) IN FLIGHT -> results/b_verdict.
