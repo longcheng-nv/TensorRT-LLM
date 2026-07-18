@@ -423,6 +423,71 @@ def chart_bs():
             + rows + "</table></details>")
 
 
+# ------------------------------------------------------------ §6c hit split
+# Post-hoc statistics only: hit is a property of the capture batch (model,isl),
+# identical across BS, and the ship table never reads it (red line).
+def cell_hit(k):
+    r = bmeta[k].get("gvr_pr") or bmeta[k].get("sglang_v2")
+    return r["hit"]
+
+
+hit_split = {}
+for name, cond in (("hit>0.4", lambda h: h > 0.4),
+                   ("hit<=0.4", lambda h: h <= 0.4)):
+    sub = [(k, o) for k, o in full if cond(cell_hit(k))]
+    ship = [o["sglang_v2"] / ship_time(k, o) for k, o in sub]
+    ro = [(k, o) for k, o in sub if routed(k, bmeta)]
+    hit_split[name] = {
+        "n": len(sub),
+        "nb": len({(k[0], k[1]) for k, _ in sub}),
+        "ship": (gm(ship), min(ship), max(ship)),
+        "pr": gm([o["sglang_v2"] / o["gvr_pr"] for _, o in sub]),
+        "bx": gm([o["sglang_v2"] / o["sgl_bx"] for _, o in sub]),
+        "per_model": {m: gm([o["sglang_v2"] / ship_time(k, o)
+                             for k, o in sub if k[0] == m] or [float("nan")])
+                      for m in ("flash", "pro", "v32")},
+        "routed": (len(ro),
+                   gm([o["sglang_v2"] / ship_time(k, o) for k, o in ro]),
+                   max([o["sglang_v2"] / ship_time(k, o) for k, o in ro])),
+    }
+
+
+def hit_table():
+    hdr = ("<table><tr><th></th>"
+           "<th>n (cells / batches)</th><th>ship / sgl gm</th><th>min</th>"
+           "<th>max</th><th>pr / sgl</th><th>bx / sgl</th>"
+           "<th>flash</th><th>pro</th><th>v32</th>"
+           "<th>routed cells (n / gm / max)</th></tr>")
+    rows = ""
+    for name in ("hit>0.4", "hit<=0.4"):
+        s = hit_split[name]
+        g, lo, hi = s["ship"]
+        rn, rg, rm = s["routed"]
+        pm = s["per_model"]
+        v32 = f3(pm['v32']) if pm['v32'] == pm['v32'] else "—"
+        label = "hit&gt;0.4" if name == "hit>0.4" else "hit&le;0.4"
+        rows += (f"<tr><td>{label}</td><td>{s['n']} / {s['nb']}</td>"
+                 f"<td><b>{f3(g)}</b></td><td>{f3(lo)}</td><td>{f3(hi)}</td>"
+                 f"<td>{f3(s['pr'])}</td><td>{f3(s['bx'])}</td>"
+                 f"<td>{f3(pm['flash'])}</td><td>{f3(pm['pro'])}</td>"
+                 f"<td>{v32}</td>"
+                 f"<td>{rn} / {f3(rg)} / {f3(rm)}</td></tr>")
+    return hdr + rows + "</table>"
+
+
+def hit_batch_table():
+    hdr = ("<table><tr><th>batch</th><th>N</th><th>hit</th>"
+           "<th>domain</th></tr>")
+    rows = ""
+    for (m, isl) in sorted({(k[0], k[1]) for k, _ in full}):
+        k = next(k for k, _ in full if (k[0], k[1]) == (m, isl))
+        r = bmeta[k].get("gvr_pr") or bmeta[k].get("sglang_v2")
+        h = r["hit"]
+        rows += (f"<tr><td>{m}/{isl}</td><td>{r['N']}</td><td>{h:.3f}</td>"
+                 f"<td>{'&gt;0.4' if h > 0.4 else '&le;0.4'}</td></tr>")
+    return hdr + rows + "</table>"
+
+
 # ------------------------------------------------------------ §7 algorithm
 # Flow diagram (pure CSS boxes, no <script>) + pseudocode for the ship scheme.
 # Kernel structure cross-checked against variant/gvrpkg36/top_k/gvr_topk_decode.py
@@ -790,6 +855,28 @@ harness = op26 rival_harness clone (src/) · 16 commits, single-day campaign</p>
     "alone.")}
 {legend3()}
 {chart_bs()}
+
+{h3("6c · hit 分域统计 (hit>0.4 vs hit≤0.4)", "6c · Hit-domain split (hit>0.4 vs hit≤0.4)")}
+{bi("事后统计视角(hit 是 capture 批 (model,ISL) 的属性,同批各 BS 相同;ship 表从不读 "
+    "hit — 红线)。两个 hit 域的 ship 复合都 ≥1.0:不存在按 hit 分域后被翻盘的隐藏区域。",
+    "Post-hoc view only (hit is a property of the capture batch (model,ISL), identical "
+    "across BS; the ship table never reads hit — red line). The ship composite is ≥1.0 in "
+    "BOTH hit domains: there is no hidden region that flips once you condition on hit.")}
+{hit_table()}
+{bi("解读注意:pr 单臂在 hit>0.4 域更差(0.684 vs 0.783)主要是 <b>N 结构混杂</b> — 高 hit "
+    "批显著偏向小 N(flash 4k/32k/128k、pro 4k-32k 都在此域,而 flash 512k hit=0.057 这类"
+    "大 N 低 hit 批在另一域),小 N 恰是 4-16k 洞。这不能读成 \"hit 高对 GVR 不利\" 的因果 — "
+    "op30 对固定形状的结论方向相反(GVR 快在低 hr、慢在高 hr 是控制形状后的效应)。v32 全部 "
+    "7 批 hit 均 >0.4,故 hit≤0.4 域无 v32 切片。",
+    "Interpretation caveat: pr-alone being worse in the hit>0.4 domain (0.684 vs 0.783) is "
+    "mostly an <b>N-structure confound</b> — high-hit batches skew strongly toward small N "
+    "(flash 4k/32k/128k and pro 4k-32k sit in this domain, while large-N low-hit batches like "
+    "flash 512k hit=0.057 sit in the other), and small N is exactly the 4-16k hole. Do NOT "
+    "read it as causal \"high hit hurts GVR\" — op30's fixed-shape finding points the other "
+    "way (GVR fast at low hr, slow at high hr, once shape is controlled). All 7 v32 batches "
+    "have hit>0.4, so the hit≤0.4 domain has no v32 slice.")}
+<details><summary><span class="zh">逐批 hit 值</span><span class="en">per-batch hit values</span></summary>
+{hit_batch_table()}</details>
 
 {h2("7 · Ship 方案算法:流程图与伪代码", "7 · The ship scheme: flow diagram & pseudocode")}
 {bi("下图为最终推荐方案(§6 三臂路由)的端到端算法流程;三臂输出契约一致(每行精确 top-K "
