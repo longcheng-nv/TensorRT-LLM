@@ -35,8 +35,12 @@ import ops_refresh as ORF                                     # noqa: E402
 from gvrpkg35.top_k.gvr_topk_decode import GvrTopKKernel as Gvr35  # noqa: E402
 import sgl_bx_op as BX                                        # noqa: E402
 
+_VARIANT36 = _HERE.parent / "variant"
+sys.path.insert(0, str(_VARIANT36))
+from gvrpkg36.top_k.gvr_topk_decode import GvrTopKKernel as Gvr36  # noqa: E402
+
 DEV = "cuda"
-OP36_ARMS = ["gvr_a0", "sgl_bx"]
+OP36_ARMS = ["gvr_a0", "sgl_bx", "gvr_a2"]
 
 
 def ops_for_op36(dtype_name, K):
@@ -44,6 +48,30 @@ def ops_for_op36(dtype_name, K):
     if dtype_name != "fp32":
         arms.remove("sgl_bx")        # fp32-only, same contract as sglang_v2
     return OR.ops_for_rival(dtype_name, K) + arms
+
+
+def _build_a2(K, dtype, N, BS, cr, logits_row, preidx_row):
+    """Track A2 = gvrpkg36 at the production launch contract with dist_p4=True
+    ONLY (no A0 flags — attribution axis is a2/pr = pure distP4 effect).
+    dist_p4 requires cs>1; when pick_config chooses cs==1 the flag is dropped
+    (kernel would raise) and the arm degenerates to gvr_pr — recorded in
+    extra so the analysis can exclude those cells from attribution."""
+    lg = logits_row.to(dtype).contiguous().expand(BS, -1).contiguous()
+    pre = preidx_row.contiguous().expand(BS, -1).contiguous()
+    sl = torch.full((BS,), N * cr, dtype=torch.int32, device=DEV)
+    out = torch.empty(BS, K, dtype=torch.int32, device=DEV)
+    cfg = Gvr36.pick_config(dtype, BS, lg.shape[1])
+    dp4 = cfg["cluster_size"] > 1
+    ovr = dict(dist_p4=True) if dp4 else {}
+    call = (lambda lg=lg, pre=pre, sl=sl, out=out, ovr=ovr:
+            Gvr36.launch(lg, pre, sl, out, K, compress_ratio=cr, **ovr))
+    call()                                     # warm: compile + populate out
+    extra = {"cluster_size": cfg["cluster_size"],
+             "launch_cfg": (f"cs{cfg['cluster_size']}/T{cfg['num_threads']}"
+                            f"/mb{cfg['min_blocks_per_mp']}"
+                            f"/v{256 if cfg['use_256bit_load'] else 128}"),
+             "flags": "dist_p4" if dp4 else "cs1_no_dp4"}
+    return call, [lg, pre, sl, out], extra, (lambda: out)
 
 
 def _build_bx(K, dtype, N, BS, cr, logits_row, preidx_row):
@@ -98,6 +126,8 @@ def build_call_op36(op, K, dtype, N, BS, cr, logits_row, preidx_row):
         return _build_a0(K, dtype, N, BS, cr, logits_row, preidx_row)
     if op == "sgl_bx":
         return _build_bx(K, dtype, N, BS, cr, logits_row, preidx_row)
+    if op == "gvr_a2":
+        return _build_a2(K, dtype, N, BS, cr, logits_row, preidx_row)
     if op in ("gvr_base", "gvr_pr"):
         return ORF.build_call_rival(op, K, dtype, N, BS, cr,
                                     logits_row, preidx_row)
