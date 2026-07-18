@@ -30,11 +30,17 @@ Key facts:
   0.722 -> 1.015 (oracle 1.016), first >1.0. Pure N-threshold DEGENERATE
   (always-bx 0.992) — pr wins are a (N,BS) region, not an N-band.
 - Owes at campaign close: op26 full-grid 2245 battery on sgl_bx.
-- PIVOT GATE FIRED (iter5, arithmetic on measured grid): A-track ceiling
-  = 1.03-1.07 composite (oracle dispatch + pr ×1.10-1.25 everywhere);
-  1.10 needs pr ×~1.4 uniform — unreachable (triple-falsified). STOPPED
-  pre-A2 per PLAN; awaiting user decision (ship 1.015+moat / run A2 for
-  +2-5% / redefine axis / close). Tasks A1-A3 on hold.
+- USER DECIDED (07-18): run A2 then close. A2 DONE iter6: distP4 shipped
+  shape-gated {K512@N>=262144, K2048@N>=163775} routed cells; composite
+  1.015 -> 1.017. Gate CONFIRMED empirically; A1/A3 DROPPED.
+- CAMPAIGN CLOSING STATE: final ship = Track-B dispatch (sgl_bx default,
+  gvr_pr+A0 flags at N>=65536 & BS32-128, dist_p4 at the bigN subset)
+  composite 1.017 vs sglang (baseline 0.745, +37%), unconditional
+  exactness (2233/2233 + 93/93 + 29/29 batteries).
+- REMAINING (next session): campaign REPORT (bilingual HTML per house
+  style) + production-port plan (sgl_bx op + shape dispatch into
+  gvrpkg/TRT-LLM; decide upstream PR scope). LEARNINGS: 8-conc eps
+  artifact; distP4 sync-tax-vs-work N-boundary ~160k.
 
 ## State after iter3 (2026-07-18) — A0 CLOSED
 - A0 ship table: skip_h1 ON {K512@N>=262144, K2048(+kb512)}, OFF K1024;

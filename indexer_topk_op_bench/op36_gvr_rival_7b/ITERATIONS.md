@@ -129,3 +129,27 @@ beating-sglang-per-cell remains triple-falsified (op34/op35/apex).
 VERDICT: 1.10 unreachable by the A-track; measured ceiling ≈1.07 (oracle
 + full lever success), honest expectation 1.03-1.05. GATE FIRED per PLAN:
 STOP, present ceiling + options to user (A2 remains optional for +2-5%).
+
+## iter6 (2026-07-18) — A2 distP4 CLOSED (shape-gated micro-ship, +0.2%)
+Implementation: gvrpkg36 dist_p4 (@8eac2f6d75, agent-implemented from
+TRACKA2_DESIGN.md, battery_a2 29/29 first compile; deviation log in commit).
+Measurement: 9 routed-region batches at VERDICT-GRADE directly (<=2-way,
+anchors pr med 1.036/sgl 0.997, results/a2_verdict).
+- distP4 effect is SHAPE-COHERENT: WINS at large-N — flash/1024k (K512,
+  N=262127) pr/a2 1.03-1.41 (BS>=128 1.30-1.41!), v32/256k (K2048,
+  N=163775) 1.03-1.19; WASH pro/1024k; LOSES at N=65k-131k (0.62-0.97,
+  17 routed regressions up to 1.40) — the 6-cluster-sync tax beats the
+  distributed-work win below ~160k candidates-scale. Mirrors A0's skip_h1
+  gate shape (K512-large + K2048 win, K1024 off).
+- SHIP TABLE ADDITION: dist_p4 ON only at routed cells of {flash 1024k,
+  v32 256k} class shapes (K512@N>=262144, K2048@N>=163775), where a2
+  beats pr AND bx on all 6 cells (e.g. flash/1024k/BS128 1.047->1.361).
+  Composite 1.015 -> 1.017 (full {bx,pr,a2} oracle 1.018).
+- PIVOT GATE CONFIRMED EMPIRICALLY: the biggest known lever, fully
+  landed, moved the composite +0.2% — the 1.03-1.07 ceiling stands;
+  1.10 unreachable. Campaign closes at ship state per user decision
+  (A2-then-close). A1/A3 dropped (gate arithmetic covers them).
+- Residual (unexplored): a2 x A0 flag stacking at the shared win shapes;
+  a2's BS>=256 flash-1024k pr-gain (1.38-1.41) lands where bx already
+  holds parity — irrelevant to composite, relevant only if the axis
+  changes.
