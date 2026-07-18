@@ -109,3 +109,20 @@ anchor transfer via per-batch gvr_pr/sglang_v2 as always.
   (run at campaign close before any upstream port).
 - NEXT: A2 distP4 (largest remaining lever; only helps pr-routed region
   + could widen it), then feasibility pivot gate.
+
+## iter5 (2026-07-18) — FEASIBILITY PIVOT GATE FIRED (pre-A2, arithmetic)
+Post-Track-B, all A-track levers act only on gvr_pr, which the ship table
+routes at 26/275 cells. Ceiling recompute on the measured b_screen grid
+(oracle {pr/f, bx} dispatch per cell, f applied to ALL cells — generous,
+includes regions where the levers were falsified):
+  ship (R1, measured)              1.015
+  pr ×1.10 (A-stack low)           1.031
+  pr ×1.25 (A-stack realistic top) 1.066
+  pr ×1.578 (zero-P4blk UB, phys-impossible) 1.191
+op35's "realistic reachable stack (bundle-v2 + distP4 + warp-B1) 1.10-1.25"
+on pr cells ⇒ composite ceiling 1.03-1.07 < 1.10. Crossing 1.10 needs
+pr ×~1.4 uniform — between realistic and physically-impossible, and
+beating-sglang-per-cell remains triple-falsified (op34/op35/apex).
+VERDICT: 1.10 unreachable by the A-track; measured ceiling ≈1.07 (oracle
++ full lever success), honest expectation 1.03-1.05. GATE FIRED per PLAN:
+STOP, present ceiling + options to user (A2 remains optional for +2-5%).
