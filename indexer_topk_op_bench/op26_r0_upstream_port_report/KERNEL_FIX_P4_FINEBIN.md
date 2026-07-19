@@ -108,3 +108,58 @@ whose rare-ambiguity gather fallback already covers its own boundary case).
 selection mechanics). op36's `dist_p4` distributed P4 carries its own
 gather fallback for boundary ambiguity; port F1 there for symmetry when
 PR-B lands.
+
+## 6. F4 (evaluated, REJECTED): log-transform before the fine recursion
+
+Proposal (2026-07-19 review): map candidates v → log-domain before the
+coarse+fine linear binning, keeping the existing single 256-sub-bin refine.
+
+**Verdict: does NOT guarantee exactness, and does not even fix the observed
+cells.** Measured on the 4 diagnosed failing rows (log-domain pair distance
+= |ln(v_kth/v_neighbor)| vs log-domain fine-bin width = ln(seg_max/seg_min)
+/ (kNumBins·256), sign-segmented):
+
+| cell | pair log-gap | log fine-bin | verdict |
+|---|---|---|---|
+| pro/128k/L6 | 1.26e-05 | 1.66e-05 | SAME BIN — still inexact |
+| pro/512k/L48 | 3.74e-05 | 4.75e-05 | SAME BIN — still inexact |
+| v32/8k/L8 | 1.96e-06 | 1.08e-05 | SAME BIN — still inexact (5.5× short) |
+| v32/64k/L16 | 2.38e-06 | 7.17e-06 | SAME BIN — still inexact (3× short) |
+
+Why it cannot work in principle:
+
+1. **Pigeonhole**: ANY fixed monotone transform + a fixed 2^18–2^19-bin
+   two-level histogram partitions fp32's ~2^30 candidate-representable
+   values into ≤2^19 classes; some class contains ≥2 distinct values, and
+   real/adversarial data can (and does) place the K boundary inside it.
+   A static re-measure (linear→log→anything) only moves WHICH pairs
+   collide; it cannot eliminate collisions.
+2. **Log specifically trades small-|v| for large-|v| boundaries**: log gives
+   uniform RELATIVE resolution. The v32 failing pairs sit at |v|≈4–5 where
+   their relative gap (2e-6) is far below the relative bin width — log makes
+   those strictly worse than linear would need. Meanwhile candidates near 0
+   (pro/512k has |v| down to 3e-5) inflate ln(max/min) to ~12, widening
+   every log bin.
+3. **Engineering cost is not free either**: logits are signed (v32 boundary
+   values are negative) → sign-split segments; log/ex2 = MUFU per candidate
+   × 2 passes (hist + scatter) over kC≈5–6K candidates — a real add on the
+   hot path, paid on 100% of rows to not fix the 1%.
+
+Note the "log-like binning done right" is exactly binning by the top bits of
+the monotonic u32 order key (sign+exponent+mantissa-high) — i.e. option F3's
+first radix digit. It inherits the same pigeonhole limit per pass; what makes
+F3 exact is the guaranteed ≤4-pass recursion, not the transform.
+
+## 7. On the performance concern with F1/F2
+
+Historical regressions in this area (p4_fused_hist −15%, global kNumBins
+512, kNumBins=256) were UNCONDITIONAL structural changes paid on every row.
+F1/F2 as specified here are **block-uniform conditional** paths: the extra
+recursion/tail-select fires only when `cnt_straddle > need` — a whole-block
+branch on an SMEM scalar that is false on ~99% of real rows (and ~100% of
+synth rows). The 99%-path cost is one extra SETP/branch on a value already
+in SMEM + icache footprint; the 1%-path pays ~1–2µs. If even that footprint
+measures as a regression (op32 showed small-N cells are icache/issue-bound),
+the fallback is F2 with the tail-select hoisted into a separate __noinline__
+device function (cold section), or a compile-time flag default-ON only for
+K∈{1024,2048} where the failures occur.
