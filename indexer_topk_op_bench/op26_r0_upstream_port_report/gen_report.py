@@ -65,6 +65,50 @@ REAL_JS = [dict(model=r["model"], isl=r["isl"], N=int(r["N"]), K=int(r["K"]),
                 hit=fnum(r["hit_rate"]), base=fnum(r["base"]), pr=fnum(r["pr"]),
                 op26=fnum(r["op26"])) for r in real]
 
+# ---- §4b per-layer real data (3 GVR-active layers, no median) --------------
+real_layers = read_csv("real_3arm_layers.csv")
+REAL_L_JS = [dict(model=r["model"], isl=r["isl"], N=int(r["N"]), L=int(r["layer"]),
+                  hit=fnum(r["hit"]), base=fnum(r["base"]), pr=fnum(r["pr"]),
+                  op26=fnum(r["op26"])) for r in real_layers]
+
+
+def _layer_spread():
+    """Per-rung inter-layer spread of PR/base + the extreme examples."""
+    from collections import defaultdict as _dd
+    g = _dd(list)
+    for r in real_layers:
+        pvb = fnum(r["pr_vs_base"])
+        if pvb:
+            g[(r["model"], r["isl"])].append((int(r["layer"]), pvb, fnum(r["hit"])))
+    spreads = []
+    for (m, isl), ls in g.items():
+        vs = [v for _, v, _ in ls]
+        hs = [h for _, _, h in ls if h is not None]
+        spreads.append((max(vs) / min(vs), m, isl, min(vs), max(vs),
+                        min(hs), max(hs)))
+    spreads.sort(reverse=True)
+    med = sorted(s[0] for s in spreads)[len(spreads) // 2]
+    return spreads, med
+
+
+LAYER_SPREADS, LAYER_SPREAD_MED = _layer_spread()
+
+
+def real_layer_table():
+    if not real_layers:
+        return "<p class='mut'>(real_3arm_layers.csv not yet available)</p>"
+    h = ("<tr><th>model</th><th>ISL</th><th>N</th><th>layer</th><th>hit</th>"
+         "<th>base µs</th><th>PR µs</th><th>op26 µs</th><th>PR/base</th>"
+         "<th>op26/PR</th><th>PR exact</th><th>base exact</th></tr>")
+    body = ""
+    for r in real_layers:
+        body += (f"<tr><td>{r['model']}</td><td>{r['isl']}</td><td>{r['N']}</td>"
+                 f"<td>L{r['layer']}</td><td>{r['hit']}</td><td>{r['base']}</td>"
+                 f"<td>{r['pr']}</td><td>{r['op26']}</td><td>{r['pr_vs_base']}</td>"
+                 f"<td>{r['pr_vs_op26']}</td><td>{r['pr_exact']}</td>"
+                 f"<td>{r['base_exact']}</td></tr>")
+    return f"<table>{h}{body}</table>"
+
 # ---- BS-scaling data (§8) -------------------------------------------------
 bs_synth = read_csv("bs_synth.csv")
 bs_real = read_csv("bs_real.csv")
@@ -848,7 +892,11 @@ fixed cs4/T1024 instantiation, so these numbers reflect production shapes.</p></
 
 <h2>4 · Real-data results (V4 + V3.2 decode-capture) / 真实数据结果</h2>
 {HEADNOTE}
-<div class="lang-en"><p>Real DeepSeek decode-capture top-K inputs, BS=1 fp32, median over 3 GVR-active layers per (model, ISL).
+<div class="lang-en"><p>Real DeepSeek decode-capture top-K inputs, BS=1 fp32. <b>This chapter's headline numbers are
+single-layer</b> — the 2026-07-16 launch-contract refresh measures one GVR-active layer per model
+(flash L22 / pro L30 / v32 L34); the original 3-layer median sweep (07-15, frozen launch config) is kept as the
+<b>per-layer view in §4b</b> below, because inter-layer differences are large (median rung spread
+{LAYER_SPREAD_MED:.2f}×) and a median blurs them.
 Three model families: <b>V4 Flash</b> (K512, cr=4), <b>V4 Pro</b> (K1024, cr=4), <b>V3.2</b> (K2048, cr=1).
 Indexer length N = ISL/cr (V4: ISL/4; V3.2: ≈ISL). hit = mean preIdx∩topK hit-rate, where
 <code>preIdx</code> = the previous decode step's captured top-K (real temporal warm-start; for V3.2 reconstructed
@@ -861,7 +909,10 @@ larger than synthetic {syn_pvb:.3f}× because the upstream base secant is slower
 V3.2 (K=2048, dense cr=1, hit≈0.4–0.93) shows the widest PR/base wins. Residual <b>op26/PR = {real_pvo:.3f}</b>
 (~{(1-real_pvo)*100:.0f}%; V3.2 {real_pvo_v32:.3f}). V3.2 real captures span 7 ISL rungs (4K–256K; physical
 kv_len caps N at ~163775 for ISL_256K).</p></div>
-<div class="lang-zh"><p>真实 DeepSeek 解码采集 top-K 输入，BS=1 fp32，每个 (model, ISL) 对 3 个 GVR-active 层取中位数。
+<div class="lang-zh"><p>真实 DeepSeek 解码采集 top-K 输入，BS=1 fp32。<b>本章标题数字为单层测量</b>——2026-07-16 的
+launch 契约复测每个模型测一个 GVR-active 层（flash L22 / pro L30 / v32 L34）；原始 3 层 sweep（07-15，冻结
+launch 配置）保留为下方 <b>§4b 逐层视图</b>——层间差异很大（各档中位跨度 {LAYER_SPREAD_MED:.2f}×），
+取中位数会把它抹平。
 三个模型族：<b>V4 Flash</b>（K512，cr=4）、<b>V4 Pro</b>（K1024，cr=4）、<b>V3.2</b>（K2048，cr=1）。
 indexer 长度 N = ISL/cr（V4：ISL/4；V3.2：≈ISL）。hit = preIdx∩topK 平均命中率，其中
 <code>preIdx</code> = 上一解码步采集的 top-K（真实时序 warm-start；V3.2 因无独立 <code>preidx.in</code> 而由
@@ -890,6 +941,47 @@ V3.2 真实采集覆盖 7 档 ISL（4K–256K；ISL_256K 的物理 kv_len 使 N 
   <p class="noscript">If charts are blank (script-free viewer), use the table below.</p>
 </div>
 <details><summary class="mut">full real-data table ({len(real)} rows) / 完整真实数据表（{len(real)} 行）</summary>{real_table()}</details>
+
+<h3>4b · Per-layer view — no layer averaging / 逐层视图——不做层间平均</h3>
+<div class="lang-en"><p>All {len(real_layers)} per-layer measurements of the 3-layer real sweep
+(<b>3 GVR-active layers per model</b>: flash L10/L22/L34, pro L14/L30/L46, v32 L14/L34/L54; 07-15,
+branch HEAD 018251950f, frozen launch config cs4/T1024 — see provenance note below). Layers of the SAME
+(model, ISL) differ strongly in per-layer hit-rate and value distribution, and GVR is data-sensitive where the
+histogram arms are not — e.g. <b>{LAYER_SPREADS[0][1]}/{LAYER_SPREADS[0][2]}</b>: PR/base
+{LAYER_SPREADS[0][3]:.2f}–{LAYER_SPREADS[0][4]:.2f}× across its 3 layers (hit {LAYER_SPREADS[0][5]:.2f}–{LAYER_SPREADS[0][6]:.2f});
+<b>{LAYER_SPREADS[1][1]}/{LAYER_SPREADS[1][2]}</b>: {LAYER_SPREADS[1][3]:.2f}–{LAYER_SPREADS[1][4]:.2f}×;
+<b>{LAYER_SPREADS[2][1]}/{LAYER_SPREADS[2][2]}</b>: {LAYER_SPREADS[2][3]:.2f}–{LAYER_SPREADS[2][4]:.2f}×.
+Median rung spread {LAYER_SPREAD_MED:.2f}×. A layer median (the pre-refresh §4) hides exactly this.</p>
+<p class="mut"><b>Provenance</b>: this per-layer sweep predates the launch-contract refresh, so its
+absolute large-N V4 cells understate PR (frozen shapes; see §6) — read it for <b>inter-layer spread and
+per-layer arm ordering</b>, and read the §4 headline (refreshed, single layer) for absolute contract numbers.</p></div>
+<div class="lang-zh"><p>3 层真实 sweep 的全部 {len(real_layers)} 条逐层测量
+（<b>每模型 3 个 GVR-active 层</b>：flash L10/L22/L34、pro L14/L30/L46、v32 L14/L34/L54；07-15,
+分支 HEAD 018251950f,冻结 launch 配置 cs4/T1024——溯源见下）。同一 (model, ISL) 的不同层在逐层
+hit-rate 与值分布上差异显著,而 GVR 恰是数据敏感的（直方图类臂不敏感）——如
+<b>{LAYER_SPREADS[0][1]}/{LAYER_SPREADS[0][2]}</b>:3 层 PR/base
+{LAYER_SPREADS[0][3]:.2f}–{LAYER_SPREADS[0][4]:.2f}×（hit {LAYER_SPREADS[0][5]:.2f}–{LAYER_SPREADS[0][6]:.2f}）;
+<b>{LAYER_SPREADS[1][1]}/{LAYER_SPREADS[1][2]}</b>:{LAYER_SPREADS[1][3]:.2f}–{LAYER_SPREADS[1][4]:.2f}×;
+<b>{LAYER_SPREADS[2][1]}/{LAYER_SPREADS[2][2]}</b>:{LAYER_SPREADS[2][3]:.2f}–{LAYER_SPREADS[2][4]:.2f}×。
+各档中位跨度 {LAYER_SPREAD_MED:.2f}×。层间取中位数（refresh 前的 §4 口径）恰好把这些抹平。</p>
+<p class="mut"><b>溯源</b>:本逐层 sweep 早于 launch 契约复测,其大 N V4 cell 的绝对值低估 PR
+（冻结形状,见 §6）——它用于看<b>层间跨度与逐层臂间排序</b>;绝对契约数字以 §4 标题（复测,单层）为准。</p></div>
+<div class="card">
+  <div class="ctl">
+    <b>model</b>
+    <label class="ck"><input type="checkbox" class="rlm" value="flash" checked>V4 Flash · K512</label>
+    <label class="ck"><input type="checkbox" class="rlm" value="pro">V4 Pro · K1024</label>
+    <label class="ck"><input type="checkbox" class="rlm" value="v32">V3.2 · K2048</label>
+    &nbsp; <b>arms</b>
+    <label class="ck"><input type="checkbox" class="rla" value="base" checked>base (secant)</label>
+    <label class="ck"><input type="checkbox" class="rla" value="pr" checked>PR (R0+RS)</label>
+    <label class="ck"><input type="checkbox" class="rla" value="op26">op26_r0auto</label>
+    <span class="mut">· color = arm · line style = layer (solid/dash/dot, per-model L order) · one model at a time reads best</span>
+  </div>
+  <div class="row"><div id="realL_lat" class="plt"></div><div id="realL_rat" class="plt"></div></div>
+  <p class="noscript">If charts are blank (script-free viewer), use the table below.</p>
+</div>
+<details><summary class="mut">full per-layer table ({len(real_layers)} rows) / 完整逐层表（{len(real_layers)} 行）</summary>{real_layer_table()}</details>
 
 <h2>5 · Exactness / 精确性</h2>
 <div class="lang-en"><ul>
@@ -1504,6 +1596,7 @@ findings in <code>BIGBS_TRIAGE_NOTE.md</code>.</li>
 <script>
 const SYN={json.dumps(SYN_JS)};
 const REAL={json.dumps(REAL_JS)};
+const REAL_L={json.dumps(REAL_L_JS)};
 const BS_SYN={json.dumps(BS_SYN_JS)};
 const BS_REAL={json.dumps(BS_REAL_JS)};
 const ARMC={{base:'#ff7a7a',pr:'#6ea8fe',op26:'#6ede8a'}};
@@ -1570,6 +1663,30 @@ function drawReal(){{
   const tk=nTicks(all);
   Plotly.react('real_lat',lat,LAY('Real V4+V3.2 decode — latency vs indexer N (fp32 BS=1, cold-L2)','ISL (indexer N: V4=ISL/4, V3.2≈ISL)','µs',null,tk),{{responsive:true}});
   Plotly.react('real_rat',rat,LAY('Real V4+V3.2 decode — speedup vs base (>1 faster)','ISL (indexer N)','ratio',1,tk),{{responsive:true}});
+}}
+// ---- §4b per-layer real view (no layer averaging) ----
+const LDASH=['solid','dash','dot'];
+function drawRealL(){{
+  const models=vals('rlm'),arms=vals('rla'),lat=[],rat=[],all=[];
+  models.forEach(m=>{{
+    const Ls=[...new Set(REAL_L.filter(r=>r.model===m).map(r=>r.L))].sort((a,b)=>a-b);
+    Ls.forEach((L,li)=>{{
+      const rows=REAL_L.filter(r=>r.model===m&&r.L===L).sort((a,b)=>a.N-b.N);
+      all.push(...rows);
+      const xs=rows.map(r=>r.N),cd=rows.map(r=>islLabel(r.isl)+' · hit '+(r.hit!=null?r.hit.toFixed(2):'?')),
+            dash=LDASH[li%3],tag=RMLAB[m]+' L'+L;
+      const ht='%{{customdata}} · indexer N=%{{x}} · %{{y:.2f}}<extra>%{{fullData.name}}</extra>';
+      arms.forEach(a=>{{
+        lat.push({{x:xs,y:rows.map(r=>r[a]),customdata:cd,name:a+' '+tag,mode:'lines+markers',
+          line:{{color:ARMC[a],dash:dash}},marker:{{size:5}},hovertemplate:ht}});
+        if(a!=='base') rat.push({{x:xs,y:rows.map(r=>r.base/r[a]),customdata:cd,name:a+'/base '+tag,
+          mode:'lines+markers',line:{{color:ARMC[a],dash:dash}},marker:{{size:5}},hovertemplate:ht}});
+      }});
+    }});
+  }});
+  const tk=nTicks(all);
+  Plotly.react('realL_lat',lat,LAY('Real decode PER LAYER — latency vs indexer N (fp32 BS=1, frozen-cfg sweep)','ISL (indexer N)','µs',null,tk),{{responsive:true}});
+  Plotly.react('realL_rat',rat,LAY('Real decode PER LAYER — speedup vs base within layer (>1 faster)','ISL (indexer N)','ratio',1,tk),{{responsive:true}});
 }}
 // ---- §7 BS scaling: BS on log-x ----
 function bsLAY(t,yt,ref){{
@@ -1700,9 +1817,9 @@ function drawRival(){{
   Plotly.react('rv_lat',lat,L('External top-K — '+scK+' '+dt+' — latency vs '+(sweep==='bs'?'BS':'N')+' (lower = faster)','µs',null),{{responsive:true}});
   Plotly.react('rv_rat',rat,L('t(GVR op26)/t(arm) — >1 = arm FASTER than GVR','ratio',1),{{responsive:true}});
 }}
-function drawAll(){{try{{drawSyn();}}catch(e){{}} try{{drawReal();}}catch(e){{}}
+function drawAll(){{try{{drawSyn();}}catch(e){{}} try{{drawReal();}}catch(e){{}} try{{drawRealL();}}catch(e){{}}
   try{{drawBsSyn();}}catch(e){{}} try{{drawBsReal();}}catch(e){{}} try{{drawHM();}}catch(e){{}} try{{drawRival();}}catch(e){{}}}}
-document.querySelectorAll('input[name=sk],.ss,.sa,.rm,.ra,input[name=bsk],input[name=bsd],input[name=bsn],.bss,.bsa,.brm,input[name=brd],input[name=brl],.bra,input[name=hmf],input[name=hmk],input[name=hms],input[name=hmm],input[name=hmd],.hmz,input[name=rvf],input[name=rvv],input[name=rvk],input[name=rvs],input[name=rvm],input[name=rvd],input[name=rvn],input[name=rvi],.rva').forEach(e=>e.addEventListener('change',()=>setTimeout(drawAll,0)));
+document.querySelectorAll('input[name=sk],.ss,.sa,.rm,.ra,.rlm,.rla,input[name=bsk],input[name=bsd],input[name=bsn],.bss,.bsa,.brm,input[name=brd],input[name=brl],.bra,input[name=hmf],input[name=hmk],input[name=hms],input[name=hmm],input[name=hmd],.hmz,input[name=rvf],input[name=rvv],input[name=rvk],input[name=rvs],input[name=rvm],input[name=rvd],input[name=rvn],input[name=rvi],.rva').forEach(e=>e.addEventListener('change',()=>setTimeout(drawAll,0)));
 if(window.Plotly) drawAll(); else window.addEventListener('load',drawAll);
 </script>
 </body>
