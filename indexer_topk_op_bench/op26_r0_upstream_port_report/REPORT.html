@@ -956,6 +956,81 @@ K∈{512,1024,2048}、cr∈{1,4}、cs∈{1,4,8} 全部修复。未受影响 cell
 <details open><summary class='mut'><b>Canonical shipped-head tables (BS=1 fp32, per seq-len) / 当前 HEAD canonical 表（BS=1 fp32，按序列长）</b></summary><div class='lang-en'><p class='mut'>Same-run 3-arm re-measure at the shipped PR head <code>eae374554c</code> (base vs NEW; identical grid to §3/§4). These are the numbers now quoted in the PR#16457 body.</p></div><div class='lang-zh'><p class='mut'>在已上线 PR HEAD <code>eae374554c</code> 下的同轮 3 臂重测（base vs NEW；网格与 §3/§4 完全一致）。PR#16457 body 现引用的即这组数字。</p></div><p><b>K512 · V4 Flash</b> — geomean best 1.252× / worst 1.008×</p><table><tr><th>N</th><th>base best µs</th><th>NEW best µs</th><th>best ↑</th><th>base worst µs</th><th>NEW worst µs</th><th>worst ↑</th></tr><tr><td>4,096</td><td>12.554</td><td>9.51</td><td>1.32×</td><td>9.789</td><td>9.542</td><td>1.03×</td></tr><tr><td>8,192</td><td>12.531</td><td>9.658</td><td>1.30×</td><td>9.162</td><td>9.56</td><td>0.958×</td></tr><tr><td>16,384</td><td>13.251</td><td>10.45</td><td>1.27×</td><td>12.594</td><td>10.258</td><td>1.23×</td></tr><tr><td>32,768</td><td>13.504</td><td>11.99</td><td>1.13×</td><td>11.987</td><td>12.0</td><td>0.999×</td></tr><tr><td>65,536</td><td>19.517</td><td>13.059</td><td>1.49×</td><td>12.742</td><td>13.048</td><td>0.977×</td></tr><tr><td>131,072</td><td>17.078</td><td>14.414</td><td>1.18×</td><td>13.019</td><td>13.35</td><td>0.975×</td></tr><tr><td>262,144</td><td>19.653</td><td>15.461</td><td>1.27×</td><td>16.757</td><td>15.941</td><td>1.05×</td></tr><tr><td>524,288</td><td>23.058</td><td>19.859</td><td>1.16×</td><td>19.589</td><td>19.84</td><td>0.987×</td></tr><tr><td>1,048,576</td><td>31.226</td><td>26.475</td><td>1.18×</td><td>24.094</td><td>26.616</td><td>0.905×</td></tr></table><p><b>K1024 · V4 Pro</b> — geomean best 1.392× / worst 1.037×</p><table><tr><th>N</th><th>base best µs</th><th>NEW best µs</th><th>best ↑</th><th>base worst µs</th><th>NEW worst µs</th><th>worst ↑</th></tr><tr><td>4,096</td><td>10.171</td><td>9.232</td><td>1.10×</td><td>9.595</td><td>9.312</td><td>1.03×</td></tr><tr><td>8,192</td><td>18.39</td><td>9.829</td><td>1.87×</td><td>9.554</td><td>10.118</td><td>0.944×</td></tr><tr><td>16,384</td><td>16.453</td><td>10.856</td><td>1.52×</td><td>10.034</td><td>10.706</td><td>0.937×</td></tr><tr><td>32,768</td><td>21.909</td><td>12.128</td><td>1.81×</td><td>15.678</td><td>12.034</td><td>1.30×</td></tr><tr><td>65,536</td><td>18.912</td><td>13.987</td><td>1.35×</td><td>17.334</td><td>14.589</td><td>1.19×</td></tr><tr><td>131,072</td><td>19.136</td><td>14.702</td><td>1.30×</td><td>15.29</td><td>14.654</td><td>1.04×</td></tr><tr><td>262,144</td><td>23.446</td><td>16.912</td><td>1.39×</td><td>17.234</td><td>16.939</td><td>1.02×</td></tr><tr><td>524,288</td><td>25.048</td><td>20.102</td><td>1.25×</td><td>19.605</td><td>20.664</td><td>0.949×</td></tr><tr><td>1,048,576</td><td>30.723</td><td>26.933</td><td>1.14×</td><td>26.477</td><td>27.04</td><td>0.979×</td></tr></table><p><b>K2048 · V3.2</b> — geomean best 1.073× / worst 1.020×</p><table><tr><th>N</th><th>base best µs</th><th>NEW best µs</th><th>best ↑</th><th>base worst µs</th><th>NEW worst µs</th><th>worst ↑</th></tr><tr><td>8,192</td><td>14.682</td><td>12.435</td><td>1.18×</td><td>12.869</td><td>11.248</td><td>1.14×</td></tr><tr><td>16,384</td><td>14.634</td><td>13.392</td><td>1.09×</td><td>13.048</td><td>12.549</td><td>1.04×</td></tr><tr><td>32,768</td><td>17.408</td><td>16.32</td><td>1.07×</td><td>13.79</td><td>15.47</td><td>0.891×</td></tr><tr><td>65,536</td><td>20.579</td><td>18.91</td><td>1.09×</td><td>18.542</td><td>16.829</td><td>1.10×</td></tr><tr><td>131,072</td><td>20.405</td><td>20.328</td><td>1.00×</td><td>17.963</td><td>17.843</td><td>1.01×</td></tr><tr><td>262,144</td><td>24.605</td><td>22.163</td><td>1.11×</td><td>21.294</td><td>20.682</td><td>1.03×</td></tr><tr><td>524,288</td><td>21.68</td><td>22.877</td><td>0.948×</td><td>22.666</td><td>23.888</td><td>0.949×</td></tr><tr><td>1,048,576</td><td>38.016</td><td>34.288</td><td>1.11×</td><td>30.976</td><td>30.376</td><td>1.02×</td></tr></table><p><b>Real V4 Flash (K512)</b> — geomean 1.276×</p><table><tr><th>ISL</th><th>N</th><th>hit</th><th>base µs</th><th>NEW µs</th><th>speedup</th><th>exact</th></tr><tr><td>4k</td><td>1,027</td><td>0.64</td><td>8.424</td><td>7.406</td><td>1.14×</td><td>✓</td></tr><tr><td>8k</td><td>2,051</td><td>0.33</td><td>8.058</td><td>7.776</td><td>1.04×</td><td>✓</td></tr><tr><td>16k</td><td>4,099</td><td>0.34</td><td>10.413</td><td>8.154</td><td>1.28×</td><td>✓</td></tr><tr><td>32k</td><td>8,195</td><td>0.69</td><td>10.979</td><td>8.79</td><td>1.25×</td><td>✓</td></tr><tr><td>64k</td><td>16,387</td><td>0.08</td><td>13.981</td><td>11.442</td><td>1.22×</td><td>✓</td></tr><tr><td>128k</td><td>32,771</td><td>0.70</td><td>14.858</td><td>10.989</td><td>1.35×</td><td>✓</td></tr><tr><td>256k</td><td>65,538</td><td>0.28</td><td>16.083</td><td>13.37</td><td>1.20×</td><td>✓</td></tr><tr><td>512k</td><td>131,075</td><td>0.06</td><td>43.314</td><td>20.149</td><td>2.15×</td><td>✓</td></tr><tr><td>1024k</td><td>262,127</td><td>0.42</td><td>19.027</td><td>17.018</td><td>1.12×</td><td>✓</td></tr></table><p><b>Real V4 Pro (K1024)</b> — geomean 1.271×</p><table><tr><th>ISL</th><th>N</th><th>hit</th><th>base µs</th><th>NEW µs</th><th>speedup</th><th>exact</th></tr><tr><td>4k</td><td>1,027</td><td>1.00</td><td>18.85</td><td>9.467</td><td>1.99×</td><td>✓</td></tr><tr><td>8k</td><td>2,051</td><td>0.46</td><td>8.867</td><td>8.752</td><td>1.01×</td><td>✓</td></tr><tr><td>16k</td><td>4,099</td><td>0.74</td><td>14.574</td><td>9.485</td><td>1.54×</td><td>✓</td></tr><tr><td>32k</td><td>8,195</td><td>0.53</td><td>17.883</td><td>11.251</td><td>1.59×</td><td>✓</td></tr><tr><td>64k</td><td>16,387</td><td>0.31</td><td>11.838</td><td>11.379</td><td>1.04×</td><td>✓</td></tr><tr><td>128k</td><td>32,771</td><td>0.33</td><td>15.918</td><td>12.819</td><td>1.24×</td><td>✓</td></tr><tr><td>256k</td><td>65,539</td><td>0.36</td><td>16.442</td><td>14.494</td><td>1.13×</td><td>✓</td></tr><tr><td>512k</td><td>131,075</td><td>0.23</td><td>20.674</td><td>21.563</td><td>0.959×</td><td>✓</td></tr><tr><td>1024k</td><td>262,127</td><td>0.27</td><td>23.755</td><td>18.976</td><td>1.25×</td><td>✓</td></tr></table><p><b>Real V3.2 (K2048)</b> — geomean 1.348×</p><table><tr><th>ISL</th><th>N</th><th>hit</th><th>base µs</th><th>NEW µs</th><th>speedup</th><th>exact</th></tr><tr><td>4k</td><td>4,111</td><td>0.73</td><td>15.707</td><td>11.939</td><td>1.32×</td><td>✓</td></tr><tr><td>8k</td><td>8,207</td><td>0.84</td><td>15.032</td><td>14.115</td><td>1.06×</td><td>✓</td></tr><tr><td>16k</td><td>16,399</td><td>0.53</td><td>27.216</td><td>13.87</td><td>1.96×</td><td>✓</td></tr><tr><td>32k</td><td>32,783</td><td>0.43</td><td>19.482</td><td>16.67</td><td>1.17×</td><td>✓</td></tr><tr><td>64k</td><td>65,551</td><td>0.41</td><td>31.114</td><td>20.466</td><td>1.52×</td><td>✓</td></tr><tr><td>128k</td><td>131,087</td><td>0.62</td><td>21.235</td><td>17.934</td><td>1.18×</td><td>✓</td></tr><tr><td>256k</td><td>163,775</td><td>0.87</td><td>26.39</td><td>18.834</td><td>1.40×</td><td>✓</td></tr></table></details>
 </div>
 
+<!-- RUNGRECAL:BEGIN (update_report_rungrecal.py) -->
+<h2 id="sec-rungrecal">9c · Rung qfracs recalibration study — retune the global pair first; per-layer table second / rung 参数重标研究</h2>
+<div class="lang-en">
+<p><b>What.</b> The R0 ladder's shipped rung quantiles q=(0.85, 0.35) were validated by a full admission
+REPLAY on captured data (hint = logits[preIdx], 256-bin kernel-path rungs, full-row counts on a 14-q grid;
+cost proxy E[extra P2 full-row passes] = P(bracket)·1 + P(fallback)·2; calibrate on even steps, evaluate on
+odd). Data: the 9-ISL random-token decode-capture sweep (865 layer-cells) and the 2026-05-20 REAL SWE-bench
+captures (Flash 64K/100K, Pro 32K/64K native preIdx; V3.2 64K reconstructed). Full study:
+<code>E2E_exp/indexer_decode_capture/</code> report §5c-CCDF / §5c-CCDF-b, scripts
+<code>src/rung_table_eval.py</code> + <code>src/rung_table_real.py</code>.</p>
+<table><tr><th>random-token sweep, envelope ISL≥32K — E[extra P2 passes]</th><th>G ship (0.85,0.35)</th><th>Gbest (retuned global)</th><th>PL (per-layer table)</th><th>PLN</th><th>PL cut vs G</th><th>kernel ceiling</th></tr><tr><td><b>Flash (K=512)</b></td><td>0.165</td><td>0.158</td><td><b>0.098</b></td><td>0.157</td><td>−41%</td><td>~3%</td></tr><tr><td><b>Pro (K=1024)</b></td><td>0.350</td><td>0.185</td><td><b>0.091</b></td><td>0.138</td><td>−74%</td><td>~11%</td></tr><tr><td><b>V3.2* (K=2048)</b></td><td>0.481</td><td>0.175</td><td><b>0.068</b></td><td>0.089</td><td>−86%</td><td>~17%</td></tr></table>
+<table><tr><th>real SWE captures (odd-step eval) — E[extra] (ok%)</th><th>G ship</th><th>Gbest_r (rand-calib global)</th><th>PL_rand (rand-calib table)</th><th>PL_real (real-calib table)</th><th>ORACLE</th><th>same-pair layers</th></tr><tr><td><b>Flash 64K+100K</b></td><td>0.189 (87%)</td><td>0.119 (94%)</td><td>0.132 (92%)</td><td><b>0.070 (95%)</b></td><td>0.000 (100%)</td><td>4/21</td></tr><tr><td><b>Pro 32K+64K</b></td><td>0.327 (83%)</td><td>0.023 (98%)</td><td>0.043 (98%)</td><td><b>0.015 (99%)</b></td><td>0.000 (100%)</td><td>10/30</td></tr><tr><td><b>V3.2* 64K</b></td><td>0.857 (14%)</td><td>0.023 (98%)</td><td>0.297 (82%)</td><td><b>0.011 (99%)</b></td><td>0.000 (100%)</td><td>0/7</td></tr></table>
+<p><b>Findings.</b></p>
+<ol>
+<li><b>The shipped pair is a bug-grade mismatch on real V3.2</b>: (0.85, 0.35) lands in the bracket state on
+<b>85.7% of real V3.2-64K steps</b> (one extra falsi pass nearly every step, E[extra]=0.857; Pro SWE-32K
+41.8%). This is the same fat-admission family as §9's flash-L22 finding, but on the K2048 arm it is chronic.
+Switching to (0.8, 0.5) fixes it (0.023).</li>
+<li><b>Retune the GLOBAL pair first.</b> Train-optimal global pairs are Flash (0.95, 0.6) /
+Pro (0.95, 0.5) / V3.2 (0.8, 0.5) — all higher-q than shipped, consistent with the measured
+hint-rank of the true threshold (median r*/K 0.5–0.8). On real data a retuned global pair already reaches
+E[extra] 0.119 / 0.023 / 0.023 (vs shipped 0.189 / 0.327 / 0.857) — kernel-latency ceilings vs ship
+≈ Flash ~3% / Pro ~13% / V3.2 ~29% (memory-bound, kernel ≈ 2+E
+full-row-read equivalents at large N).</li>
+<li><b>A static per-layer table is the second-order lever.</b> Layer id is known at inference; qneeds become
+a tiny per-layer constant lookup (no extra rungs / SMEM / registers — a different failure class from the
+silicon-falsified uh4 M=4). On the random sweep it beats the global retune clearly in the envelope
+(PL cut −41% / −74% / −86% vs ship); on real data its net over the retuned global shrinks to ~0.3–2.3%
+kernel ceiling (real cross-layer r* spread is tighter) — maybe worth it on Flash only.</li>
+<li><b>Calibrate on real content.</b> Specific pair values do NOT transfer (random vs real tables agree on
+4/21 / 10/30 / 0/7 layers; the random per-layer table is WORSE than its own global pair on real V3.2,
+0.297 vs 0.023). Random data only gets the direction right (go higher q).</li>
+</ol>
+<p><b>Caveats.</b> ① The replayed "G" is the pre-vseed ladder — the shipped HEAD's r0_vseed (pmean virtual
+rung) already recovers part of these misses, so true headroom sits between the G and Gbest rows.
+② Admission ≠ latency (the uh4 lesson): falsi/fallback passes may be partially hidden by PDL/L2 — final
+sign-off needs a silicon nsys cold-L2 A/B on this PR branch. ③ Real captures are single-ISL points
+(32–100K); long-ISL layer-structure gains unverified. ④ fallback=2 passes is an assumption.</p>
+<p class="note"><b>Suggested follow-up on this PR</b>: (1) change the default r0_qfracs per (dtype, K) to the
+real-calibrated global pairs (one-line config, biggest win: V3.2/K2048 and Pro); (2) optionally a per-layer
+qneeds table for Flash; (3) nsys cold-L2 A/B per the §11 recipe before shipping either.</p>
+</div>
+<div class="lang-zh">
+<p><b>做了什么。</b>用捕获数据对 R0 阶梯出厂分位 q=(0.85, 0.35) 做全量 admission <b>复演</b>(hint =
+logits[preIdx],kernel 路径 256-bin rung,14 档 q 网格全行计数;代价代理 E[额外 P2 全行遍数] =
+P(bracket)·1 + P(fallback)·2;偶数步标定、奇数步评估)。数据 = 9 档 ISL 随机 token 解码捕获(865 层单元)
++ 2026-05-20 <b>真实 SWE-bench 捕获</b>(Flash 64K/100K、Pro 32K/64K 原生 preIdx;V3.2 64K 重建)。完整研究见
+<code>E2E_exp/indexer_decode_capture/</code> 报告 §5c-CCDF / §5c-CCDF-b,脚本
+<code>src/rung_table_eval.py</code> + <code>src/rung_table_real.py</code>。</p>
+<p><b>结论。</b></p>
+<ol>
+<li><b>出厂对在真实 V3.2 上是 bug 级失配</b>:(0.85, 0.35) 在真实 V3.2-64K 上 <b>85.7% 的步落入 bracket</b>
+(几乎每步多一遍 falsi 补射,E[extra]=0.857;Pro SWE-32K 41.8%)。与 §9 的 flash-L22 fat-admission 同族,
+但在 K2048 臂上是常态。换 (0.8, 0.5) 即修复(0.023)。</li>
+<li><b>第一优先:重调全局对。</b>训练最优全局对 Flash (0.95, 0.6) / Pro (0.95, 0.5) /
+V3.2 (0.8, 0.5) —— 均比出厂偏高 q,与实测真实阈值的 hint-rank(r*/K 中位 0.5–0.8)一致。真实数据上
+重调后的全局对即达 E[extra] 0.119 / 0.023 / 0.023(出厂 0.189 / 0.327 / 0.857)—— 对出厂的 kernel 延迟上限
+≈ Flash ~3% / Pro ~13% / V3.2 ~29%(大 N 内存受限,kernel ≈ 2+E 次全行等效读)。</li>
+<li><b>静态 per-layer 表是二阶杠杆。</b>layer id 推理时已知;qneeds 改为按层查小常量表即可(不加 rung、
+不加 SMEM/寄存器 —— 与硅上证伪的 uh4 M=4 不同类)。随机 sweep 包络内 per-layer 明显优于调全局
+(对出厂减遍 −41% / −74% / −86%);但真实数据上其相对重调全局的净增量缩到 kernel 上限 ~0.3–2.3%
+(真实数据层间 r* 分布更收敛)—— 或许只在 Flash 上值得。</li>
+<li><b>必须用真实语料标定。</b>具体表值不可跨数据迁移(随机表与真实表同对的层仅 4/21 / 10/30 / 0/7;
+随机 per-layer 表在真实 V3.2 上反而劣于其自身全局对,0.297 vs 0.023)。随机数据只把「方向偏高 q」标对了。</li>
+</ol>
+<p><b>Caveat。</b>① 复演的「G」是 vseed 之前的阶梯 —— 已上线 HEAD 的 r0_vseed(pmean 虚拟阶梯)已回收部分
+miss,真实余量介于 G 行与 Gbest 行之间。② admission ≠ latency(uh4 教训):falsi/fallback 遍可能被 PDL/L2
+部分隐藏 —— 最终判定需在本 PR 分支上做 nsys 冷 L2 A/B。③ 真实捕获仅 32–100K 单点 ISL,长 ISL 层结构增益未验证。
+④ fallback=2 遍为假设值。</p>
+<p class="note"><b>本 PR 的建议后续</b>:(1) 把各 (dtype, K) 的 r0_qfracs 默认值换成真实语料标定的全局对
+(一行配置,V3.2/K2048 与 Pro 收益最大);(2) 可选:Flash 加 per-layer qneeds 表;(3) 上线前按 §11 配方做
+nsys 冷 L2 A/B。</p>
+</div>
+<!-- RUNGRECAL:END -->
+
 <h2>10 · Test data · environment · code / 测试数据·环境·代码</h2>
 <div class="box">
 <div class="lang-en">
