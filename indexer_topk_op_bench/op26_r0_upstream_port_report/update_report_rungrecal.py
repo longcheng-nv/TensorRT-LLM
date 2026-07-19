@@ -105,9 +105,27 @@ rung) already recovers part of these misses, so true headroom sits between the G
 ② Admission ≠ latency (the uh4 lesson): falsi/fallback passes may be partially hidden by PDL/L2 — final
 sign-off needs a silicon nsys cold-L2 A/B on this PR branch. ③ Real captures are single-ISL points
 (32–100K); long-ISL layer-structure gains unverified. ④ fallback=2 passes is an assumption.</p>
-<p class="note"><b>Suggested follow-up on this PR</b>: (1) change the default r0_qfracs per (dtype, K) to the
-real-calibrated global pairs (one-line config, biggest win: V3.2/K2048 and Pro); (2) optionally a per-layer
-qneeds table for Flash; (3) nsys cold-L2 A/B per the §11 recipe before shipping either.</p>
+<p><b>Silicon A/B verdict (2026-07-19, b200-027, shipped head eae374554c via launch(r0_qfracs=…), nsys
+cold-L2, fp32 BS=1 seq-len scan, 3 arms paired per cell, 77 cells all exact).</b> Arms: <code>ship</code>
+defaults; <code>qr2</code> = real-calibrated pairs (K512 (0.9,0.5) / K1024 (0.95,0.6) / K2048 (0.6,0.35));
+<code>qr1</code> = column-count-preserving variant (K512 (0.9,) / K1024 (0.95,) / K2048 = qr2, serving as a
+duplicate noise control — its two arms agreed within 0.1%).</p>
+<table><tr><th>geomean ship/new (&gt;1 = new faster)</th><th>qr2</th><th>qr1</th></tr>
+<tr><td>real Flash / Pro / V3.2</td><td>0.965 / 0.987 / <b>1.023</b></td><td>0.999 / 0.985 / <b>1.022</b></td></tr>
+<tr><td>synth best K512 / K1024 / K2048</td><td>0.940 / 0.993 / <b>1.096</b></td><td>0.980 / 0.969 / <b>1.093</b></td></tr>
+<tr><td>synth worst K512 / K1024 / K2048</td><td>0.975 / 0.963 / 0.994</td><td>1.010 / 1.007 / 0.995</td></tr>
+<tr><td>ALL (77 cells)</td><td>0.990</td><td>1.005</td></tr></table>
+<p><b>Outcome — the uh4 lesson repeats: admission ≠ latency.</b> (1) <b>V4 (K512/K1024): DO NOT change</b> —
+qr2's extra explicit count column costs a real 3–7% (real Flash gm −3.5%) and even the column-preserving qr1
+is a wash (the falsi/fallback passes the admission model charges for are largely hidden by PDL / warm-L2 in
+wall-clock; the naive memory-bound ceiling over-translated by ~10×). (2) <b>K2048: (0.85,0.35)→(0.6,0.35) is
+a real but modest win</b> — real V3.2 gm <b>+2.2%</b> (8k +11.6%, no loser), synth-best gm <b>+9.6%</b>
+(65–262K up to +18%, 1M +14%), synth-worst gm −0.6% (deepest single cell −2.4% @262k). Candidate one-line
+per-K default change; before PR: re-run the −2.4% worst cell (noise check) + 16-bit + BS-axis spot checks.
+Harness/CSV: <code>qfracs_ab/</code>.</p>
+<p class="note"><b>Remaining follow-up</b>: per-layer qneeds table demoted further by this result (its extra
+admission gain over a retuned global pair translated to ~nothing on V4); the K2048 pair swap is the only
+piece that survived silicon.</p>
 </div>
 <div class="lang-zh">
 <p><b>做了什么。</b>用捕获数据对 R0 阶梯出厂分位 q=(0.85, 0.35) 做全量 admission <b>复演</b>(hint =
@@ -136,9 +154,23 @@ V3.2 {tuple(gb['v32'])} —— 均比出厂偏高 q,与实测真实阈值的 hin
 miss,真实余量介于 G 行与 Gbest 行之间。② admission ≠ latency(uh4 教训):falsi/fallback 遍可能被 PDL/L2
 部分隐藏 —— 最终判定需在本 PR 分支上做 nsys 冷 L2 A/B。③ 真实捕获仅 32–100K 单点 ISL,长 ISL 层结构增益未验证。
 ④ fallback=2 遍为假设值。</p>
-<p class="note"><b>本 PR 的建议后续</b>:(1) 把各 (dtype, K) 的 r0_qfracs 默认值换成真实语料标定的全局对
-(一行配置,V3.2/K2048 与 Pro 收益最大);(2) 可选:Flash 加 per-layer qneeds 表;(3) 上线前按 §11 配方做
-nsys 冷 L2 A/B。</p>
+<p><b>硅上 A/B 判定(2026-07-19,b200-027,shipped head eae374554c 经 launch(r0_qfracs=…),nsys 冷 L2,
+fp32 BS=1 序列长扫描,逐 cell 三臂配对,77 cell 全精确)。</b>臂:<code>ship</code> 默认;<code>qr2</code> =
+真实标定对(K512 (0.9,0.5) / K1024 (0.95,0.6) / K2048 (0.6,0.35));<code>qr1</code> = 保列数变体
+(K512 (0.9,) / K1024 (0.95,) / K2048 同 qr2,充当重复噪声对照——两臂互差 ≤0.1%)。</p>
+<table><tr><th>几何均值 ship/new(&gt;1 = 新参更快)</th><th>qr2</th><th>qr1</th></tr>
+<tr><td>real Flash / Pro / V3.2</td><td>0.965 / 0.987 / <b>1.023</b></td><td>0.999 / 0.985 / <b>1.022</b></td></tr>
+<tr><td>synth best K512 / K1024 / K2048</td><td>0.940 / 0.993 / <b>1.096</b></td><td>0.980 / 0.969 / <b>1.093</b></td></tr>
+<tr><td>synth worst K512 / K1024 / K2048</td><td>0.975 / 0.963 / 0.994</td><td>1.010 / 1.007 / 0.995</td></tr>
+<tr><td>全部 77 cell</td><td>0.990</td><td>1.005</td></tr></table>
+<p><b>结论 —— uh4 教训重演:admission ≠ latency。</b>(1) <b>V4(K512/K1024):不换</b> —— qr2 多一列显式
+计数实付 3–7%(real Flash gm −3.5%),保列数的 qr1 也只是 wash(admission 模型记账的 falsi/fallback 遍在
+wall-clock 里大部分被 PDL/热 L2 掩盖;朴素内存受限上限高估约 10×)。(2) <b>K2048:(0.85,0.35)→(0.6,0.35)
+是真实但温和的赢</b> —— real V3.2 gm <b>+2.2%</b>(8k +11.6%,无输点),synth-best gm <b>+9.6%</b>
+(65–262K 最高 +18%,1M +14%),synth-worst gm −0.6%(最深单点 −2.4% @262k)。候选一行 per-K 默认值改动;
+进 PR 前需:复测该 −2.4% 单点(噪声排查)+ 16-bit + BS 轴抽查。Harness/CSV:<code>qfracs_ab/</code>。</p>
+<p class="note"><b>剩余后续</b>:per-layer qneeds 表被本结果进一步降级(其相对重调全局对的额外 admission
+增益在 V4 上折算 ≈ 零);唯一过硅的是 K2048 换对。</p>
 </div>
 """
     return BEGIN + en + END
