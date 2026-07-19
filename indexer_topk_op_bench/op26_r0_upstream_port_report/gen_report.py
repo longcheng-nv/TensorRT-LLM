@@ -144,10 +144,14 @@ def _rl_model_blocks():
     lrows = ""
     for m in ("flash", "pro", "v32"):
         Ls = sorted({int(r["layer"]) for r in real_layers if r["model"] == m})
+        # v32: 58 layers overwhelm the initial view — default to the 3 bench
+        # layers (all 58 stay one "all" click away).
+        dflt = (lambda L: L in (14, 34, 54)) if m == "v32" else (lambda L: True)
         cks = "".join(
             f'<label class="ck"><input type="checkbox" class="rll rll_{m}" '
-            f'value="{L}" checked>L{L}</label>' for L in Ls)
-        lrows += (f'  <div class="ctl"><b>{mlab[m]}</b> ({len(Ls)} layers) '
+            f'value="{L}"{" checked" if dflt(L) else ""}>L{L}</label>' for L in Ls)
+        note = " (default: bench layers 14/34/54)" if m == "v32" else ""
+        lrows += (f'  <div class="ctl"><b>{mlab[m]}</b> ({len(Ls)} layers{note}) '
                   f'<a href="#" onclick="setL(\'rll_{m}\',true);return false">all</a> · '
                   f'<a href="#" onclick="setL(\'rll_{m}\',false);return false">none</a> — {cks}</div>\n')
     ext = ""
