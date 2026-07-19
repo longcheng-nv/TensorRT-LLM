@@ -260,9 +260,13 @@ def _rl_exact_note():
             f'in every diagnosed cell the true K-th and its neighbor differ by LESS than one fine bin '
             f'(6e-6–1e-5) — the docstring assumption "one recursion resolves the bin to ≤1 distinct value" '
             f'is falsified by real data. (An earlier note here attributed this to 16-bit tie keys — '
-            f'incorrect: the collision with fp16/bf16 grids was correlation, not mechanism.) Fix plan: '
-            f'<code>KERNEL_FIX_P4_FINEBIN.md</code>. Invisible to the single-layer §4 (25/25 exact) and all '
-            f'synthetic batteries.</p></div>'
+            f'incorrect: the collision with fp16/bf16 grids was correlation, not mechanism.) '
+            f'<b>RESOLVED UPSTREAM</b>: these rows are measured on this chapter\'s pre-vseed arm '
+            f'(@018251950f, per the §4 headnote); the shipped PR#16457 head (@eae374554c, '
+            f'<code>p4_exact_tail</code> = ambiguity-gated radix tie-select, default ON for fp32) is '
+            f'verified exact on all 9 fixtures AND the full 865-cell grid (2026-07-19, b200-027). '
+            f'Analysis & independent validation: <code>KERNEL_FIX_P4_FINEBIN.md</code>. Invisible to the '
+            f'single-layer §4 (25/25 exact) and all synthetic batteries.</p></div>'
             f'<div class="lang-zh"><p><b>精确性发现(仅全层覆盖可见):</b>PR 在 {n_all - len(bad)}/{n_all} '
             f'个逐层 cell 上精确;{len(bad)} 个例外({cells})全部同类且可复现——返回 K 个唯一索引,但一个'
             f'边界元素被换成真第 K 值下方的紧邻值。<b>根因(已对码验证)</b>:P4 rank-scatter exact 用'
@@ -270,7 +274,10 @@ def _rl_exact_note():
             f'bin 内的元素按任意顺序写出;其分辨率下限 = range/(kNumBins·256) ≈ 1.2e-5–3e-5,而全部诊断 '
             f'cell 中真第 K 值与其邻值的差(6e-6–1e-5)<b>小于一个精细 bin</b>——代码注释"一次递归足以把'
             f'跨界 bin 解析到 ≤1 个不同值"的假设被真实数据证伪。(此前此处标注为 16-bit tie 键——有误:'
-            f'与 fp16/bf16 网格的碰撞是相关而非机理。)修复方案见 <code>KERNEL_FIX_P4_FINEBIN.md</code>。'
+            f'与 fp16/bf16 网格的碰撞是相关而非机理。)<b>上游已修复</b>:这些行测量的是本章的 pre-vseed 臂'
+            f'(@018251950f,见 §4 头注);已上线 PR#16457 HEAD(@eae374554c,<code>p4_exact_tail</code> = '
+            f'歧义门控 radix tie-select,fp32 默认 ON)经验证在全部 9 个 fixture 与完整 865 cell 网格上精确'
+            f'(2026-07-19,b200-027)。分析与独立验证见 <code>KERNEL_FIX_P4_FINEBIN.md</code>。'
             f'单层 §4(25/25 精确)与全部合成电池均不可见。</p></div>')
 
 

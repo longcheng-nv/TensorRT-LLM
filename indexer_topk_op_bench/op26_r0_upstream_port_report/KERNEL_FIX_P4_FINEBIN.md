@@ -202,3 +202,37 @@ of RUNTIME tie detection in this structure.
 ("exact up to same-fine-bin boundary ties, ~1% of real layer-cells, error
 magnitude one boundary element at ~1e-5"); (c) F3 radix-select P4 rewrite
 (structural; potentially tax-free but unproven — a new campaign).
+
+## 9. RESOLUTION (2026-07-19): already fixed upstream — no PR needed
+
+Port preparation exposed the decisive fact: the defect does NOT exist at the
+shipped PR#16457 head. `@eae374554c` ("[None][fix] GVR top-K decode: exact
+tie resolution in the P4 straddling fine bin", 2026-07-16) added
+`p4_exact_tail` — an **ambiguity-gated MSB-first 8-bit radix select over
+f32 order keys** on the straddling-fine-bin tie set (rewrites
+[rank_above_fine, kK); default ON for fp32 rank-scatter-exact; hot path
+pays two scalar compares). That is precisely this doc's option F3, gated
+the way v2-v4 tried and failed to make cheap — and its cost was already
+absorbed in the §9b NEW/OLD re-measure (gm 0.9943, no regression flag).
+
+Verified on silicon today (standalone `p4f1_harness/gvrpkgprod` build of the
+shipped file): the 9 fixtures exact 5/5 each; the FULL 865-cell all-layer
+grid 865/865 exact.
+
+Scope correction to §0/§2 of this doc and to REPORT §4b: the 9/865
+inexactness belongs to the **pre-vseed measurement arm** (@018251950f — the
+bench snapshot the per-layer sweeps ran, as the §4 headnote states), NOT to
+the shipped kernel.
+
+F1 campaign disposition: v2-v4 + 164-case battery + gates stand as an
+independent re-derivation and third-party validation of the upstream fix
+(and of why the naive structures cost ~3% — the shipped ambiguity-gate is
+the right shape). Nothing to merge; no follow-up PR; F3 project moot
+(p4_exact_tail IS F3-lite).
+
+Process lesson (recorded to memory): a defect diagnosed on a pinned bench
+snapshot must be REPRODUCED ON THE SHIPPED HEAD before any fix campaign —
+one 10-minute fixture run would have saved the whole F1 implementation
+loop. The snapshot's very first "earlier fixes" table in §1 mislabeled
+`p4_exact_tail` as "exact-tail scratch/rank handling" instead of reading
+its diff.
