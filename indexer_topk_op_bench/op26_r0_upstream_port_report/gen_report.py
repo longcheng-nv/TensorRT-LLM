@@ -94,6 +94,25 @@ def _layer_spread():
 LAYER_SPREADS, LAYER_SPREAD_MED = _layer_spread()
 
 
+def _rl_model_blocks():
+    """§4b: one full-width chart pair per model, with per-model layer checkboxes."""
+    mlab = {"flash": "V4 Flash · K512 · cr=4", "pro": "V4 Pro · K1024 · cr=4",
+            "v32": "V3.2 · K2048 · cr=1"}
+    out = ""
+    for m in ("flash", "pro", "v32"):
+        Ls = sorted({int(r["layer"]) for r in real_layers if r["model"] == m})
+        cks = "".join(
+            f'<label class="ck"><input type="checkbox" class="rll rll_{m}" '
+            f'value="{L}" checked>L{L}</label>' for L in Ls)
+        out += (f'<div class="card">\n  <div class="ctl"><b>{mlab[m]}</b> — layers: {cks}</div>\n'
+                f'  <div id="realL_lat_{m}" class="pltw"></div>\n'
+                f'  <div id="realL_rat_{m}" class="pltw"></div>\n</div>\n')
+    return out
+
+
+RL_MODEL_BLOCKS = _rl_model_blocks()
+
+
 def real_layer_table():
     if not real_layers:
         return "<p class='mut'>(real_3arm_layers.csv not yet available)</p>"
@@ -757,6 +776,7 @@ HTML = f"""<!DOCTYPE html>
   .row{{display:grid;grid-template-columns:1fr 1fr;gap:12px}}
   @media(max-width:820px){{.row{{grid-template-columns:1fr}}}}
   .plt{{width:100%;height:310px}}
+  .pltw{{width:100%;height:420px;margin-top:6px}}
   .noscript{{color:var(--org);font-size:12px}}
 </style>
 </head>
@@ -968,19 +988,15 @@ hit-rate 与值分布上差异显著,而 GVR 恰是数据敏感的（直方图�
 （冻结形状,见 §6）——它用于看<b>层间跨度与逐层臂间排序</b>;绝对契约数字以 §4 标题（复测,单层）为准。</p></div>
 <div class="card">
   <div class="ctl">
-    <b>model</b>
-    <label class="ck"><input type="checkbox" class="rlm" value="flash" checked>V4 Flash · K512</label>
-    <label class="ck"><input type="checkbox" class="rlm" value="pro">V4 Pro · K1024</label>
-    <label class="ck"><input type="checkbox" class="rlm" value="v32">V3.2 · K2048</label>
-    &nbsp; <b>arms</b>
+    <b>arms</b>
     <label class="ck"><input type="checkbox" class="rla" value="base" checked>base (secant)</label>
     <label class="ck"><input type="checkbox" class="rla" value="pr" checked>PR (R0+RS)</label>
     <label class="ck"><input type="checkbox" class="rla" value="op26">op26_r0auto</label>
-    <span class="mut">· color = arm · line style = layer (solid/dash/dot, per-model L order) · one model at a time reads best</span>
+    <span class="mut">· one chart pair per model (full width) · color = arm · line style = layer (solid/dash/dot) · uncheck layers below to declutter</span>
   </div>
-  <div class="row"><div id="realL_lat" class="plt"></div><div id="realL_rat" class="plt"></div></div>
-  <p class="noscript">If charts are blank (script-free viewer), use the table below.</p>
 </div>
+{RL_MODEL_BLOCKS}
+<p class="noscript">If charts are blank (script-free viewer), use the table below.</p>
 <details><summary class="mut">full per-layer table ({len(real_layers)} rows) / 完整逐层表（{len(real_layers)} 行）</summary>{real_layer_table()}</details>
 
 <h2>5 · Exactness / 精确性</h2>
@@ -1664,29 +1680,35 @@ function drawReal(){{
   Plotly.react('real_lat',lat,LAY('Real V4+V3.2 decode — latency vs indexer N (fp32 BS=1, cold-L2)','ISL (indexer N: V4=ISL/4, V3.2≈ISL)','µs',null,tk),{{responsive:true}});
   Plotly.react('real_rat',rat,LAY('Real V4+V3.2 decode — speedup vs base (>1 faster)','ISL (indexer N)','ratio',1,tk),{{responsive:true}});
 }}
-// ---- §4b per-layer real view (no layer averaging) ----
+// ---- §4b per-layer real view (no layer averaging; one chart pair per model) ----
 const LDASH=['solid','dash','dot'];
 function drawRealL(){{
-  const models=vals('rlm'),arms=vals('rla'),lat=[],rat=[],all=[];
-  models.forEach(m=>{{
-    const Ls=[...new Set(REAL_L.filter(r=>r.model===m).map(r=>r.L))].sort((a,b)=>a-b);
-    Ls.forEach((L,li)=>{{
+  const arms=vals('rla');
+  ['flash','pro','v32'].forEach(m=>{{
+    const allLs=[...new Set(REAL_L.filter(r=>r.model===m).map(r=>r.L))].sort((a,b)=>a-b);
+    const selLs=vals('rll_'+m).map(Number);
+    const lat=[],rat=[],all=[];
+    allLs.forEach((L,li)=>{{
+      if(!selLs.includes(L)) return;
       const rows=REAL_L.filter(r=>r.model===m&&r.L===L).sort((a,b)=>a.N-b.N);
       all.push(...rows);
       const xs=rows.map(r=>r.N),cd=rows.map(r=>islLabel(r.isl)+' · hit '+(r.hit!=null?r.hit.toFixed(2):'?')),
-            dash=LDASH[li%3],tag=RMLAB[m]+' L'+L;
+            dash=LDASH[li%3],tag='L'+L;
       const ht='%{{customdata}} · indexer N=%{{x}} · %{{y:.2f}}<extra>%{{fullData.name}}</extra>';
       arms.forEach(a=>{{
         lat.push({{x:xs,y:rows.map(r=>r[a]),customdata:cd,name:a+' '+tag,mode:'lines+markers',
-          line:{{color:ARMC[a],dash:dash}},marker:{{size:5}},hovertemplate:ht}});
+          line:{{color:ARMC[a],dash:dash,width:2}},marker:{{size:6}},hovertemplate:ht}});
         if(a!=='base') rat.push({{x:xs,y:rows.map(r=>r.base/r[a]),customdata:cd,name:a+'/base '+tag,
-          mode:'lines+markers',line:{{color:ARMC[a],dash:dash}},marker:{{size:5}},hovertemplate:ht}});
+          mode:'lines+markers',line:{{color:ARMC[a],dash:dash,width:2}},marker:{{size:6}},hovertemplate:ht}});
       }});
     }});
+    const tk=nTicks(all);
+    const l1=LAY(RMLAB[m]+' PER LAYER — latency vs indexer N (fp32 BS=1, frozen-cfg sweep)','ISL (indexer N)','µs',null,tk);
+    const l2=LAY(RMLAB[m]+' PER LAYER — speedup vs base within layer (>1 faster)','ISL (indexer N)','ratio',1,tk);
+    l1.height=420;l2.height=420;l1.legend.y=-0.18;l2.legend.y=-0.18;
+    Plotly.react('realL_lat_'+m,lat,l1,{{responsive:true}});
+    Plotly.react('realL_rat_'+m,rat,l2,{{responsive:true}});
   }});
-  const tk=nTicks(all);
-  Plotly.react('realL_lat',lat,LAY('Real decode PER LAYER — latency vs indexer N (fp32 BS=1, frozen-cfg sweep)','ISL (indexer N)','µs',null,tk),{{responsive:true}});
-  Plotly.react('realL_rat',rat,LAY('Real decode PER LAYER — speedup vs base within layer (>1 faster)','ISL (indexer N)','ratio',1,tk),{{responsive:true}});
 }}
 // ---- §7 BS scaling: BS on log-x ----
 function bsLAY(t,yt,ref){{
@@ -1819,7 +1841,7 @@ function drawRival(){{
 }}
 function drawAll(){{try{{drawSyn();}}catch(e){{}} try{{drawReal();}}catch(e){{}} try{{drawRealL();}}catch(e){{}}
   try{{drawBsSyn();}}catch(e){{}} try{{drawBsReal();}}catch(e){{}} try{{drawHM();}}catch(e){{}} try{{drawRival();}}catch(e){{}}}}
-document.querySelectorAll('input[name=sk],.ss,.sa,.rm,.ra,.rlm,.rla,input[name=bsk],input[name=bsd],input[name=bsn],.bss,.bsa,.brm,input[name=brd],input[name=brl],.bra,input[name=hmf],input[name=hmk],input[name=hms],input[name=hmm],input[name=hmd],.hmz,input[name=rvf],input[name=rvv],input[name=rvk],input[name=rvs],input[name=rvm],input[name=rvd],input[name=rvn],input[name=rvi],.rva').forEach(e=>e.addEventListener('change',()=>setTimeout(drawAll,0)));
+document.querySelectorAll('input[name=sk],.ss,.sa,.rm,.ra,.rla,.rll,input[name=bsk],input[name=bsd],input[name=bsn],.bss,.bsa,.brm,input[name=brd],input[name=brl],.bra,input[name=hmf],input[name=hmk],input[name=hms],input[name=hmm],input[name=hmd],.hmz,input[name=rvf],input[name=rvv],input[name=rvk],input[name=rvs],input[name=rvm],input[name=rvd],input[name=rvn],input[name=rvi],.rva').forEach(e=>e.addEventListener('change',()=>setTimeout(drawAll,0)));
 if(window.Plotly) drawAll(); else window.addEventListener('load',drawAll);
 </script>
 </body>
