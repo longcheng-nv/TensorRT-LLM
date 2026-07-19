@@ -253,15 +253,25 @@ def _rl_exact_note():
     return (f'<div class="lang-en"><p><b>Exactness finding (all-layer coverage only):</b> PR is exact on '
             f'{n_all - len(bad)}/{n_all} per-layer cells; the {len(bad)} exceptions ({cells}) are all the '
             f'same reproducible class — K unique indices returned, but ONE boundary element is swapped for '
-            f'the next value below the true K-th, and in every diagnosed case the two values collide in both '
-            f'fp16 and bf16 (16-bit tie-key resolution at the selection boundary; the op26 kC contract). '
-            f'Invisible to the single-layer §4 (25/25 exact there) and to synthetic batteries — flagged for '
-            f'kernel follow-up.</p></div>'
+            f'the next value below the true K-th. <b>Root cause (code-verified)</b>: the P4 rank-scatter '
+            f'exact path resolves the K boundary with a coarse linear histogram (kNumBins over the candidate '
+            f'range) plus ONE 256-sub-bin fine recursion; elements in the straddling fine bin are emitted in '
+            f'arbitrary order. Its resolution floor is range/(kNumBins·256) ≈ 1.2e-5–3e-5 on these rows, and '
+            f'in every diagnosed cell the true K-th and its neighbor differ by LESS than one fine bin '
+            f'(6e-6–1e-5) — the docstring assumption "one recursion resolves the bin to ≤1 distinct value" '
+            f'is falsified by real data. (An earlier note here attributed this to 16-bit tie keys — '
+            f'incorrect: the collision with fp16/bf16 grids was correlation, not mechanism.) Fix plan: '
+            f'<code>KERNEL_FIX_P4_FINEBIN.md</code>. Invisible to the single-layer §4 (25/25 exact) and all '
+            f'synthetic batteries.</p></div>'
             f'<div class="lang-zh"><p><b>精确性发现(仅全层覆盖可见):</b>PR 在 {n_all - len(bad)}/{n_all} '
             f'个逐层 cell 上精确;{len(bad)} 个例外({cells})全部同类且可复现——返回 K 个唯一索引,但一个'
-            f'边界元素被换成真第 K 值下方的紧邻值,且所有诊断案例中两值在 fp16 与 bf16 下均碰撞'
-            f'（选择边界处的 16-bit tie 键分辨率;op26 kC 契约）。单层 §4（该处 25/25 精确）与合成电池'
-            f'均不可见——已标记为内核后续跟进项。</p></div>')
+            f'边界元素被换成真第 K 值下方的紧邻值。<b>根因(已对码验证)</b>:P4 rank-scatter exact 用'
+            f'粗线性直方图(候选值域上 kNumBins 个 bin)+ 一次 256 子 bin 精细递归来解 K 边界,跨界精细 '
+            f'bin 内的元素按任意顺序写出;其分辨率下限 = range/(kNumBins·256) ≈ 1.2e-5–3e-5,而全部诊断 '
+            f'cell 中真第 K 值与其邻值的差(6e-6–1e-5)<b>小于一个精细 bin</b>——代码注释"一次递归足以把'
+            f'跨界 bin 解析到 ≤1 个不同值"的假设被真实数据证伪。(此前此处标注为 16-bit tie 键——有误:'
+            f'与 fp16/bf16 网格的碰撞是相关而非机理。)修复方案见 <code>KERNEL_FIX_P4_FINEBIN.md</code>。'
+            f'单层 §4(25/25 精确)与全部合成电池均不可见。</p></div>')
 
 
 RL_EXACT_NOTE = _rl_exact_note()
@@ -375,7 +385,7 @@ def real_layer_table():
     body = ""
     for r in real_layers:
         pe = r.get("pr_exact", "")
-        pe_cell = (f'<td style="color:var(--red);font-weight:700">{pe} (16-bit tie)</td>'
+        pe_cell = (f'<td style="color:var(--red);font-weight:700">{pe} (P4 fine-bin tie)</td>'
                    if pe == "False" else f"<td>{pe}</td>")
         # whole-row highlight for the 16-bit-tie inexact cells — findable
         # among 865 rows (see the exactness note above the charts)
