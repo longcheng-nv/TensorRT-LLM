@@ -375,14 +375,18 @@ def real_layer_table():
     body = ""
     for r in real_layers:
         pe = r.get("pr_exact", "")
-        pe_cell = (f'<td style="color:var(--red)">{pe}</td>' if pe == "False"
-                   else f"<td>{pe}</td>")
+        pe_cell = (f'<td style="color:var(--red);font-weight:700">{pe} (16-bit tie)</td>'
+                   if pe == "False" else f"<td>{pe}</td>")
+        # whole-row highlight for the 16-bit-tie inexact cells — findable
+        # among 865 rows (see the exactness note above the charts)
+        rowst = (' style="background:rgba(255,122,122,.14);'
+                 'outline:1px solid rgba(255,122,122,.5)"' if pe == "False" else "")
         exc = ""
         if RL_HAS_EXT:
             e = _ext.get((r["model"], r["isl"], int(r["layer"])), {})
             exc = "".join(f"<td>{round(e[k], 2) if e.get(k) else ''}</td>"
                           for k in ("radix", "sgl", "fi"))
-        body += (f"<tr><td>{r['model']}</td><td>{r['isl']}</td><td>{r['N']}</td>"
+        body += (f"<tr{rowst}><td>{r['model']}</td><td>{r['isl']}</td><td>{r['N']}</td>"
                  f"<td>L{r['layer']}</td><td>{r['hit']}</td><td>{r['base']}</td>"
                  f"<td>{r['pr']}</td><td>{r['op26']}</td>{exc}<td>{r['pr_vs_base']}</td>"
                  f"<td>{r['pr_vs_op26']}</td>{pe_cell}"
