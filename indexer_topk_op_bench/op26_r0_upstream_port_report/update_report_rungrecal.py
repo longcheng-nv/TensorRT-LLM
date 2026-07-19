@@ -124,7 +124,7 @@ a real but modest win</b> — real V3.2 gm <b>+2.2%</b> (8k +11.6%, no loser), s
 per-K default change; before PR: re-run the −2.4% worst cell (noise check) + 16-bit + BS-axis spot checks.
 Harness/CSV: <code>qfracs_ab/</code>.</p>
 <p><b>Pre-PR validation (2026-07-19, all three gates PASSED — change committed to the PR branch as
-2d7ad4d019).</b> ① <i>Worst-cell noise re-check</i>: the −2.4% @262k did NOT reproduce (4 independent runs:
+0d6fc4f1f2 (pushed, PR head)).</b> ① <i>Worst-cell noise re-check</i>: the −2.4% @262k did NOT reproduce (4 independent runs:
 0.976/1.020/1.014/0.935 — scattered both ways; whole adverse batch 4-run geomean <b>1.007 = wash</b>;
 single-cell excursions in the adverse scenario span 0.64–1.51 across runs, i.e. noise-floor-dominated — per
 the stated priority, no further pair tuning attempted for the adverse axis). ② <i>16-bit</i>: wins carry —
@@ -136,7 +136,7 @@ cell; synth-best full 8N×11BS grid <b>+10.9%</b> (BS-invariant), synth-worst gr
 K512/K1024 and the pre-vseed fallback unchanged.</p>
 <p class="note"><b>Remaining follow-up</b>: per-layer qneeds table demoted further by this result (its extra
 admission gain over a retuned global pair translated to ~nothing on V4); the K2048 pair swap is the only
-piece that survived silicon — now validated on all three gates and committed (2d7ad4d019, push = maintainer's
+piece that survived silicon — now validated on all three gates and committed (0d6fc4f1f2 (pushed, PR head), push = maintainer's
 call).</p>
 </div>
 <div class="lang-zh">
@@ -181,7 +181,7 @@ wall-clock 里大部分被 PDL/热 L2 掩盖;朴素内存受限上限高估约 1
 是真实但温和的赢</b> —— real V3.2 gm <b>+2.2%</b>(8k +11.6%,无输点),synth-best gm <b>+9.6%</b>
 (65–262K 最高 +18%,1M +14%),synth-worst gm −0.6%(最深单点 −2.4% @262k)。候选一行 per-K 默认值改动;
 进 PR 前需:复测该 −2.4% 单点(噪声排查)+ 16-bit + BS 轴抽查。Harness/CSV:<code>qfracs_ab/</code>。</p>
-<p><b>进 PR 前验证(2026-07-19,三道门全部通过 —— 改动已提交 PR 分支 2d7ad4d019)。</b>①
+<p><b>进 PR 前验证(2026-07-19,三道门全部通过 —— 改动已提交 PR 分支 0d6fc4f1f2 (pushed, PR head))。</b>①
 <i>worst 单点噪声复测</i>:−2.4% @262k <b>不复现</b>(4 次独立 run:0.976/1.020/1.014/0.935,双向散布;
 整个逆风批 4-run 几何均值 <b>1.007 = wash</b>;逆风场景单 cell 跨 run 波动 0.64–1.51,噪声地板主导 ——
 按既定优先级,不再为逆风轴调替代对)。② <i>16-bit</i>:收益保持 —— synth-best bf16 <b>+9.4%</b> /
@@ -191,7 +191,7 @@ fp16 +0.4%(wash 偏正),全部精确。③ <i>BS 轴</i>:real V3.2 全 ISL × BS
 synth-worst 网格 <b>1.000</b> 纯 wash;352 个网格 cell,0 错误,0 不精确。最终上线语义:
 <code>K2048(vseed):(0.85,0.35)→(0.6,0.35)</code>;K512/K1024 与 pre-vseed 回退不变。</p>
 <p class="note"><b>剩余后续</b>:per-layer qneeds 表被本结果进一步降级(其相对重调全局对的额外 admission
-增益在 V4 上折算 ≈ 零);唯一过硅的是 K2048 换对 —— 现已通过全部三道验证并提交(2d7ad4d019,推送与否由
+增益在 V4 上折算 ≈ 零);唯一过硅的是 K2048 换对 —— 现已通过全部三道验证并提交(0d6fc4f1f2 (pushed, PR head),推送与否由
 维护者决定)。</p>
 </div>
 """
