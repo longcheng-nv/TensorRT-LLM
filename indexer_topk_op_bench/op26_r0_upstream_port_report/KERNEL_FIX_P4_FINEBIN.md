@@ -163,3 +163,42 @@ measures as a regression (op32 showed small-N cells are icache/issue-bound),
 the fallback is F2 with the tail-select hoisted into a separate __noinline__
 device function (cold section), or a compile-time flag default-ON only for
 K∈{1024,2048} where the failures occur.
+
+## 8. F1 implementation campaign — measured verdict (2026-07-19, b200-027)
+
+Implemented behind default-OFF flag `p4_finebin_loop` in `p4f1_harness/gvrpkgf1`
+(agent-implemented from this doc + iterated v2→v4; battery grew to 164 cases).
+OFF is PTX-byte-identical to the snapshot (modulo mangled kernel name);
+baseline output order on straddle rows is atomic-arrival nondeterministic
+(proven base-vs-base), so bit-equality is asserted on deterministic rows +
+PTX identity.
+
+Gates (all on real captures, launch contract):
+- A: 9 fixtures ON exact 5/5 each, OFF negative control 0/5 each — PASS.
+- B: battery 164/164 (planted same-fine-bin pairs, 1-ULP ladders forcing
+  deep levels, all-equal ULP-floor, CAP=128 boundary + CAP+1 fallback) — PASS.
+- D: full 865-cell all-layer grid ON: 865/865 exact (9/865 -> 0) — PASS.
+- C (nsys x3-round median, paired same-process A/B): FAIL at the
+  "no cell > 1.025" bar in every variant:
+
+| variant | structure | bench (25 cells, 0 fire) | fixture (9 cells, fire) |
+|---|---|---|---|
+| v2 | compile-time iterative fine recursion (replaces one-shot) | gm 1.0254, max 1.049 | gm 1.169 |
+| v3 | + scatter-integrated scratch (store in hot branch) | gm 1.046 (hot-path store tax) | gm 1.067 |
+| v4 | zero hot-path deltas; separate collect pass; deep section DELETED (PTX +6.5%) | gm 1.0335, max 1.061 | gm 1.104 |
+
+Attribution (silicon printf): 0/25 real bench rows fire need_more (every
+real row has exactly 1 straddle element) — the bench tax is NOT tail work.
+NCU: registers 86(OFF)->80(ON), occupancy limits unchanged — not registers.
+v4 vs v2 PTX delta (6.5% vs ~24%) did not move the tax — not primarily
+icache either. Residual attribution: wrapping the original scatter in a
+dynamic (block-uniform) branch changes codegen of the hot loop + BS=1
+issue-bound layout sensitivity (op32). ~2-5%/cell is the irreducible cost
+of RUNTIME tie detection in this structure.
+
+**Conclusion**: exactness is fully achieved (gates A/B/D), but not for free
+(gate C). Decision forked to the user: (a) accept ~3% BS=1 tax, default-ON;
+(b) merge default-OFF as opt-in exactness + document the baseline contract
+("exact up to same-fine-bin boundary ties, ~1% of real layer-cells, error
+magnitude one boundary element at ~1e-5"); (c) F3 radix-select P4 rewrite
+(structural; potentially tax-free but unproven — a new campaign).
