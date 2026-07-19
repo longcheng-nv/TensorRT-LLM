@@ -50,6 +50,48 @@ def parse_rep_span(rep):
     return res
 
 
+def harvest(src, dst_name, glob="rival_seqlen_*.jsonl", with_bs=False):
+    out = ["model,isl,N,K,L," + ("BS," if with_bs else "") + "hit,op,us,us_span,exact"]
+    n_err = 0
+    for batch in sorted(src.glob(glob)):
+        rep = src / "nsys_reps" / f"{batch.stem}.nsys-rep"
+        kern = parse_rep(rep) if rep.exists() else {}
+        span = parse_rep_span(rep) if rep.exists() else {}
+        for line in batch.read_text().splitlines():
+            if not line.strip():
+                continue
+            r = json.loads(line)
+            if "error" in r:
+                n_err += 1
+                continue
+            uc = kern.get(r["range_cold"])
+            uw = kern.get(r["range_warm"])
+            us = uc if uc is not None else uw
+            if us is None:
+                n_err += 1
+                continue
+            sc = span.get(r["range_cold"])
+            bs_col = f"{r['BS']}," if with_bs else ""
+            out.append(f"{r['model']},{r['isl']},{r['N']},{r['K']},{r['L']},{bs_col}"
+                       f"{round(r['hit'], 3) if r.get('hit') is not None else ''},"
+                       f"{r['op']},{round(us, 4)},"
+                       f"{round(sc, 4) if sc is not None else ''},{r.get('exact', '')}")
+        print(f"  {batch.stem}: ranges={len(kern)}")
+    dst = HERE / dst_name
+    dst.write_text("\n".join(out) + "\n")
+    print(f"wrote {dst}: {len(out) - 1} rows ({n_err} omitted)")
+    return out
+
+
+ALL_SRC = Path("/tmp/gvrlayers/rival_all_results")
+if ALL_SRC.exists() and "--all-only" in sys.argv:
+    harvest(ALL_SRC, "rival_layers_full.csv")
+    sys.exit(0)
+BS_SRC = Path("/tmp/gvrlayers/rival_bs_results")
+if BS_SRC.exists() and "--bs-only" in sys.argv:
+    harvest(BS_SRC, "rival_bs_layers.csv", glob="rival_bs_*.jsonl", with_bs=True)
+    sys.exit(0)
+
 out = ["model,isl,N,K,L,hit,op,us,us_span,exact"]
 n_err = 0
 for batch in sorted(SRC.glob("rival_seqlen_*.jsonl")):

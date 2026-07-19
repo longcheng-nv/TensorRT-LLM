@@ -29,6 +29,8 @@ from sweep_nsys import measure_cell                                  # noqa: E40
 from ops_rival import build_call_rival                               # noqa: E402
 import real_data_v4cap as RV4                                        # noqa: E402
 import real_data_v32 as RV32                                         # noqa: E402
+sys.path.insert(0, str(_REPORT / "refresh_harness"))
+from ops_refresh import build_call_rival as build_gvr_refresh        # noqa: E402
 
 ARMS = ["op26_r0auto", "radix_cutedsl", "sglang_v2", "flashinfer_topk"]
 BS3_LAYERS = {"flash": [10, 22, 34], "pro": [14, 30, 46], "v32": [14, 34, 54]}
@@ -50,6 +52,8 @@ def _load_done(path):
             try:
                 r = json.loads(line)
                 done.add((r["op"], r["N"], r.get("isl", ""), r.get("L")))
+                done.add((r["op"], r["N"], r.get("isl", ""), r.get("L"),
+                          r.get("BS", 1)))
             except Exception:
                 pass
     return done
@@ -67,23 +71,59 @@ def _exact(getter, logits_full, N, K, BS):
     return True
 
 
+ALL_LAYERS = {"flash": list(range(2, 43, 2)),
+              "pro": list(range(2, 61, 2)),
+              "v32": list(RV32.LAYERS_ALL)}
+EXT_ARMS = ["radix_cutedsl", "sglang_v2", "flashinfer_topk"]
+
+
 def main():
+    global ARMS
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", choices=["flash", "pro", "v32"], required=True)
     ap.add_argument("--out-root", required=True)
+    ap.add_argument("--isl", help="all-layer mode: one (model,isl) batch, "
+                    "EXT_ARMS only over ALL captured layers")
+    ap.add_argument("--bs-layer", type=int,
+                    help="BS-scaling mode: one (model,layer) batch, arms = "
+                    "gvr_pr (launch contract) + EXT_ARMS, 11-BS grid x all rungs")
     ap.add_argument("--reps", type=int, default=20)
     ap.add_argument("--reps-warm", type=int, default=50)
     a = ap.parse_args()
     out = Path(a.out_root)
     out.mkdir(parents=True, exist_ok=True)
+    if a.bs_layer is not None:
+        ARMS = ["gvr_pr"] + EXT_ARMS
+        path = out / f"rival_bs_{a.model}_L{a.bs_layer}.jsonl"
+        done = _load_done(path)
+        cells = [(isl, a.bs_layer, BS) for isl in REAL_ISLS[a.model]
+                 for BS in [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024]]
+        print(f"# rival-bs-layers {a.model}/L{a.bs_layer} cells={len(cells)} "
+              f"arms={ARMS}", flush=True)
+        _run(a, path, done, cells, sweep="bs")
+        return
+    if a.isl:
+        RV32.BENCH_LAYERS = list(RV32.LAYERS_ALL)   # all-layer slim key domain
+        ARMS = EXT_ARMS
+        path = out / f"rival_seqlen_{a.model}_{a.isl}.jsonl"
+        done = _load_done(path)
+        cells = [(a.isl, L) for L in ALL_LAYERS[a.model]]
+        print(f"# rival-all-layers {a.model}/{a.isl} cells={len(cells)} arms={ARMS}", flush=True)
+        _run(a, path, done, cells)
+        return
     path = out / f"rival_seqlen_{a.model}.jsonl"
     done = _load_done(path)
     cells = [(isl, L) for isl in REAL_ISLS[a.model] for L in BS3_LAYERS[a.model]]
     print(f"# rival-layers {a.model} cells={len(cells)} arms={ARMS}", flush=True)
+    _run(a, path, done, cells)
+
+
+def _run(a, path, done, cells, sweep="seqlen"):
     f = open(path, "a")
     prof.start()
     try:
-        for i, (isl, L) in enumerate(cells):
+        for i, cell in enumerate(cells):
+            isl, L, BS = cell if len(cell) == 3 else (*cell, 1)
             try:
                 bd = bundle(a.model, isl, L)
             except Exception as e:
@@ -92,29 +132,30 @@ def main():
             K, N, cr = bd["K"], bd["N"], bd["cr"]
             lg_full = bd["logits"][0, :N]
             for op in ARMS:
-                if (op, N, isl, L) in done:
+                if (op, N, isl, L, BS) in done or (BS == 1 and (op, N, isl, L) in done):
                     continue
-                base = f"{op}|{a.model}|{isl}|L{L}|fp32|{N}|1"
-                rec = dict(family="real", sweep="seqlen", model=a.model, op=op,
-                           K=K, dtype="fp32", N=N, BS=1, cr=cr, L=L,
+                base = f"{op}|{a.model}|{isl}|L{L}|fp32|{N}|{BS}"
+                rec = dict(family="real", sweep=sweep, model=a.model, op=op,
+                           K=K, dtype="fp32", N=N, BS=BS, cr=cr, L=L,
                            hit=bd["hit_rate"], isl=isl,
                            data_src=f"{a.model}/{isl}/L{L}",
                            range_cold=f"c|{base}", range_warm=f"w|{base}",
                            reps_cold=a.reps, reps_warm=a.reps_warm)
                 try:
-                    call, keep, extra, getter = build_call_rival(
-                        op, K, torch.float32, N, 1, cr, bd["logits"], bd["preIdx"])
+                    build = build_gvr_refresh if op.startswith("gvr") else build_call_rival
+                    call, keep, extra, getter = build(
+                        op, K, torch.float32, N, BS, cr, bd["logits"], bd["preIdx"])
                     rec.update(extra)
                     if getter is not None:
-                        rec["exact"] = bool(_exact(getter, lg_full, N, K, 1))
+                        rec["exact"] = bool(_exact(getter, lg_full, N, K, BS))
                     measure_cell(call, base, a.reps, a.reps_warm)
                     del call, keep
                 except Exception as e:
                     rec["error"] = f"{type(e).__name__}: {str(e)[:140]}"
                 f.write(json.dumps(rec) + "\n"); f.flush()
                 gc.collect(); torch.cuda.empty_cache()
-            if (i + 1) % 3 == 0 or i + 1 == len(cells):
-                print(f"[rival {a.model}] {i+1}/{len(cells)} (isl={isl} L{L})", flush=True)
+            if (i + 1) % 5 == 0 or i + 1 == len(cells):
+                print(f"[rival {a.model}] {i+1}/{len(cells)} (isl={isl} L{L} BS={BS})", flush=True)
     finally:
         prof.stop()
     f.close()

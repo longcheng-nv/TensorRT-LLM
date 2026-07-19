@@ -73,9 +73,23 @@ import os as _os
 RL_FULL = _os.path.exists(os.path.join(HERE, "real_3arm_layers_full.csv"))
 real_layers = read_csv("real_3arm_layers_full.csv" if RL_FULL
                        else "real_3arm_layers.csv")
-REAL_L_JS = [dict(model=r["model"], isl=r["isl"], N=int(r["N"]), L=int(r["layer"]),
-                  hit=fnum(r["hit"]), base=fnum(r["base"]), pr=fnum(r["pr"]),
-                  op26=fnum(r["op26"])) for r in real_layers]
+
+# all-layer external arms (radix/sglang_v2/flashinfer, BS=1) — folded into the
+# §4b rows. Canonical time: us_span for sglang_v2 (PDL 2-kernel), us else.
+_EXTKEY = {"radix_cutedsl": "radix", "sglang_v2": "sgl", "flashinfer_topk": "fi"}
+_ext = {}
+for r in read_csv("rival_layers_full.csv"):
+    t = fnum(r["us_span"]) if (r["op"] == "sglang_v2" and r.get("us_span")) \
+        else fnum(r["us"])
+    _ext.setdefault((r["model"], r["isl"], int(r["L"])), {})[_EXTKEY[r["op"]]] = t
+REAL_L_JS = []
+for r in real_layers:
+    row = dict(model=r["model"], isl=r["isl"], N=int(r["N"]), L=int(r["layer"]),
+               hit=fnum(r["hit"]), base=fnum(r["base"]), pr=fnum(r["pr"]),
+               op26=fnum(r["op26"]))
+    row.update(_ext.get((r["model"], r["isl"], int(r["layer"])), {}))
+    REAL_L_JS.append(row)
+RL_HAS_EXT = bool(_ext)
 
 # ---- §7b per-layer BS + §8b per-layer rival (2026-07-19 backfill) -----------
 bs_real_layers = read_csv("bs_real_layers.csv") \
@@ -84,12 +98,20 @@ BS_REAL_L_JS = [dict(model=r["model"], isl=r["isl"], N=int(r["N"]), L=int(r["L"]
                      BS=int(r["BS"]), hit=fnum(r["hit"]), base=fnum(r["base"]),
                      pr=fnum(r["pr"]), op26=fnum(r["op26"]))
                 for r in bs_real_layers]
-rival_layers = read_csv("rival_layers.csv") \
-    if _os.path.exists(os.path.join(HERE, "rival_layers.csv")) else []
-RIVAL_L_JS = [dict(model=r["model"], isl=r["isl"], N=int(r["N"]), L=int(r["L"]),
-                   hit=fnum(r["hit"]), op=r["op"], us=fnum(r["us"]),
-                   us_span=fnum(r["us_span"]) if r.get("us_span") else None)
-              for r in rival_layers]
+# §8b: per-layer BS-scaling, gvr_pr vs externals (same-run, launch contract).
+# Pivot to one row per (model,isl,L,BS) with canonical per-arm times.
+_RVKEY = {"gvr_pr": "pr", "radix_cutedsl": "radix", "sglang_v2": "sgl",
+          "flashinfer_topk": "fi"}
+_rvb = {}
+for r in read_csv("rival_bs_layers.csv"):
+    t = fnum(r["us_span"]) if (r["op"] == "sglang_v2" and r.get("us_span")) \
+        else fnum(r["us"])
+    d = _rvb.setdefault((r["model"], r["isl"], int(r["L"]), int(r["BS"])), dict(
+        model=r["model"], isl=r["isl"], N=int(r["N"]), L=int(r["L"]),
+        BS=int(r["BS"]), hit=fnum(r["hit"])))
+    d[_RVKEY[r["op"]]] = t
+RIVAL_BS_JS = sorted(_rvb.values(),
+                     key=lambda d: (d["model"], d["N"], d["L"], d["BS"]))
 
 
 def _layer_spread():
@@ -115,22 +137,38 @@ LAYER_SPREADS, LAYER_SPREAD_MED = _layer_spread()
 
 
 def _rl_model_blocks():
-    """§4b: one full-width chart pair per model, with per-model layer checkboxes
-    (+ all/none quick toggles — v32 has 58 layers)."""
+    """§4b: ONE merged chart pair; model + arm + per-model layer checkboxes
+    (all/none quick toggles — v32 has 58 layers)."""
     mlab = {"flash": "V4 Flash · K512 · cr=4", "pro": "V4 Pro · K1024 · cr=4",
             "v32": "V3.2 · K2048 · cr=1"}
-    out = ""
+    lrows = ""
     for m in ("flash", "pro", "v32"):
         Ls = sorted({int(r["layer"]) for r in real_layers if r["model"] == m})
         cks = "".join(
             f'<label class="ck"><input type="checkbox" class="rll rll_{m}" '
             f'value="{L}" checked>L{L}</label>' for L in Ls)
-        out += (f'<div class="card">\n  <div class="ctl"><b>{mlab[m]}</b> ({len(Ls)} layers) '
-                f'<a href="#" onclick="setL(\'rll_{m}\',true);return false">all</a> · '
-                f'<a href="#" onclick="setL(\'rll_{m}\',false);return false">none</a> — {cks}</div>\n'
-                f'  <div id="realL_lat_{m}" class="pltw"></div>\n'
-                f'  <div id="realL_rat_{m}" class="pltw"></div>\n</div>\n')
-    return out
+        lrows += (f'  <div class="ctl"><b>{mlab[m]}</b> ({len(Ls)} layers) '
+                  f'<a href="#" onclick="setL(\'rll_{m}\',true);return false">all</a> · '
+                  f'<a href="#" onclick="setL(\'rll_{m}\',false);return false">none</a> — {cks}</div>\n')
+    ext = ""
+    if RL_HAS_EXT:
+        ext = ("""
+     <label class="ck"><input type="checkbox" class="rla" value="radix">Radix (cuteDSL)</label>
+     <label class="ck"><input type="checkbox" class="rla" value="sgl" checked>SGLang v2 (span)</label>
+     <label class="ck"><input type="checkbox" class="rla" value="fi">FlashInfer</label>""")
+    return (f'<div class="card">\n'
+            f'  <div class="ctl"><b>models</b>\n'
+            f'     <label class="ck"><input type="checkbox" class="rlm2" value="flash" checked>V4 Flash</label>\n'
+            f'     <label class="ck"><input type="checkbox" class="rlm2" value="pro">V4 Pro</label>\n'
+            f'     <label class="ck"><input type="checkbox" class="rlm2" value="v32">V3.2</label>\n'
+            f'     &nbsp; <b>arms</b>\n'
+            f'     <label class="ck"><input type="checkbox" class="rla" value="base" checked>base (secant)</label>\n'
+            f'     <label class="ck"><input type="checkbox" class="rla" value="pr" checked>PR (R0+RS)</label>\n'
+            f'     <label class="ck"><input type="checkbox" class="rla" value="op26">op26_r0auto</label>{ext}\n'
+            f'     <span class="mut">· color = arm · line style = layer (cycled) · ratio chart = base(L)/arm(L) within layer</span></div>\n'
+            f'{lrows}'
+            f'  <div id="realL_lat" class="pltw"></div>\n'
+            f'  <div id="realL_rat" class="pltw"></div>\n</div>\n')
 
 
 RL_MODEL_BLOCKS = _rl_model_blocks()
@@ -224,6 +262,16 @@ def _rl_exact_note():
 
 RL_EXACT_NOTE = _rl_exact_note()
 
+RL_EXT_INTRO = ("" if not RL_HAS_EXT else
+    '<div class="lang-en"><p>The three external arms (<b>Radix cuteDSL / SGLang v2 / FlashInfer</b>) are '
+    'measured per layer on the same captures (BS=1 fp32, same protocol; SGLang v2 timed by projected NVTX '
+    'span — PDL 2-kernel overlap) and selectable below alongside the GVR arms. The externals are nearly '
+    'layer-flat — their lines pile on top of each other — which makes the GVR arms\' layer spread directly '
+    'visible against a stable reference.</p></div>'
+    '<div class="lang-zh"><p>三个外部臂(<b>Radix cuteDSL / SGLang v2 / FlashInfer</b>)在相同 capture 上'
+    '按层测量(BS=1 fp32,协议相同;SGLang v2 用投影 NVTX span 计时——PDL 双内核重叠),可在下方与 GVR 臂'
+    '一同勾选。外部臂对层几乎平坦——各层曲线几乎重合——恰好构成稳定参照,使 GVR 臂的层间跨度一目了然。</p></div>')
+
 _MLAB ={"flash": "V4 Flash · K512 · cr=4", "pro": "V4 Pro · K1024 · cr=4",
          "v32": "V3.2 · K2048 · cr=1"}
 
@@ -266,32 +314,47 @@ BSL_BLOCK = _bsl_block()
 
 
 def _rvl_block():
-    """§8b: per-layer external-rival comparison — one card per model."""
-    if not rival_layers:
+    """§8b: per-layer BS-scaling — gvr_pr vs the 3 external arms, merged view
+    with model / layer / arm checkboxes + one shared ISL rung radio."""
+    if not RIVAL_BS_JS:
         return ""
-    out = ["""<h3>8b · Per-layer external comparison (fp32 BS=1, 3 GVR-active layers) / 逐层外部算子对比</h3>
-<div class="lang-en"><p>External arms re-measured per layer on the same captures (2026-07-19 b200-027;
-sglang_v2 timed by projected NVTX span — PDL overlap). Ratio = t(GVR op26, same layer) / t(arm, same layer):
-&gt;1 = arm faster than GVR on that layer. Histogram/radix arms are nearly layer-insensitive; GVR's layer
-spread is what moves the ratio.</p></div>
-<div class="lang-zh"><p>外部臂在相同 capture 上按层重测（2026-07-19 b200-027;sglang_v2 计时用投影 NVTX
-span——PDL 重叠）。比值 = t(GVR op26, 同层) / t(外部臂, 同层):&gt;1 = 该层上外部臂快于 GVR。直方图/radix
-类臂对层几乎不敏感;比值的波动主要来自 GVR 的层间跨度。</p></div>
-<div class="card"><div class="ctl"><b>arms</b>
- <label class="ck"><input type="checkbox" class="rvla" value="op26_r0auto" checked>GVR op26 (anchor)</label>
- <label class="ck"><input type="checkbox" class="rvla" value="radix_cutedsl" checked>Radix (cuteDSL)</label>
- <label class="ck"><input type="checkbox" class="rvla" value="sglang_v2" checked>SGLang v2</label>
- <label class="ck"><input type="checkbox" class="rvla" value="flashinfer_topk" checked>FlashInfer</label></div></div>"""]
+    lrows = ""
     for m in ("flash", "pro", "v32"):
-        Ls = sorted({int(r["L"]) for r in rival_layers if r["model"] == m})
+        Ls = sorted({d["L"] for d in RIVAL_BS_JS if d["model"] == m})
         lcks = "".join(
             f'<label class="ck"><input type="checkbox" class="rvll rvll_{m}" '
             f'value="{L}" checked>L{L}</label>' for L in Ls)
-        out.append(
-            f'<div class="card">\n  <div class="ctl"><b>{_MLAB[m]}</b> — layers: {lcks}</div>\n'
-            f'  <div class="row"><div id="rvL_lat_{m}" class="plt"></div>'
-            f'<div id="rvL_rat_{m}" class="plt"></div></div>\n</div>')
-    return "\n".join(out)
+        lrows += f'  <div class="ctl"><b>{_MLAB[m]}</b> — layers: {lcks}</div>\n'
+    isls = sorted({d["isl"] for d in RIVAL_BS_JS}, key=lambda s: int(s[:-1]))
+    rungs = "".join(
+        f'<label class="ck"><input type="radio" name="rvbr" value="{isl}"'
+        f'{" checked" if isl == "128k" else ""}>{isl}</label>' for isl in isls)
+    return f"""<h3>8b · Per-layer BS scaling — GVR PR vs external arms / 逐层 BS 扩展——GVR PR 对外部算子</h3>
+<div class="lang-en"><p><b>gvr_pr</b> (launch contract) and the three external arms (<b>Radix cuteDSL /
+SGLang v2 / FlashInfer</b>) measured in the SAME run per (layer, BS) cell on the 3 GVR-active bench layers
+per model (2026-07-19 b200-027; sglang_v2 timed by projected NVTX span — PDL overlap). Ratio =
+t(gvr_pr, layer) / t(arm, layer): &gt;1 = arm faster than PR on that layer. The externals are nearly
+layer-flat, so per-layer ratio movement tracks PR's data sensitivity across the BS axis. Pick models with
+the checkboxes, the ISL rung with the radio.</p></div>
+<div class="lang-zh"><p><b>gvr_pr</b>（launch 契约）与三个外部臂（<b>Radix cuteDSL / SGLang v2 /
+FlashInfer</b>）在每个 (层, BS) cell 上<b>同一 run 内</b>测量,覆盖每模型 3 个 GVR-active bench 层
+（2026-07-19 b200-027;sglang_v2 用投影 NVTX span 计时——PDL 重叠）。比值 = t(gvr_pr, 同层) /
+t(外部臂, 同层):&gt;1 = 该层上外部臂快于 PR。外部臂对层几乎平坦,故逐层比值随 BS 轴的波动反映的是
+PR 的数据敏感性。复选框选模型,单选钮选 ISL 档。</p></div>
+<div class="card">
+  <div class="ctl"><b>models</b>
+   <label class="ck"><input type="checkbox" class="rvm2" value="flash" checked>V4 Flash</label>
+   <label class="ck"><input type="checkbox" class="rvm2" value="pro">V4 Pro</label>
+   <label class="ck"><input type="checkbox" class="rvm2" value="v32">V3.2</label>
+   &nbsp; <b>arms</b>
+   <label class="ck"><input type="checkbox" class="rvla" value="pr" checked>gvr_pr</label>
+   <label class="ck"><input type="checkbox" class="rvla" value="radix" checked>Radix (cuteDSL)</label>
+   <label class="ck"><input type="checkbox" class="rvla" value="sgl" checked>SGLang v2 (span)</label>
+   <label class="ck"><input type="checkbox" class="rvla" value="fi" checked>FlashInfer</label>
+   &nbsp; <b>ISL</b> {rungs}</div>
+{lrows}  <div id="rvL_lat" class="pltw"></div>
+  <div id="rvL_rat" class="pltw"></div>
+</div>"""
 
 
 RVL_BLOCK = _rvl_block()
@@ -300,17 +363,24 @@ RVL_BLOCK = _rvl_block()
 def real_layer_table():
     if not real_layers:
         return "<p class='mut'>(real_3arm_layers.csv not yet available)</p>"
+    exh = ("<th>Radix µs</th><th>SGLv2 µs (span)</th><th>FI µs</th>"
+           if RL_HAS_EXT else "")
     h = ("<tr><th>model</th><th>ISL</th><th>N</th><th>layer</th><th>hit</th>"
-         "<th>base µs</th><th>PR µs</th><th>op26 µs</th><th>PR/base</th>"
-         "<th>op26/PR</th><th>PR exact</th><th>base exact</th></tr>")
+         "<th>base µs</th><th>PR µs</th><th>op26 µs</th>" + exh +
+         "<th>PR/base</th><th>op26/PR</th><th>PR exact</th><th>base exact</th></tr>")
     body = ""
     for r in real_layers:
         pe = r.get("pr_exact", "")
         pe_cell = (f'<td style="color:var(--red)">{pe}</td>' if pe == "False"
                    else f"<td>{pe}</td>")
+        exc = ""
+        if RL_HAS_EXT:
+            e = _ext.get((r["model"], r["isl"], int(r["layer"])), {})
+            exc = "".join(f"<td>{round(e[k], 2) if e.get(k) else ''}</td>"
+                          for k in ("radix", "sgl", "fi"))
         body += (f"<tr><td>{r['model']}</td><td>{r['isl']}</td><td>{r['N']}</td>"
                  f"<td>L{r['layer']}</td><td>{r['hit']}</td><td>{r['base']}</td>"
-                 f"<td>{r['pr']}</td><td>{r['op26']}</td><td>{r['pr_vs_base']}</td>"
+                 f"<td>{r['pr']}</td><td>{r['op26']}</td>{exc}<td>{r['pr_vs_base']}</td>"
                  f"<td>{r['pr_vs_op26']}</td>{pe_cell}"
                  f"<td>{r['base_exact']}</td></tr>")
     return f"<table>{h}{body}</table>"
@@ -1151,6 +1221,7 @@ V3.2 真实采集覆盖 7 档 ISL（4K–256K；ISL_256K 的物理 kv_len 使 N 
 
 <h3>4b · Per-layer view — no layer averaging / 逐层视图——不做层间平均</h3>
 {RL_INTRO}
+{RL_EXT_INTRO}
 {RL_EXACT_NOTE}
 <div class="card">
   <div class="ctl">
@@ -1784,7 +1855,7 @@ const SYN={json.dumps(SYN_JS)};
 const REAL={json.dumps(REAL_JS)};
 const REAL_L={json.dumps(REAL_L_JS)};
 const BS_REAL_L={json.dumps(BS_REAL_L_JS)};
-const RIVAL_L={json.dumps(RIVAL_L_JS)};
+const RIVAL_BS={json.dumps(RIVAL_BS_JS)};
 function setL(cls,on){{document.querySelectorAll('.'+cls).forEach(e=>{{e.checked=on;}});setTimeout(drawAll,0);}}
 const BS_SYN={json.dumps(BS_SYN_JS)};
 const BS_REAL={json.dumps(BS_REAL_JS)};
@@ -1853,35 +1924,41 @@ function drawReal(){{
   Plotly.react('real_lat',lat,LAY('Real V4+V3.2 decode — latency vs indexer N (fp32 BS=1, cold-L2)','ISL (indexer N: V4=ISL/4, V3.2≈ISL)','µs',null,tk),{{responsive:true}});
   Plotly.react('real_rat',rat,LAY('Real V4+V3.2 decode — speedup vs base (>1 faster)','ISL (indexer N)','ratio',1,tk),{{responsive:true}});
 }}
-// ---- §4b per-layer real view (no layer averaging; one chart pair per model) ----
+// ---- §4b per-layer real view (merged: model/arm/layer checkboxes, one chart pair) ----
 const LDASH=['solid','dash','dot'];
+const ARMC2={{base:'#ff7a7a',pr:'#6ea8fe',op26:'#6ede8a',radix:'#e6b45a',sgl:'#c58bff',fi:'#4dd0e1'}};
+const ARML2={{base:'base',pr:'PR',op26:'op26',radix:'Radix',sgl:'SGLv2',fi:'FI'}};
 function drawRealL(){{
-  const arms=vals('rla');
-  ['flash','pro','v32'].forEach(m=>{{
+  if(!document.getElementById('realL_lat')) return;
+  const arms=vals('rla'),models=vals('rlm2');
+  const lat=[],rat=[],all=[];
+  models.forEach(m=>{{
     const allLs=[...new Set(REAL_L.filter(r=>r.model===m).map(r=>r.L))].sort((a,b)=>a-b);
     const selLs=vals('rll_'+m).map(Number);
-    const lat=[],rat=[],all=[];
     allLs.forEach((L,li)=>{{
       if(!selLs.includes(L)) return;
       const rows=REAL_L.filter(r=>r.model===m&&r.L===L).sort((a,b)=>a.N-b.N);
       all.push(...rows);
       const xs=rows.map(r=>r.N),cd=rows.map(r=>islLabel(r.isl)+' · hit '+(r.hit!=null?r.hit.toFixed(2):'?')),
-            dash=LDASH[li%3],tag='L'+L;
+            dash=LDASH[li%3],tag=(models.length>1?RMLAB[m]+' ':'')+'L'+L;
       const ht='%{{customdata}} · indexer N=%{{x}} · %{{y:.2f}}<extra>%{{fullData.name}}</extra>';
       arms.forEach(a=>{{
-        lat.push({{x:xs,y:rows.map(r=>r[a]),customdata:cd,name:a+' '+tag,mode:'lines+markers',
-          line:{{color:ARMC[a],dash:dash,width:2}},marker:{{size:6}},hovertemplate:ht}});
-        if(a!=='base') rat.push({{x:xs,y:rows.map(r=>r.base/r[a]),customdata:cd,name:a+'/base '+tag,
-          mode:'lines+markers',line:{{color:ARMC[a],dash:dash,width:2}},marker:{{size:6}},hovertemplate:ht}});
+        const ys=rows.map(r=>r[a]!=null?r[a]:null);
+        if(!ys.some(v=>v!=null)) return;
+        lat.push({{x:xs,y:ys,customdata:cd,name:ARML2[a]+' '+tag,mode:'lines+markers',
+          line:{{color:ARMC2[a],dash:dash,width:2}},marker:{{size:6}},hovertemplate:ht}});
+        if(a!=='base') rat.push({{x:xs,y:rows.map(r=>(r[a]!=null&&r.base!=null)?r.base/r[a]:null),customdata:cd,
+          name:ARML2[a]+'/base '+tag,mode:'lines+markers',
+          line:{{color:ARMC2[a],dash:dash,width:2}},marker:{{size:6}},hovertemplate:ht}});
       }});
     }});
-    const tk=nTicks(all);
-    const l1=LAY(RMLAB[m]+' PER LAYER — latency vs indexer N (fp32 BS=1, frozen-cfg sweep)','ISL (indexer N)','µs',null,tk);
-    const l2=LAY(RMLAB[m]+' PER LAYER — speedup vs base within layer (>1 faster)','ISL (indexer N)','ratio',1,tk);
-    l1.height=420;l2.height=420;l1.legend.y=-0.18;l2.legend.y=-0.18;
-    Plotly.react('realL_lat_'+m,lat,l1,{{responsive:true}});
-    Plotly.react('realL_rat_'+m,rat,l2,{{responsive:true}});
   }});
+  const tk=nTicks(all);
+  const l1=LAY('Real decode PER LAYER — latency vs indexer N (fp32 BS=1, launch contract)','ISL (indexer N)','µs',null,tk);
+  const l2=LAY('Real decode PER LAYER — speedup vs base within layer (>1 faster)','ISL (indexer N)','ratio',1,tk);
+  l1.height=430;l2.height=430;l1.legend.y=-0.18;l2.legend.y=-0.18;
+  Plotly.react('realL_lat',lat,l1,{{responsive:true}});
+  Plotly.react('realL_rat',rat,l2,{{responsive:true}});
 }}
 // ---- §7b per-layer BS scaling ----
 function drawBsL(){{
@@ -1909,39 +1986,40 @@ function drawBsL(){{
     Plotly.react('bsL_rat_'+m,rat,bsLAY(RMLAB[m]+' PER LAYER '+(rung||'')+' — speedup vs base within layer','ratio',1),{{responsive:true}});
   }});
 }}
-// ---- §8b per-layer rival ----
-const RVLC={{op26_r0auto:'#6ede8a',radix_cutedsl:'#e6b45a',sglang_v2:'#c58bff',flashinfer_topk:'#6ea8fe'}};
-const RVLL={{op26_r0auto:'GVR op26',radix_cutedsl:'Radix',sglang_v2:'SGLangV2',flashinfer_topk:'FI'}};
-function rvT(r){{return (r.op==='sglang_v2'&&r.us_span)?r.us_span:r.us;}}
+// ---- §8b per-layer BS scaling: gvr_pr vs externals (merged) ----
+const RVLC={{pr:'#6ea8fe',radix:'#e6b45a',sgl:'#c58bff',fi:'#4dd0e1'}};
+const RVLL={{pr:'gvr_pr',radix:'Radix',sgl:'SGLv2',fi:'FI'}};
 function drawRvL(){{
-  if(!RIVAL_L.length) return;
-  const arms=vals('rvla');
-  ['flash','pro','v32'].forEach(m=>{{
-    if(!document.getElementById('rvL_lat_'+m)) return;
+  if(!RIVAL_BS.length||!document.getElementById('rvL_lat')) return;
+  const arms=vals('rvla'),models=vals('rvm2'),rung=rad('rvbr');
+  const lat=[],rat=[];
+  models.forEach(m=>{{
+    const allLs=[...new Set(RIVAL_BS.filter(r=>r.model===m).map(r=>r.L))].sort((a,b)=>a-b);
     const selLs=vals('rvll_'+m).map(Number);
-    const allLs=[...new Set(RIVAL_L.filter(r=>r.model===m).map(r=>r.L))].sort((a,b)=>a-b);
-    const lat=[],rat=[],all=[];
     allLs.forEach((L,li)=>{{
       if(!selLs.includes(L)) return;
-      const sub=RIVAL_L.filter(r=>r.model===m&&r.L===L);
-      const Ns=[...new Set(sub.map(r=>r.N))].sort((a,b)=>a-b),dash=LDASH[li%3];
-      const anchor={{}};
-      sub.filter(r=>r.op==='op26_r0auto').forEach(r=>{{anchor[r.N]=rvT(r);}});
+      const rows=RIVAL_BS.filter(r=>r.model===m&&r.L===L&&r.isl===rung).sort((a,b)=>a.BS-b.BS);
+      if(!rows.length) return;
+      const xs=rows.map(r=>r.BS),dash=LDASH[li%3],
+            tag=(models.length>1?RMLAB[m]+' ':'')+'L'+L,
+            cd=rows.map(r=>'hit '+(r.hit!=null?r.hit.toFixed(2):'?'));
+      const ht='BS=%{{x}} · %{{y:.2f}} · %{{customdata}}<extra>%{{fullData.name}}</extra>';
       arms.forEach(a=>{{
-        const rows=Ns.map(N=>sub.find(r=>r.op===a&&r.N===N)).filter(Boolean);
-        all.push(...rows);
-        const xs=rows.map(r=>r.N),cd=rows.map(r=>islLabel(r.isl)+' · hit '+(r.hit!=null?r.hit.toFixed(2):'?'));
-        const ht='%{{customdata}} · N=%{{x}} · %{{y:.2f}}<extra>%{{fullData.name}}</extra>';
-        lat.push({{x:xs,y:rows.map(rvT),customdata:cd,name:RVLL[a]+' L'+L,mode:'lines+markers',
-          line:{{color:RVLC[a],dash:dash}},marker:{{size:5}},hovertemplate:ht}});
-        if(a!=='op26_r0auto') rat.push({{x:xs,y:rows.map(r=>anchor[r.N]?anchor[r.N]/rvT(r):null),customdata:cd,
-          name:'gvr/'+RVLL[a]+' L'+L,mode:'lines+markers',line:{{color:RVLC[a],dash:dash}},marker:{{size:5}},hovertemplate:ht}});
+        const ys=rows.map(r=>r[a]!=null?r[a]:null);
+        if(!ys.some(v=>v!=null)) return;
+        lat.push({{x:xs,y:ys,customdata:cd,name:RVLL[a]+' '+tag,mode:'lines+markers',
+          line:{{color:RVLC[a],dash:dash,width:2}},marker:{{size:5}},hovertemplate:ht}});
+        if(a!=='pr') rat.push({{x:xs,y:rows.map(r=>(r[a]!=null&&r.pr!=null)?r.pr/r[a]:null),customdata:cd,
+          name:'pr/'+RVLL[a]+' '+tag,mode:'lines+markers',
+          line:{{color:RVLC[a],dash:dash,width:2}},marker:{{size:5}},hovertemplate:ht}});
       }});
     }});
-    const tk=nTicks(all);
-    Plotly.react('rvL_lat_'+m,lat,LAY(RMLAB[m]+' PER LAYER — external arms latency (fp32 BS=1)','ISL (indexer N)','µs',null,tk),{{responsive:true}});
-    Plotly.react('rvL_rat_'+m,rat,LAY(RMLAB[m]+' PER LAYER — t(GVR op26)/t(arm), >1 = arm faster','ISL (indexer N)','ratio',1,tk),{{responsive:true}});
   }});
+  const l1=bsLAY('PER LAYER '+(rung||'')+' — gvr_pr vs external arms, latency vs BS (fp32)','µs',null);
+  const l2=bsLAY('PER LAYER '+(rung||'')+' — t(gvr_pr)/t(arm) vs BS, >1 = arm faster than PR','ratio',1);
+  l1.height=430;l2.height=430;
+  Plotly.react('rvL_lat',lat,l1,{{responsive:true}});
+  Plotly.react('rvL_rat',rat,l2,{{responsive:true}});
 }}
 // ---- §7 BS scaling: BS on log-x ----
 function bsLAY(t,yt,ref){{
@@ -2074,7 +2152,7 @@ function drawRival(){{
 }}
 function drawAll(){{try{{drawSyn();}}catch(e){{}} try{{drawReal();}}catch(e){{}} try{{drawRealL();}}catch(e){{}} try{{drawBsL();}}catch(e){{}} try{{drawRvL();}}catch(e){{}}
   try{{drawBsSyn();}}catch(e){{}} try{{drawBsReal();}}catch(e){{}} try{{drawHM();}}catch(e){{}} try{{drawRival();}}catch(e){{}}}}
-document.querySelectorAll('input[name=sk],.ss,.sa,.rm,.ra,.rla,.rll,.bsla,.bsll,input[name^=bslr],.rvla,.rvll,input[name=bsk],input[name=bsd],input[name=bsn],.bss,.bsa,.brm,input[name=brd],input[name=brl],.bra,input[name=hmf],input[name=hmk],input[name=hms],input[name=hmm],input[name=hmd],.hmz,input[name=rvf],input[name=rvv],input[name=rvk],input[name=rvs],input[name=rvm],input[name=rvd],input[name=rvn],input[name=rvi],.rva').forEach(e=>e.addEventListener('change',()=>setTimeout(drawAll,0)));
+document.querySelectorAll('input[name=sk],.ss,.sa,.rm,.ra,.rla,.rll,.rlm2,.bsla,.bsll,input[name^=bslr],.rvla,.rvll,.rvm2,input[name=rvbr],input[name=bsk],input[name=bsd],input[name=bsn],.bss,.bsa,.brm,input[name=brd],input[name=brl],.bra,input[name=hmf],input[name=hmk],input[name=hms],input[name=hmm],input[name=hmd],.hmz,input[name=rvf],input[name=rvv],input[name=rvk],input[name=rvs],input[name=rvm],input[name=rvd],input[name=rvn],input[name=rvi],.rva').forEach(e=>e.addEventListener('change',()=>setTimeout(drawAll,0)));
 if(window.Plotly) drawAll(); else window.addEventListener('load',drawAll);
 </script>
 </body>
