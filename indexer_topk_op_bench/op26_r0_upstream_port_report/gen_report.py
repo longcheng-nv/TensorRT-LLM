@@ -158,9 +158,9 @@ def _rl_model_blocks():
      <label class="ck"><input type="checkbox" class="rla" value="fi">FlashInfer</label>""")
     return (f'<div class="card">\n'
             f'  <div class="ctl"><b>models</b>\n'
-            f'     <label class="ck"><input type="checkbox" class="rlm2" value="flash" checked>V4 Flash</label>\n'
-            f'     <label class="ck"><input type="checkbox" class="rlm2" value="pro">V4 Pro</label>\n'
-            f'     <label class="ck"><input type="checkbox" class="rlm2" value="v32">V3.2</label>\n'
+            f'     <label class="ck"><input type="checkbox" class="rlm2" value="flash" checked>V4 Flash (21L)</label>\n'
+            f'     <label class="ck"><input type="checkbox" class="rlm2" value="pro" checked>V4 Pro (30L)</label>\n'
+            f'     <label class="ck"><input type="checkbox" class="rlm2" value="v32" checked>V3.2 (58L)</label>\n'
             f'     &nbsp; <b>arms</b>\n'
             f'     <label class="ck"><input type="checkbox" class="rla" value="base" checked>base (secant)</label>\n'
             f'     <label class="ck"><input type="checkbox" class="rla" value="pr" checked>PR (R0+RS)</label>\n'
@@ -1957,6 +1957,8 @@ function drawRealL(){{
   const l1=LAY('Real decode PER LAYER — latency vs indexer N (fp32 BS=1, launch contract)','ISL (indexer N)','µs',null,tk);
   const l2=LAY('Real decode PER LAYER — speedup vs base within layer (>1 faster)','ISL (indexer N)','ratio',1,tk);
   l1.height=430;l2.height=430;l1.legend.y=-0.18;l2.legend.y=-0.18;
+  // legend collapses at high trace counts (e.g. all 3 models, 109 layers) — hover carries identity
+  l1.showlegend=lat.length<=40;l2.showlegend=rat.length<=40;
   Plotly.react('realL_lat',lat,l1,{{responsive:true}});
   Plotly.react('realL_rat',rat,l2,{{responsive:true}});
 }}
