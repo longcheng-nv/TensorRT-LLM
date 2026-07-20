@@ -542,11 +542,16 @@ class GvrTopKKernel:
         # (value_bits, cand_idx) pairs into SMEM and thread0 selects the
         # top-need exactly, replacing the 4 unconditional radix passes
         # (~5.3us -> ~1 pass on pro/512k). Larger tie classes fall through to
-        # the existing radix select. Pure optimization: default ON whenever
-        # p4_exact_tail is on; False compiles the original text (byte-
-        # identical PTX modulo kernel name) for A/B.
+        # the existing radix select. Pure optimization (the radix backstop
+        # keeps exactness identical either way); False compiles the original
+        # text (byte-identical PTX modulo kernel name) for A/B.
+        # Default gate = p4_exact_tail AND top_k >= 1024: the non-firing
+        # codegen tax concentrates at K512 cs=1 mid-N (flash 64k/128k
+        # -6.6/-9.1%, cross-GPU reproducible, 2026-07-20 b200-035) while the
+        # fire census (pro/512k bench + 9 per-layer fixture cells) contains
+        # NO K512 cell — so K512 keeps the original byte-identical kernel.
         if p4_tail_fast is None:  # [p4tt]
-            p4_tail_fast = self.p4_exact_tail
+            p4_tail_fast = self.p4_exact_tail and top_k >= 1024
         self.p4_tail_fast = bool(p4_tail_fast) and self.p4_exact_tail  # [p4tt]
 
     # ------------------------------------------------------------------

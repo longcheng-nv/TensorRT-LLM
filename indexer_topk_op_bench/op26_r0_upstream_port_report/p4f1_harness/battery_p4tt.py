@@ -273,6 +273,64 @@ def caseD():
 
 
 # ----------------------------------------------------------------------
+def caseF():
+    """Launch-contract compile+exact smoke over ALL 25 real bench cells
+    (flash/pro/v32 x every ISL rung, bench layer, fp32 BS=1) — the exact
+    per-cell pick_config variants Gate C' exercises (run1-3 only covered
+    the synthetic N grid, missing e.g. the cs=4/cs=8 switch cells at
+    256k/512k). Both flags via the launch() path. PASS per arm-pair iff
+    fast is value-exact, or slow fails identically (pre-existing
+    admission/undershoot behavior) with agreeing value multisets."""
+    import real_data_v4cap as RV4
+    import real_data_v32 as RV32
+    RV32.BENCH_LAYERS = list(RV32.LAYERS_ALL)
+
+    bench_l = {"flash": 22, "pro": 30, "v32": 34}
+    isls = {"flash": ["4k", "8k", "16k", "32k", "64k", "128k", "256k",
+                      "512k", "1024k"],
+            "pro":   ["4k", "8k", "16k", "32k", "64k", "128k", "256k",
+                      "512k", "1024k"],
+            "v32":   ["4k", "8k", "16k", "32k", "64k", "128k", "256k"]}
+    for model in ("flash", "pro", "v32"):
+        RD = RV32 if model == "v32" else RV4
+        L = bench_l[model]
+        oks, notes = [], []
+        for isl in isls[model]:
+            bd = RD.get_bundle(model, isl, L, "fp32")
+            k, n, cr = int(bd["K"]), int(bd["N"]), int(bd["cr"])
+            lg = bd["logits"].contiguous()
+            pre = bd["preIdx"].contiguous()
+            sl = torch.full((1,), n * cr, dtype=torch.int32, device=DEV)
+            outs = {}
+            compile_fail = None
+            for tag, tf in (("fast", True), ("slow", False)):
+                ob = torch.empty((1, k), dtype=torch.int32, device=DEV)
+                try:
+                    KMOD.launch(lg, pre, sl, ob, k, compress_ratio=cr,
+                                p4_tail_fast=tf)
+                    torch.cuda.synchronize()
+                    outs[tag] = ob
+                except Exception as e:  # compile or launch failure = hard FAIL
+                    compile_fail = f"{isl}/{tag}: {type(e).__name__}"
+                    break
+            if compile_fail is not None:
+                oks.append(False)
+                notes.append(compile_fail)
+                continue
+            ok = valueset_exact_rows(lg, outs["fast"], k)[0]
+            if not ok:
+                # baseline-gated: pre-existing iff slow fails identically
+                ok = (not valueset_exact_rows(lg, outs["slow"], k)[0]) and \
+                    agree_values(lg, outs["fast"], outs["slow"])
+                if ok:
+                    notes.append(f"{isl}: baseline-gated (slow non-exact too)")
+            oks.append(ok)
+        record("F", f"real-cell launch-contract smoke {model} "
+               f"({len(isls[model])} ISLs, L{L})", oks,
+               note="; ".join(notes) if notes else "all exact")
+
+
+# ----------------------------------------------------------------------
 def caseE():
     """Real cell pro/512k L30 (K1024, N=131075): exactness + CUDA-event
     warm timing fast vs slow (smoke; nsys verdict is the coordinator's)."""
@@ -343,6 +401,7 @@ def main():
     caseB()
     caseC()
     caseD()
+    caseF()
     caseE()
     print("\n===== battery_p4tt summary =====")
     total_p = total_t = fail = 0
