@@ -24,6 +24,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPORT = os.path.join(HERE, "REPORT.html")
 DATA = os.path.join(HERE, "headfull_harness", "results_canonical",
                     "results_canonical_seqlen_fp32.jsonl")
+DATA_BS = os.path.join(HERE, "headfull_harness", "results_canonical",
+                       "results_canonical_bs_real.jsonl")
 HEADFULL = os.path.join(HERE, "headfull_harness", "results_headfull",
                         "results_54batch_027plus019.jsonl.gz")
 BEGIN = "<!-- CANONHEAD:BEGIN (update_report_canonical.py) -->"
@@ -69,6 +71,43 @@ def anchor_gate(rows):
     return med, p95, len(ratios)
 
 
+BS_GRID = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024]
+
+
+def build_bs():
+    """Real-capture BS-scaling table (3 dtypes x all ISL, PR/base geomean per BS)."""
+    if not os.path.exists(DATA_BS):
+        return ""
+    rows = [json.loads(l) for l in open(DATA_BS)]
+    rows = [r for r in rows if r.get("sweep") == "bs" and r.get("family") == "real"
+            and "us" in r]
+    key = {}
+    for r in rows:
+        key.setdefault((r["model"], r["dtype"], r["N"], r["BS"]), {})[r["op"]] = r
+    pairs = {k: d["gvr_base"]["us"] / d["gvr_pr"]["us"] for k, d in key.items()
+             if "gvr_pr" in d and "gvr_base" in d}
+    pr_exact = sum(d["gvr_pr"]["exact"] for d in key.values() if "gvr_pr" in d)
+    n_pr = sum(1 for d in key.values() if "gvr_pr" in d)
+    h = ("<tr><th>PR/base geomean</th>" +
+         "".join(f"<th>BS {b}</th>" for b in BS_GRID) + "</tr>")
+    body = ""
+    for m, lab in (("flash", "Flash (K512)"), ("pro", "Pro (K1024)"),
+                   ("v32", "V3.2 (K2048)"), (None, "all models")):
+        cells = []
+        for b in BS_GRID:
+            g = [r for k, r in pairs.items() if k[3] == b and (m is None or k[0] == m)]
+            cells.append(f"<td>{geo(g):.3f}</td>" if g else "<td>—</td>")
+        name = lab if m else f"<b>{lab}</b>"
+        body += f"<tr><td>{name}</td>{''.join(cells)}</tr>"
+    fp32 = [r for k, r in pairs.items() if k[1] == "fp32"]
+    b16 = [r for k, r in pairs.items() if k[1] in ("bf16", "fp16")]
+    return (
+        "<p><b>Real BS scaling @ current head</b> — all captured ISL rungs × 3 dtypes, "
+        f"same-run 3-arm; PR exact {pr_exact}/{n_pr}; overall PR/base geomean "
+        f"{geo(list(pairs.values())):.3f}× (fp32 {geo(fp32):.3f}× / 16-bit {geo(b16):.3f}×)</p>"
+        f"<table>{h}{body}</table>")
+
+
 def build():
     rows, key = load_rows()
     med, p95, n_anchor = anchor_gate(rows)
@@ -111,6 +150,8 @@ def build():
                   f"<td>{ba['us']:.3f}</td><td>{pr['us']:.3f}</td><td>{_fx(sp)}</td>"
                   f"<td>{'✓' if pr['exact'] else '✗'}</td></tr>")
         out.append(f"<p><b>Real {lab}</b> — geomean {geo(g):.3f}×</p><table>{h}{b}</table>")
+
+    out.append(build_bs())
 
     anchor_txt = (f"anchor op26_r0auto vs 07-20 headfull run: median {med:.3f} / p95 {p95:.3f} "
                   f"(n={n_anchor})" if med else "anchor gate unavailable")
