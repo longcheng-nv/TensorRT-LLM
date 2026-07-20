@@ -61,11 +61,53 @@ cross-GPU/cross-process reproducible, NOT noise and NOT the GPU0 thermal history
    N≥32K deployment focus). Within N≥32K: worst −2.1% (v32/64k 0.979),
    wins v32/128k +1.3%, v32/256k +1.9%, **pro/512k +34%**.
 
-## Open before any PR decision (not run yet)
+## Round 2 (same day): K-gate implemented + full validation — DONE
 
-- Implement the K-gate in the ctor default (1-line), re-run battery caseA to
-  prove K512 OFF-shape byte-identity, spot-check K1024/K2048 exactness.
-- BS-axis + synthetic-grid A/B (qab protocol) if promoting; per-layer 865-grid
-  would weight the 9 firing fixture cells more favorably than the single-layer
-  view above.
-- Per user directive: **verify first, PR decision after** — nothing pushed.
+- **K-gate landed** in gvrpkgprod2 ctor: default `p4_tail_fast =
+  p4_exact_tail and top_k >= 1024`. `kgate_proof.py` 3/3: K512 DEFAULT PTX
+  byte-identical to pristine; K1024/K2048 default ON + exact; explicit
+  False byte-identical at all K.
+- **battery run5 (gated kernel): 175/175** incl. the concurrent session's
+  caseF (25-cell real launch-contract smoke — their handoff's claimed
+  "N>=65538 compile bug" does NOT exist on the NFS kernel; their agent's
+  divergent copy never landed).
+- **Firing-census nsys A/B (9 per-layer fixture cells, all K>=1024, GPU1
+  x3 paired): gm 1.287 (range 1.228-1.346), 0 inexact.** The fire-path win
+  generalizes beyond pro/512k: pro/64k L22 1.33, pro/128k L6 1.33,
+  pro/512k L48/L60 1.23/1.24, v32 cells 1.26-1.32.
+- **Gated-shape sweep (chains A+B, 584 paired cells, 0 err, 0 inexact):**
+  synth best/worst x K{1024,2048} seqlen + FULL BS grid (11 BS x all N) +
+  real pro/v32 all ISL x 11 BS. Results (off/on, >1 = fast wins):
+  - Non-firing tax is **BS-invariant** (every BS bucket gm 0.993-1.001)
+    and small: synth gms 0.992-0.996; real v32 0.987; real pro ex-512k
+    0.974-1.002 per ISL.
+  - **pro/512k firing rung: gm 1.189 across BS 1-1024** (min 1.068,
+    max 1.346) — the win survives the whole BS axis.
+  - Ship rule (<0.95) violations: 3/584 — pro/4k BS2/BS8 (N=1024,
+    OUTSIDE envelope; pro/4k is systematically -2.6% gm across BS) and
+    synth K2048 N131072 BS1024 0.948 (single cell, adverse-synth noise
+    floor per qfracs lore).
+
+## Final verdict
+
+The gated tiny-tie path is a **tail-latency repair, not a mean win**:
++19-35% on every firing cell (the p4_exact_tail fire census, ~1% of real
+layer-cells, incl. the +45% pro/512k regression) for a broad, BS-invariant
+~1-1.5% codegen tax on non-firing K>=1024 cells (worst pocket N<=1024,
+-2.6% gm). Uniform-weighted 865-grid mean would be ~-1%; §4 BS=1 gated
+gm +0.5%; worst-cell latency improves dramatically.
+
+**Ship options** (user decision):
+1. Gate as-is (fp32 & K>=1024) — recommended if tail latency / worst-cell
+   robustness is the goal (it is: the fire path exists to keep exactness).
+2. Add N>=2048 to the gate (1 line) — trims the pro/4k pocket; keeps all
+   census cells (smallest firing N is v32/8k N=8195).
+3. Opt-in flag only (default OFF) — zero risk, no default benefit.
+F1 precedent says the ~1-1.5% non-firing tax is codegen-structural and
+not reducible within this skeleton (v2/v3/v4 all paid >=2.5%; this shape
+is already the cheapest known).
+
+Artifacts: kgate_proof.py, p4tt_fix_ab.py (+ fixture jsonl in
+p4tt_results/), ops_p4tt.py/sweep_p4tt.py/aggregate_p4tt.py,
+p4tt_sweep.csv (584 cells), battery run5 log. NOT pushed to the PR
+branch — per verify-first directive.
