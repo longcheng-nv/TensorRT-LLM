@@ -27,7 +27,8 @@ import ops_refresh as ORF_HEAD                                # noqa: E402  (hea
 OP37_DEFAULT = ["gvr_pr", "sglang_v2"]
 
 
-PROBE_ARMS = ["gvr_cs2", "gvr_cs4", "gvr_cs8", "gvr_a2", "gvr_dp4"]
+PROBE_ARMS = ["gvr_cs2", "gvr_cs4", "gvr_cs8", "gvr_a2", "gvr_dp4",
+              "gvr_base", "op26_r0auto"]
 
 
 def ops_for_op37(dtype_name, K):
@@ -54,7 +55,32 @@ def _build_pr_cs(cs_override, K, dtype, N, BS, cr, logits_row, preidx_row):
                                       "launch_cfg": f"cs{cs_override}/forced"}, (lambda: out)
 
 
+def _build_dp4(K, dtype, N, BS, cr, logits_row, preidx_row):
+    """gvrpkg37 (current head + [op37-dp4] splice) with dist_p4=True where
+    pick_config gives cs>1; degenerates to gvr_pr at cs==1 (recorded)."""
+    import torch
+    _VAR37 = _HERE.parents[0] / "variant"
+    if str(_VAR37) not in sys.path:
+        sys.path.insert(0, str(_VAR37))
+    from gvrpkg37.top_k.gvr_topk_decode import GvrTopKKernel as Gvr37
+    lg = logits_row.to(dtype).contiguous().expand(BS, -1).contiguous()
+    pre = preidx_row.contiguous().expand(BS, -1).contiguous()
+    sl = torch.full((BS,), N * cr, dtype=torch.int32, device="cuda")
+    out = torch.empty(BS, K, dtype=torch.int32, device="cuda")
+    cfg = Gvr37.pick_config(dtype, BS, lg.shape[1])
+    dp4 = cfg["cluster_size"] > 1
+    ovr = dict(dist_p4=True) if dp4 else {}
+    call = (lambda lg=lg, pre=pre, sl=sl, out=out, ovr=ovr:
+            Gvr37.launch(lg, pre, sl, out, K, compress_ratio=cr, **ovr))
+    call()
+    extra = {"cluster_size": cfg["cluster_size"],
+             "flags": "dist_p4" if dp4 else "cs1_no_dp4"}
+    return call, [lg, pre, sl, out], extra, (lambda: out)
+
+
 def build_call_op37(op, K, dtype, N, BS, cr, logits_row, preidx_row):
+    if op == "gvr_dp4":
+        return _build_dp4(K, dtype, N, BS, cr, logits_row, preidx_row)
     if op.startswith("gvr_cs"):
         return _build_pr_cs(int(op[6:]), K, dtype, N, BS, cr,
                             logits_row, preidx_row)

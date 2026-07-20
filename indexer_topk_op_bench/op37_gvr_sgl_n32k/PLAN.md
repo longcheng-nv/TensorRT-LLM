@@ -71,6 +71,35 @@ unknowable at inference); ms_auto fused count+collect (1.47× slower);
   becomes viable if dp4-v2 cuts the cluster sync tax. Do not re-run as a
   pure launch-policy change.
 
+## Mechanism map (results/phase_bs.csv, clock64 splice, BS∈{1,2,8}, 6 cells)
+
+- Warm/mid-hit (hit 0.23-0.70): **P4 select 44-58%** (leader-only), P2 17-24%,
+  P1 10-14%. Holds at BS 2 and 8 (cs 8→4). Straggle ≈1.0.
+- Cold-hit (flash-512k hit 0.057): **P2 count+admission 45-51%** (rung miss →
+  refine rounds, each a cluster sync), P4 27-35%.
+- V4 cells cluster at BS≤8 even on the 32K rung (pick_config keys off
+  max_seq_len=N*cr, NOT compressed N) — only v32 (cr=1) 32k runs cs=1.
+- flash-512k BS-scaling attribution (results/f512k*): pr 2.1-3.1× FASTER than
+  base everywhere (R0 repairs). BS≥256 collapse = BW-bound multi-pass wall:
+  pr ~0.40µs/row vs sglang ~0.19µs/row at BS=1024 (cold content ⇒ ~4-5
+  full-N passes vs sglang's fixed 2). Fix = fewer miss-path passes, not R0
+  rollback.
+
+## gvr29/HBE scope ruling (2026-07-20)
+
+op29's gvr29_hbe arm achieves sglang parity at BS 1-16 AND 1.3-1.7× at
+BS≥1024 (N 131-262K) on the op22 grid — BUT the kernel is a CUDA **fork of
+sglang v2** (src/gvr29/gvr29_standalone.cu) with the HBE tier added; its
+non-engaged cells literally run sglang code (hence sgl/hbe = 1.00 there).
+Under this campaign's red line, porting gvr29 wholesale = shipping a rival
+port (out of scope, same as op36 sgl_bx). IN scope: re-implementing the HBE
+*algorithmic ideas* inside the production cuteDSL GvrTopKKernel as a new
+guess/verify strategy (sampled-rank guess column when hint is cold; fused
+collect-with-slack; mini-hist refine; GMEM-atomic multi-CTA cooperation
+instead of cluster-barrier chains). Tier-2 lever if dp4-v2 falls short —
+note op34's lock says BS=1 ceiling ≈ sglang parity, which matches gvr29's
+measured 1.00-1.01 at BS 1-8.
+
 ## Measurement discipline
 
 nsys cold-L2 only (no CUDA-event verdicts); ship verdicts ≤2-way concurrent;
