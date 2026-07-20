@@ -79,6 +79,30 @@ and value-set semantics get murkier — declare dtype explicitly).
 
 ## 5. Paste-ready prompt for the other party's Claude Code session
 
+English:
+
+---
+Benchmark operator <YOUR_OP> on the REPORT-§4 real dataset (shared NFS):
+Read /home/scratch.loncheng_gpu/workspace/perf/workloads/DSV4/TensorRT-LLM/indexer_topk_op_bench/op26_r0_upstream_port_report/SHARED_REALDATA_TESTING.md.
+Load the 25 bench cells per its §1 via the loaders (flash L22 / pro L30 /
+v32 L34, BS=1 fp32). For each cell, time <YOUR_OP> under the §3 protocol
+(nsys with cold-L2 512MB eviction outside the NVTX range, 20 cold + 50 warm
+reps, NVTX c|/w| ranges, verdict runs at <=2 concurrent nsys per node) and
+fold in the §2 exactness check (K unique indices, gathered value multiset
+== torch.topk of the valid prefix). Emit one jsonl row per cell, then
+compare per-cell and geomean against the §4 reference tables
+(real_3arm.csv / rival_long.csv). Cautions: only the first N elements of
+logits are valid — the padded tail is garbage and must never be scanned or
+selected; multi-kernel / PDL-overlapped operators must additionally report
+the projected NVTX span (nvtx_gpu_proj), which is the canonical time for
+such ops; CUDA-event timing is not comparable (warm-L2 understates by
+25-35%). If comparing absolute microseconds against the reference CSVs,
+note they were measured on b200-044/094 — include a shared anchor arm or
+compare ratios (cross-node drift med ~1.01-1.03 on this B200 fleet).
+---
+
+中文:
+
 ---
 在 NFS 数据集上为算子 <YOUR_OP> 做 REPORT-§4 同数据性能测试:
 读 /home/scratch.loncheng_gpu/workspace/perf/workloads/DSV4/TensorRT-LLM/indexer_topk_op_bench/op26_r0_upstream_port_report/SHARED_REALDATA_TESTING.md,
