@@ -1,5 +1,22 @@
 # RESUME — p4tt tiny-tie fast path campaign (session handoff)
 
+> **TAKEOVER 2026-07-20 ~05:1x UTC on umbriel-b200-081 — ALL GATES GREEN.**
+> The agent compile-fix + fp32&K>=1024 ctor gate DID land (committed kernel
+> md5 3396037cfc6eb7afe8924f2385ebd874; the md5 712171 below is stale — the
+> agent edited again at 04:48 before the handoff commit). Verified this node:
+> battery run5 **175/175** incl. new case F 25-config launch-contract smoke
+> (`battery_p4tt_run5_081.log`; needs `CUTE_DSL_KEEP_PTX=1`); `kgate_proof.py`
+> 3/3 (K512 default byte-identical to pristine, K1024/2048 gate ON exact,
+> explicit-False always byte-identical, `kgate_proof_081.log`); Gate A' PASS
+> (`gateA_run5_081.log`); Gate D' 865/865 (`gateD_{flash,pro,v32}_081.log`);
+> Gate C' nsys x3 paired (`gateC_parse_081.log`, raw /tmp/gvrlayers/p4tt_ab_081):
+> **pro/512k slow/fast 1.340** (== 035's 1.340), 25/25 exact both arms,
+> anchor med 1.014, K>=1024 non-firing 0.973–1.026; K-gated ship geomean ~1.007.
+> Worktree precondition verified: prod2_pristine == gvr-r0 worktree head file
+> @1128c0544f (NOT @0d6fc4f1f2 as the mission line below says — pristine was
+> upgraded on 035). Remaining: user decision on the PR push (user directive
+> 07-20: present overall verification first, do NOT push before approval).
+
 > Written 2026-07-20 ~04:5x UTC on umbriel-b200-027 for migration to another
 > 8x B200 node. Read top-to-bottom; everything needed is on NFS in this dir.
 
