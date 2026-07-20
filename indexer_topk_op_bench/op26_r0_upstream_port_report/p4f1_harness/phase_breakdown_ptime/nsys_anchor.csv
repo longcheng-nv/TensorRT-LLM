@@ -1,0 +1,13 @@
+cell,arm,n_kernels,med_us
+flash/32k/L22,prod,30,9.104
+flash/32k/L22,timed,30,9.264
+flash/128k/L22,prod,30,13.152
+flash/128k/L22,timed,30,13.504
+pro/128k/L30,prod,30,14.464
+pro/128k/L30,timed,30,14.56
+pro/512k/L30,prod,30,17.792
+pro/512k/L30,timed,30,18.991500000000002
+v32/128k/L34,prod,30,18.144
+v32/128k/L34,timed,30,18.528
+flash/1024k/L22,prod,30,18.384
+flash/1024k/L22,timed,30,19.0235
