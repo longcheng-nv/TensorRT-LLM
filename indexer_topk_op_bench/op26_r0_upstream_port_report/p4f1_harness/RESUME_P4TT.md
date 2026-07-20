@@ -17,8 +17,8 @@
 > upgraded on 035). User decision 07-20: LOCAL COMMIT ONLY — spliced kernel
 > committed on the PR branch as **e6fdbfac3d** ("[None][perf] gvr_topk_decode:
 > tiny-tie fast path for p4_exact_tail", DCO + trailer, worktree clean).
-> NOT pushed; `git -C ../TensorRT-LLM-gvr-r0 push fork
-> perf/gvr-topk-r0-histogram-ladder` is the only remaining step after review.
+> PUSHED 2026-07-20 per user approval: fork 1128c0544f..e6fdbfac3d,
+> PR#16457 head verified = e6fdbfac3d via REST. CAMPAIGN COMPLETE.
 
 > Written 2026-07-20 ~04:5x UTC on umbriel-b200-027 for migration to another
 > 8x B200 node. Read top-to-bottom; everything needed is on NFS in this dir.
