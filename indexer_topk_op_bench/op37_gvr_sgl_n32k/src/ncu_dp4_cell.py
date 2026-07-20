@@ -36,6 +36,21 @@ pre = b["preIdx"].contiguous().expand(BS, -1).contiguous()
 sl = torch.full((BS,), N * cr, dtype=torch.int32, device="cuda")
 out = torch.empty(BS, K, dtype=torch.int32, device="cuda")
 
+if ARM == "sgl":
+    sys.path.insert(0, str(OPBENCH / "op26_r0_upstream_port_report" / "rival_harness"))
+    import ops_rival as OR
+    call, keep, extra, getter = OR.build_call_rival(
+        "sglang_v2", K, torch.float32, N, BS, cr, lg[:1], pre[:1])
+    for _ in range(3):
+        call()
+    torch.cuda.synchronize()
+    torch.cuda.profiler.start()
+    for _ in range(12):
+        call()
+    torch.cuda.synchronize()
+    torch.cuda.profiler.stop()
+    print("DONE sgl", flush=True)
+    sys.exit(0)
 if ARM == "dp4":
     from gvrpkg37.top_k.gvr_topk_decode import GvrTopKKernel as Gvr
     ovr = dict(dist_p4=True)
@@ -43,7 +58,8 @@ else:
     from gvrpkgprod2.top_k.gvr_topk_decode import GvrTopKKernel as Gvr
     ovr = {}
 cfg = Gvr.pick_config(torch.float32, BS, lg.shape[1])
-assert cfg["cluster_size"] > 1, cfg
+if ARM == "dp4":
+    assert cfg["cluster_size"] > 1, cfg
 print(f"[{ARM}] {MODEL}/{ISL} N={N} BS={BS} cs={cfg['cluster_size']}", flush=True)
 
 for _ in range(3):

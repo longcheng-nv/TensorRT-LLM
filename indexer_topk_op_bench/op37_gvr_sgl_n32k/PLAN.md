@@ -84,6 +84,14 @@ unknowable at inference); ms_auto fused count+collect (1.47× slower);
   pr ~0.40µs/row vs sglang ~0.19µs/row at BS=1024 (cold content ⇒ ~4-5
   full-N passes vs sglang's fixed 2). Fix = fewer miss-path passes, not R0
   rollback.
+- **NCU DRAM + phase split at BS≥256 (07-20)**: pr 403µs @76.9% DRAM = 2.38GB
+  = 4.4× row data; sglang 188µs = 1.9×. Phase split (BS 256/1024, cs=1):
+  **P2 = 72.5-72.7%** (≈3.5 full-N-pass equivalents ⇒ the ladder MISSES on
+  this real cell and refines ~2.5 extra passes), P3 21%, P4 only 3.4%.
+  ⇒ the collapse is a P2 admission-miss problem; L-J's wider/deeper bracket
+  (replay M8 band 482 on this cell) should kill the refine → P2 →1 pass →
+  projected ~2× at BS≥256 (0.53→~parity). L-J now carries BOTH loss regions
+  (warm BS≤8 via P4 diet + cold/big-BS via refine elimination).
 
 ## gvr29/HBE scope ruling (2026-07-20)
 

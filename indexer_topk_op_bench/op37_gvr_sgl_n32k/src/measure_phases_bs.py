@@ -59,6 +59,8 @@ PHASES = [
 ]
 
 # (model, isl, layer, BS list) — op37 BS<=8 loss cells
+import os as _os
+_ONLY = _os.environ.get("CELLS_ONLY", "")
 CELLS = [
     ("flash", "128k", 22, [1, 2, 8]),   # N=32771  cs1 all
     ("flash", "512k", 22, [2, 8]),      # N=131075 cs8/cs4
@@ -67,6 +69,9 @@ CELLS = [
     ("v32", "64k", 34, [2, 8]),         # N=65551  cs4/cs4
     ("flash", "1024k", 22, [2, 8]),     # N=262127 cs8/cs4
 ]
+if _ONLY:  # e.g. "flash:512k:22:256,1024"
+    m, isl, ly, bss = _ONLY.split(":")
+    CELLS = [(m, isl, int(ly), [int(b) for b in bss.split(",")])]
 
 
 def make_kernel(cls, K, cr, cfg, timed):
