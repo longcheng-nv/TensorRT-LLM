@@ -317,6 +317,9 @@ class GvrTopKKernel:
         p4_exact_tail: Optional[bool] = None,
         p4_tail_fast: Optional[bool] = None,  # [p4tt]
         dist_p4: Optional[bool] = None,  # [op37-dp4]
+        tight_bracket: Optional[bool] = None,  # [op37-lj]
+        tb_qfracs: Optional[tuple] = None,  # [op37-lj]
+        tb_debug: bool = False,  # [op37-lj]
     ):
         # cluster_size: number of CTAs cooperating per row. 1 = single-CTA
         # path; 2/4 = thread-block cluster with DSMEM aggregation. Capped at
@@ -503,6 +506,29 @@ class GvrTopKKernel:
                 r0_qfracs = (0.6, 0.35) if r0_vseed else (0.85, 0.35)
             else:
                 r0_qfracs = (0.85,) if r0_vseed else (0.85, 0.35)
+        # [op37-lj] tight_bracket: multi-rung tight-bracket admission.
+        # Widen the rung ladder to M tb_qfracs columns (+ vseed) so the ONE
+        # M-ary P2 count pass yields a tight (lo, hi) pair straddling K:
+        # elements >= thr_hi are SURE top-K members (P3 streams them straight
+        # to the output row), only the [thr_lo, thr_hi) band goes to the smem
+        # candidate slots, and P4 ranks band_count << cand_count elements for
+        # the remaining K - cnt_hi slots at output offset cnt_hi. Zero new
+        # cluster syncs. Default OFF compiles the original text (PTX
+        # byte-identity contract, see [op37-dp4] precedent).
+        # tb_qfracs default = 8 spec rungs + one deep-coverage q0.05 rung
+        # (a HIGH threshold whose count is likely < K, donating a hi bracket
+        # / sure set even on high-hit rows); + vseed pmean column => M_thr=10.
+        self.tight_bracket = bool(tight_bracket) if tight_bracket is not None else False
+        self.tb_debug = bool(tb_debug) and self.tight_bracket
+        if self.tight_bracket:
+            if not enable_r0:
+                raise ValueError("tight_bracket=True requires enable_r0=True")
+            if tb_qfracs is None:
+                tb_qfracs = (0.98, 0.94, 0.88, 0.8, 0.7, 0.58, 0.45, 0.3, 0.05)
+            self.tb_qfracs = tuple(float(q) for q in tb_qfracs)
+            r0_qfracs = self.tb_qfracs
+        else:
+            self.tb_qfracs = ()
         if enable_r0 and p1b_cache is None:
             if cluster_size > 1:
                 p1b_cache = True
@@ -619,6 +645,14 @@ class GvrTopKKernel:
                 "enable_p4_rank_scatter_exact=True; got "
                 f"cluster_size={cluster_size}, "
                 f"enable_p4_rank_scatter_exact={self.enable_p4_rank_scatter_exact}"
+            )
+        # [op37-lj] band P4 is implemented on the leader-local exact
+        # rank-scatter only; distP4 keeps its own path (leave dist_p4 off).
+        if self.tight_bracket and (not self.enable_p4_rank_scatter or self.dist_p4):
+            raise ValueError(
+                "tight_bracket=True requires enable_p4_rank_scatter=True and "
+                f"dist_p4=False; got enable_p4_rank_scatter="
+                f"{self.enable_p4_rank_scatter}, dist_p4={self.dist_p4}"
             )
 
     # ------------------------------------------------------------------
@@ -4259,6 +4293,24 @@ class GvrTopKKernel:
                 )
             else:
                 smem_gath = None
+            # [op37-lj] tight-bracket scratch: s_lj_i[0]=fired, [1]=hi_m,
+            # [2]=cnt_hi (cluster-wide), [3]=lo_m, [4]=per-CTA sure-set
+            # output base, [5]=spare; s_lj_f[0]=thr_hi. None when OFF so
+            # the base SMEM layout is byte-for-byte unchanged.
+            if cutlass.const_expr(self.tight_bracket):
+                s_lj_i = smem.allocate_tensor(
+                    element_type=cutlass.Int32,
+                    layout=cute.make_ordered_layout((6,), order=(0,)),
+                    byte_alignment=16,
+                )
+                s_lj_f = smem.allocate_tensor(
+                    element_type=cutlass.Float32,
+                    layout=cute.make_ordered_layout((1,), order=(0,)),
+                    byte_alignment=16,
+                )
+            else:
+                s_lj_i = None
+                s_lj_f = None
         else:
             s_mt_thr = None
             smem_ptcnt_multi = None
@@ -4267,6 +4319,8 @@ class GvrTopKKernel:
             s_r0col = None
             s_cluster_partial_m = None
             smem_gath = None
+            s_lj_i = None  # [op37-lj]
+            s_lj_f = None  # [op37-lj]
 
         # ---- Per-row dispatch ----
         # Three branches:
@@ -4353,6 +4407,8 @@ class GvrTopKKernel:
                         warp_id,
                         lane,
                         s_dp4=s_dp4,  # [op37-dp4]
+                        s_lj_i=s_lj_i,  # [op37-lj]
+                        s_lj_f=s_lj_f,  # [op37-lj]
                     )
                 else:
                     # Short row: only CTA 0 scans the full row; the other
@@ -4395,6 +4451,8 @@ class GvrTopKKernel:
                             warp_id,
                             lane,
                             s_dp4=s_dp4,  # [op37-dp4]
+                            s_lj_i=s_lj_i,  # [op37-lj]
+                            s_lj_f=s_lj_f,  # [op37-lj]
                         )
             else:
                 # cs=1: one CTA per row, no cluster sync.
@@ -4434,6 +4492,8 @@ class GvrTopKKernel:
                     warp_id,
                     lane,
                     s_dp4=s_dp4,  # [op37-dp4]
+                    s_lj_i=s_lj_i,  # [op37-lj]
+                    s_lj_f=s_lj_f,  # [op37-lj]
                 )
 
         griddepcontrol_launch_dependents()
@@ -4476,6 +4536,8 @@ class GvrTopKKernel:
         warp_id,
         lane,
         s_dp4=None,  # [op37-dp4] distP4 DSMEM scratch (cs>1 + dist_p4 only)
+        s_lj_i=None,  # [op37-lj] tight-bracket int scratch (tight_bracket only)
+        s_lj_f=None,  # [op37-lj] tight-bracket thr_hi scratch (tight_bracket only)
     ):
         """Run Phase 1-4 + final cluster barrier on a given row slice.
 

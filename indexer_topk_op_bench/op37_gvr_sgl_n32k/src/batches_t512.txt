@@ -1,0 +1,6 @@
+flash 512k
+pro 512k
+flash 1024k
+pro 1024k
+flash 256k
+pro 256k

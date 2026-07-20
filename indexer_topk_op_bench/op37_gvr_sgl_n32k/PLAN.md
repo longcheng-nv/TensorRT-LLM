@@ -128,7 +128,10 @@ L-G  P1 hint-gather distribution/overlap check (7-14%; verify gather is
      cluster-parallel; overlap with P1b via warp split = the "deepest
      untouched lever" intra-CTA pipelining, op32-falsified ONLY at cs=1
      short rows — cluster BS≤8 large-N is unprobed territory)
-L-H  Launch micro-tuning at the 12 loss shapes (cs4 nt512-class, ~2-4%)
+L-H  Launch micro-tuning — **FALSIFIED as meaningful** (results/t512:
+     T512 override on the 6 V4 T1024 rungs = +1.0-1.5% BS1-2 only, loses
+     BS8-128 to 0.80; the pre-compression n_per_cta inflation is NOT a
+     consequential mis-tune; not worth a shape-gate).
 L-J  multi-rung tight bracket (sync-free P4 diet): count MORE rung columns
      in the existing P2 M-ary pass (M=2+vseed today) → post-count pick the
      tightest pair (lo,hi) straddling K → P3 emits ≥hi "sure set" directly

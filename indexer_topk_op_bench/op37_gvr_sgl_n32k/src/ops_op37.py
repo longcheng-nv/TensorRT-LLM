@@ -28,7 +28,7 @@ OP37_DEFAULT = ["gvr_pr", "sglang_v2"]
 
 
 PROBE_ARMS = ["gvr_cs2", "gvr_cs4", "gvr_cs8", "gvr_a2", "gvr_dp4",
-              "gvr_base", "op26_r0auto"]
+              "gvr_base", "op26_r0auto", "gvr_lj", "gvr_t512"]
 
 
 def ops_for_op37(dtype_name, K):
@@ -78,7 +78,25 @@ def _build_dp4(K, dtype, N, BS, cr, logits_row, preidx_row):
     return call, [lg, pre, sl, out], extra, (lambda: out)
 
 
+def _build_pr_ovr(ovr, tag, K, dtype, N, BS, cr, logits_row, preidx_row):
+    """gvr_pr (head) with explicit ctor overrides (L-H' tuning probes)."""
+    import torch
+    Gvr = ORF_HEAD.GvrTopKKernel
+    lg = logits_row.to(dtype).contiguous().expand(BS, -1).contiguous()
+    pre = preidx_row.contiguous().expand(BS, -1).contiguous()
+    sl = torch.full((BS,), N * cr, dtype=torch.int32, device="cuda")
+    out = torch.empty(BS, K, dtype=torch.int32, device="cuda")
+    call = (lambda lg=lg, pre=pre, sl=sl, out=out:
+            Gvr.launch(lg, pre, sl, out, K, compress_ratio=cr, **ovr))
+    call()
+    return call, [lg, pre, sl, out], {"flags": tag}, (lambda: out)
+
+
 def build_call_op37(op, K, dtype, N, BS, cr, logits_row, preidx_row):
+    if op == "gvr_t512":
+        return _build_pr_ovr(dict(num_threads=512,
+                                  enable_warp_parallel_reduce=False),
+                             "t512", K, dtype, N, BS, cr, logits_row, preidx_row)
     if op == "gvr_dp4":
         return _build_dp4(K, dtype, N, BS, cr, logits_row, preidx_row)
     if op.startswith("gvr_cs"):
