@@ -129,6 +129,16 @@ L-G  P1 hint-gather distribution/overlap check (7-14%; verify gather is
      untouched lever" intra-CTA pipelining, op32-falsified ONLY at cs=1
      short rows — cluster BS≤8 large-N is unprobed territory)
 L-H  Launch micro-tuning at the 12 loss shapes (cs4 nt512-class, ~2-4%)
+L-J  multi-rung tight bracket (sync-free P4 diet): count MORE rung columns
+     in the existing P2 M-ary pass (M=2+vseed today) → post-count pick the
+     tightest pair (lo,hi) straddling K → P3 emits ≥hi "sure set" directly
+     to output, collects ONLY the (lo,hi) band → P4 ranks band_count ≪
+     cand_count elements for the remaining K-cnt_hi slots. Attacks the
+     fat-admission P4 input (kC=3072=6×K@K512; flash-1M measured 4408
+     admitted) with ZERO new cluster syncs; leader P4 hist/scatter work
+     scales down proportionally. Cost = wider count pass (qr2 3-col tax
+     was -3..-7%, must A/B col count) + P3 two-threshold classify.
+     Host-side replay estimate of band sizes on the 25 real cells FIRST.
 L-I  PDL / kernel-prologue overlap (sglang gains from 2-kernel PDL; GVR
      could pre-launch evict/plan under PDL) — framework-adjacent, last
 FALSIFIED (do not revisit): forced cs2/4 w/o algorithm change; P4 reseed/
