@@ -1,0 +1,12 @@
+flash 128k
+pro 128k
+v32 32k
+flash 256k
+pro 256k
+v32 64k
+flash 512k
+pro 512k
+v32 128k
+flash 1024k
+pro 1024k
+v32 256k
