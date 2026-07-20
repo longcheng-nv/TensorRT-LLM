@@ -100,6 +100,37 @@ instead of cluster-barrier chains). Tier-2 lever if dp4-v2 falls short —
 note op34's lock says BS=1 ceiling ≈ sglang parity, which matches gvr29's
 measured 1.00-1.01 at BS 1-8.
 
+## BS≤8 exhaustive lever ledger (user directive 2026-07-20: 穷尽 GVR 改进空间)
+
+Phase budget at BS≤8 loss cells (phase_bs.csv): P4 44-58% (leader-serial),
+P2 17-24% (45-51% cold), P1 gather 7-14%, P1b ~3%, stage/epilogue <1%.
+
+L-A  dist_P4 v1 (A2 splice, 6 syncs)           — verdict sweep IN FLIGHT
+L-B  dist_P4 v2: S1→P3-handoff merge + S5+S6 merge (6→4 syncs)   — next
+L-C  dist_P4 v3: single-level wide-hist over cand band (4→3 syncs,
+     p4_exact_tail absorbs boundary; host-side fire-rate estimate first)
+L-D  cs=16 probe at BS 1-2 (ctor bound [1,16]; only AFTER dist_P4 lands —
+     leader-serial P4 made cs>8 pointless before)
+L-E  P2 refine sync diet: fold rung-count cluster merges into fewer rounds;
+     admission already vseed'd — do NOT retune qfracs (silicon-wash, §9c)
+L-F  HBE-lite cold guess: P1 samples full-row tiles → order-stat guess
+     column when hint is cold (in-kernel, no hit-rate dispatch), replaces
+     miss→secant chains; targets cold cells (flash-512k) at ALL BS
+L-G  P1 hint-gather distribution/overlap check (7-14%; verify gather is
+     cluster-parallel; overlap with P1b via warp split = the "deepest
+     untouched lever" intra-CTA pipelining, op32-falsified ONLY at cs=1
+     short rows — cluster BS≤8 large-N is unprobed territory)
+L-H  Launch micro-tuning at the 12 loss shapes (cs4 nt512-class, ~2-4%)
+L-I  PDL / kernel-prologue overlap (sglang gains from 2-kernel PDL; GVR
+     could pre-launch evict/plan under PDL) — framework-adjacent, last
+FALSIFIED (do not revisit): forced cs2/4 w/o algorithm change; P4 reseed/
+fine-iter; fused P2+P3 (Opt-L/ms_auto); smem-resident; sw-pipeline @cs1;
+hit-rate host dispatch; qfracs retune V4.
+
+Ceiling honesty: op34 oracle lock ⇒ BS=1 target is sglang PARITY (±5%),
+not a win; composite >1.0 comes from parity at BS≤16 + protected wins at
+BS 32-128 + big-BS repair (L-F).
+
 ## Measurement discipline
 
 nsys cold-L2 only (no CUDA-event verdicts); ship verdicts ≤2-way concurrent;
