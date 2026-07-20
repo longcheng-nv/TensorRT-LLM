@@ -105,7 +105,15 @@ measured 1.00-1.01 at BS 1-8.
 Phase budget at BS≤8 loss cells (phase_bs.csv): P4 44-58% (leader-serial),
 P2 17-24% (45-51% cold), P1 gather 7-14%, P1b ~3%, stage/epilogue <1%.
 
-L-A  dist_P4 v1 (A2 splice, 6 syncs)           — verdict sweep IN FLIGHT
+L-A  dist_P4 v1 (A2 splice, 6 syncs) — **VERDICT: NET LOSS at current head**
+     (results/dp4, 132 cells 0 inexact, pr/dp4 composite 0.9721): wins only
+     N=262K BS1-2 (1.03-1.07), loses BS8-64 mid-N (worst v32-64k 0.77-0.85),
+     BS≥128 cs1 control clean 1.00. op36's A2 headroom shrank because the
+     current head already dieted P4 (hist-diet + p4tt). Arithmetic: at
+     v32-64k BS8 the distributed-work saving (~11µs ideal) is overwhelmed
+     by ~16µs of sync/DSMEM-atomic overhead — NCU attribution in flight to
+     decide if L-B (4 syncs) is viable or the whole cluster-barrier dist_P4
+     family is dead below 262K. DO NOT ship dp4-v1.
 L-B  dist_P4 v2: S1→P3-handoff merge + S5+S6 merge (6→4 syncs)   — next
 L-C  dist_P4 v3: single-level wide-hist over cand band (4→3 syncs,
      p4_exact_tail absorbs boundary; host-side fire-rate estimate first)
