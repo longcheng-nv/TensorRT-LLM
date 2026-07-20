@@ -56,6 +56,21 @@ unknowable at inference); ms_auto fused count+collect (1.47× slower);
 - Later: BS 256-1024 flash-512k mechanism (re-check at current head first —
   may be vseed-repaired or R0 low-hit fallback scans).
 
+## Results so far (2026-07-20, b200-028, same-node paired)
+
+- **T0 baseline @e6fdbfac3d DONE: composite gm 0.8664** (132 cells, 0 inexact,
+  results/baseline). Per-BS: 1-8 → 0.68-0.71; 16 → 0.82; 32/64/128 →
+  1.17/1.17/1.09 (wins); 256/512/1024 → 0.91/0.89/0.88.
+  flash-1M big-BS repaired vs OLD head (0.77→1.01); **flash-512k big-BS
+  collapse PERSISTS (0.48-0.53 @BS≥256)** — separate mechanism, task.
+  Composite arithmetic: BS≤8→0.95 (+11%) & BS16→1.0 (+1.8%) & bigBS→0.95
+  (+2%) ⇒ ≈1.02. The BS 32-128 win block is the asset to protect.
+- **L1 forced-cs probe FALSIFIED** (results/l1probe): cs2/cs4 at N=32771 rung
+  loses at every BS (BS=1 0.92-0.98, BS≥64 0.27-0.63). pick_config cs=1 gate
+  is correct for the CURRENT cluster path; clustering the 32K rung only
+  becomes viable if dp4-v2 cuts the cluster sync tax. Do not re-run as a
+  pure launch-policy change.
+
 ## Measurement discipline
 
 nsys cold-L2 only (no CUDA-event verdicts); ship verdicts ≤2-way concurrent;
