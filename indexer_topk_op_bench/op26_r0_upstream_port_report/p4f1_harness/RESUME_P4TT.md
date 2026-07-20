@@ -14,8 +14,11 @@
 > anchor med 1.014, K>=1024 non-firing 0.973–1.026; K-gated ship geomean ~1.007.
 > Worktree precondition verified: prod2_pristine == gvr-r0 worktree head file
 > @1128c0544f (NOT @0d6fc4f1f2 as the mission line below says — pristine was
-> upgraded on 035). Remaining: user decision on the PR push (user directive
-> 07-20: present overall verification first, do NOT push before approval).
+> upgraded on 035). User decision 07-20: LOCAL COMMIT ONLY — spliced kernel
+> committed on the PR branch as **e6fdbfac3d** ("[None][perf] gvr_topk_decode:
+> tiny-tie fast path for p4_exact_tail", DCO + trailer, worktree clean).
+> NOT pushed; `git -C ../TensorRT-LLM-gvr-r0 push fork
+> perf/gvr-topk-r0-histogram-ladder` is the only remaining step after review.
 
 > Written 2026-07-20 ~04:5x UTC on umbriel-b200-027 for migration to another
 > 8x B200 node. Read top-to-bottom; everything needed is on NFS in this dir.
