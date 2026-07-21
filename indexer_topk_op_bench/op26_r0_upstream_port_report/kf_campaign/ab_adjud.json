@@ -1,0 +1,22 @@
+[
+ {
+  "uuid": "flash_64k_L18",
+  "pr_cold": 10.322016666666666,
+  "cand_cold": 9.666066666666667,
+  "speedup_cold": 1.067861108620535,
+  "pr_warm": 8.595975000000001,
+  "cand_warm": 9.110375,
+  "speedup_warm": 0.9435369016094289,
+  "cand_exact": true
+ },
+ {
+  "uuid": "pro_64k_L32",
+  "pr_cold": 10.748716666666667,
+  "cand_cold": 10.315616666666667,
+  "speedup_cold": 1.0419848869917294,
+  "pr_warm": 9.079125,
+  "cand_warm": 9.763950000000001,
+  "speedup_warm": 0.9298618899113574,
+  "cand_exact": true
+ }
+]

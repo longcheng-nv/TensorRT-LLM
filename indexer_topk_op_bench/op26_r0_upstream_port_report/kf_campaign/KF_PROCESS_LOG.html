@@ -261,6 +261,13 @@ first in-tree-family kernel to beat sglang v2 on the full real envelope (op28 ha
 sglang keeps mid-N strongholds N=8195 (0/51, 0.817) / 16387 (1/51, 0.850) / 32771-32783 (~0.92-0.94).
 <b>vs radix_cutedsl geomean 1.611 (win 864/865)</b>. Exactness edge: champion unconditionally exact; sglang v2 conditionally exact
 (kMaxNumTie=2048, real V3.2 L52 fails at 128k/256k).</td></tr>
+<tr><td>07-21 08:55</td><td style="color:#070"><b>SHIP BAR MET — c74f_sbx</b> = round-2 champion c74fb3c0 + engineer sb&lt;17&gt;@1024thr rung
+(8448&lt;n≤16896; c74fb3c0's topk_small was already blockDim.x-parameterized so the graft is 3 lines)</td><td>—</td>
+<td><b>geomean 1.6828× (865 cells), exact 865/865, ZERO cold regressions</b> — the two 0.993/0.998 borderline cells re-adjudicated at
+60 cold reps: flash_64k_L18 1.068, pro_64k_L32 1.042 (noise). Anchor clean (only 1027 marginal 1.033). Boundary rung healed:
+flash_64k_L28 0.846→1.253. Warm axis secondary notes: a few 64k cells 0.93-0.94 warm (cold-L2 is canonical for BS=1 decode).
+Rivals (PR-normalized): vs sglang_v2 ≈1.12 / vs radix_cutedsl ≈1.62. Campaign continues (round 2 plateau 1.3385) — any later harvest
+must beat THIS composite to displace it.</td></tr>
 </table>
 
 <h2>6 · Final verdict</h2>
