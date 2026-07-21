@@ -190,13 +190,14 @@ def main():
         f'<div style="font-size:1.5em;font-weight:700">{v}</div>'
         f'<div style="font-size:0.8em;color:#52514e">{k}</div></div>'
         for k, v in [
-            ("geomean vs PR head", f"{kpi_pr:.4f}×"),
+            ("geomean vs PR head / 对 PR 基线", f"{kpi_pr:.4f}×"),
             ("vs sglang v2", f"{kpi['xSGL']:.3f}×"),
             ("vs radix_cutedsl", f"{kpi['xRDX']:.3f}×"),
             ("vs flashinfer", f"{kpi['xFI']:.3f}×"),
-            ("exact", f"{n}/865"), ("cold regressions", "0"),
-            ("campaign cost", "$690.81"), ("orchestrator cost", "~$60"),
-            ("total LLM cost", "~$751"), ("wall", "~7.5 h")])
+            ("exact / 精确", f"{n}/865"), ("cold regressions / 冷回归", "0"),
+            ("campaign cost / 战役成本", "$690.81"),
+            ("orchestrator cost / 编排成本", "~$60"),
+            ("total LLM cost / 总成本", "~$751"), ("wall / 全程", "~7.5 h")])
             + "</div>")
 
     body = f"""{MARK_S}{css}
@@ -204,8 +205,11 @@ def main():
 + engineer dispatch graft (<code>topk_small&lt;17&gt;&lt;&lt;&lt;1,1024&gt;&gt;&gt;</code> rung, 8448&lt;n≤16896).
 Verdict grid: 865 real decode cells (BS=1), nsys cold-L2, paired same-GPU vs PR head @e6fdbfac3d; borderline cells adjudicated at 60 reps;
 per-rung <code>pr_cold</code> anchors clean. Rival ratios are PR-arm-normalized joins against the REPORT rival sweep (calibration med 1.010).
-Code pushed to <code>github.com/longcheng-nv/TensorRT-LLM</code> branch <code>kf/gvr-topk-c74fsbx</code>.
-两个基准口径:campaign 内部 1.3385(含 ~15µs 评测地板)≠ 本地 nsys 核时间比 1.6828。</p>
+Code pushed to <code>github.com/longcheng-nv/TensorRT-LLM</code> branch <code>kf/gvr-topk-c74fsbx</code>.<br>
+<span class="cng">最终交付 <b>c74f_sbx</b> = 第 2 轮冠军 c74fb3c0(agent r002-a003)+ 工程师分派嫁接(1024 线程单 CTA 档,8448&lt;n≤16896)。
+终审口径:865 个真实 decode 格(BS=1),nsys 冷-L2,同卡背靠背对 PR head;边缘格 60 rep 裁决;逐档 pr_cold 锚检干净。
+对手比值经 PR 臂逐格归一(校准中位 1.010)。代码已推 fork 分支 kf/gvr-topk-c74fsbx。
+两个基准口径互不相通:campaign 内部 1.3385(含 ~15µs 评测地板)≠ 本地 nsys 核时间比 1.6828。</span></p>
 {kpis}
 <div class="vizE">{inputs}{chips}
 <figure style="margin:8px 0">{e1}
@@ -221,7 +225,12 @@ Model and series chips both filter.<br>图 E2 — 分模型小倍图(模型与�
 vs sglang v2 <b>{kpi['xSGL']:.3f}×</b> (first in-tree-family win on the full real envelope; residual sglang strongholds at 32k ISL are now shallow),
 vs radix_cutedsl <b>{kpi['xRDX']:.3f}×</b>, vs flashinfer <b>{kpi['xFI']:.3f}×</b>.
 Production-port caveat: worst/best synthetic axes per house ship discipline remain to be run; warm-axis is secondary for BS=1 decode (cold-L2 canonical).
-Campaign cancelled 07-21 09:1x UTC after round-2 plateau; 2 rounds, 13 agents, ~30 candidates.</p>
+Campaign cancelled 07-21 09:1x UTC after round-2 plateau; 2 rounds, 13 agents, ~30 candidates.<br>
+<span class="cng">终审:对 PR head geomean <b>1.6828×</b>(门 ≥1.20 ✅),<b>零冷回归</b> ✅,865/865 精确 ✅;
+vs sglang v2 <b>{kpi['xSGL']:.3f}×</b>(首个在完整真实包络胜出的树内家族内核;sglang 残余优势区 32k ISL 已变浅),
+vs radix_cutedsl <b>{kpi['xRDX']:.3f}×</b>,vs flashinfer <b>{kpi['xFI']:.3f}×</b>。
+生产移植前提:按 ship 纪律还需补 worst/best 合成极端轴;BS=1 decode 以冷-L2 为准绳(warm 轴次要)。
+Campaign 于 07-21 09:1x UTC 第 2 轮高原期取消;共 2 轮、13 个 agent、~30 个候选。</span></p>
 <p><b>Cost accounting / 成本口径:</b> two independent meters. <b>Campaign side $690.81</b> (KF platform billing,
 <code>kf campaign cost</code>: round 1 ≈ $458.24 / 13.26 agent-hours; round 2 ≈ $232.6, cancelled mid-round; 48% cache hit;
 6 agents/round = 2×Fable-5(max) + 2×GPT-5.6-sol(xhigh) + 2×Opus-4.8, single agents reaching 30-47M input tokens).
@@ -231,11 +240,12 @@ Campaign cancelled 07-21 09:1x UTC after round-2 plateau; 2 rounds, 13 agents, ~
 
     html = HTML.read_text()
     if MARK_S in html:
-        html = html[:html.index(MARK_S)] + html[html.index(MARK_E) + len(MARK_E):]
-    anchor = "<h2>6 · Final verdict</h2>"
-    pend_start = html.index(anchor) + len(anchor)
-    pend_end = html.index("</p>", pend_start) + 4
-    html = html[:pend_start] + "\n" + body + html[pend_end:]
+        # idempotent: replace ONLY the marked region, never consume trailing content
+        html = html[:html.index(MARK_S)] + body + html[html.index(MARK_E) + len(MARK_E):]
+    else:
+        anchor = "<h2>6 · Final verdict / 终审</h2>"
+        pos = html.index(anchor) + len(anchor)
+        html = html[:pos] + "\n" + body + html[pos:]
     HTML.write_text(html)
     print("final section injected,", len(body), "bytes")
 
