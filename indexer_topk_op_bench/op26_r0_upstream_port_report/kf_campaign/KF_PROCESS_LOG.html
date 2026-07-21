@@ -217,6 +217,12 @@ ALL other 14 N-rungs are clean (N=1027 gm 2.15×, 262127 gm 1.44×). Root cause:
 3 elements below the grid's 16k npad — those cells fall to the cooperative path at only ~8 CTAs. Local probe <b>sb17</b>
 (SMALL_N→16896, sb&lt;22&gt; branch: 768 thr × KPT 22 = 16896 keys) launched on the 12 worst cells to validate the fix direction
 before steering. Data: grid_r1c.csv.</td></tr>
+<tr><td>07-21 05:50–06:05</td><td><b>Local dispatch probes sb17/sb17b</b> (engineer-assisted, on ba1020ce source):
+extend single-CTA smem path over the boundary — sb17 = SMALL_N 16384→16896 + sb&lt;22&gt;@768thr; sb17b = sb&lt;17&gt;@1024thr.</td><td>—</td>
+<td>Direction <b>double-confirmed</b>, exact 17/17 across probes: N=16387 flash_64k (K=512) 0.74–0.79 → sb17 0.85–0.92 → <b>sb17b 0.89–0.99</b>;
+pro_64k (K=1024) 0.79–0.81 → <b>0.88–1.06</b>; v32_16k (K=2048) 1.23–1.32 → <b>1.32–1.47</b> (net win, would clear the N=16399 rung).
+1024thr×KPT17 &gt; 768thr×KPT22 &gt; 8-CTA coop at this npad. Residual flash/pro_64k gap 1–11% vs PR cuteDSL = round-2 battleground;
+N=32771 (22 reg, gm 1.029) untouched by this lever. Steering material if round 2 stalls: switch-point ≥16.9k + 1024-thread sb + residual-gap map.</td></tr>
 </table>
 
 <h2>6 · Final verdict</h2>

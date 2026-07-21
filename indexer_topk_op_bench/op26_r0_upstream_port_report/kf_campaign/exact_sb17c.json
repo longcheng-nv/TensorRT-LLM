@@ -1,0 +1,42 @@
+{
+ "pro_64k_L02|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_64k_L02|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_64k_L04|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_64k_L04|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_64k_L32|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_64k_L32|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_64k_L50|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_64k_L50|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_64k_L52|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_64k_L52|kf_cand": [
+  true,
+  ""
+ ]
+}
