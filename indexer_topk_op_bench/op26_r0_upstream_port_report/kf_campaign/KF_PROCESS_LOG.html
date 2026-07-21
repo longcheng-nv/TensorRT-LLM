@@ -241,6 +241,13 @@ Data: grid_r2a.csv.</td></tr>
 elsewhere. Campaign-internal ranking (0197 &gt; 0260) is FLIPPED by the full grid — subset metric ≠ deployment envelope, again.
 Next probe: c74fb3c0 (a003, 1.3385 internal) which deletes the sb 16384 rung entirely (coop from 8448 up, ~148 CTAs at 16k — bets early-exit
 flipped the round-1 "more CTAs worse" consensus).</td></tr>
+<tr><td>07-21 08:05</td><td style="color:#b00"><b>MEASUREMENT CONTAMINATION — r2a &amp; r2b grid verdicts INVALIDATED</b></td><td>—</td>
+<td>Cross-run anchor check (per-rung median pr_cold over 5 grid runs) exposed whole-rung PR-arm inflation of 25–50% in r2a
+(N=16387/32771/131075/262127) and r2b (N=65551/131087/163775); r1a/r1c/sbx mutually consistent. Root cause: single-GPU probes were
+launched on GPU6/7 <i>while</i> the 8-GPU sharded grids were in flight — the op22 double-driver incident repeated. Invalidated:
+r2a "1.7758" (0260cee7), r2b "1.7101" (0197c2a1), probes ab_r2b/r2b2/r2c/r2c2. Clean + retained: r1c 1.3662 (ba1020ce),
+<b>sbx 1.6053 / 8 shallow regs (min 0.940), exact 865/865</b> — currently the best CLEAN verdict. Clean re-run of 0260cee7 (tag r2a2) launched;
+all local GPU work now strictly serialized.</td></tr>
 </table>
 
 <h2>6 · Final verdict</h2>
