@@ -1,0 +1,54 @@
+{
+  "name": "indexer_topk_decode_bs1_real",
+  "description": "DeepSeek-V4 sparse-attention indexer top-K selection at decode, BS=1, fp32, real captured logits. Select the indices of the k largest values of logits[0, :n_valid]. logits is stride-padded to npad=ceil(n/64)*64 with float32 min (pad can never enter the top-k). pre_idx holds the PREVIOUS decode step's top-k indices (temporal warm hint; overlap with the true top-k ranges 0.02-1.0, typically >0.5). Output: int32 indices, any order; ties at the k-th value boundary may be resolved either way.",
+  "op_type": "topk",
+  "axes": {
+    "b": {
+      "type": "const",
+      "value": 1
+    },
+    "n": {
+      "type": "var",
+      "description": "valid row length (post-compression indexer length)"
+    },
+    "k": {
+      "type": "var",
+      "description": "top-k size: 512 (V4-Flash), 1024 (V4-Pro), 2048 (V3.2)"
+    },
+    "npad": {
+      "type": "expr",
+      "expression": "(n + 63) // 64 * 64"
+    }
+  },
+  "inputs": {
+    "logits": {
+      "shape": [
+        "b",
+        "npad"
+      ],
+      "dtype": "float32"
+    },
+    "pre_idx": {
+      "shape": [
+        "b",
+        "k"
+      ],
+      "dtype": "int32"
+    },
+    "n_valid": {
+      "shape": null,
+      "dtype": "int32"
+    }
+  },
+  "outputs": {
+    "indices": {
+      "shape": [
+        "b",
+        "k"
+      ],
+      "dtype": "int32"
+    }
+  },
+  "custom_correctness_entrypoint": "check_topk",
+  "reference": "import torch\n\n\ndef run(logits, pre_idx, n_valid):\n    k = pre_idx.shape[1]\n    vals = logits[0, :n_valid].float()\n    return torch.topk(vals, k, largest=True, sorted=True).indices.view(1, k).to(torch.int32)\n\n\ndef check_topk(ref_outputs, user_outputs, *, mandatory, tie, k, n):\n    \"\"\"Tie-robust top-k index-set check.\n\n    mandatory: indices whose value is strictly greater than the k-th value\n    tie: indices whose value equals the k-th value (any subset may fill the rest)\n    \"\"\"\n    idx = user_outputs[\"indices\"].flatten().to(torch.int64).cpu()\n    problems = []\n    if idx.numel() != k:\n        problems.append(f\"count {idx.numel()} != k={k}\")\n    else:\n        if int(idx.min()) < 0 or int(idx.max()) >= n:\n            problems.append(\"index out of range\")\n        if torch.unique(idx).numel() != k:\n            problems.append(\"duplicate indices\")\n        mand = torch.tensor(mandatory, dtype=torch.int64)\n        tie_t = torch.tensor(tie, dtype=torch.int64) if len(tie) else torch.empty(0, dtype=torch.int64)\n        allowed = torch.cat([mand, tie_t])\n        if not bool(torch.isin(idx, allowed).all()):\n            problems.append(\"selected an index outside the true top-k set\")\n        if not bool(torch.isin(mand, idx).all()):\n            problems.append(\"missing a mandatory top-k index\")\n    passed = len(problems) == 0\n    return {\"indices\": {\"passed\": passed, \"message\": \"; \".join(problems) or \"ok\"}}\n"
+}
