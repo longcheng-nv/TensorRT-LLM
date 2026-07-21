@@ -76,8 +76,79 @@ def load_cells():
 
 # ---------------------------------------------------------------- prose ----
 # (filled from PHASE_FULL_ANALYSIS.md after the run; keep EN/ZH in sync)
-FINDINGS_EN = "%%FINDINGS_EN%%"
-FINDINGS_ZH = "%%FINDINGS_ZH%%"
+FINDINGS_EN = """
+<p><b>Findings (each claim is per-cell, no cross-cell averaging).</b></p>
+<ol>
+<li><b>P4 dominance is a per-cell fact, not an average artifact.</b> P4 select(+tail) is the largest
+phase in <b>827/865</b> cells; its share is med 44% with a full range of 1.8–62%. In absolute terms the
+per-rung medians are: cs1-small 4.5&thinsp;µs (44% of 10.1&thinsp;µs), cs1-mid 4.8&thinsp;µs (36% of
+13.1&thinsp;µs), cs4 8.2&thinsp;µs (49% of 16.7&thinsp;µs), cs8 9.6&thinsp;µs (50% of 19.3&thinsp;µs).
+This silicon-confirms distP4 (parallelize the leader-only final collect across cluster CTAs) as the #1
+remaining lever on the current head — the 07-20 warp-redundant P4 search landed and P4 still holds
+~half the kernel wherever clusters are in play.</li>
+<li><b>The dispatch boundary reshapes the composition.</b> Within cs=1, P4's share falls monotonically
+with N (flash: 48% at 4k → 31% at 128k) while P2+P3 grow to ~50% — the single-CTA scan is the cost
+center just below the cluster threshold. Crossing to cs≥4 parallelizes P2/P3 (P3 drops from ~25% to
+~13%) but the leader-only P4 — which also absorbs the wait for the slowest peer's collect — re-balloons
+to 47–55%. The most balanced compositions on the whole grid are the cs=1 N≈32k cells (flash/pro 128k
+ISL, v32 32k).</li>
+<li><b>High hint quality is not free speed on the PR head.</b> Within each (model, ISL) group, the
+slowest-quartile layers have a <i>higher</i> hit median than the fastest quartile (0.84 vs 0.76) and a
+P2 share of 0.27 vs 0.20. In the cs1-small rung, Spearman(hit, P2 µs) = +0.62 and Spearman(hit, total
+µs) = +0.40; at cs8, hit correlates with P1b rung-ladder µs at +0.58. The mechanism matches the known
+real-data undershoot bias: a tight hint-seeded threshold makes the admission/refine walk (fb_fix) work
+harder, and P4 does not shrink in return. (Dispatch still must not branch on hit — it is unknowable at
+inference; this is a kernel-internal cost story.)</li>
+<li><b>The degenerate fast path exists but only at tiny N.</b> 3 cells (N=1027, hit ≥ 0.86, incl. two
+hit = 1.0 pro layers) collapse P2–P3 and show P4 at 1.8–2.8%, running at the 5.3–6.1&thinsp;µs grid
+floor — the only cells where the threshold prior alone essentially solves the problem.</li>
+<li><b>A 37-cell P2-dominant minority (P2 share 0.31–0.49) sits at both hint extremes</b> (hit 0.02
+and 1.0), spread over 13 (model, ISL) groups: these are refine-walk-bound cells — deep undershoot walks
+at low hit, tight-boundary walks at high hit — the population the secant/fb_fix levers address.</li>
+<li><b>PR-loss cells are an admission/tie story, not a P4 story.</b> The 36 cells where the PR kernel
+loses to base (§7b ratios, classification only) concentrate in v32 large-N high-hit cells (19/36 at
+v32 64k–256k; class hit med 0.85, us med 17.9). Their phase mix is P2-heavier (0.22 vs 0.20 grid-wide)
+with P4 at the grid-typical 0.49 — consistent with tie-dense K=2048 exact-tail work, not with a
+structural P4 deficit.</li>
+<li><b>Validation.</b> 865/865 exact on BOTH arms, 865/865 monotone timestamps, instrumentation
+overhead med +0.5% / p95 +4.4%. 28 cells exceed the ±7% gate: 27 are ~10&thinsp;µs launch-floor cells
+(pro 4k–16k) where the delta is negative (noise), and flash_128k_L42 reproducibly pays ~+10% stamp tax
+while its phase fractions reproduce (P4 0.528 vs 0.531 across independent runs) — fractions kept,
+absolute anchored to the pristine arm as everywhere else.</li>
+</ol>"""
+FINDINGS_ZH = """
+<p><b>结论(每条都基于逐 cell 数据,全程不做跨 cell 平均)。</b></p>
+<ol>
+<li><b>P4 主导是逐格事实,不是平均值假象。</b>P4 select(+tail) 在 <b>827/865</b> 个 cell 中都是最大相;
+份额中位 44%,全距 1.8–62%。绝对值上各 rung 中位:cs1-small 4.5&thinsp;µs(占 10.1&thinsp;µs 的 44%)、
+cs1-mid 4.8&thinsp;µs(36%/13.1&thinsp;µs)、cs4 8.2&thinsp;µs(49%/16.7&thinsp;µs)、cs8 9.6&thinsp;µs
+(50%/19.3&thinsp;µs)。这在当前 head 上以硅上数据再次确认:distP4(把 leader 独占的最终收集并行到
+cluster 各 CTA)仍是第一杠杆——07-20 的 warp-redundant P4 搜索已落地,凡有 cluster 的地方 P4 仍占
+kernel 约一半。</li>
+<li><b>分派边界重塑相位构成。</b>cs=1 内部,P4 份额随 N 单调下降(flash:4k 的 48% → 128k 的 31%),
+P2+P3 升至 ~50%——紧贴 cluster 门槛之下,单 CTA 扫描是成本中心。跨入 cs≥4 后 P2/P3 被并行化
+(P3 从 ~25% 降到 ~13%),但 leader 独占的 P4——还吸收等最慢 peer collect 的时间——重新膨胀到
+47–55%。全网格构成最均衡的是 cs=1、N≈32k 的格(flash/pro 128k ISL、v32 32k)。</li>
+<li><b>在 PR head 上,高 hint 质量不等于更快。</b>各 (model, ISL) 组内,最慢四分位层的 hit 中位反而
+高于最快四分位(0.84 对 0.76),P2 份额 0.27 对 0.20。cs1-small rung 内 Spearman(hit, P2 µs) = +0.62、
+Spearman(hit, 总 µs) = +0.40;cs8 上 hit 与 P1b 阶梯 µs 相关 +0.58。机理与已知的真实数据 undershoot
+偏置一致:hint 种子给出的阈值越紧,admission/refine(fb_fix)走得越多,而 P4 并不因此缩短。
+(分派仍然不得依据 hit 分支——推理时不可知;这是 kernel 内部的成本叙事。)</li>
+<li><b>退化快路径存在,但只在极小 N。</b>3 个 cell(N=1027,hit ≥ 0.86,含两个 hit = 1.0 的 pro 层)
+把 P2–P3 塌缩掉,P4 仅 1.8–2.8%,跑在 5.3–6.1&thinsp;µs 的全网格地板——只有这些格,阈值先验本身就
+基本解决了问题。</li>
+<li><b>37 个 P2 主导的少数派(P2 份额 0.31–0.49)分布在 hint 两个极端</b>(hit 0.02 与 1.0),
+横跨 13 个 (model, ISL) 组:这是 refine-walk 受限的群体——低 hit 是深 undershoot 行走,高 hit 是
+紧边界行走——正是 secant/fb_fix 杠杆面向的人群。</li>
+<li><b>PR 输格是 admission/tie 叙事,不是 P4 叙事。</b>PR 对 base 落败的 36 格(§7b 比值,仅用于分类)
+集中在 v32 大 N 高 hit(19/36 位于 v32 64k–256k;类 hit 中位 0.85,us 中位 17.9)。其相位构成 P2 偏重
+(0.22 对全网格 0.20),P4 处于网格常态 0.49——与 K=2048 tie 密集触发 exact-tail 的机制一致,
+而非 P4 结构性劣势。</li>
+<li><b>验证。</b>两臂 865/865 精确,865/865 时间戳单调,插桩开销中位 +0.5%、p95 +4.4%。28 格超出
+±7% 门:27 格是 ~10&thinsp;µs launch-floor 格(pro 4k–16k)且偏差为负(噪声);flash_128k_L42 可复现地
+付 ~+10% 插桩税,但其相位份额跨独立运行复现(P4 0.528 对 0.531)——保留其份额,绝对值一如其他格
+锚定在纯净臂。</li>
+</ol>"""
 
 
 def bi(en, zh, tag="p"):
@@ -182,7 +253,7 @@ const PTD={data_js};
 const PTPH={json.dumps(PHASES)}, PTLAB={json.dumps(PLAB)}, PTCOL={json.dumps(PCOL)};
 const PTISL={json.dumps(ISL_ORDER)};
 const PTCLS={{pclass:['strong-win','win','parity','loss'],htier:['hi','mid','lo'],
-  squart:['fastest25','mid50','slowest25'],rung:['cs1-small','cs1-mid','cs4','cs8-T512','cs8-T1024']}};
+  squart:['fastest25','mid50','slowest25'],rung:['cs1-small','cs1-mid','cs4','cs8-T512']}};
 const PTCI={{u:0,m:1,i:2,l:3,N:4,h:5,us:6,f:7,uu:8,pv:9,rg:10,pc:11,ht:12,sq:13}};
 function ptv(n){{const e=document.querySelector(`input[name=${{n}}]:checked`);return e?e.value:null}}
 function ptcks(c){{return [...document.querySelectorAll(`input.${{c}}:checked`)].map(e=>e.value)}}
