@@ -152,40 +152,73 @@ for m, mt in MODELS:
 <svg viewBox="0 0 {W} {H}" xmlns="http://www.w3.org/2000/svg" style="background:#fcfcfb">{axes(m,'sp')}{series(m,'sp')}</svg>
 </div>''')
 
-html = f'''<!doctype html><html lang="zh"><head><meta charset="utf-8">
-<title>KF campaign — per-case performance comparison (865 cases, no layer averaging)</title>
-<style>
-body{{font:14px/1.55 -apple-system,'Segoe UI',Roboto,'Noto Sans SC',sans-serif;background:#f5f4f1;color:#0b0b0b;margin:0;padding:22px 26px;max-width:1330px}}
-h1{{font-size:20px;margin:0 0 4px}} h3{{margin:20px 0 4px;font-size:15px}}
-.mut{{color:#52514e;font-size:12.5px}}
+FRAG_CSS = f'''.vizP{{margin:10px 0}}
+.vizP .note{{color:#555;font-size:0.9em}}
+.vizP h3{{color:#333;margin:20px 0 4px;font-size:1.05em}}
 .vizP input{{position:absolute;opacity:0;pointer-events:none}}
-.vizP .ctl{{background:#fcfcfb;border:1px solid #e4e3df;border-radius:8px;padding:8px 12px;margin:8px 0;display:flex;gap:6px;flex-wrap:wrap;align-items:center}}
+.vizP .ctl{{background:#fff;border:1px solid #ddd;border-radius:8px;padding:8px 12px;margin:8px 0;display:flex;gap:6px;flex-wrap:wrap;align-items:center}}
 .vizP .ctl label{{border:1.5px solid #c9c8c2;border-radius:14px;padding:2px 10px;cursor:pointer;font-size:12px;color:#52514e;user-select:none;white-space:nowrap}}
 .vizP .ctl label i{{display:inline-block;width:10px;height:10px;border-radius:5px;margin-right:6px;vertical-align:-1px}}
-.vizP .ctl .hd{{font-weight:600;color:#0b0b0b;font-size:12.5px;margin-right:4px}}
-.panel svg{{width:100%;height:auto;border:1px solid #e4e3df;border-radius:8px;margin:2px 0 10px}}
-.chartlbl{{font-size:12px;color:#52514e;margin-top:6px}}
-{''.join(css)}
-</style></head><body>
-<h1>KernelFactory campaign — per-case performance comparison / 逐 case 性能对比(不做层间平均)</h1>
-<p class="mut">All <b>865 per-layer cases</b> (V4 Flash 21L×9 ISL + V4 Pro 30L×9 ISL + V3.2 58L×7 ISL), BS=1 fp32, nsys cold-L2 <b>paired</b>
+.vizP .ctl .hd{{font-weight:600;color:#1a1a2e;font-size:12.5px;margin-right:4px}}
+.vizP .panel svg{{width:100%;height:auto;border:1px solid #ddd;border-radius:8px;margin:2px 0 10px}}
+.vizP .chartlbl{{font-size:12px;color:#555;margin-top:6px}}
+{''.join(css)}'''
+
+INTRO = f'''<p class="note">All <b>865 per-layer cases</b> (V4 Flash 21L×9 ISL + V4 Pro 30L×9 ISL + V3.2 58L×7 ISL), BS=1 fp32, nsys cold-L2 <b>paired</b>
 (cand vs PR head <code>e6fdbfac3d</code> same-run), 8×B200 sharded grids, 2026-07-21, umbriel-b200-027.
 Only <b>CLEAN full-grid verdicts</b> are shown — the contaminated r2a/r2b runs (double-driver PR-arm inflation, later invalidated
 and re-measured as r2a2_fixed / r2c2g) are excluded. Source: <code>grid_*.csv</code> in <code>kf_campaign/</code>; generator
-<code>gen_per_case_chart.py</code>. 全部 865 个逐层 case,冷 L2 nsys 同轮配对计时;仅展示通过锚检的干净终审网格,污染作废的 r2a/r2b 已排除。
-x 轴 = ISL,颜色 = 候选臂,线型 = 层(循环虚线);悬停任意数据点可见该 case 的精确数值。</p>
+<code>gen_per_case_chart.py</code> (idempotent). 全部 865 个逐层 case,冷 L2 nsys 同轮配对计时,不做任何层间平均;仅展示通过锚检的干净终审网格,污染作废的 r2a/r2b 已排除。
+x 轴 = ISL,颜色 = 候选臂,线型 = 层(循环虚线);用复选框选择候选臂/模型/层,悬停任意数据点可见该 case 的精确数值。</p>'''
+
+OUTRO = f'''<p class="note">Speedup chart clips at {SP_HI}× (a handful of sbx small-N cells reach 3.75×; hover shows the true value).
+加速比图纵轴截断于 {SP_HI}×,悬停可见真实值。Champion ship verdict: c74f_sbx geomean 1.6828×, 865/865 exact, zero cold regressions.</p>'''
+
+FRAG_BODY = f'''{INTRO}
 <div class="vizP">
 {''.join(inputs)}
 <div class="ctl"><span class="hd">arms / 候选臂</span>{''.join(chips_arm)}</div>
 <div class="ctl"><span class="hd">models / 模型</span>{''.join(chips_model)}</div>
 <div class="ctl"><span class="hd">Flash layers</span>{chips_layer['flash']}</div>
 <div class="ctl"><span class="hd">Pro layers</span>{chips_layer['pro']}</div>
-<div class="ctl"><span class="hd">V3.2 layers</span><span class="mut">(默认只勾 bench 层 14/34/54,勾选更多以展开)</span>{chips_layer['v32']}</div>
+<div class="ctl"><span class="hd">V3.2 layers</span><span class="note">(默认只勾 bench 层 14/34/54,勾选更多以展开)</span>{chips_layer['v32']}</div>
 {''.join(panels)}
-</div>
-<p class="mut">Speedup chart clips at {SP_HI}× (a handful of sbx small-N cells reach 3.75×; hover shows the true value).
-加速比图纵轴截断于 {SP_HI}×,悬停可见真实值。Champion ship verdict: c74f_sbx geomean 1.6828×, 865/865 exact, zero cold regressions.</p>
-</body></html>'''
+{OUTRO}
+</div>'''
 
+# ---- standalone page ---------------------------------------------------------
+html = f'''<!doctype html><html lang="zh"><head><meta charset="utf-8">
+<title>KF campaign — per-case performance comparison (865 cases, no layer averaging)</title>
+<style>
+body{{font:14px/1.55 -apple-system,'Segoe UI',Roboto,'Noto Sans SC',sans-serif;background:#fafaf7;color:#1a1a2e;margin:0;padding:22px 26px;max-width:1330px}}
+h1{{font-size:20px;margin:0 0 4px}}
+code{{font-family:"SF Mono",Consolas,monospace;background:#f0f0ea;border-radius:4px;padding:1px 5px;font-size:0.9em}}
+{FRAG_CSS}
+</style></head><body>
+<h1>KernelFactory campaign — per-case performance comparison / 逐 case 性能对比(不做层间平均)</h1>
+{FRAG_BODY}
+</body></html>'''
 open(OUT, 'w').write(html)
 print(f'wrote {OUT}  ({os.path.getsize(OUT)/1e6:.2f} MB)')
+
+# ---- idempotent injection into KF_PROCESS_LOG.html ---------------------------
+LOG = os.path.join(HERE, 'KF_PROCESS_LOG.html')
+MARK_S, MARK_E = '<!-- KF-PERCASE:START -->', '<!-- KF-PERCASE:END -->'
+ANCHOR = '<!-- KF-FINAL:END -->'
+section = f'''{MARK_S}
+<h2 id="sec-percase">7 · Per-case interactive comparison / 逐 case 交互性能对比(不做层间平均)</h2>
+<style>{FRAG_CSS}</style>
+{FRAG_BODY}
+{MARK_E}'''
+doc = open(LOG).read()
+if MARK_S in doc and MARK_E in doc:
+    pre, rest = doc.split(MARK_S, 1)
+    _, post = rest.split(MARK_E, 1)
+    doc = pre + section + post
+    print('replaced existing KF-PERCASE section in KF_PROCESS_LOG.html')
+else:
+    assert ANCHOR in doc, 'anchor KF-FINAL:END not found'
+    doc = doc.replace(ANCHOR, ANCHOR + '\n\n' + section, 1)
+    print('inserted new KF-PERCASE section after KF-FINAL:END')
+open(LOG, 'w').write(doc)
+print(f'KF_PROCESS_LOG.html now {os.path.getsize(LOG)/1e6:.2f} MB')
