@@ -93,6 +93,7 @@ L1-persistent-across-launch arch, breaks this. Flag for production port review.
 | r3d_relacq | 09d1 acq_rel asm | 28 | 1.6142 | 0 | 28/28 | REJECTED −8% |
 | r3f_surg | 09d1 surgical rel/acq | 28 | 1.6146 | 0 | 28/28 | REJECTED — ordering cost intrinsic |
 | r3g_30e7 | 30e79029 vs PR | 28 | 1.8150 | 0 | 28/28 | GPU1, anchors med 0.991; **vs champion +6.2%** (contiguous-slice scan on top of 09d1 barrier); full grid running |
+| **r3grid30e7** | 30e79029 vs PR@b14ec40e1b | 865 | **1.7714** | **0** (min 1.003) | **865/865** | 3-shard GPUs0/1/3; anchors med 1.004; vs champion +5.0%, vs 09d1 +0.67% (net; 118 cells ≤0.99 vs 09d1 = layout noise) → **new composite**. NB ≈ op35 UB reference 1.771 (zero-P3+P4blk relaxation) — at the estimated structural wall |
 | ~~r3b_09d1~~ | 09d13c81 vs PR | 28 | ~~2.3698~~ | — | 28/28 | **INVALIDATED** — foreign job at 100% util GPUs 1-7 during run (pr arm inflated 19→26 µs); my quiet-check echo was unconditional (scripting bug, fixed to gated form). Exactness (load-independent) retained: 28/28. Re-probe pending quiescence |
 
 - **09d13c81** (r2, internal 1.0351): replaces `cudaLaunchCooperativeKernel`
