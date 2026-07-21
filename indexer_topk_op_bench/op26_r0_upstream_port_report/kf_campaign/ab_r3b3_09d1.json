@@ -1,0 +1,102 @@
+[
+ {
+  "uuid": "flash_1024k_L16",
+  "pr_cold": 26.6124,
+  "cand_cold": 10.9504,
+  "speedup_cold": 2.4302673874926946,
+  "pr_warm": 26.14855,
+  "cand_warm": 11.1119,
+  "speedup_warm": 2.3532024226279935,
+  "cand_exact": true
+ },
+ {
+  "uuid": "flash_1024k_L36",
+  "pr_cold": 25.345200000000002,
+  "cand_cold": 10.7454,
+  "speedup_cold": 2.358702328438216,
+  "pr_warm": 25.003,
+  "cand_warm": 11.235100000000001,
+  "speedup_warm": 2.225436355706669,
+  "cand_exact": true
+ },
+ {
+  "uuid": "flash_128k_L32",
+  "pr_cold": 13.22055,
+  "cand_cold": 8.7391,
+  "speedup_cold": 1.5128045222048034,
+  "pr_warm": 11.2574,
+  "cand_warm": 8.0815,
+  "speedup_warm": 1.3929839757470768,
+  "cand_exact": true
+ },
+ {
+  "uuid": "flash_128k_L36",
+  "pr_cold": 13.40785,
+  "cand_cold": 8.8527,
+  "speedup_cold": 1.5145492335671602,
+  "pr_warm": 11.673549999999999,
+  "cand_warm": 8.199950000000001,
+  "speedup_warm": 1.4236123390996283,
+  "cand_exact": true
+ },
+ {
+  "uuid": "flash_32k_L16",
+  "pr_cold": 9.5008,
+  "cand_cold": 6.94555,
+  "speedup_cold": 1.367897430729028,
+  "pr_warm": 7.990399999999999,
+  "cand_warm": 6.1583000000000006,
+  "speedup_warm": 1.297500933699235,
+  "cand_exact": true
+ },
+ {
+  "uuid": "flash_32k_L36",
+  "pr_cold": 10.252600000000001,
+  "cand_cold": 7.03675,
+  "speedup_cold": 1.4570078516360538,
+  "pr_warm": 8.7823,
+  "cand_warm": 6.28155,
+  "speedup_warm": 1.398110339008684,
+  "cand_exact": true
+ },
+ {
+  "uuid": "flash_4k_L24",
+  "pr_cold": 8.257200000000001,
+  "cand_cold": 3.5679499999999997,
+  "speedup_cold": 2.314270099076501,
+  "pr_warm": 6.716600000000001,
+  "cand_warm": 3.1535,
+  "speedup_warm": 2.129887426668781,
+  "cand_exact": true
+ },
+ {
+  "uuid": "flash_4k_L36",
+  "pr_cold": 9.2431,
+  "cand_cold": 3.6159499999999998,
+  "speedup_cold": 2.5562023811169956,
+  "pr_warm": 8.06235,
+  "cand_warm": 3.0351999999999997,
+  "speedup_warm": 2.6562829467580396,
+  "cand_exact": true
+ },
+ {
+  "uuid": "flash_512k_L04",
+  "pr_cold": 20.9262,
+  "cand_cold": 10.29275,
+  "speedup_cold": 2.033100969128756,
+  "pr_warm": 20.98055,
+  "cand_warm": 10.430299999999999,
+  "speedup_warm": 2.0115001486055055,
+  "cand_exact": true
+ },
+ {
+  "uuid": "flash_512k_L24",
+  "pr_cold": 28.65575,
+  "cand_cold": 9.90395,
+  "speedup_cold": 2.893365778300577,
+  "pr_warm": 30.54035,
+  "cand_warm": 9.780700000000001,
+  "speedup_warm": 3.1225116811680143,
+  "cand_exact": true
+ }
+]

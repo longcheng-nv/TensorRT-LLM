@@ -73,6 +73,15 @@ Node: umbriel-b200-027 (8×B200). Started 2026-07-21 13:40Z.
   token ⇒ no per-launch reset), grid sized to co-residency. CAUTION for ship:
   barrier uses relaxed atomics with no __threadfence — memory-ordering risk on
   paper even if exact in practice; if it wins, add fence + re-measure.
+- 09d13c81 partial probes (r3b2 GPU5 full-28, r3b3 GPU5 flash-only), per-cell
+  anchor-gated (±6% vs champh2 refs): clean-anchor cells show a REAL win vs
+  champion — v32_32k 1.19-1.23, v32_256k 1.17-1.18, v32_128k 1.06-1.10,
+  pro_128k 1.13-1.18, pro_512k 1.05-1.13, pro_1024k 1.06-1.07,
+  flash_128k 1.08-1.11, flash_32k/4k ≈1.00, v32_4k ≈1.00 (single-CTA path
+  untouched, as expected). flash_512k/1024k anchors dirty in BOTH GPU5 runs
+  (foreign bursts; cand times ≈ champion 0.98-1.00 but unverified).
+  → genuine displacement candidate; full-865 verdict queued for quiescence,
+  batched with any further round-2 winners.
 | **champh2** | c74f_sbx vs PR@b14ec40e1b | 865 | **1.6770** | **0** (min 1.018) | **865/865** | 7-shard GPUs0-6; Bar-1/2/3 denominators; worst cells all N=16387 (graft-rung boundary, 1.02-1.08) |
 
 ## Anchor checks
