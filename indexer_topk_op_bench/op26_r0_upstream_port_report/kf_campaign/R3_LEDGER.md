@@ -38,6 +38,28 @@ Node: umbriel-b200-027 (8×B200). Started 2026-07-21 13:40Z.
 | 13:52 | 28-cell probe champh2 (GPU6): champion vs NEW head cold gm **1.7193**, 0/28 reg, 28/28 exact |
 | 13:56 | full 865-cell grid champh2 launched, 7 shards GPUs 0-6 |
 
+## Round log
+
+- **Round 1** (13:40–~17:45Z, 6 agents, 17 kernels): best internal 0.9956 =
+  verbatim champion resubmission (`821e5e5f topk_champion_final`, diff=0 vs
+  c74f_sbx) → direct calibration of platform eval noise: identical code scores
+  −0.4%; an agent also logged the same solution.json timing 17/23/20 vs
+  23/28/26 µs across runs. `0d057e1e` = trivial rebase (0.9899).
+  Only genuine variant: **`5f3daaf8` (0.9926)** — warm-hint min-threshold
+  filter in coop pass-0 + final collect, gated n≥512K, with a provable
+  ≥k-admission superset argument (min over logits[pre_idx] ⇒ pool ≥ k ⇒
+  exact regardless of hint quality). Harvested to `harvest/r3_5f3daaf8/`;
+  local probe pending GPU quiescence.
+  Insights (40): grid.sync barrier stall ≈48% of large-n runtime (NCU);
+  falsified: hand-rolled atomic barrier, block-count sweeps, TMA/cp.async
+  hist prefetch, warp-agg (__match_any) hist accumulation, 15-bit 2-pass smem
+  hist, champion+hier hybrid, 3 pre_idx threshold grafts (unGated), tight
+  T_seed, single-1024-block collapse. Round 2 launched ~17:45Z.
+
+- **Local-timing pause**: from ~17:40Z an 8-GPU foreign job occupies all GPUs
+  (~118 GB resident, 1–17% util bursts). All local probes/grids paused until
+  quiescence (monitor armed) per no-probes discipline.
+
 ## Verdicts
 
 | tag | arms | cells | cold gm | regs | exact | notes |
