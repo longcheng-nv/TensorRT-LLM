@@ -1,0 +1,102 @@
+[
+ {
+  "uuid": "flash_64k_L02",
+  "pr_cold": 10.44935,
+  "cand_cold": 9.219100000000001,
+  "speedup_cold": 1.1334457810415333,
+  "pr_warm": 8.5055,
+  "cand_warm": 8.575899999999999,
+  "speedup_warm": 0.9917909490549097,
+  "cand_exact": true
+ },
+ {
+  "uuid": "flash_64k_L14",
+  "pr_cold": 10.17435,
+  "cand_cold": 8.208,
+  "speedup_cold": 1.2395650584795321,
+  "pr_warm": 8.60795,
+  "cand_warm": 7.531149999999999,
+  "speedup_warm": 1.1429794918438754,
+  "cand_exact": true
+ },
+ {
+  "uuid": "flash_64k_L28",
+  "pr_cold": 11.4719,
+  "cand_cold": 9.15675,
+  "speedup_cold": 1.25283534004969,
+  "pr_warm": 9.8959,
+  "cand_warm": 8.5695,
+  "speedup_warm": 1.1547814925024797,
+  "cand_exact": true
+ },
+ {
+  "uuid": "flash_64k_L36",
+  "pr_cold": 9.8512,
+  "cand_cold": 9.2399,
+  "speedup_cold": 1.0661587246615223,
+  "pr_warm": 8.35035,
+  "cand_warm": 8.41915,
+  "speedup_warm": 0.9918281536734707,
+  "cand_exact": true
+ },
+ {
+  "uuid": "pro_64k_L32",
+  "pr_cold": 10.5343,
+  "cand_cold": 10.219100000000001,
+  "speedup_cold": 1.0308442035012868,
+  "pr_warm": 9.059149999999999,
+  "cand_warm": 9.77275,
+  "speedup_warm": 0.9269806349287558,
+  "cand_exact": true
+ },
+ {
+  "uuid": "pro_64k_L38",
+  "pr_cold": 11.8047,
+  "cand_cold": 10.0447,
+  "speedup_cold": 1.1752167809889793,
+  "pr_warm": 10.26235,
+  "cand_warm": 9.40475,
+  "speedup_warm": 1.0911879635290678,
+  "cand_exact": true
+ },
+ {
+  "uuid": "pro_64k_L50",
+  "pr_cold": 10.599950000000002,
+  "cand_cold": 10.0351,
+  "speedup_cold": 1.0562874311167803,
+  "pr_warm": 9.1631,
+  "cand_warm": 9.497549999999999,
+  "speedup_warm": 0.9647856552479325,
+  "cand_exact": true
+ },
+ {
+  "uuid": "pro_64k_L56",
+  "pr_cold": 11.87345,
+  "cand_cold": 9.9215,
+  "speedup_cold": 1.196739404323943,
+  "pr_warm": 10.380700000000001,
+  "cand_warm": 9.35195,
+  "speedup_warm": 1.1100037959997648,
+  "cand_exact": true
+ },
+ {
+  "uuid": "v32_16k_L20",
+  "pr_cold": 12.56935,
+  "cand_cold": 10.4191,
+  "speedup_cold": 1.2063757906153123,
+  "pr_warm": 11.2287,
+  "cand_warm": 9.879850000000001,
+  "speedup_warm": 1.136525352105548,
+  "cand_exact": true
+ },
+ {
+  "uuid": "v32_16k_L22",
+  "pr_cold": 12.691049999999999,
+  "cand_cold": 10.3231,
+  "speedup_cold": 1.2293836153868507,
+  "pr_warm": 11.2399,
+  "cand_warm": 9.703899999999999,
+  "speedup_warm": 1.1582868743494885,
+  "cand_exact": true
+ }
+]
