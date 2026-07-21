@@ -5,9 +5,10 @@
 Clone of battery_lj.py adapted to the tb_escape ctor flag. The escape path
 only runs on a base-admission MISS, so besides the default-config grid
 (escape mostly dormant — proves the traced-but-idle build is unchanged),
-two sections FORCE the base admission to miss via ctor overrides
-(r0_vseed=False, r0_qfracs=(0.999,): the single base rung count is ~0.001*K
-<< K on smooth rows, guaranteed miss):
+several sections FORCE the base admission to miss via ctor overrides
+(r0_vseed=False, r0_qfracs=(0.001,): need=1 -> rung threshold ~ max hinted
+value -> count ~ 1 << K, guaranteed miss) and pick escape ladders that
+deterministically fire / cannot fire (see the OVR constants):
 
   E1 grid      fp32 x K{512,1024,2048} x N{65536,131072,262144} x BS{2,8,64},
                tb_escape=True default config. Per cell: escape arm exact +
@@ -18,9 +19,9 @@ two sections FORCE the base admission to miss via ctor overrides
                band P3/P4 through the ESCAPE columns (tb_debug prints
                [esc] fired=... at BS<=2 for eyeball confirmation); exact.
   E3 esc-miss  forced base miss AND a useless escape ladder
-               (tb_esc_qfracs=(0.9995, 0.999, 0.998) -> all rung counts
-               << K) -> escape cannot fire; the M_esc-seeded log-falsi
-               chain finishes the row; exact.
+               (ESC_MISS_OVR: all rung counts << K) -> escape cannot
+               fire; the M_esc-seeded log-falsi chain finishes the row;
+               exact.
   E4 tie       battery_lj S2 fixtures (big tie / small tie / distinct
                linspace / hi-plateau) under the E2 forced-miss config so
                the tie plateaus are crossed by the ESCAPE band split.
@@ -46,10 +47,23 @@ from gvrpkgprod2.top_k.gvr_topk_decode import GvrTopKKernel as GvrRef  # noqa: E
 DEV = "cuda"
 CR = 1
 
-# Forced base-admission miss: one absurdly high base rung, no vseed.
-MISS_OVR = dict(r0_vseed=False, r0_qfracs=(0.999,))
-# Useless escape ladder (counts << K) so the escape can never fire.
-ESC_MISS_OVR = dict(tb_esc_qfracs=(0.9995, 0.999, 0.998))
+# Forced base-admission miss: qneeds = ceil(q*K), so a TINY qfrac makes
+# need=1 -> the rung threshold ~ the MAX hinted value -> count(>=thr) ~ 1
+# << K -> guaranteed miss. (v1 of this battery used (0.999,), which with
+# exact hints lands count ~ K INSIDE the accept window — the base never
+# missed and E2-E5 exercised only the accept path; 0 fired=1 in the log.)
+MISS_OVR = dict(r0_vseed=False, r0_qfracs=(0.001,))
+# Escape ladder that FIRES with exact hints: lo rung q0.9999 (need=K ->
+# thr ~ K-th hint value -> count >= K), hi rung q0.85 (count ~ 0.85K < K),
+# band ~ 0.15K <= kC, sure set ~ 0.85K streamed directly.
+ESC_FIRE_OVR = dict(tb_esc_qfracs=(0.9999, 0.85, 0.35))
+# Escape ladder that CANNOT fire (all needs ~ 1-2 -> counts << K -> no lo
+# rung) -> the M_esc-seeded falsi must finish the row.
+ESC_MISS_OVR = dict(tb_esc_qfracs=(0.002, 0.0015, 0.001))
+# Fire WITHOUT a hi rung: single deep rung -> lo fires, hi_m = -1 ->
+# thr_hi = +FLT_MAX sentinel, sure set 0, band = lo_c (the degenerate
+# single-rung form of the bracket).
+ESC_NOHI_OVR = dict(tb_esc_qfracs=(0.9999,))
 
 
 def run_kernel(cls, logits, pre, K, esc, cr=CR, cs_force=None, tb_debug=False,
@@ -149,12 +163,25 @@ def main():
             logits, _ = make_inputs(K, N, BS, seed)
             pre = make_pre_exact(logits, K)  # good hints: escape hist is honest
             out = run_kernel(Gvr37, logits, pre, K, esc=True, tb_debug=True,
-                             ovr=MISS_OVR)
+                             ovr={**MISS_OVR, **ESC_FIRE_OVR})
             ok, why = check_exact(logits, out, K)
             sec_tot["E2_fire"] += 1
             sec_pass["E2_fire"] += int(ok)
             print(f"[{'PASS' if ok else 'FAIL'}] E2 K={K} N={N} BS={BS} "
-                  f"forced-miss | {'OK' if ok else 'FAIL:' + why}", flush=True)
+                  f"forced-miss+fire | {'OK' if ok else 'FAIL:' + why}",
+                  flush=True)
+        # fire WITHOUT a hi rung (FLT_MAX sentinel, empty sure set)
+        seed += 1
+        N, BS = 131072, 2
+        logits, _ = make_inputs(K, N, BS, seed)
+        pre = make_pre_exact(logits, K)
+        out = run_kernel(Gvr37, logits, pre, K, esc=True, tb_debug=True,
+                         ovr={**MISS_OVR, **ESC_NOHI_OVR})
+        ok, why = check_exact(logits, out, K)
+        sec_tot["E2_fire"] += 1
+        sec_pass["E2_fire"] += int(ok)
+        print(f"[{'PASS' if ok else 'FAIL'}] E2 K={K} N={N} BS={BS} "
+              f"fire-no-hi | {'OK' if ok else 'FAIL:' + why}", flush=True)
 
     # ---------------- E3: forced base miss + useless escape -> falsi -------
     for K in grid_K:
@@ -184,7 +211,7 @@ def main():
             49.0 + 0.9 * torch.rand(BS, 3000, dtype=torch.float32,
                                     device=DEV, generator=g))
         pre = make_pre_exact(logits, K)
-        out = run_kernel(Gvr37, logits, pre, K, esc=True, ovr=MISS_OVR)
+        out = run_kernel(Gvr37, logits, pre, K, esc=True, ovr={**MISS_OVR, **ESC_FIRE_OVR})
         ok, why = check_exact(logits, out, K)
         sec_tot["E4_tie"] += 1
         sec_pass["E4_tie"] += int(ok)
@@ -202,7 +229,7 @@ def main():
             49.0 + 0.9 * torch.rand(BS, band, dtype=torch.float32,
                                     device=DEV, generator=g))
         pre = make_pre_exact(logits, K)
-        out = run_kernel(Gvr37, logits, pre, K, esc=True, ovr=MISS_OVR)
+        out = run_kernel(Gvr37, logits, pre, K, esc=True, ovr={**MISS_OVR, **ESC_FIRE_OVR})
         ok, why = check_exact(logits, out, K)
         sec_tot["E4_tie"] += 1
         sec_pass["E4_tie"] += int(ok)
@@ -218,7 +245,7 @@ def main():
         noisy = logits + 0.8 * logits.std() * torch.randn(
             BS, N, dtype=torch.float32, device=DEV, generator=g)
         pre = torch.topk(noisy, K, dim=1).indices.int().contiguous()
-        out = run_kernel(Gvr37, logits, pre, K, esc=True, ovr=MISS_OVR)
+        out = run_kernel(Gvr37, logits, pre, K, esc=True, ovr={**MISS_OVR, **ESC_FIRE_OVR})
         ok, why = check_exact(logits, out, K)
         sec_tot["E4_tie"] += 1
         sec_pass["E4_tie"] += int(ok)
@@ -234,7 +261,7 @@ def main():
         tail = 10.0 + torch.arange(ntail, device=DEV, dtype=torch.float32) * 1e-3
         logits[:, 600: 600 + ntail] = tail.flip(0)
         pre = make_pre_exact(logits, K)
-        out = run_kernel(Gvr37, logits, pre, K, esc=True, ovr=MISS_OVR)
+        out = run_kernel(Gvr37, logits, pre, K, esc=True, ovr={**MISS_OVR, **ESC_FIRE_OVR})
         ok, why = check_exact(logits, out, K)
         sec_tot["E4_tie"] += 1
         sec_pass["E4_tie"] += int(ok)
@@ -250,7 +277,7 @@ def main():
             logits, _ = make_inputs(K, N, BS, seed)
             pre = make_pre_exact(logits, K)
             out = run_kernel(Gvr37, logits, pre, K, esc=True, cs_force=cs_ovr,
-                             ovr=MISS_OVR)
+                             ovr={**MISS_OVR, **ESC_FIRE_OVR})
             ok, why = check_exact(logits, out, K)
             sec_tot["E5_launch"] += 1
             sec_pass["E5_launch"] += int(ok)
