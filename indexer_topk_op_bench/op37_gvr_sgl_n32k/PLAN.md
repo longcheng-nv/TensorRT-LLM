@@ -140,7 +140,21 @@ L-H  Launch micro-tuning — **FALSIFIED as meaningful** (results/t512:
      T512 override on the 6 V4 T1024 rungs = +1.0-1.5% BS1-2 only, loses
      BS8-128 to 0.80; the pre-compression n_per_cta inflation is NOT a
      consequential mis-tune; not worth a shape-gate).
-L-J  multi-rung tight bracket (sync-free P4 diet): count MORE rung columns
+L-J  **v1 nsys VERDICT (results/lj, 132 cells, 0 inexact, b200-027): NET
+     LOSS as-implemented** — gvr_pr/gvr_lj composite 0.7221; uniform
+     ~0.65-0.80 tax across ALL warm rungs/BS (flat in N and BS; BS1024
+     BW-bound cells also ~0.70 ⇒ structural extra memory traffic, not
+     the modeled -3..-7% wide-count-column tax). ONLY win = the cold
+     flash-512k cell (hit .057): BS256/512/1024 = 1.26/1.24/1.33 vs pr
+     (lifts vs sglang 0.48-0.53 → 0.64-0.70) — the P2 admission-miss
+     refine root cause IS killed there, as projected. flash-1024k shows
+     NO such win (0.63-0.72) ⇒ benefit is cold-cell-specific. Anchor
+     sane: pr/sgl this run 0.8640 vs baseline 0.8664. NEXT: phase
+     attribution (warm loss cell vs flash-512k win cell) to locate the
+     uniform tax; if removable → fix + re-A/B; else L-J degenerates to
+     an in-kernel cold-escape form (bracket only when admission misses)
+     — never a host-side hit-rate gate (hit unknowable at inference).
+     Original design: count MORE rung columns
      in the existing P2 M-ary pass (M=2+vseed today) → post-count pick the
      tightest pair (lo,hi) straddling K → P3 emits ≥hi "sure set" directly
      to output, collects ONLY the (lo,hi) band → P4 ranks band_count ≪
