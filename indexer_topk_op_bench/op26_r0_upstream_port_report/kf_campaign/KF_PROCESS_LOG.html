@@ -253,6 +253,14 @@ all local GPU work now strictly serialized.</td></tr>
 <td><b>geomean 1.6421×, exact 865/865, 4 regressions</b> (flash_64k_L28 0.877, pro_64k_L38 0.938, L56 0.973, L18 0.981 — all N=16387).
 <b>LOCAL RANKING: ① 0260cee7 1.6421/4 regs ② sbx 1.6053/8 regs (shallower worst 0.940) ③ ba1020ce 1.3662/85 regs.</b>
 Data: grid_r2a2_fixed.csv. Anchor-check + quiet-GPU-probe now standing protocol for every grid.</td></tr>
+<tr><td>07-21 07:05</td><td><b>c74fb3c0 CLEAN verdict (r2c2g) + rival cross-comparison</b> (compare_rivals.py: REPORT rival sweep joined on uuid,
+per-cell PR-arm normalization, calibration med 1.010)</td><td>1.3385</td>
+<td><b>c74fb3c0: geomean 1.6713, exact 865/865, 5 regs (worst flash_64k_L28 0.846) — NEW LOCAL CHAMPION by geomean</b>
+(0260cee7 1.6421/4 regs stays best by regression profile). Rivals: <b>c74fb3c0 vs sglang_v2 geomean 1.111 (win 569/865)</b> —
+first in-tree-family kernel to beat sglang v2 on the full real envelope (op28 had sglang v2 &gt; all in-tree 1.38-1.77×);
+sglang keeps mid-N strongholds N=8195 (0/51, 0.817) / 16387 (1/51, 0.850) / 32771-32783 (~0.92-0.94).
+<b>vs radix_cutedsl geomean 1.611 (win 864/865)</b>. Exactness edge: champion unconditionally exact; sglang v2 conditionally exact
+(kMaxNumTie=2048, real V3.2 L52 fails at 128k/256k).</td></tr>
 </table>
 
 <h2>6 · Final verdict</h2>
