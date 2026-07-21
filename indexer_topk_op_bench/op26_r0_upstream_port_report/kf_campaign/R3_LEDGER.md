@@ -43,3 +43,14 @@ Node: umbriel-b200-027 (8×B200). Started 2026-07-21 13:40Z.
 | tag | arms | cells | cold gm | regs | exact | notes |
 |---|---|---|---|---|---|---|
 | champh2_probe | c74f_sbx vs PR@b14ec40e1b | 28 | 1.7193 | 0 | 28/28 | GPU6 probe |
+| **champh2** | c74f_sbx vs PR@b14ec40e1b | 865 | **1.6770** | **0** (min 1.018) | **865/865** | 7-shard GPUs0-6; Bar-1/2/3 denominators; worst cells all N=16387 (graft-rung boundary, 1.02-1.08) |
+
+## Anchor checks
+
+- champh2 vs c74fsbx (old-head grid): per-cell `pr_cold(old)/pr_cold(new)`
+  overall median **1.005**, p95 1.058; rung medians 0.995–1.048 (worst
+  pro_4k 1.048 — small-n launch noise). No drifted rung. Conclusion: PR head
+  b14ec40e1b ≈ e6fdbfac3d on this 865-cell envelope (the 07-20/07-21 P4
+  bracket/kb512 commits do not materially move these cells); champion start
+  vs current head = 1.6770 (vs 1.6828 on old head), consistent with the
+  1.005 anchor shift.
