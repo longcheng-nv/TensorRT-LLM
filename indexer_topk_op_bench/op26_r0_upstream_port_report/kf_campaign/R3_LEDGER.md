@@ -65,6 +65,7 @@ Node: umbriel-b200-027 (8×B200). Started 2026-07-21 13:40Z.
 | tag | arms | cells | cold gm | regs | exact | notes |
 |---|---|---|---|---|---|---|
 | champh2_probe | c74f_sbx vs PR@b14ec40e1b | 28 | 1.7193 | 0 | 28/28 | GPU6 probe |
+| r3a_5f3d | 5f3daaf8 vs PR@b14ec40e1b | 28 | 1.7158 | 0 | 28/28 | GPU6; vs champion: ALL 0.9985, n≥512K activation zone 1.0001 → **WASH, no displacement** (hint filter doesn't pay on radix-scan skeleton) |
 | **champh2** | c74f_sbx vs PR@b14ec40e1b | 865 | **1.6770** | **0** (min 1.018) | **865/865** | 7-shard GPUs0-6; Bar-1/2/3 denominators; worst cells all N=16387 (graft-rung boundary, 1.02-1.08) |
 
 ## Anchor checks
