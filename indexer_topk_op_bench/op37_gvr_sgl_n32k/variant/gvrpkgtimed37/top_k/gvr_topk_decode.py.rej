@@ -1,0 +1,63 @@
+--- gvr_topk_decode.py	2026-07-20 04:48:56.167558000 +0000
++++ gvr_topk_decode.py	2026-07-20 07:51:55.601354000 +0000
+@@ -3925,6 +3963,11 @@
+                     smem_input=smem_input,
+                 )
+ 
++            # [ptime] t4: threshold final (post R0 admission + fb_fix refine
++            # or secant search); just before Phase 3.
++            if is_leader & (tidx == cutlass.Int32(0)):
++                phase_ts_row[4] = cute.arch.clock64()
++
+             # Cluster handoff #1 (end of Phase 2). Skipped when
+             # do_cluster_sync is False (cs=1 or short-row degrade).
+             if cutlass.const_expr(cluster_size > 1):
+@@ -3952,6 +3995,10 @@
+                 smem_input=smem_input,
+             )
+ 
++            # [ptime] t5: after phase3_collect_candidates
++            if is_leader & (tidx == cutlass.Int32(0)):
++                phase_ts_row[5] = cute.arch.clock64()
++
+             # Cluster handoff #2: leader's DSMEM gather of peer
+             # smem_keys/smem_vals. Skipped at do_cluster_sync=False.
+             if cutlass.const_expr(cluster_size > 1):
+@@ -4077,6 +4124,10 @@
+                             lane,
+                         )
+ 
++        # [ptime] t6: after Phase 4 (incl. cluster gather + p4 exact tail)
++        if is_leader & (tidx == cutlass.Int32(0)):
++            phase_ts_row[6] = cute.arch.clock64()
++
+         # Final cluster barrier: keep peer CTAs (and their SMEM) alive
+         # until the leader's gather + Phase 4 finish. Skipped at
+         # do_cluster_sync=False (no peers; short-row degrade non-leaders
+@@ -4086,6 +4137,10 @@
+                 cute.arch.cluster_arrive_relaxed()
+                 cute.arch.cluster_wait()
+ 
++        # [ptime] t7: end of _run_phases
++        if is_leader & (tidx == cutlass.Int32(0)):
++            phase_ts_row[7] = cute.arch.clock64()
++
+     # ------------------------------------------------------------------
+     # Host-side launcher
+     # ------------------------------------------------------------------
+@@ -4098,6 +4153,7 @@
+         output_values: cute.Tensor,  # or None.
+         output_indices: cute.Tensor,
+         order_row: cute.Tensor,  # or None when seqlen_sorted=False
++        phase_ts: cute.Tensor,  # [ptime] int64[num_rows, 8]
+         stream,
+     ):
+         num_rows = input_data.shape[0]
+@@ -4120,6 +4176,7 @@
+             output_values,
+             output_indices,
+             order_row,
++            phase_ts,  # [ptime]
+         ).launch(
+             grid=(total_ctas, 1, 1),
+             block=(self.num_threads, 1, 1),
