@@ -1,0 +1,282 @@
+[
+ {
+  "uuid": "flash_1024k_L16",
+  "pr_cold": 18.951900000000002,
+  "cand_cold": 13.220799999999999,
+  "speedup_cold": 1.4334911654362825,
+  "pr_warm": 17.13115,
+  "cand_warm": 12.36305,
+  "speedup_warm": 1.3856734381887967,
+  "cand_exact": true
+ },
+ {
+  "uuid": "flash_1024k_L36",
+  "pr_cold": 18.009349999999998,
+  "cand_cold": 13.2207,
+  "speedup_cold": 1.3622085063574543,
+  "pr_warm": 16.0766,
+  "cand_warm": 12.3903,
+  "speedup_warm": 1.297514991565983,
+  "cand_exact": true
+ },
+ {
+  "uuid": "flash_128k_L32",
+  "pr_cold": 13.3104,
+  "cand_cold": 12.593549999999999,
+  "speedup_cold": 1.0569219957835558,
+  "pr_warm": 11.4655,
+  "cand_warm": 11.78715,
+  "speedup_warm": 0.972711809046292,
+  "cand_exact": true
+ },
+ {
+  "uuid": "flash_128k_L36",
+  "pr_cold": 13.715200000000001,
+  "cand_cold": 12.7455,
+  "speedup_cold": 1.0760817543446708,
+  "pr_warm": 11.88475,
+  "cand_warm": 11.9919,
+  "speedup_warm": 0.9910648020747339,
+  "cand_exact": true
+ },
+ {
+  "uuid": "flash_32k_L16",
+  "pr_cold": 9.46075,
+  "cand_cold": 7.5184,
+  "speedup_cold": 1.258346190678868,
+  "pr_warm": 8.1584,
+  "cand_warm": 7.081600000000001,
+  "speedup_warm": 1.1520560325350202,
+  "cand_exact": true
+ },
+ {
+  "uuid": "flash_32k_L36",
+  "pr_cold": 10.558399999999999,
+  "cand_cold": 8.30875,
+  "speedup_cold": 1.2707567323604632,
+  "pr_warm": 9.0256,
+  "cand_warm": 7.899100000000001,
+  "speedup_warm": 1.1426111835525565,
+  "cand_exact": true
+ },
+ {
+  "uuid": "flash_4k_L24",
+  "pr_cold": 11.87355,
+  "cand_cold": 5.150399999999999,
+  "speedup_cold": 2.305364631873253,
+  "pr_warm": 12.931149999999999,
+  "cand_warm": 5.094399999999999,
+  "speedup_warm": 2.5383067682160805,
+  "cand_exact": true
+ },
+ {
+  "uuid": "flash_4k_L36",
+  "pr_cold": 14.299100000000001,
+  "cand_cold": 5.13435,
+  "speedup_cold": 2.784987388861297,
+  "pr_warm": 14.39675,
+  "cand_warm": 5.1887,
+  "speedup_warm": 2.7746352650953034,
+  "cand_exact": true
+ },
+ {
+  "uuid": "flash_512k_L04",
+  "pr_cold": 14.268799999999999,
+  "cand_cold": 13.4719,
+  "speedup_cold": 1.0591527549937276,
+  "pr_warm": 12.7519,
+  "cand_warm": 12.718399999999999,
+  "speedup_warm": 1.0026339791168701,
+  "cand_exact": true
+ },
+ {
+  "uuid": "flash_512k_L24",
+  "pr_cold": 21.31005,
+  "cand_cold": 13.6608,
+  "speedup_cold": 1.559941584680253,
+  "pr_warm": 19.764650000000003,
+  "cand_warm": 12.948649999999999,
+  "speedup_warm": 1.5263869206442373,
+  "cand_exact": true
+ },
+ {
+  "uuid": "pro_1024k_L02",
+  "pr_cold": 23.1311,
+  "cand_cold": 13.8671,
+  "speedup_cold": 1.6680560463254752,
+  "pr_warm": 20.587049999999998,
+  "cand_warm": 12.95675,
+  "speedup_warm": 1.5889053968008953,
+  "cand_exact": true
+ },
+ {
+  "uuid": "pro_1024k_L40",
+  "pr_cold": 28.711650000000002,
+  "cand_cold": 17.1646,
+  "speedup_cold": 1.6727246775339946,
+  "pr_warm": 26.9919,
+  "cand_warm": 16.3934,
+  "speedup_warm": 1.6465101809264706,
+  "cand_exact": true
+ },
+ {
+  "uuid": "pro_128k_L02",
+  "pr_cold": 14.31025,
+  "cand_cold": 15.5295,
+  "speedup_cold": 0.9214881354840787,
+  "pr_warm": 12.6127,
+  "cand_warm": 14.929549999999999,
+  "speedup_warm": 0.8448144786681447,
+  "cand_exact": true
+ },
+ {
+  "uuid": "pro_128k_L30",
+  "pr_cold": 13.26555,
+  "cand_cold": 12.870299999999999,
+  "speedup_cold": 1.030710239854549,
+  "pr_warm": 11.36305,
+  "cand_warm": 12.4399,
+  "speedup_warm": 0.9134357993231457,
+  "cand_exact": true
+ },
+ {
+  "uuid": "pro_32k_L02",
+  "pr_cold": 11.23355,
+  "cand_cold": 7.72945,
+  "speedup_cold": 1.4533440283590682,
+  "pr_warm": 9.77595,
+  "cand_warm": 7.26075,
+  "speedup_warm": 1.3464104947835969,
+  "cand_exact": true
+ },
+ {
+  "uuid": "pro_32k_L32",
+  "pr_cold": 11.199950000000001,
+  "cand_cold": 8.02555,
+  "speedup_cold": 1.3955367544903465,
+  "pr_warm": 9.735850000000001,
+  "cand_warm": 7.59195,
+  "speedup_warm": 1.2823912170127572,
+  "cand_exact": true
+ },
+ {
+  "uuid": "pro_4k_L12",
+  "pr_cold": 9.8096,
+  "cand_cold": 4.3456,
+  "speedup_cold": 2.257363770250368,
+  "pr_warm": 8.399899999999999,
+  "cand_warm": 3.91195,
+  "speedup_warm": 2.147241145720165,
+  "cand_exact": true
+ },
+ {
+  "uuid": "pro_4k_L16",
+  "pr_cold": 6.006399999999999,
+  "cand_cold": 4.3808,
+  "speedup_cold": 1.3710737764791818,
+  "pr_warm": 4.7311000000000005,
+  "cand_warm": 3.8768000000000002,
+  "speedup_warm": 1.2203621543541066,
+  "cand_exact": true
+ },
+ {
+  "uuid": "pro_512k_L02",
+  "pr_cold": 18.21265,
+  "cand_cold": 12.8448,
+  "speedup_cold": 1.417900629048331,
+  "pr_warm": 16.2703,
+  "cand_warm": 12.078299999999999,
+  "speedup_warm": 1.3470687100005796,
+  "cand_exact": true
+ },
+ {
+  "uuid": "pro_512k_L30",
+  "pr_cold": 17.34065,
+  "cand_cold": 16.21275,
+  "speedup_cold": 1.0695687036437371,
+  "pr_warm": 15.855799999999999,
+  "cand_warm": 15.5184,
+  "speedup_warm": 1.0217419321579544,
+  "cand_exact": true
+ },
+ {
+  "uuid": "v32_128k_L09",
+  "pr_cold": 18.1839,
+  "cand_cold": 14.5631,
+  "speedup_cold": 1.2486283826932454,
+  "pr_warm": 16.641599999999997,
+  "cand_warm": 13.85915,
+  "speedup_warm": 1.2007662807603638,
+  "cand_exact": true
+ },
+ {
+  "uuid": "v32_128k_L24",
+  "pr_cold": 19.311799999999998,
+  "cand_cold": 14.6768,
+  "speedup_cold": 1.3158045350485117,
+  "pr_warm": 17.81915,
+  "cand_warm": 13.89105,
+  "speedup_warm": 1.282779199556549,
+  "cand_exact": true
+ },
+ {
+  "uuid": "v32_256k_L09",
+  "pr_cold": 19.2687,
+  "cand_cold": 14.5871,
+  "speedup_cold": 1.320941105497323,
+  "pr_warm": 17.291150000000002,
+  "cand_warm": 13.844700000000001,
+  "speedup_warm": 1.2489364161014684,
+  "cand_exact": true
+ },
+ {
+  "uuid": "v32_256k_L12",
+  "pr_cold": 17.51185,
+  "cand_cold": 13.59675,
+  "speedup_cold": 1.2879438101016787,
+  "pr_warm": 15.6223,
+  "cand_warm": 12.84305,
+  "speedup_warm": 1.2164010885264793,
+  "cand_exact": true
+ },
+ {
+  "uuid": "v32_32k_L03",
+  "pr_cold": 15.975850000000001,
+  "cand_cold": 16.82075,
+  "speedup_cold": 0.9497703729025163,
+  "pr_warm": 14.055950000000001,
+  "cand_warm": 16.0831,
+  "speedup_warm": 0.8739577569001,
+  "cand_exact": true
+ },
+ {
+  "uuid": "v32_32k_L46",
+  "pr_cold": 17.38535,
+  "cand_cold": 16.404700000000002,
+  "speedup_cold": 1.0597786000353555,
+  "pr_warm": 15.536,
+  "cand_warm": 15.7695,
+  "speedup_warm": 0.9851929357303655,
+  "cand_exact": true
+ },
+ {
+  "uuid": "v32_4k_L05",
+  "pr_cold": 13.0575,
+  "cand_cold": 7.92635,
+  "speedup_cold": 1.6473534476776825,
+  "pr_warm": 11.70715,
+  "cand_warm": 7.4047,
+  "speedup_warm": 1.581043121260821,
+  "cand_exact": true
+ },
+ {
+  "uuid": "v32_4k_L33",
+  "pr_cold": 10.35835,
+  "cand_cold": 6.54875,
+  "speedup_cold": 1.5817293376598587,
+  "pr_warm": 8.9888,
+  "cand_warm": 6.03355,
+  "speedup_warm": 1.489802852383754,
+  "cand_exact": true
+ }
+]

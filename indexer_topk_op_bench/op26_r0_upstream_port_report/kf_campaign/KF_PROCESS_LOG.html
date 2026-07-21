@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>KernelFactory Campaign Log — GVR Top-K BS=1 (+20% vs PR#16457)</title>
+<style>
+:root { --fg:#1a1a2e; --acc:#0b6e4f; --warn:#b3541e; --bg:#fafaf7; --card:#fff; }
+body { font-family: -apple-system, "Segoe UI", Roboto, "Noto Sans CJK SC", sans-serif;
+       margin:0; background:var(--bg); color:var(--fg); line-height:1.55; }
+.wrap { max-width:1100px; margin:0 auto; padding:24px 32px 80px; }
+h1 { font-size:1.5em; border-bottom:3px solid var(--acc); padding-bottom:8px; }
+h2 { color:var(--acc); margin-top:2em; border-left:5px solid var(--acc); padding-left:10px; }
+h3 { color:#333; }
+table { border-collapse:collapse; margin:12px 0; font-size:0.92em; width:100%; }
+th,td { border:1px solid #ccc; padding:5px 9px; text-align:left; vertical-align:top; }
+th { background:#eef3ef; }
+code, pre { font-family:"SF Mono",Consolas,monospace; background:#f0f0ea; border-radius:4px; }
+code { padding:1px 5px; font-size:0.9em; }
+pre { padding:12px 14px; overflow-x:auto; font-size:0.85em; border:1px solid #ddd; }
+.card { background:var(--card); border:1px solid #ddd; border-radius:8px; padding:14px 18px; margin:14px 0; }
+.warn { border-left:5px solid var(--warn); }
+.kpi { display:inline-block; background:#eef7f2; border:1px solid var(--acc); border-radius:6px;
+       padding:6px 14px; margin:4px 8px 4px 0; font-size:0.95em; }
+details { margin:10px 0; }
+summary { cursor:pointer; font-weight:600; color:var(--acc); }
+/* bilingual CSS-only toggle: EN default */
+.lang-cn { display:none; }
+#lang-toggle:checked ~ .content .lang-cn { display:block; }
+#lang-toggle:checked ~ .content .lang-en { display:none; }
+.toggle-label { position:fixed; top:14px; right:22px; background:var(--acc); color:#fff;
+       padding:6px 14px; border-radius:20px; cursor:pointer; user-select:none; font-size:0.9em; z-index:10; }
+.status-live { color:var(--warn); font-weight:700; }
+</style>
+</head>
+<body>
+<input type="checkbox" id="lang-toggle" style="display:none">
+<label class="toggle-label" for="lang-toggle">EN / 中文</label>
+<div class="content wrap">
+
+<h1>KernelFactory Campaign — DeepSeek-V4 Indexer Top-K decode BS=1<br>
+<small>target: +20% avg vs PR#16457 GVR on §4 real data (865 cells), zero regression</small></h1>
+
+<div class="card">
+<span class="kpi">Campaign ID <code>tfb91bvwm972kfyf1bc1trj5e0</code></span>
+<span class="kpi">Started 2026-07-21 01:19:30 UTC</span>
+<span class="kpi">GPU: managed B200 pool</span>
+<span class="kpi">Language: CUDA C++</span>
+<span class="kpi">Effort: max (6 agents/round)</span>
+<span class="kpi status-live">STATUS: RUNNING</span>
+</div>
+
+<!-- KF-DIAGRAMS:START -->
+<h2>0 · Harness at a glance / 流程图总览</h2>
+<figure style="margin:18px 0;text-align:center"><svg viewBox="0 0 1360 360" style="max-width:100%;background:#fff;border:1px solid #ddd;border-radius:8px"><defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#555"/></marker></defs><rect x="20" y="30" width="190" height="96" rx="7" fill="#eef1f8" stroke="#0b6e4f" stroke-width="1.4"/><text x="115.0" y="53.85" font-size="11" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif" font-weight="700">Problem bundle</text><text x="115.0" y="67.85" font-size="11" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif">definition.json</text><text x="115.0" y="81.85" font-size="11" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif">workload.jsonl ×28</text><text x="115.0" y="95.85" font-size="11" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif">baselines.jsonl · prompt.md</text><text x="115.0" y="109.85" font-size="11" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif">assets ×28 (.safetensors)</text><line x1="210" y1="78" x2="260" y2="78" stroke="#555" stroke-width="1.6" marker-end="url(#arr)"/><rect x="260" y="52" width="120" height="52" rx="7" fill="#eef7f2" stroke="#0b6e4f" stroke-width="1.4"/><text x="320.0" y="74.7" font-size="12" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif" font-weight="700">kf campaign</text><text x="320.0" y="89.7" font-size="12" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif">init</text><line x1="380" y1="78" x2="430" y2="78" stroke="#555" stroke-width="1.6" marker-end="url(#arr)"/><text x="405.0" y="72.0" font-size="11" text-anchor="middle" fill="#555" font-family="-apple-system,Segoe UI,sans-serif">campaign.yaml</text><rect x="430" y="52" width="130" height="52" rx="7" fill="#eef7f2" stroke="#0b6e4f" stroke-width="1.4"/><text x="495.0" y="67.85" font-size="11" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif" font-weight="700">prepare</text><text x="495.0" y="81.85" font-size="11" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif">(validate +</text><text x="495.0" y="95.85" font-size="11" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif">baseline stamp)</text><line x1="560" y1="78" x2="610" y2="78" stroke="#555" stroke-width="1.6" marker-end="url(#arr)"/><rect x="610" y="52" width="100" height="52" rx="7" fill="#eef7f2" stroke="#0b6e4f" stroke-width="1.4"/><text x="660.0" y="82.2" font-size="12" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif" font-weight="700">start</text><line x1="710" y1="78" x2="760" y2="78" stroke="#555" stroke-width="1.6" marker-end="url(#arr)"/><rect x="760" y="16" width="380" height="330" rx="10" fill="#fafcf9" stroke="#0b6e4f" stroke-width="1.8" stroke-dasharray="8 5"/><text x="950" y="38" font-size="13" text-anchor="middle" fill="#0b6e4f" font-family="-apple-system,Segoe UI,sans-serif" font-weight="700">ROUND r (sequential, r ≤ 20)</text><rect x="790" y="52" width="320" height="46" rx="7" fill="#fdf3e7" stroke="#0b6e4f" stroke-width="1.4"/><text x="950.0" y="71.85" font-size="11" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif" font-weight="700">spawn 6 agents in parallel</text><text x="950.0" y="85.85" font-size="11" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif">2×Fable-5(max) · 2×GPT-5.6(xhigh) · 2×Opus-4.8</text><line x1="950" y1="98" x2="950" y2="120" stroke="#555" stroke-width="1.6" marker-end="url(#arr)"/><rect x="790" y="120" width="320" height="40" rx="7" fill="#fff" stroke="#0b6e4f" stroke-width="1.4"/><text x="950.0" y="136.925" font-size="10.5" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif">agent loop: write CUDA kernel → compile → GPU eval</text><text x="950.0" y="150.425" font-size="10.5" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif">(iterate freely inside 4 h soft budget)</text><line x1="950" y1="160" x2="950" y2="182" stroke="#555" stroke-width="1.6" marker-end="url(#arr)"/><rect x="790" y="182" width="152" height="40" rx="7" fill="#fff" stroke="#0b6e4f" stroke-width="1.4"/><text x="866.0" y="205.85" font-size="11" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif">submit Solution</text><line x1="942" y1="202" x2="970" y2="202" stroke="#555" stroke-width="1.6" marker-end="url(#arr)"/><rect x="970" y="182" width="140" height="40" rx="7" fill="#fbecec" stroke="#0b6e4f" stroke-width="1.4"/><text x="1040.0" y="198.925" font-size="10.5" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif">LLM compliance</text><text x="1040.0" y="212.425" font-size="10.5" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif">judge (bans)</text><line x1="950" y1="222" x2="950" y2="244" stroke="#555" stroke-width="1.6" marker-end="url(#arr)"/><rect x="790" y="244" width="320" height="40" rx="7" fill="#fff" stroke="#0b6e4f" stroke-width="1.4"/><text x="950.0" y="267.675" font-size="10.5" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif">fitness = 40% perf + 30% correct + 20% eff + 10% novel</text><line x1="950" y1="284" x2="950" y2="306" stroke="#555" stroke-width="1.6" marker-end="url(#arr)"/><rect x="790" y="306" width="320" height="30" rx="7" fill="#fdf3e7" stroke="#0b6e4f" stroke-width="1.4"/><text x="950.0" y="324.675" font-size="10.5" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif">round summary + shared insights DB → seed round r+1</text><line x1="1140" y1="180" x2="1190" y2="180" stroke="#555" stroke-width="1.6" marker-end="url(#arr)"/><rect x="1190" y="130" width="150" height="100" rx="7" fill="#eef1f8" stroke="#0b6e4f" stroke-width="1.4"/><text x="1265.0" y="155.85" font-size="11" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif" font-weight="700">terminate when:</text><text x="1265.0" y="169.85" font-size="11" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif">max_rounds 20</text><text x="1265.0" y="183.85" font-size="11" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif">stagnation ≥ 4</text><text x="1265.0" y="197.85" font-size="11" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif">converged</text><text x="1265.0" y="211.85" font-size="11" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif">8 h wall</text><line x1="1265" y1="230" x2="1265" y2="262" stroke="#555" stroke-width="1.6" marker-end="url(#arr)"/><rect x="1190" y="262" width="150" height="44" rx="7" fill="#eef7f2" stroke="#0b6e4f" stroke-width="1.4"/><text x="1265.0" y="280.7" font-size="12" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif" font-weight="700">best kernel →</text><text x="1265.0" y="295.7" font-size="12" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif">local harvest</text></svg><figcaption style="font-size:0.9em;color:#444;margin-top:6px"><b>Fig. A — KernelFactory campaign lifecycle: evolutionary rounds of parallel LLM agents over a fixed SOLBench problem.</b><br>图 A — KernelFactory 战役生命周期:固定 SOLBench 问题上,并行 LLM agent 的进化式轮次。</figcaption></figure><figure style="margin:18px 0;text-align:center"><svg viewBox="0 0 1360 330" style="max-width:100%;background:#fff;border:1px solid #ddd;border-radius:8px"><defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#555"/></marker></defs><rect x="20" y="40" width="170" height="56" rx="7" fill="#eef1f8" stroke="#0b6e4f" stroke-width="1.4"/><text x="105.0" y="57.85" font-size="11" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif" font-weight="700">Solution sources</text><text x="105.0" y="71.85" font-size="11" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif">kernel.cu (+ .cpp)</text><text x="105.0" y="85.85" font-size="11" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif">TVM-FFI entry</text><line x1="190" y1="68" x2="240" y2="68" stroke="#555" stroke-width="1.6" marker-end="url(#arr)"/><rect x="240" y="40" width="170" height="56" rx="7" fill="#eef7f2" stroke="#0b6e4f" stroke-width="1.4"/><text x="325.0" y="57.85" font-size="11" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif" font-weight="700">compile server</text><text x="325.0" y="71.85" font-size="11" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif">tvm_ffi.cpp.build →</text><text x="325.0" y="85.85" font-size="11" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif">benchmark_kernel.so</text><line x1="410" y1="68" x2="460" y2="68" stroke="#555" stroke-width="1.6" marker-end="url(#arr)"/><rect x="460" y="14" width="700" height="300" rx="10" fill="#fafcf9" stroke="#0b6e4f" stroke-width="1.8" stroke-dasharray="8 5"/><text x="810" y="36" font-size="13" text-anchor="middle" fill="#0b6e4f" font-family="-apple-system,Segoe UI,sans-serif" font-weight="700">for each of the 28 workloads (GPU eval server, B200)</text><rect x="485" y="50" width="190" height="62" rx="7" fill="#fdf3e7" stroke="#0b6e4f" stroke-width="1.4"/><text x="580.0" y="71.175" font-size="10.5" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif" font-weight="700">load inputs</text><text x="580.0" y="84.675" font-size="10.5" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif">logits[1,npad] fp32 (blob)</text><text x="580.0" y="98.175" font-size="10.5" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif">pre_idx[1,k] i32 · n_valid</text><line x1="580" y1="112" x2="580" y2="136" stroke="#555" stroke-width="1.6" marker-end="url(#arr)"/><rect x="485" y="136" width="190" height="48" rx="7" fill="#fff" stroke="#0b6e4f" stroke-width="1.4"/><text x="580.0" y="156.925" font-size="10.5" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif" font-weight="700">reference run()</text><text x="580.0" y="170.425" font-size="10.5" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif">torch.topk ground truth</text><line x1="675" y1="160" x2="715" y2="160" stroke="#555" stroke-width="1.6" marker-end="url(#arr)"/><rect x="715" y="136" width="190" height="48" rx="7" fill="#fff" stroke="#0b6e4f" stroke-width="1.4"/><text x="810.0" y="156.925" font-size="10.5" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif" font-weight="700">candidate run</text><text x="810.0" y="170.425" font-size="10.5" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif">shape/dtype gate</text><line x1="810" y1="184" x2="810" y2="208" stroke="#555" stroke-width="1.6" marker-end="url(#arr)"/><rect x="700" y="208" width="220" height="56" rx="7" fill="#fbecec" stroke="#0b6e4f" stroke-width="1.4"/><text x="810.0" y="226.175" font-size="10.5" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif" font-weight="700">custom check_topk</text><text x="810.0" y="239.675" font-size="10.5" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif">all mandatory (> kth) present</text><text x="810.0" y="253.175" font-size="10.5" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif">rest ⊆ tie (= kth) · unique · in-range</text><line x1="920" y1="236" x2="960" y2="236" stroke="#555" stroke-width="1.6" marker-end="url(#arr)"/><text x="940.0" y="230.0" font-size="11" text-anchor="middle" fill="#555" font-family="-apple-system,Segoe UI,sans-serif">pass</text><rect x="960" y="208" width="180" height="56" rx="7" fill="#eef7f2" stroke="#0b6e4f" stroke-width="1.4"/><text x="1050.0" y="226.175" font-size="10.5" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif" font-weight="700">benchmark loop</text><text x="1050.0" y="239.675" font-size="10.5" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif">warm-up ≥10 reps,</text><text x="1050.0" y="253.175" font-size="10.5" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif">CUDA-event timing</text><line x1="1050" y1="264" x2="1050" y2="288" stroke="#555" stroke-width="1.6" marker-end="url(#arr)"/><rect x="930" y="288" width="215" height="20" rx="7" fill="#fff" stroke="#fff" stroke-width="1.4"/><text x="1037.5" y="302.2" font-size="12" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif"></text><text x="1050" y="302" font-size="11" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif">latency_ms → speedup = baseline / candidate</text><line x1="1160" y1="236" x2="1210" y2="236" stroke="#555" stroke-width="1.6" marker-end="url(#arr)"/><rect x="1210" y="190" width="130" height="92" rx="7" fill="#eef1f8" stroke="#0b6e4f" stroke-width="1.4"/><text x="1275.0" y="218.85" font-size="11" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif" font-weight="700">Trace</text><text x="1275.0" y="232.85" font-size="11" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif">status · latency</text><text x="1275.0" y="246.85" font-size="11" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif">speedup ·</text><text x="1275.0" y="260.85" font-size="11" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif">logs</text></svg><figcaption style="font-size:0.9em;color:#444;margin-top:6px"><b>Fig. B — CudaGym/SOLBench per-candidate evaluation harness (correctness gate before timing; speedup vs the stamped PR baseline).</b><br>图 B — CudaGym/SOLBench 单候选评测流水线(先正确性门再计时;加速比对 prepare 盖章的 PR 基线)。</figcaption></figure><figure style="margin:18px 0;text-align:center"><svg viewBox="0 0 1300 450" style="max-width:100%;background:#fff;border:1px solid #ddd;border-radius:8px"><defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#555"/></marker></defs><rect x="14" y="14" width="600" height="420" rx="10" fill="#f4f8f4" stroke="#0b6e4f" stroke-width="1.6"/><text x="314" y="38" font-size="13" text-anchor="middle" fill="#0b6e4f" font-family="-apple-system,Segoe UI,sans-serif" font-weight="700">LOCAL · umbriel-b200-027 (8× B200, idle)</text><rect x="680" y="14" width="600" height="420" rx="10" fill="#f4f6fb" stroke="#33518f" stroke-width="1.6"/><text x="980" y="38" font-size="13" text-anchor="middle" fill="#33518f" font-family="-apple-system,Segoe UI,sans-serif" font-weight="700">CLOUD · kernelfactory.nvidia.com (managed B200 pool)</text><rect x="40" y="56" width="250" height="62" rx="7" fill="#eef1f8" stroke="#0b6e4f" stroke-width="1.4"/><text x="165.0" y="77.175" font-size="10.5" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif" font-weight="700">§4 real data (865 cells)</text><text x="165.0" y="90.675" font-size="10.5" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif">real_3arm_layers_full.csv (PR baseline)</text><text x="165.0" y="104.175" font-size="10.5" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif">decode-capture slims (V4/V3.2)</text><line x1="165" y1="118" x2="165" y2="142" stroke="#555" stroke-width="1.6" marker-end="url(#arr)"/><rect x="40" y="142" width="250" height="56" rx="7" fill="#eef7f2" stroke="#0b6e4f" stroke-width="1.4"/><text x="165.0" y="160.175" font-size="10.5" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif" font-weight="700">export_cells.py</text><text x="165.0" y="173.675" font-size="10.5" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif">28-cell stratified subset →</text><text x="165.0" y="187.175" font-size="10.5" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif">safetensors + tie/mandatory sets</text><line x1="290" y1="170" x2="700" y2="90" stroke="#555" stroke-width="1.6" marker-end="url(#arr)"/><text x="495.0" y="124.0" font-size="11" text-anchor="middle" fill="#555" font-family="-apple-system,Segoe UI,sans-serif">kf campaign init/prepare/start</text><rect x="700" y="60" width="260" height="60" rx="7" fill="#fdf3e7" stroke="#0b6e4f" stroke-width="1.4"/><text x="830.0" y="80.175" font-size="10.5" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif" font-weight="700">campaign</text><text x="830.0" y="93.675" font-size="10.5" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif">tfb91bvwm972kfyf1bc1trj5e0</text><text x="830.0" y="107.175" font-size="10.5" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif">cuda_cpp · effort max · ≤20 rounds</text><line x1="830" y1="120" x2="830" y2="146" stroke="#555" stroke-width="1.6" marker-end="url(#arr)"/><rect x="700" y="146" width="260" height="54" rx="7" fill="#fff" stroke="#0b6e4f" stroke-width="1.4"/><text x="830.0" y="169.925" font-size="10.5" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif" font-weight="700">rounds: 6 agents evolve kernels</text><text x="830.0" y="183.425" font-size="10.5" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif">(Fig. A) · eval harness (Fig. B)</text><line x1="830" y1="200" x2="830" y2="226" stroke="#555" stroke-width="1.6" marker-end="url(#arr)"/><rect x="700" y="226" width="260" height="48" rx="7" fill="#eef1f8" stroke="#0b6e4f" stroke-width="1.4"/><text x="830.0" y="246.925" font-size="10.5" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif" font-weight="700">candidates DB</text><text x="830.0" y="260.425" font-size="10.5" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif">kernel list / results / insights</text><line x1="700" y1="250" x2="320" y2="250" stroke="#555" stroke-width="1.6" marker-end="url(#arr)"/><text x="510.0" y="244.0" font-size="11" text-anchor="middle" fill="#555" font-family="-apple-system,Segoe UI,sans-serif">harvest: kf campaign results</text><rect x="40" y="226" width="280" height="48" rx="7" fill="#fff" stroke="#0b6e4f" stroke-width="1.4"/><text x="180.0" y="246.925" font-size="10.5" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif" font-weight="700">quick_ab.py (exactness smoke)</text><text x="180.0" y="260.425" font-size="10.5" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif">28-cell candidate vs PR-head</text><line x1="180" y1="274" x2="180" y2="298" stroke="#555" stroke-width="1.6" marker-end="url(#arr)"/><rect x="40" y="298" width="280" height="60" rx="7" fill="#eef7f2" stroke="#0b6e4f" stroke-width="1.4"/><text x="180.0" y="318.175" font-size="10.5" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif" font-weight="700">nsys_ab.py — house protocol</text><text x="180.0" y="331.675" font-size="10.5" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif">cold-L2 512MB evict · NVTX GPU projection</text><text x="180.0" y="345.175" font-size="10.5" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif">paired same-GPU vs gvrpkg_head @e6fdbfac</text><line x1="180" y1="358" x2="180" y2="382" stroke="#555" stroke-width="1.6" marker-end="url(#arr)"/><rect x="40" y="382" width="400" height="40" rx="7" fill="#fbecec" stroke="#0b6e4f" stroke-width="1.4"/><text x="240.0" y="405.85" font-size="11" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif" font-weight="700">VERDICT: 865-cell full grid · geomean ≥1.20 · zero regression · all exact</text><line x1="320" y1="320" x2="700" y2="320" stroke="#555" stroke-width="1.6" marker-end="url(#arr)" stroke-dasharray="6 4"/><text x="510.0" y="314.0" font-size="11" text-anchor="middle" fill="#555" font-family="-apple-system,Segoe UI,sans-serif">regressions found → fork --append-prompt</text><rect x="700" y="298" width="260" height="48" rx="7" fill="#fdf3e7" stroke="#0b6e4f" stroke-width="1.4"/><text x="830.0" y="318.925" font-size="10.5" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif" font-weight="700">fork: rewind/extend rounds</text><text x="830.0" y="332.425" font-size="10.5" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif">with corrective steering</text><line x1="960" y1="322" x2="1010" y2="322" stroke="#555" stroke-width="1.6" marker-end="url(#arr)" stroke-dasharray="6 4"/><rect x="1010" y="298" width="250" height="48" rx="7" fill="#fff" stroke="#0b6e4f" stroke-width="1.4"/><text x="1135.0" y="318.925" font-size="10.5" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif">new rounds see the local</text><text x="1135.0" y="332.425" font-size="10.5" text-anchor="middle" fill="#1a1a2e" font-family="-apple-system,Segoe UI,sans-serif">regression evidence</text></svg><figcaption style="font-size:0.9em;color:#444;margin-top:6px"><b>Fig. C — End-to-end optimization loop: cloud campaign evolves kernels; local 8×B200 arm re-verifies with nsys cold-L2 and steers via fork.</b><br>图 C — 端到端优化闭环:云端战役演化 kernel;本机 8×B200 臂用 nsys 冷-L2 复验并经 fork 回灌导向。</figcaption></figure>
+<!-- KF-DIAGRAMS:END -->
+
+<div class="lang-en">
+
+<h2>1 · What KernelFactory is, and how its harness works</h2>
+<p><b>KernelFactory</b> (<code>kf</code> CLI, kernelfactory.nvidia.com) is NVIDIA's
+multi-agent GPU-kernel optimization platform. You define a <i>problem</i> in the
+CudaGym/SOLBench schema; the platform then runs a <i>campaign</i>: sequential
+<b>rounds</b>, each spawning a pool of LLM coding agents in parallel (here: 2×
+Claude Fable-5 @max + 2× Codex GPT-5.6-sol @xhigh + 2× N3 Claude-Opus-4.8) that
+write CUDA kernels, evaluate them on real GPUs, see each other's results and
+insights from earlier rounds, and evolve solutions via <i>mutation / crossover /
+random</i> strategies until the round budget, a convergence target, or a
+stagnation limit ends the campaign.</p>
+
+<h3>1.1 The evaluation harness (CudaGym / SOLBench)</h3>
+<table>
+<tr><th>Component</th><th>Role in the harness</th></tr>
+<tr><td><code>definition.json</code></td><td>The problem contract: named <b>axes</b>
+(const / var / derived-expr), <b>inputs/outputs</b> as ordered tensor specs
+(shape strings refer to axes; scalars use <code>shape:null</code>), a pure-PyTorch
+<code>reference</code> implementation (<code>def run(...)</code>) used as ground truth, and an
+optional <code>custom_correctness_entrypoint</code> replacing the default
+elementwise-tolerance check.</td></tr>
+<tr><td><code>workload.jsonl</code></td><td>One test case per line: concrete axis
+values + input sources (<code>random</code> / <code>scalar</code> /
+<code>safetensors</code> blob / <code>custom</code> generator). Per-workload
+<code>custom_correctness_kwargs</code> are passed as kwargs into the custom checker.</td></tr>
+<tr><td><code>baselines.jsonl</code></td><td>Per-workload target timings
+(<code>{"uuid", "execution_time_ms"}</code>). Candidate <b>speedup = baseline_time /
+candidate_time</b> per workload; the campaign's fitness aggregates speedup +
+correctness (+ efficiency, novelty) with 40/30/20/10 default weights.</td></tr>
+<tr><td>Solution</td><td>An agent submission: source files + build spec. CUDA C++
+solutions are built with <code>tvm_ffi.cpp.build</code> into
+<code>benchmark_kernel.so</code> (TVM-FFI <code>TensorView</code> ABI, inputs first then
+outputs, no torch/extension.h). The eval driver loads it, generates/loads inputs,
+runs correctness then a warm-up + timed benchmark loop (CUDA-event based) per
+workload, and records a <b>Trace</b> (status, latency, speedup, logs).</td></tr>
+<tr><td>Compliance judge</td><td>An LLM judge inspects every submission:
+<b>CUDA-graph capture/replay banned</b> (would measure launch amortization, not
+kernel work) and <b>framework-kernel imports banned</b> (flashinfer / trtllm /
+tensorrt_llm at any level) — kernels must be original computation.</td></tr>
+<tr><td>Agent-side tools</td><td>Inside the agent pod: compile server, GPU eval
+server, <code>ncu</code>/<code>nsys</code>/<code>compute-sanitizer</code> profiling,
+a shared DB of all candidates + inter-agent <i>insights</i> messaging.</td></tr>
+</table>
+
+<h3>1.2 Campaign lifecycle used here</h3>
+<pre>kf campaign init gvr-topk-bs1-real --definition definition.json --workloads workload.jsonl \
+  --baselines baselines.jsonl --prompt-file prompt.md --gpu-spec b200 --language cuda_cpp \
+  --effort max --max-rounds 20 --max-duration 28800 --stagnation-limit 4 --asset cell_*.safetensors ×28
+kf campaign prepare --from ws/campaign.yaml   # validates definition/workloads + stamps baselines
+kf campaign start   --from ws/campaign.yaml   # → id tfb91bvwm972kfyf1bc1trj5e0</pre>
+
+<h2>2 · Problem encoding (what the agents optimize)</h2>
+<div class="card">
+<p><b>Op:</b> top-K index selection over one real captured indexer-logits row
+(BS=1, fp32): inputs <code>logits[1, npad]</code> (npad = ceil(n/64)·64, tail
+padded with fp32-min), <code>pre_idx[1, k]</code> (previous decode step's top-K =
+temporal warm hint), scalar <code>n_valid</code>; output <code>indices[1, k]</code>
+int32, any order.</p>
+<p><b>Correctness:</b> tie-robust set semantics via
+<code>custom_correctness_entrypoint=check_topk</code>: per workload we precomputed
+<code>mandatory</code> (values &gt; k-th value — must all be present) and
+<code>tie</code> (values == k-th value — any subset may fill the rest); checker also
+enforces uniqueness and range. This mirrors the PR#16457 equivalence-test
+semantics (index-set, tie-either-way).</p>
+<p><b>Workloads:</b> 28 stratified real cells from the 865-cell §4 grid —
+3 models (Flash K=512 / Pro K=1024 / V3.2 K=2048) × ISL rungs (4k→1M) ×
+{min-hit, max-hit} layer per rung. Hit range 0.023–1.0; N range 1027–262127;
+assets 9.8 MB safetensors.</p>
+<p><b>Baseline:</b> per-cell PR#16457 GVR timings from
+<code>real_3arm_layers_full.csv</code> (<code>pr</code> column; nsys pure-kernel
+cold-L2 on umbriel-b200-027), 5–29 µs, geomean 14.40 µs. <b>Methodology caveat:</b>
+campaign eval times warm-loop CUDA events on the managed pool, so campaign-reported
+speedups are steering signals, not the verdict — the acceptance gate is a local
+865-cell nsys cold-L2 paired A/B on our own B200s.</p>
+<p><b>Prompt steering:</b> <code>prompt.md</code> distills the GVR falsification
+history (12+ dead ends: fused count+collect, smem staging, secant multi-round,
+CUB sort, single-CTA occupancy wall) and points at the two live structural levers:
+multi-CTA-per-row cooperation (sglang-style ≈1.4× existence proof) and
+histogram/radix select over fp32-ordered-uint keys; requires geomean ≥1.30× with
+no cell below ~1.05× (margin over the +20% final bar).</p>
+</div>
+
+<h2>3 · Decisions & deviations</h2>
+<table>
+<tr><th>Decision</th><th>Rationale</th></tr>
+<tr><td>Baseline from REPORT CSV, not re-measured on the campaign harness</td>
+<td>User directive. Cold-L2 nsys baselines vs warm campaign eval inflates apparent
+speedups ⇒ prompt demands 1.30× margin; final gate is local.</td></tr>
+<tr><td>Managed b200 pool, not BYOG on umbriel-b200-027</td>
+<td>BYOG needs a local CudaGym server (source at gitlab-master atlas/cudagym) —
+no gitlab credentials available on this box. Local 8×B200 are instead the
+continuous validation arm: every round's best kernel is re-measured locally on the
+full grid.</td></tr>
+<tr><td>28-cell campaign subset of the 865-cell grid</td>
+<td>Per-candidate eval cost: every candidate runs all workloads; 865 would blow the
+600 s eval budget. Stratified subset + full-grid local verdict.</td></tr>
+<tr><td>CUDA C++ language (not CuTe DSL)</td>
+<td>Strongest search space for this latency-bound scalar-select op; the known
+1.4× rival (sglang v2) is plain CUDA; integration into TRT-LLM as a custom op is
+acceptable for PR#2.</td></tr>
+</table>
+
+<h2>4 · Timeline</h2>
+<table id="timeline">
+<tr><th>UTC</th><th>Event</th></tr>
+<tr><td>2026-07-21 ~00:40</td><td><code>kf</code> 1.0.0 installed; SSO auth OK; skills provisioned.</td></tr>
+<tr><td>2026-07-21 ~01:05</td><td>28 cells exported (assets 9.8 MB); definition/workload/baselines/prompt authored.</td></tr>
+<tr><td>2026-07-21 01:15</td><td><code>prepare</code> passed (after fixing shape dims to axis-name strings via const axis <code>b=1</code>).</td></tr>
+<tr><td>2026-07-21 01:19</td><td>Campaign started: <code>tfb91bvwm972kfyf1bc1trj5e0</code>, phase Pending.</td></tr>
+<tr><td>2026-07-21 01:25</td><td>Round 1 Running, 6 agents launched. Background monitor attached (2-min poll → <code>status_log.jsonl</code>).</td></tr>
+<tr><td>2026-07-21 ~01:50</td><td>Local validation arm built on umbriel-b200-027: <code>gvrpkg_head/</code>
+(PR branch HEAD e6fdbfac3d kernel snapshot, md5 3396037c), <code>quick_ab.py</code> (CUDA-event quick loop; self-test 28/28 exact) and
+<code>nsys_ab.py + run_nsys_ab.sh + parse_ab.py</code> (house NVTX cold/warm-L2 protocol). Smoke nsys run reproduces REPORT baselines
+(flash_4k 8.33 vs 8.3 µs, flash_128k 13.41 vs 13.67 µs) — timing loop calibrated. Note: CUDA-event quick loop found to include
+python launch overhead (inflates to 900 µs on big cells) ⇒ nsys GPU projection is the ONLY trusted comparator, quick_ab demoted to exactness smoke.</td></tr>
+</table>
+
+<h2>5 · Round-by-round results</h2>
+<table>
+<tr><th>When (UTC)</th><th>Candidate</th><th>Campaign speedup</th><th>LOCAL nsys cold-L2 vs PR head @e6fdbfac3d (28 cells)</th></tr>
+<tr><td>07-21 01:47→02:45</td><td>round-1 ramp: c95942b0 0.29× → 101d0d26 0.63× → f5c18852 0.92× → 47661ba5 0.95×</td>
+<td>&lt;1.0</td><td>not harvested (below baseline)</td></tr>
+<tr><td>07-21 02:45</td><td><b>41a94aaa</b> — hybrid radix-select: single-CTA smem (npad ≤ 8256, fused
+first 10-bit round, warp-parity histogram replicas) + multi-CTA (one CTA / 2048 elems, ≤128 CTAs,
+11-bit global-histogram rounds, epoch grid barrier, two-pass distributed emission). Ignores pre_idx entirely.</td>
+<td>1.04×</td>
+<td><b>geomean COLD 1.372× / WARM 1.297×, exact 28/28</b>; 26/28 cells ≥1.0; regressions:
+pro_128k_L02 0.921×, v32_32k_L03 0.950× (both mid-N multi-CTA regime); best cells: flash_4k 2.3–2.8×,
+pro_1024k 1.67×, flash_1024k 1.36–1.43×. Campaign-internal speedup (1.04×) badly UNDERSTATES the nsys
+kernel-time ratio — their timing includes per-call overheads; steering direction is conservative-safe.</td></tr>
+<tr><td>07-21 ~04:10</td><td><b>41a94aaa FULL-GRID verdict</b> (865 cells, 8×B200 sharded, nsys cold-L2 paired)</td>
+<td>—</td>
+<td><b>geomean 1.316×</b> (≥1.20 target ✅), <b>exact 865/865</b> ✅, max 3.28×, but <b>137 regressions</b> (❌ zero-regression bar),
+worst 0.743. Regression map is razor-sharp: ALL in the <b>N∈[16k, 65k] crossover band</b> where the kernel switches from
+single-CTA smem to multi-CTA grid-barrier with only 8–32 CTAs (N≈16k: 81/109 cells regress, gm 0.86; N≈32k: 46/109, gm 0.93;
+N≈65k: 9/88; N≥131k: 1). Fix direction for steering: extend the single-CTA smem path upward (B200 has 227 KB smem/CTA;
+npad·4B fits to ~48k) or a lighter mid-N cooperative scheme. Data: <code>grid_r1a.csv</code>.</td></tr>
+<tr><td>07-21 04:31</td><td><b>ae264468</b> (round-1 evolution of the hybrid)</td>
+<td>1.06×</td>
+<td>20-cell probe (regression band + anchors): moves the band up — v32_16k 0.75→0.97, v32_32k 0.90→1.22–1.31,
+pro_64k 0.74→0.83–0.96, pro_1024k 1.70→2.04; small give-backs at flash large-N (flash_1024k 1.44→1.32, flash_256k 1.07→0.98).
+Remaining hard core: <b>N≈16k with K=512/1024</b> (flash/pro 64k ISL) still 0.75–0.80. Data: <code>ab_r1b.json</code>.</td></tr>
+<tr><td>07-21 05:06 <em>(harvested 05:20 post-resume)</em></td><td><b>ba1020ce</b> (r001-a005, evolution of the hybrid lineage) — multi-CTA side rewritten to
+<b>3-pass 11/11/10-bit cooperative radix + float4 loads</b> (was 4×8-bit); single-CTA smem switch-point raised to
+<b>n ≤ 16384</b>; histogram re-zero moved to previous call's collect tail (one grid.sync saved).</td><td>1.0768</td>
+<td><b>28-cell probe (full campaign set): geomean COLD 1.436× / WARM 1.405×, exact 28/28</b>; probe-set regressions healed —
+pro_128k 0.921→0.996, v32_32k 0.950→1.24/1.33; worst cell 0.994 (warm, noise-level). Probe lacks 16k/64k cells;
+suspected sb-branch coverage hole at 8448&lt;n≤16384 (KPT 11 × 768 thr = 8448 keys) → adjudicated by 865-cell full grid (tag r1c, running).
+Ops note: /tmp/gvrlayers cutlass450 overlay was wiped by tmp cleanup → rebuilt from NFS userbase (make_fragment AttributeError).</td></tr>
+</table>
+
+<h2>6 · Final verdict</h2>
+<p><i>(pending: harvested kernel vs PR#16457 on all 865 §4 cells, nsys cold-L2,
+paired per-GPU on umbriel-b200-027; acceptance = geomean ≥1.20 and no regression)</i></p>
+
+</div>
+
+<div class="lang-cn">
+
+<h2>1 · KernelFactory 是什么,harness 原理</h2>
+<p><b>KernelFactory</b>(<code>kf</code> CLI)是 NVIDIA 的多 agent GPU kernel 优化平台。
+用 CudaGym/SOLBench 格式定义<i>问题</i>,平台跑<i>战役(campaign)</i>:顺序执行多个
+<b>轮次</b>,每轮并行拉起一池 LLM 编码 agent(本战役:2× Claude Fable-5 @max + 2× Codex
+GPT-5.6-sol @xhigh + 2× N3 Claude-Opus-4.8),它们编写 CUDA kernel、在真 GPU 上评测、
+共享历史轮次的候选与洞察,以<i>变异/杂交/随机</i>策略演化解,直到轮次预算、收敛目标或
+停滞上限终止。</p>
+
+<h3>1.1 评测 harness(CudaGym / SOLBench)</h3>
+<table>
+<tr><th>组件</th><th>在 harness 中的角色</th></tr>
+<tr><td><code>definition.json</code></td><td>问题契约:<b>axes</b>(常量/变量/表达式派生)、
+按序的 <b>inputs/outputs</b> 张量规格(shape 引用 axis 名;标量用 <code>shape:null</code>)、
+作为真值的纯 PyTorch <code>reference</code> 实现,以及可选的
+<code>custom_correctness_entrypoint</code>(替换默认的逐元素容差检查)。</td></tr>
+<tr><td><code>workload.jsonl</code></td><td>每行一个测试用例:具体 axis 取值 + 输入来源
+(<code>random</code>/<code>scalar</code>/<code>safetensors</code> blob/<code>custom</code> 生成器)。
+每 workload 的 <code>custom_correctness_kwargs</code> 以 kwargs 传入自定义检查器。</td></tr>
+<tr><td><code>baselines.jsonl</code></td><td>逐 workload 目标时延。候选 <b>加速比 = 基线时间 /
+候选时间</b>;fitness 按 40/30/20/10 聚合(性能/正确性/效率/新颖性)。</td></tr>
+<tr><td>Solution</td><td>agent 提交:源码 + 构建规格。CUDA C++ 用
+<code>tvm_ffi.cpp.build</code> 编译为 <code>benchmark_kernel.so</code>(TVM-FFI TensorView ABI)。
+评测驱动加载后:先正确性、再 warm-up + CUDA-event 计时循环,逐 workload 记录 Trace。</td></tr>
+<tr><td>合规裁判</td><td>LLM 裁判审查每个提交:默认<b>禁 CUDA graph</b>(那是测发射摊销,
+不是 kernel 本身)且<b>禁框架 kernel 导入</b>(flashinfer/trtllm 等任何层级)——必须原创计算。</td></tr>
+<tr><td>agent 侧工具</td><td>agent pod 内:编译服务、GPU 评测服务、
+<code>ncu</code>/<code>nsys</code>/<code>compute-sanitizer</code>、全候选共享 DB + agent 间 insight 消息。</td></tr>
+</table>
+
+<h2>2 · 问题编码(agent 优化的目标)</h2>
+<div class="card">
+<p><b>算子:</b>单行真实 indexer logits 的 top-K 索引选择(BS=1 fp32):
+<code>logits[1,npad]</code>(尾部 fp32-min 填充)、<code>pre_idx[1,k]</code>(上一 decode 步
+top-K = 时间warm提示)、标量 <code>n_valid</code>;输出 <code>indices[1,k]</code> int32 任意序。</p>
+<p><b>正确性:</b>tie-鲁棒集合语义:每 workload 预计算 <code>mandatory</code>(严格大于第 K 值,
+必须全含)与 <code>tie</code>(等于第 K 值,任意子集补足),另查唯一性与范围 —— 与 PR#16457
+等价性测试同语义。</p>
+<p><b>Workload:</b>865-cell §4 网格的 28 个分层抽样 cell(3 模型 × ISL 梯 × 最低/最高命中层),
+hit 0.023–1.0,N 1027–262127,资产 9.8 MB。</p>
+<p><b>基线:</b><code>real_3arm_layers_full.csv</code> 的 <code>pr</code> 列(nsys 纯 kernel
+冷 L2,本机实测),5–29µs。<b>口径注意:</b>campaign 评测是 warm 循环 CUDA-event,其加速比
+只是导向信号;判决门 = 本地 865-cell nsys 冷-L2 配对 A/B。</p>
+<p><b>Prompt 导向:</b>注入 GVR 证伪史(12+ 死路)与两条活杠杆(多 CTA 协作 = sglang ~1.4×
+存在性证明;fp32-ordered-uint 直方图/radix 选择),要求几何均值 ≥1.30× 且无 cell 低于 ~1.05×。</p>
+</div>
+
+<h2>3 · 关键决策</h2>
+<table>
+<tr><th>决策</th><th>理由</th></tr>
+<tr><td>基线直接取 REPORT CSV(用户指示)</td><td>冷 L2 基线 vs warm 评测会虚增加速比 ⇒
+prompt 抬高目标至 1.30× 留余量;终审在本地。</td></tr>
+<tr><td>托管 b200 池而非本机 BYOG</td><td>BYOG 需本机装 CudaGym server(源在 gitlab-master,
+本机无凭据)。本机 8×B200 改作持续验证臂:每轮最优 kernel 本地全网格复测。</td></tr>
+<tr><td>28-cell 子集</td><td>每个候选都要跑全部 workload,865 个会爆 600s 评测预算;
+分层抽样 + 本地全网格终审。</td></tr>
+<tr><td>CUDA C++(非 CuTe DSL)</td><td>latency-bound 标量选择算子的最大搜索空间;
+已知 1.4× 对手(sglang v2)就是纯 CUDA。</td></tr>
+</table>
+
+<h2>4 · 时间线 / 5 · 逐轮结果 / 6 · 终审</h2>
+<p><i>见英文侧同名章节(数据同源,随里程碑更新)。</i></p>
+
+</div>
+</div>
+</body>
+</html>

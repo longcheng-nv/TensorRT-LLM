@@ -1,0 +1,42 @@
+[
+ {
+  "uuid": "flash_128k_L32",
+  "pr_cold": 13.412700000000001,
+  "cand_cold": null,
+  "speedup_cold": null,
+  "pr_warm": 11.463799999999999,
+  "cand_warm": null,
+  "speedup_warm": null,
+  "cand_exact": null
+ },
+ {
+  "uuid": "flash_4k_L24",
+  "pr_cold": 8.3263,
+  "cand_cold": null,
+  "speedup_cold": null,
+  "pr_warm": 6.85275,
+  "cand_warm": null,
+  "speedup_warm": null,
+  "cand_exact": null
+ },
+ {
+  "uuid": "pro_512k_L30",
+  "pr_cold": 17.6318,
+  "cand_cold": null,
+  "speedup_cold": null,
+  "pr_warm": 15.84305,
+  "cand_warm": null,
+  "speedup_warm": null,
+  "cand_exact": null
+ },
+ {
+  "uuid": "v32_32k_L46",
+  "pr_cold": 17.449450000000002,
+  "cand_cold": null,
+  "speedup_cold": null,
+  "pr_warm": 15.508700000000001,
+  "cand_warm": null,
+  "speedup_warm": null,
+  "cand_exact": null
+ }
+]
