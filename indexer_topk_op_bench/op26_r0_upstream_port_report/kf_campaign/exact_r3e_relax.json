@@ -1,0 +1,50 @@
+{
+ "flash_128k_L32|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_128k_L32|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_128k_L30|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_128k_L30|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_128k_L02|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_128k_L02|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_32k_L46|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_32k_L46|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_32k_L03|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_32k_L03|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_256k_L09|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_256k_L09|kf_cand": [
+  true,
+  ""
+ ]
+}

@@ -60,12 +60,39 @@ Node: umbriel-b200-027 (8×B200). Started 2026-07-21 13:40Z.
   (~118 GB resident, 1–17% util bursts). All local probes/grids paused until
   quiescence (monitor armed) per no-probes discipline.
 
+## Barrier-ordering study (engineer variants of 09d13c81)
+
+Measured cost of FORMAL memory ordering in the hand-rolled grid barrier
+(28-cell probes GPU1, clean anchors):
+
+| variant | ordering | cold gm vs PR | note |
+|---|---|---|---|
+| 09d13c81 as-harvested | none (relaxed intrinsics) | ~1.72-1.75 | fastest |
+| + __threadfence pair | full membar.gl | 1.5657 | −11% |
+| acq_rel asm barrier | scoped acq/rel | 1.6142 | −8% |
+| relaxed asm (clobber only) | none | ~1.65 (6-cell 1.55) | clobber alone −5-7% |
+| surgical (relaxed spin + trailing acquire) | scoped | 1.6146 | ordering cost is intrinsic: release-add must wait for the block's L2-pending writes on the critical path |
+
+Conclusion: 09d13c81's win comes precisely from omitting barrier ordering +
+avoiding the cooperative-launch premium. Safety argument for shipping
+fence-less ON THIS PATTERN: (1) merged-hist lines are never plain-read before
+the barrier within a launch (first plain touch is post-barrier), (2) L1 is
+invalidated at kernel-launch boundaries, (3) pre-barrier writes are L2 atomics
+⇒ post-barrier plain loads must miss L1 and fetch fresh from L2. Constraint
+documented: any future edit that plain-reads merged hist pre-barrier, or an
+L1-persistent-across-launch arch, breaks this. Flag for production port review.
+
 ## Verdicts
 
 | tag | arms | cells | cold gm | regs | exact | notes |
 |---|---|---|---|---|---|---|
 | champh2_probe | c74f_sbx vs PR@b14ec40e1b | 28 | 1.7193 | 0 | 28/28 | GPU6 probe |
 | r3a_5f3d | 5f3daaf8 vs PR@b14ec40e1b | 28 | 1.7158 | 0 | 28/28 | GPU6; vs champion: ALL 0.9985, n≥512K activation zone 1.0001 → **WASH, no displacement** (hint filter doesn't pay on radix-scan skeleton) |
+| **r3grid09d1** | 09d13c81 vs PR@b14ec40e1b | 865 | **1.7553** | **0** (min 1.009) | **865/865** | 3-shard GPUs0/1/5; anchors med 1.002 all rungs ≤1.045; vs champion gm 1.0428 (coop rungs +6-11%, small-n ≈1.00) → **new composite** |
+| r3c_fence | 09d1+threadfence | 28 | 1.5657 | 0 | 28/28 | REJECTED −11% |
+| r3d_relacq | 09d1 acq_rel asm | 28 | 1.6142 | 0 | 28/28 | REJECTED −8% |
+| r3f_surg | 09d1 surgical rel/acq | 28 | 1.6146 | 0 | 28/28 | REJECTED — ordering cost intrinsic |
+| r3g_30e7 | 30e79029 vs PR | 28 | 1.8150 | 0 | 28/28 | GPU1, anchors med 0.991; **vs champion +6.2%** (contiguous-slice scan on top of 09d1 barrier); full grid running |
 | ~~r3b_09d1~~ | 09d13c81 vs PR | 28 | ~~2.3698~~ | — | 28/28 | **INVALIDATED** — foreign job at 100% util GPUs 1-7 during run (pr arm inflated 19→26 µs); my quiet-check echo was unconditional (scripting bug, fixed to gated form). Exactness (load-independent) retained: 28/28. Re-probe pending quiescence |
 
 - **09d13c81** (r2, internal 1.0351): replaces `cudaLaunchCooperativeKernel`
