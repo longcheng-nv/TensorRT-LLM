@@ -78,6 +78,28 @@ def _build_dp4(K, dtype, N, BS, cr, logits_row, preidx_row):
     return call, [lg, pre, sl, out], extra, (lambda: out)
 
 
+def _build_lj(K, dtype, N, BS, cr, logits_row, preidx_row):
+    """gvrpkg37 (current head + [op37-lj] splice) with tight_bracket=True
+    (L-J multi-rung tight bracket, sync-free P4 diet). Works at any cs;
+    cs/launch shape stays whatever pick_config gives (no forcing)."""
+    import torch
+    _VAR37 = _HERE.parents[0] / "variant"
+    if str(_VAR37) not in sys.path:
+        sys.path.insert(0, str(_VAR37))
+    from gvrpkg37.top_k.gvr_topk_decode import GvrTopKKernel as Gvr37
+    lg = logits_row.to(dtype).contiguous().expand(BS, -1).contiguous()
+    pre = preidx_row.contiguous().expand(BS, -1).contiguous()
+    sl = torch.full((BS,), N * cr, dtype=torch.int32, device="cuda")
+    out = torch.empty(BS, K, dtype=torch.int32, device="cuda")
+    cfg = Gvr37.pick_config(dtype, BS, lg.shape[1])
+    call = (lambda lg=lg, pre=pre, sl=sl, out=out:
+            Gvr37.launch(lg, pre, sl, out, K, compress_ratio=cr,
+                         tight_bracket=True))
+    call()
+    extra = {"cluster_size": cfg["cluster_size"], "flags": "tight_bracket"}
+    return call, [lg, pre, sl, out], extra, (lambda: out)
+
+
 def _build_pr_ovr(ovr, tag, K, dtype, N, BS, cr, logits_row, preidx_row):
     """gvr_pr (head) with explicit ctor overrides (L-H' tuning probes)."""
     import torch
@@ -99,6 +121,8 @@ def build_call_op37(op, K, dtype, N, BS, cr, logits_row, preidx_row):
                              "t512", K, dtype, N, BS, cr, logits_row, preidx_row)
     if op == "gvr_dp4":
         return _build_dp4(K, dtype, N, BS, cr, logits_row, preidx_row)
+    if op == "gvr_lj":
+        return _build_lj(K, dtype, N, BS, cr, logits_row, preidx_row)
     if op.startswith("gvr_cs"):
         return _build_pr_cs(int(op[6:]), K, dtype, N, BS, cr,
                             logits_row, preidx_row)
