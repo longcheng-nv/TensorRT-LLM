@@ -1,0 +1,191 @@
+#!/usr/bin/env python3
+"""Generate KF_PER_CASE_CHART.html — interactive per-case (no layer averaging)
+performance comparison across all CLEAN KernelFactory full-grid verdicts.
+
+Zero <script>: all interactivity is CSS-only (checkbox :checked ~ sibling),
+per the report-viewer constraint. Data = the 865-case nsys cold-L2 paired
+grids in this directory. Contaminated verdicts (grid_r2a, grid_r2b) excluded.
+"""
+import csv, math, os
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+OUT = os.path.join(HERE, 'KF_PER_CASE_CHART.html')
+
+# ---- arms: (tag, csv, label EN, label CN, color, default-checked, is-baseline)
+ARMS = [
+    ('aPR',  'grid_c74fsbx.csv', 'PR head e6fdbfa (baseline)', 'PR 基线',        '#55534e', True,  True),
+    ('aR1A', 'grid_r1a.csv',     'r1 41a94aaa gm1.316',        '第1轮 41a94aaa', '#b07fe0', False, False),
+    ('aR1C', 'grid_r1c.csv',     'r1 winner ba1020ce gm1.366', '第1轮冠军 ba1020ce', '#2a78d6', True, False),
+    ('aSBX', 'grid_sbx.csv',     'sbx (ba1020ce+sb17b) gm1.605','sbx 工程师嫁接', '#00a5c0', False, False),
+    ('aR2A', 'grid_r2a2_fixed.csv','r2 0260cee7 gm1.642',      '第2轮 0260cee7', '#e8912d', False, False),
+    ('aR2C', 'grid_r2c2g.csv',   'r2 c74fb3c0 gm1.671',        '第2轮 c74fb3c0', '#008300', False, False),
+    ('aCH',  'grid_c74fsbx.csv', 'CHAMPION c74f_sbx gm1.683',  '出货冠军 c74f_sbx', '#d62f2f', True, False),
+]
+ISL_ORDER = ['4k','8k','16k','32k','64k','128k','256k','512k','1024k']
+ISL_LBL = {'1024k':'1m'}
+MODELS = [('flash','V4 Flash · K512 · cr=4'), ('pro','V4 Pro · K1024 · cr=4'), ('v32','V3.2 · K2048 · cr=1')]
+DASHES = ['', '7 3', '2 2', '9 3 2 3', '1 3', '12 4', '4 2 1 2']
+
+# ---- load ------------------------------------------------------------------
+def load(fn):
+    d = {}
+    for r in csv.DictReader(open(os.path.join(HERE, fn))):
+        d[r['uuid']] = r
+    return d
+
+grids = {tag: load(fn) for tag, fn, *_ in ARMS}
+champ = grids['aCH']
+cases = list(champ.values())
+layers = {m: sorted({int(r['layer']) for r in cases if r['model'] == m}) for m, _ in MODELS}
+isls = {m: [i for i in ISL_ORDER if any(r['isl'] == i for r in cases if r['model'] == m)] for m, _ in MODELS}
+N_of = {(r['model'], r['isl']): int(r['N']) for r in cases}
+
+def by_case(m, isl, L):
+    for r in cases:
+        if r['model'] == m and r['isl'] == isl and int(r['layer']) == L:
+            return r['uuid']
+    return None
+
+# ---- geometry ---------------------------------------------------------------
+W, H, ML, MR, MT, MB = 1240, 360, 52, 14, 18, 34
+PW, PH = W - ML - MR, H - MT - MB
+LAT_LO, LAT_HI = 2.5, 40.0          # µs, log scale
+SP_LO, SP_HI = 0.6, 4.0             # speedup, linear
+
+def xpos(m, isl):
+    xs = isls[m]
+    return ML + PW * (xs.index(isl) / max(1, len(xs) - 1))
+
+def ylat(v):
+    t = (math.log10(v) - math.log10(LAT_LO)) / (math.log10(LAT_HI) - math.log10(LAT_LO))
+    return MT + PH * (1 - t)
+
+def ysp(v):
+    return MT + PH * (1 - (v - SP_LO) / (SP_HI - SP_LO))
+
+def axes(m, kind):
+    p = [f'<rect x="{ML}" y="{MT}" width="{PW}" height="{PH}" fill="none" stroke="#c9c8c2"/>']
+    for isl in isls[m]:
+        x = xpos(m, isl)
+        p.append(f'<line x1="{x:.0f}" y1="{MT}" x2="{x:.0f}" y2="{MT+PH}" stroke="#e4e3df"/>')
+        p.append(f'<text x="{x:.0f}" y="{MT+PH+15}" text-anchor="middle" font-size="11" fill="#52514e">{ISL_LBL.get(isl,isl)}</text>')
+        p.append(f'<text x="{x:.0f}" y="{MT+PH+28}" text-anchor="middle" font-size="9" fill="#8b8a85">N={N_of[(m,isl)]}</text>')
+    if kind == 'lat':
+        for v in [3, 4, 5, 7, 10, 15, 20, 30, 40]:
+            y = ylat(v)
+            p.append(f'<line x1="{ML}" y1="{y:.1f}" x2="{ML+PW}" y2="{y:.1f}" stroke="#e4e3df"/>')
+            p.append(f'<text x="{ML-6}" y="{y+4:.1f}" text-anchor="end" font-size="11" fill="#52514e">{v}</text>')
+        p.append(f'<text x="14" y="{MT+PH/2:.0f}" font-size="11" fill="#52514e" transform="rotate(-90 14 {MT+PH/2:.0f})" text-anchor="middle">µs (cold-L2, log)</text>')
+    else:
+        for v in [0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0]:
+            y = ysp(v)
+            w = ('#8b8a85' if v == 1.0 else '#e4e3df')
+            p.append(f'<line x1="{ML}" y1="{y:.1f}" x2="{ML+PW}" y2="{y:.1f}" stroke="{w}"{" stroke-dasharray=\"5 3\"" if v==1.0 else ""}/>')
+            p.append(f'<text x="{ML-6}" y="{y+4:.1f}" text-anchor="end" font-size="11" fill="#52514e">{v:g}</text>')
+        p.append(f'<text x="14" y="{MT+PH/2:.0f}" font-size="11" fill="#52514e" transform="rotate(-90 14 {MT+PH/2:.0f})" text-anchor="middle">speedup = PR / cand (paired)</text>')
+    return ''.join(p)
+
+def series(m, kind):
+    out = []
+    for li, L in enumerate(layers[m]):
+        dash = DASHES[li % len(DASHES)]
+        lcls = f'L{m}{L}'
+        for tag, fn, lab, labc, col, dflt, is_base in ARMS:
+            if kind == 'sp' and is_base:
+                continue
+            pts, dots = [], []
+            for isl in isls[m]:
+                u = by_case(m, isl, L)
+                r = grids[tag].get(u)
+                if r is None:
+                    continue
+                if kind == 'lat':
+                    v = float(r['pr_cold']) if is_base else float(r['cand_cold'])
+                    y = ylat(v)
+                    tip = (f'{m} L{L} · ISL {ISL_LBL.get(isl,isl)} (N={r["N"]}) · hit {r["hit"]} · '
+                           + (f'PR {float(r["pr_cold"]):.2f}µs' if is_base else
+                              f'{lab.split(" gm")[0]}: {float(r["cand_cold"]):.2f}µs vs PR {float(r["pr_cold"]):.2f}µs = {float(r["speedup_cold"]):.3f}×'))
+                else:
+                    v = float(r['speedup_cold'])
+                    y = ysp(min(v, SP_HI))
+                    tip = (f'{m} L{L} · ISL {ISL_LBL.get(isl,isl)} (N={r["N"]}) · hit {r["hit"]} · '
+                           f'{lab.split(" gm")[0]}: {v:.3f}× (PR {float(r["pr_cold"]):.2f}µs → {float(r["cand_cold"]):.2f}µs)')
+                x = xpos(m, isl)
+                pts.append(f'{x:.0f},{y:.1f}')
+                dots.append(f'<circle cx="{x:.0f}" cy="{y:.1f}" r="2.6" fill="{col}"><title>{tip}</title></circle>')
+            da = f' stroke-dasharray="{dash}"' if dash else ''
+            out.append(f'<g class="{tag} {lcls}"><polyline points="{" ".join(pts)}" fill="none" stroke="{col}" stroke-width="1.3" opacity="0.85"{da}/>{"".join(dots)}</g>')
+    return ''.join(out)
+
+# ---- controls + css ----------------------------------------------------------
+inputs, css, chips_arm, chips_model, chips_layer = [], [], [], [], {}
+css.append('.vizP svg g:hover polyline{stroke-width:3;opacity:1}')
+for tag, fn, lab, labc, col, dflt, _ in ARMS:
+    ck = 'checked' if dflt else ''
+    inputs.append(f'<input type="checkbox" id="ck-{tag}" {ck}>')
+    css.append(f'#ck-{tag}:not(:checked) ~ * .{tag}{{display:none}}')
+    css.append(f'#ck-{tag}:checked ~ .ctl label[for=ck-{tag}]{{border-color:{col};color:#0b0b0b;box-shadow:inset 0 0 0 1px {col}}}')
+    chips_arm.append(f'<label for="ck-{tag}"><i style="background:{col}"></i><b>{lab}</b> / {labc}</label>')
+for m, mt in MODELS:
+    inputs.append(f'<input type="checkbox" id="ck-m{m}" checked>')
+    css.append(f'#ck-m{m}:not(:checked) ~ * .m-{m}{{display:none}}')
+    css.append(f'#ck-m{m}:checked ~ .ctl label[for=ck-m{m}]{{border-color:#2a78d6;color:#0b0b0b}}')
+    chips_model.append(f'<label for="ck-m{m}"><b>{mt}</b> · {len(layers[m])}L × {len(isls[m])} ISL = {len(layers[m])*len(isls[m])} cases</label>')
+    row = []
+    for L in layers[m]:
+        dflt = True if m != 'v32' else (L in (14, 34, 54))
+        ck = 'checked' if dflt else ''
+        inputs.append(f'<input type="checkbox" id="ck-L{m}{L}" {ck}>')
+        css.append(f'#ck-L{m}{L}:not(:checked) ~ * .L{m}{L}{{display:none}}')
+        css.append(f'#ck-L{m}{L}:checked ~ .ctl label[for=ck-L{m}{L}]{{border-color:#2a78d6;color:#0b0b0b}}')
+        row.append(f'<label for="ck-L{m}{L}">L{L}</label>')
+    chips_layer[m] = ''.join(row)
+
+panels = []
+for m, mt in MODELS:
+    ncase = len(layers[m]) * len(isls[m])
+    panels.append(f'''<div class="m-{m} panel">
+<h3>{mt} — {ncase} cases ({len(layers[m])} layers × {len(isls[m])} ISL)</h3>
+<div class="chartlbl">latency per case / 逐 case 延迟 (nsys cold-L2 µs, log)</div>
+<svg viewBox="0 0 {W} {H}" xmlns="http://www.w3.org/2000/svg" style="background:#fcfcfb">{axes(m,'lat')}{series(m,'lat')}</svg>
+<div class="chartlbl">speedup per case vs PR (same-run paired) / 逐 case 对 PR 加速比(同轮配对)</div>
+<svg viewBox="0 0 {W} {H}" xmlns="http://www.w3.org/2000/svg" style="background:#fcfcfb">{axes(m,'sp')}{series(m,'sp')}</svg>
+</div>''')
+
+html = f'''<!doctype html><html lang="zh"><head><meta charset="utf-8">
+<title>KF campaign — per-case performance comparison (865 cases, no layer averaging)</title>
+<style>
+body{{font:14px/1.55 -apple-system,'Segoe UI',Roboto,'Noto Sans SC',sans-serif;background:#f5f4f1;color:#0b0b0b;margin:0;padding:22px 26px;max-width:1330px}}
+h1{{font-size:20px;margin:0 0 4px}} h3{{margin:20px 0 4px;font-size:15px}}
+.mut{{color:#52514e;font-size:12.5px}}
+.vizP input{{position:absolute;opacity:0;pointer-events:none}}
+.vizP .ctl{{background:#fcfcfb;border:1px solid #e4e3df;border-radius:8px;padding:8px 12px;margin:8px 0;display:flex;gap:6px;flex-wrap:wrap;align-items:center}}
+.vizP .ctl label{{border:1.5px solid #c9c8c2;border-radius:14px;padding:2px 10px;cursor:pointer;font-size:12px;color:#52514e;user-select:none;white-space:nowrap}}
+.vizP .ctl label i{{display:inline-block;width:10px;height:10px;border-radius:5px;margin-right:6px;vertical-align:-1px}}
+.vizP .ctl .hd{{font-weight:600;color:#0b0b0b;font-size:12.5px;margin-right:4px}}
+.panel svg{{width:100%;height:auto;border:1px solid #e4e3df;border-radius:8px;margin:2px 0 10px}}
+.chartlbl{{font-size:12px;color:#52514e;margin-top:6px}}
+{''.join(css)}
+</style></head><body>
+<h1>KernelFactory campaign — per-case performance comparison / 逐 case 性能对比(不做层间平均)</h1>
+<p class="mut">All <b>865 per-layer cases</b> (V4 Flash 21L×9 ISL + V4 Pro 30L×9 ISL + V3.2 58L×7 ISL), BS=1 fp32, nsys cold-L2 <b>paired</b>
+(cand vs PR head <code>e6fdbfac3d</code> same-run), 8×B200 sharded grids, 2026-07-21, umbriel-b200-027.
+Only <b>CLEAN full-grid verdicts</b> are shown — the contaminated r2a/r2b runs (double-driver PR-arm inflation, later invalidated
+and re-measured as r2a2_fixed / r2c2g) are excluded. Source: <code>grid_*.csv</code> in <code>kf_campaign/</code>; generator
+<code>gen_per_case_chart.py</code>. 全部 865 个逐层 case,冷 L2 nsys 同轮配对计时;仅展示通过锚检的干净终审网格,污染作废的 r2a/r2b 已排除。
+x 轴 = ISL,颜色 = 候选臂,线型 = 层(循环虚线);悬停任意数据点可见该 case 的精确数值。</p>
+<div class="vizP">
+{''.join(inputs)}
+<div class="ctl"><span class="hd">arms / 候选臂</span>{''.join(chips_arm)}</div>
+<div class="ctl"><span class="hd">models / 模型</span>{''.join(chips_model)}</div>
+<div class="ctl"><span class="hd">Flash layers</span>{chips_layer['flash']}</div>
+<div class="ctl"><span class="hd">Pro layers</span>{chips_layer['pro']}</div>
+<div class="ctl"><span class="hd">V3.2 layers</span><span class="mut">(默认只勾 bench 层 14/34/54,勾选更多以展开)</span>{chips_layer['v32']}</div>
+{''.join(panels)}
+</div>
+<p class="mut">Speedup chart clips at {SP_HI}× (a handful of sbx small-N cells reach 3.75×; hover shows the true value).
+加速比图纵轴截断于 {SP_HI}×,悬停可见真实值。Champion ship verdict: c74f_sbx geomean 1.6828×, 865/865 exact, zero cold regressions.</p>
+</body></html>'''
+
+open(OUT, 'w').write(html)
+print(f'wrote {OUT}  ({os.path.getsize(OUT)/1e6:.2f} MB)')
