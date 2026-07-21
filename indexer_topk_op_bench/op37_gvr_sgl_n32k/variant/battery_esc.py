@@ -53,16 +53,14 @@ CR = 1
 # exact hints lands count ~ K INSIDE the accept window — the base never
 # missed and E2-E5 exercised only the accept path; 0 fired=1 in the log.)
 MISS_OVR = dict(r0_vseed=False, r0_qfracs=(0.001,))
-# Escape ladder that FIRES with exact hints: lo rung q0.9999 (need=K ->
-# thr ~ K-th hint value -> count >= K), hi rung q0.85 (count ~ 0.85K < K),
-# band ~ 0.15K <= kC, sure set ~ 0.85K streamed directly.
+# [esc-lite] Escape ladder whose deep rung lands ~K with exact hints so
+# the seeded falsi starts from a tight bracket (the lite escape has no
+# fire/band concept — it always finishes through the falsi).
 ESC_FIRE_OVR = dict(tb_esc_qfracs=(0.9999, 0.85, 0.35))
 # Escape ladder that CANNOT fire (all needs ~ 1-2 -> counts << K -> no lo
 # rung) -> the M_esc-seeded falsi must finish the row.
 ESC_MISS_OVR = dict(tb_esc_qfracs=(0.002, 0.0015, 0.001))
-# Fire WITHOUT a hi rung: single deep rung -> lo fires, hi_m = -1 ->
-# thr_hi = +FLT_MAX sentinel, sure set 0, band = lo_c (the degenerate
-# single-rung form of the bracket).
+# Single-rung escape ladder (M_esc=1): degenerate ladder shape gate.
 ESC_NOHI_OVR = dict(tb_esc_qfracs=(0.9999,))
 
 
@@ -168,7 +166,7 @@ def main():
             sec_tot["E2_fire"] += 1
             sec_pass["E2_fire"] += int(ok)
             print(f"[{'PASS' if ok else 'FAIL'}] E2 K={K} N={N} BS={BS} "
-                  f"forced-miss+fire | {'OK' if ok else 'FAIL:' + why}",
+                  f"forced-miss+esc | {'OK' if ok else 'FAIL:' + why}",
                   flush=True)
         # fire WITHOUT a hi rung (FLT_MAX sentinel, empty sure set)
         seed += 1
@@ -181,7 +179,7 @@ def main():
         sec_tot["E2_fire"] += 1
         sec_pass["E2_fire"] += int(ok)
         print(f"[{'PASS' if ok else 'FAIL'}] E2 K={K} N={N} BS={BS} "
-              f"fire-no-hi | {'OK' if ok else 'FAIL:' + why}", flush=True)
+              f"esc-single-rung | {'OK' if ok else 'FAIL:' + why}", flush=True)
 
     # ---------------- E3: forced base miss + useless escape -> falsi -------
     for K in grid_K:

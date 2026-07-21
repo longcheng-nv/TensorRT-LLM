@@ -1,0 +1,40 @@
+  real_flash_bs_fp32_1024k: rep=yes ranges=66 cells_ok=33
+  real_flash_bs_fp32_128k: rep=yes ranges=66 cells_ok=33
+  real_flash_bs_fp32_256k: rep=yes ranges=66 cells_ok=33
+  real_flash_bs_fp32_512k: rep=yes ranges=66 cells_ok=33
+  real_pro_bs_fp32_1024k: rep=yes ranges=66 cells_ok=33
+  real_pro_bs_fp32_128k: rep=yes ranges=66 cells_ok=33
+  real_pro_bs_fp32_256k: rep=yes ranges=66 cells_ok=33
+  real_pro_bs_fp32_512k: rep=yes ranges=66 cells_ok=33
+  real_v32_bs_fp32_128k: rep=yes ranges=66 cells_ok=33
+  real_v32_bs_fp32_256k: rep=yes ranges=66 cells_ok=33
+  real_v32_bs_fp32_32k: rep=yes ranges=66 cells_ok=33
+  real_v32_bs_fp32_64k: rep=yes ranges=66 cells_ok=33
+wrote results/esc2/results.jsonl (396 recs)
+cells=132 arms=['gvr_esc'] ref=gvr_pr inexact=0
+
+== gvr_pr/gvr_esc (>1 = gvr_esc faster), N>=32768
+flash 128k   N=  32771 |  1.01  0.98  0.96  0.96  0.98  0.98  0.99  0.99  0.98  0.99  0.97
+flash 256k   N=  65538 |  0.99  0.99  0.98  0.99  0.99  0.99  0.99  0.99  0.99  0.99  0.97
+flash 512k   N= 131075 |  0.96  0.96  0.97  1.02  1.01  1.02  1.05  1.01  1.10  1.10  1.12
+flash 1024k  N= 262127 |  0.92  0.92  0.94  0.99  1.00  0.99  1.00  1.00  1.00  0.99  0.99
+pro   128k   N=  32771 |  1.01  0.98  0.98  0.98  0.99  0.98  0.99  0.99  1.00  0.99  0.98
+pro   256k   N=  65539 |  1.00  0.97  0.98  0.98  0.98  0.99  0.99  1.01  1.00  0.99  1.00
+pro   512k   N= 131075 |  0.89  0.88  0.92  0.99  0.99  0.99  0.99  1.01  1.00  0.99  1.00
+pro   1024k  N= 262127 |  0.94  0.94  0.96  0.98  1.00  1.01  0.99  1.01  1.00  1.00  1.00
+v32   32k    N=  32783 |  0.99  0.98  0.98  0.99  0.99  0.99  0.99  0.99  1.00  1.00  0.99
+v32   64k    N=  65551 |  0.97  0.96  0.98  0.99  1.00  0.99  0.99  0.99  1.00  1.00  1.00
+v32   128k   N= 131087 |  0.89  0.87  0.90  0.97  0.99  0.99  0.99  0.99  1.00  1.00  1.00
+v32   256k   N= 163775 |  0.93  0.94  0.95  0.99  0.99  0.99  0.99  0.99  1.00  1.00  1.00
+composite gm 0.9848  n=132
+  BS=   1 gm 0.958 (n=12)
+  BS=   2 gm 0.945 (n=12)
+  BS=   4 gm 0.957 (n=12)
+  BS=   8 gm 0.985 (n=12)
+  BS=  16 gm 0.993 (n=12)
+  BS=  32 gm 0.993 (n=12)
+  BS=  64 gm 0.997 (n=12)
+  BS= 128 gm 0.999 (n=12)
+  BS= 256 gm 1.004 (n=12)
+  BS= 512 gm 1.003 (n=12)
+  BS=1024 gm 1.001 (n=12)

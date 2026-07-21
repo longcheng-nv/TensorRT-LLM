@@ -565,9 +565,17 @@ class GvrTopKKernel:
         self.esc_qneeds = tuple(
             max(1, int(math.ceil(q * top_k))) for q in self.tb_esc_qfracs
         )
-        # tb_band: the band P3/P4 machinery is traced (either flavor).
-        self.tb_band = self.tight_bracket or self.tb_escape
-        self.tb_debug = bool(tb_debug) and self.tb_band
+        # tb_band: the band P3/P4 machinery is traced. [op37-esc-lite]
+        # tb_escape NO LONGER traces the band: the 132-cell nsys verdicts
+        # (results/esc, results/esc2) + tb_debug probes showed (a) the
+        # bracket never fires on the cold cells (the whole escape win =
+        # M_esc-seeded falsi), and (b) tracing band P3/P4 + the bracket
+        # admit costs 4-12% on latency-bound T1024 small-BS cells through
+        # compile-level register pressure (all regressing cells are
+        # base-accept, escape dynamically dormant; pr/sgl anchors stable
+        # +-0.6% while pr/esc moved +-3-5% between two esc builds).
+        self.tb_band = self.tight_bracket
+        self.tb_debug = bool(tb_debug) and (self.tb_band or self.tb_escape)
         if enable_r0 and p1b_cache is None:
             if cluster_size > 1:
                 p1b_cache = True
@@ -1500,6 +1508,7 @@ class GvrTopKKernel:
         M_ov=None,  # [op37-esc] escape ladder: override column count
         vseed_ov=None,  # [op37-esc] escape ladder: force vseed routing off
         unroll_ov=None,  # [op37-esc] escape ladder: shrink the unrolled body
+        cache_ov=None,  # [op37-esc-lite] False: skip per-thread column writes
     ):
         M = cutlass.const_expr(self.M_thr if M_ov is None else M_ov)
         use_vseed = cutlass.const_expr(
@@ -1581,11 +1590,12 @@ class GvrTopKKernel:
                 cnt_frag[m] = cnt_frag[m] + cutlass.Int32(v >= thr_frag[m])
             it = it + cutlass.Int32(num_threads)
 
-        for m in cutlass.range_constexpr(M):
-            if cutlass.const_expr(use_vseed and m == self.M_qf):
-                smem_ptcnt[tidx] = cnt_frag[m]
-            else:
-                smem_ptcnt_multi[m * num_threads + tidx] = cnt_frag[m]
+        if cutlass.const_expr(cache_ov is None or bool(cache_ov)):
+            for m in cutlass.range_constexpr(M):
+                if cutlass.const_expr(use_vseed and m == self.M_qf):
+                    smem_ptcnt[tidx] = cnt_frag[m]
+                else:
+                    smem_ptcnt_multi[m * num_threads + tidx] = cnt_frag[m]
 
         for m in cutlass.range_constexpr(M):
             wc = self.warp_reduce_sum_i32(cnt_frag[m])
@@ -5489,18 +5499,19 @@ class GvrTopKKernel:
         # / smem_input above). smem_ptcnt_multi caches M per-thread count
         # columns; s_r0col carries the accepted rung index tid0 -> all.
         if cutlass.const_expr(self.enable_r0):
-            # [op37-esc] tb_escape sizes the rung scratch for the WIDER of
-            # the base first-pass ladder and the M_esc escape ladder (the
-            # escape count pass caches all M_esc per-thread columns with
-            # vseed routing off, so the band P3 in-place reads work for
-            # whichever pair fires). Zero growth when tb_escape is off.
+            # [op37-esc-lite] the tiny per-rung scalars are sized for the
+            # wider of the base and escape ladders; the BIG per-thread
+            # column buffer stays at M_qf (the escape count pass runs with
+            # cache_ov=False — no columns, ZERO smem growth; escape-lite
+            # goes straight to the seeded falsi, which refreshes
+            # smem_ptcnt itself on accept).
             M_r0 = cutlass.const_expr(max(self.M_thr, self.M_esc))
             # vseed (v3): the pmean column's per-thread counts reuse the
             # existing single-column smem_ptcnt buffer, so the BIG multi
             # buffer only holds the M_qf rung columns -> zero smem growth
             # (the round-1 +2-4KB column pushed 16-bit mb3/T1024 configs over
             # an occupancy cliff: K2048 fp16 BS1024 -26%).
-            M_r0_pt = cutlass.const_expr(max(self.M_qf, self.M_esc))
+            M_r0_pt = cutlass.const_expr(self.M_qf)
             s_mt_thr = smem.allocate_tensor(
                 element_type=cutlass.Float32,
                 layout=cute.make_ordered_layout((M_r0,), order=(0,)),
@@ -5987,11 +5998,6 @@ class GvrTopKKernel:
                             )
                 else:
                     if tidx == 0:
-                        # [op37-esc] default the band-fire flag OFF; the
-                        # escape block below overwrites it on a fire. Must
-                        # happen on the ACCEPT path too (P3/P4 gate on it).
-                        if cutlass.const_expr(self.tb_escape):
-                            s_lj_i[0] = cutlass.Int32(0)
                         # tightest admissible rung = SMALLEST count in [K, kC].
                         # (Explicit argmin: with r0_vseed the pmean column is not
                         # sorted into the rung order; for sorted rungs this is
@@ -6042,12 +6048,17 @@ class GvrTopKKernel:
                 # accept so Phase 3 skips its retry-shrink.
                 if bc < cutlass.Int32(0):
                     if cutlass.const_expr(self.tb_escape):
-                        # ---- [op37-esc] escape bracket: dense rung re-walk
-                        # of the live P1b hist + ONE M_esc-wide count pass +
-                        # bracket admission into the band P3/P4. Replaces the
-                        # falsi chain on a fire; seeds it tighter otherwise.
-                        # Warm rows never reach this branch (base admission
-                        # accepted), so the warm-cell cost is zero.
+                        # ---- [op37-esc-lite] escape ladder: dense rung
+                        # re-walk of the live P1b hist + ONE M_esc-wide
+                        # count pass (no column cache, no unroll) that
+                        # SEEDS the shared falsi with M_esc measured
+                        # points — on the cold cells the falsi then lands
+                        # in ~1 pass (this is the entire flash-512k win;
+                        # the v1 band/bracket machinery never fired there
+                        # and its traced code cost 4-12% on latency-bound
+                        # T1024 small-BS cells, so it was removed). Warm
+                        # rows never reach this branch (base admission
+                        # accepted): zero warm involvement.
                         self.phase1b_escape_rungs(
                             smem_hist, s_thr, s_mt_thr, tidx, warp_id, lane
                         )
@@ -6068,86 +6079,39 @@ class GvrTopKKernel:
                             M_ov=self.M_esc,
                             vseed_ov=False,
                             unroll_ov=1,
+                            cache_ov=False,
                         )
                         cute.arch.barrier()
-                        if tidx == 0:
-                            # Same bracket-admit rule as the tight_bracket
-                            # first pass, over the M_esc escape columns (no
-                            # vseed column). Every CTA's thread0 computes the
-                            # same values from the cluster-wide s_mt_cnt.
-                            lo_me = cutlass.Int32(-1)
-                            lo_ce = cutlass.Int32(2147483647)
-                            hi_me = cutlass.Int32(-1)
-                            hi_ce = cutlass.Int32(-1)
-                            for m in cutlass.range_constexpr(cutlass.const_expr(self.M_esc)):
-                                cme = s_mt_cnt[m]
-                                if cme >= cutlass.Int32(self.top_k) and cme < lo_ce:
-                                    lo_me = cutlass.Int32(m)
-                                    lo_ce = cme
-                                if cme < cutlass.Int32(self.top_k) and cme > hi_ce:
-                                    hi_me = cutlass.Int32(m)
-                                    hi_ce = cme
-                            hi_ce0 = cutlass.Int32(0)
-                            if hi_me >= cutlass.Int32(0):
-                                hi_ce0 = hi_ce
-                            fired_e = cutlass.Int32(0)
-                            if lo_me >= cutlass.Int32(0) and (lo_ce - hi_ce0) <= cutlass.Int32(
-                                self.kC
-                            ):
-                                fired_e = cutlass.Int32(1)
-                            s_lj_i[0] = fired_e
-                            s_lj_i[1] = hi_me
-                            s_lj_i[2] = hi_ce0
-                            s_lj_i[3] = lo_me
-                            if fired_e == cutlass.Int32(1):
-                                thr_hi_e = cutlass.Float32(self.FLT_MAX)
-                                if hi_me >= cutlass.Int32(0):
-                                    thr_hi_e = s_mt_thr[hi_me]
-                                s_lj_f[0] = thr_hi_e
-                                s_thr[0] = s_mt_thr[lo_me]
-                                # cluster-wide band count; band P3 overwrites
-                                # with the CTA-local total (base P3 contract).
-                                s_iscalars[0] = lo_ce - hi_ce0
-                                # done=1: Phase 3 must skip retry-shrink.
-                                s_iscalars[1] = cutlass.Int32(1)
-                        cute.arch.barrier()
-                        if cutlass.const_expr(self.tb_debug):
+                        if cutlass.const_expr(self.tb_debug and self.M_esc >= 3):
                             if tidx == cutlass.Int32(0) and cta_in_cluster == cutlass.Int32(0):
                                 cute.printf(
-                                    "[esc] fired=%d lo_m=%d hi_m=%d cnt_hi=%d band=%d\n",
-                                    s_lj_i[0],
-                                    s_lj_i[3],
-                                    s_lj_i[1],
-                                    s_lj_i[2],
-                                    s_iscalars[0],
+                                    "[esc] cnts=%d/%d/%d thr=%f/%f/%f\n",
+                                    s_mt_cnt[0],
+                                    s_mt_cnt[1],
+                                    s_mt_cnt[2],
+                                    s_mt_thr[0],
+                                    s_mt_thr[1],
+                                    s_mt_thr[2],
                                 )
-                        # Escape bracket failed -> seeded log-falsi over the
-                        # M_esc measured escape rungs (strictly tighter seeds
-                        # than the base rungs). s_lj_i[0] is cluster-uniform,
-                        # so the barriers inside are convergent. Shares the
-                        # ONE traced _p2_fb_falsi body with the base build
-                        # (M bound = M_esc here via the tb_escape const;
-                        # ctor requires fb_fix=True with tb_escape).
-                        if s_lj_i[0] == cutlass.Int32(0):
-                            self._p2_fb_falsi(
-                                input_row,
-                                slice_start,
-                                slice_end,
-                                smem_ptcnt,
-                                smem_wcnt,
-                                s_thr,
-                                s_iscalars,
-                                s_cluster_partial,
-                                s_mt_thr,
-                                s_mt_cnt,
-                                v_lo,
-                                v_hi,
-                                do_cluster_sync,
-                                tidx,
-                                warp_id,
-                                lane,
-                                smem_input=smem_input,
-                            )
+                        self._p2_fb_falsi(
+                            input_row,
+                            slice_start,
+                            slice_end,
+                            smem_ptcnt,
+                            smem_wcnt,
+                            s_thr,
+                            s_iscalars,
+                            s_cluster_partial,
+                            s_mt_thr,
+                            s_mt_cnt,
+                            v_lo,
+                            v_hi,
+                            do_cluster_sync,
+                            tidx,
+                            warp_id,
+                            lane,
+                            smem_input=smem_input,
+                        )
                     elif cutlass.const_expr(self.fb_fix):
                         self._p2_fb_falsi(
                             input_row,

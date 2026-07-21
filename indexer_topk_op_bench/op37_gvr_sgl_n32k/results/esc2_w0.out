@@ -1,0 +1,7 @@
+=== op37 [0/gpu0]: real_flash_bs_fp32_128k (09:29:31) ===
+=== op37 [0/gpu0]: real_v32_bs_fp32_32k (09:31:11) ===
+=== op37 [0/gpu0]: real_pro_bs_fp32_256k (09:32:31) ===
+=== op37 [0/gpu0]: real_flash_bs_fp32_512k (09:36:21) ===
+=== op37 [0/gpu0]: real_v32_bs_fp32_128k (09:42:32) ===
+=== op37 [0/gpu0]: real_pro_bs_fp32_1024k (09:47:29) ===
+OP37WORKER0DONE
