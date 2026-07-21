@@ -66,6 +66,13 @@ Node: umbriel-b200-027 (8×B200). Started 2026-07-21 13:40Z.
 |---|---|---|---|---|---|---|
 | champh2_probe | c74f_sbx vs PR@b14ec40e1b | 28 | 1.7193 | 0 | 28/28 | GPU6 probe |
 | r3a_5f3d | 5f3daaf8 vs PR@b14ec40e1b | 28 | 1.7158 | 0 | 28/28 | GPU6; vs champion: ALL 0.9985, n≥512K activation zone 1.0001 → **WASH, no displacement** (hint filter doesn't pay on radix-scan skeleton) |
+| ~~r3b_09d1~~ | 09d13c81 vs PR | 28 | ~~2.3698~~ | — | 28/28 | **INVALIDATED** — foreign job at 100% util GPUs 1-7 during run (pr arm inflated 19→26 µs); my quiet-check echo was unconditional (scripting bug, fixed to gated form). Exactness (load-independent) retained: 28/28. Re-probe pending quiescence |
+
+- **09d13c81** (r2, internal 1.0351): replaces `cudaLaunchCooperativeKernel`
+  with regular launch + hand-rolled sense-reversing global barrier (generation
+  token ⇒ no per-launch reset), grid sized to co-residency. CAUTION for ship:
+  barrier uses relaxed atomics with no __threadfence — memory-ordering risk on
+  paper even if exact in practice; if it wins, add fence + re-measure.
 | **champh2** | c74f_sbx vs PR@b14ec40e1b | 865 | **1.6770** | **0** (min 1.018) | **865/865** | 7-shard GPUs0-6; Bar-1/2/3 denominators; worst cells all N=16387 (graft-rung boundary, 1.02-1.08) |
 
 ## Anchor checks
