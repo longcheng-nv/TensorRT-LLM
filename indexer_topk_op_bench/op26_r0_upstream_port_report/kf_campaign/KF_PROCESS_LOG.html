@@ -204,6 +204,19 @@ Remaining hard core: <b>N≈16k with K=512/1024</b> (flash/pro 64k ISL) still 0.
 pro_128k 0.921→0.996, v32_32k 0.950→1.24/1.33; worst cell 0.994 (warm, noise-level). Probe lacks 16k/64k cells;
 suspected sb-branch coverage hole at 8448&lt;n≤16384 (KPT 11 × 768 thr = 8448 keys) → adjudicated by 865-cell full grid (tag r1c, running).
 Ops note: /tmp/gvrlayers cutlass450 overlay was wiped by tmp cleanup → rebuilt from NFS userbase (make_fragment AttributeError).</td></tr>
+<tr><td>07-21 05:29</td><td><b>ROUND 1 CLOSED</b> → round 2 launched (7 new agents, 13 total). Winner: a005 (opus-4-8)
+ba1020ce "topk_hybrid_v28" 1.0768; only a000 (fable-5, 41a94aaa 1.041) also crossed 1.0. Cost: ~$458 / 13.3 agent-hours.</td><td>1.0768</td>
+<td>Consensus dead ends (multi-agent independent): pre_idx warm-hint as radix accelerator (a001+a004+a005 — matches our June qfracs/uh4 verdict);
+per-warp private histograms vs plain smem atomics on B200 (a000 CUPTI + a005 __match_any_sync); multi-CTA at n≤16k (a005, a003);
+&gt;8-32 CTAs at large-n flat-to-worse (a002, a005). a005 structural win: 4→3 grid.sync lifted geomean 1.069→1.088.
+Reported bottleneck floor: ~15µs fixed eval overhead at small-n (campaign metric compresses real kernel gains — consistent with our nsys ratios running ~1.3-1.4× above campaign-internal).</td></tr>
+<tr><td>07-21 05:44</td><td><b>ba1020ce FULL-GRID verdict (r1c)</b> (865 cells, 8×B200 sharded, nsys cold-L2 paired)</td><td>—</td>
+<td><b>geomean 1.3662×</b> (≥1.20 ✅), <b>exact 865/865</b> ✅, max 2.48×, <b>85 regressions</b> (was 137 on 41a94aaa), worst 0.743.
+Regression map collapsed to a <b>dispatch-boundary artifact</b>: N=16387 48/51 gm 0.863 + N=16399 15/58 + N=32771 22/51 gm 1.029;
+ALL other 14 N-rungs are clean (N=1027 gm 2.15×, 262127 gm 1.44×). Root cause: candidate's SMALL_N=16384 single-CTA cutoff sits
+3 elements below the grid's 16k npad — those cells fall to the cooperative path at only ~8 CTAs. Local probe <b>sb17</b>
+(SMALL_N→16896, sb&lt;22&gt; branch: 768 thr × KPT 22 = 16896 keys) launched on the 12 worst cells to validate the fix direction
+before steering. Data: grid_r1c.csv.</td></tr>
 </table>
 
 <h2>6 · Final verdict</h2>
