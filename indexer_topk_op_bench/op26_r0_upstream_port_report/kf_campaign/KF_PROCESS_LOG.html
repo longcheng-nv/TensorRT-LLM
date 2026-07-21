@@ -217,7 +217,7 @@ ALL other 14 N-rungs are clean (N=1027 gm 2.15×, 262127 gm 1.44×). Root cause:
 3 elements below the grid's 16k npad — those cells fall to the cooperative path at only ~8 CTAs. Local probe <b>sb17</b>
 (SMALL_N→16896, sb&lt;22&gt; branch: 768 thr × KPT 22 = 16896 keys) launched on the 12 worst cells to validate the fix direction
 before steering. Data: grid_r1c.csv.</td></tr>
-<tr><td>07-21 05:50–06:05</td><td><b>Local dispatch probes sb17/sb17b</b> (engineer-assisted, on ba1020ce source):
+<tr><td>07-21 05:35–05:50</td><td><b>Local dispatch probes sb17/sb17b</b> (engineer-assisted, on ba1020ce source):
 extend single-CTA smem path over the boundary — sb17 = SMALL_N 16384→16896 + sb&lt;22&gt;@768thr; sb17b = sb&lt;17&gt;@1024thr.</td><td>—</td>
 <td>Direction <b>double-confirmed</b>, exact 17/17 across probes: N=16387 flash_64k (K=512) 0.74–0.79 → sb17 0.85–0.92 → <b>sb17b 0.89–0.99</b>;
 pro_64k (K=1024) 0.79–0.81 → <b>0.88–1.06</b>; v32_16k (K=2048) 1.23–1.32 → <b>1.32–1.47</b> (net win, would clear the N=16399 rung).
@@ -230,24 +230,29 @@ sb ladder densified to n≤16384 (8448-hole fixed with KPT22@768); coop side add
 <td><b>28-cell probe: geomean COLD 1.699× / WARM 1.647×, exact 28/28, min cell 1.18</b> — first zero-regression probe of the campaign.
 Large-N leaps: v32_256k 1.43→1.96, pro_512k 1.41→1.96, flash_1024k 1.30→1.73. 865-cell full grid (tag r2a) launched;
 decisive question = N=16387/32771 boundary rungs (dispatch cutoff still 16384).</td></tr>
-<tr><td>07-21 06:40</td><td><b>0260cee7 FULL-GRID verdict (r2a)</b> (865 cells, 8×B200, nsys cold-L2 paired)</td><td>—</td>
+<tr><td>07-21 05:54</td><td><b>0260cee7 FULL-GRID verdict (r2a)</b> (865 cells, 8×B200, nsys cold-L2 paired)</td><td>—</td>
 <td><b>geomean 1.7758×</b> ✅✅ (r1c was 1.3662), <b>exact 865/865</b> ✅, max 3.43×, p5 1.231, <b>regressions 85 → 2</b>:
 flash_64k_L28 0.859 + pro_64k_L56 0.961, both again at the N=16387 dispatch-boundary rung (cutoff still 16384).
 Ship bar: ≥1.20 geomean ✅ / zero-regression ❌ by exactly 2 cells. Campaign already holds a newer 1.311-internal candidate — harvesting.
 Data: grid_r2a.csv.</td></tr>
-<tr><td>07-21 07:05</td><td><b>0197c2a1 FULL-GRID verdict (r2b)</b> (865 cells)</td><td>1.3108</td>
+<tr><td>07-21 06:08</td><td><b>0197c2a1 FULL-GRID verdict (r2b)</b> (865 cells)</td><td>1.3108</td>
 <td>geomean 1.7101, exact 865/865, 3 regressions (flash_64k_L28 0.908, pro_64k_L32 0.992, pro_64k_L52 0.996 — all N=16387), p5 1.134.
 <b>Local champion remains 0260cee7</b> (1.7758 / 2 regs / p5 1.231): 0197c2a1's boundary healing is paid back with a broad small give-back
 elsewhere. Campaign-internal ranking (0197 &gt; 0260) is FLIPPED by the full grid — subset metric ≠ deployment envelope, again.
 Next probe: c74fb3c0 (a003, 1.3385 internal) which deletes the sb 16384 rung entirely (coop from 8448 up, ~148 CTAs at 16k — bets early-exit
 flipped the round-1 "more CTAs worse" consensus).</td></tr>
-<tr><td>07-21 08:05</td><td style="color:#b00"><b>MEASUREMENT CONTAMINATION — r2a &amp; r2b grid verdicts INVALIDATED</b></td><td>—</td>
+<tr><td>07-21 06:26</td><td style="color:#b00"><b>MEASUREMENT CONTAMINATION — r2a &amp; r2b grid verdicts INVALIDATED</b></td><td>—</td>
 <td>Cross-run anchor check (per-rung median pr_cold over 5 grid runs) exposed whole-rung PR-arm inflation of 25–50% in r2a
 (N=16387/32771/131075/262127) and r2b (N=65551/131087/163775); r1a/r1c/sbx mutually consistent. Root cause: single-GPU probes were
 launched on GPU6/7 <i>while</i> the 8-GPU sharded grids were in flight — the op22 double-driver incident repeated. Invalidated:
 r2a "1.7758" (0260cee7), r2b "1.7101" (0197c2a1), probes ab_r2b/r2b2/r2c/r2c2. Clean + retained: r1c 1.3662 (ba1020ce),
 <b>sbx 1.6053 / 8 shallow regs (min 0.940), exact 865/865</b> — currently the best CLEAN verdict. Clean re-run of 0260cee7 (tag r2a2) launched;
 all local GPU work now strictly serialized.</td></tr>
+<tr><td>07-21 06:50</td><td><b>0260cee7 CLEAN verdict (r2a2 FIXED)</b> — clean re-run + anchor check caught 2 more drifted rungs
+(N=131087/163775, external contention on this shared box, PR +31%); both re-measured on quiet GPUs (redo anchors 1.022/1.005) and patched in.</td><td>—</td>
+<td><b>geomean 1.6421×, exact 865/865, 4 regressions</b> (flash_64k_L28 0.877, pro_64k_L38 0.938, L56 0.973, L18 0.981 — all N=16387).
+<b>LOCAL RANKING: ① 0260cee7 1.6421/4 regs ② sbx 1.6053/8 regs (shallower worst 0.940) ③ ba1020ce 1.3662/85 regs.</b>
+Data: grid_r2a2_fixed.csv. Anchor-check + quiet-GPU-probe now standing protocol for every grid.</td></tr>
 </table>
 
 <h2>6 · Final verdict</h2>
