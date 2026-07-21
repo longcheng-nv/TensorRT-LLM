@@ -195,7 +195,8 @@ def main():
             ("vs radix_cutedsl", f"{kpi['xRDX']:.3f}×"),
             ("vs flashinfer", f"{kpi['xFI']:.3f}×"),
             ("exact", f"{n}/865"), ("cold regressions", "0"),
-            ("campaign cost", "$690.81"), ("wall", "~7.5 h")])
+            ("campaign cost", "$690.81"), ("orchestrator cost", "~$60"),
+            ("total LLM cost", "~$751"), ("wall", "~7.5 h")])
             + "</div>")
 
     body = f"""{MARK_S}{css}
@@ -220,7 +221,12 @@ Model and series chips both filter.<br>图 E2 — 分模型小倍图(模型与�
 vs sglang v2 <b>{kpi['xSGL']:.3f}×</b> (first in-tree-family win on the full real envelope; residual sglang strongholds at 32k ISL are now shallow),
 vs radix_cutedsl <b>{kpi['xRDX']:.3f}×</b>, vs flashinfer <b>{kpi['xFI']:.3f}×</b>.
 Production-port caveat: worst/best synthetic axes per house ship discipline remain to be run; warm-axis is secondary for BS=1 decode (cold-L2 canonical).
-Campaign cancelled 07-21 09:1x UTC after round-2 plateau; total agent cost $690.81 (48% cache hit), 2 rounds, 13 agents, ~30 candidates.</p>
+Campaign cancelled 07-21 09:1x UTC after round-2 plateau; 2 rounds, 13 agents, ~30 candidates.</p>
+<p><b>Cost accounting / 成本口径:</b> two independent meters. <b>Campaign side $690.81</b> (KF platform billing,
+<code>kf campaign cost</code>: round 1 ≈ $458.24 / 13.26 agent-hours; round 2 ≈ $232.6, cancelled mid-round; 48% cache hit;
+6 agents/round = 2×Fable-5(max) + 2×GPT-5.6-sol(xhigh) + 2×Opus-4.8, single agents reaching 30-47M input tokens).
+<b>Orchestrator side ≈ $60</b> (this Claude Code session: harness authoring, harvest/verify loops, grids, analysis, report).
+<b>Full-stack LLM cost ≈ $751</b> for the shipped 1.6828×/zero-regression kernel — 指挥部 ~$60 + 13 个云端 agent $690.81,两套账互相独立。</p>
 {MARK_E}"""
 
     html = HTML.read_text()
