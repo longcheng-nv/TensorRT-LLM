@@ -139,7 +139,21 @@ for m, mt in MODELS:
         css.append(f'#ck-L{m}{L}:not(:checked) ~ * .L{m}{L}{{display:none}}')
         css.append(f'#ck-L{m}{L}:checked ~ .ctl label[for=ck-L{m}{L}]{{border-color:#2a78d6;color:#0b0b0b}}')
         row.append(f'<label for="ck-L{m}{L}">L{L}</label>')
-    chips_layer[m] = ''.join(row)
+    # ALL / NONE overrides: pure-CSS "select all / deselect all". They do not flip the
+    # individual checkboxes — the rules below are emitted AFTER the per-layer rules
+    # (same specificity, later source order wins), so ALL forces every layer of the
+    # model visible and NONE forces them hidden; NONE beats ALL if both are checked.
+    inputs.append(f'<input type="checkbox" id="ck-ALL{m}">')
+    inputs.append(f'<input type="checkbox" id="ck-NONE{m}">')
+    for L in layers[m]:
+        css.append(f'#ck-ALL{m}:checked ~ * .L{m}{L}{{display:inline}}')
+    for L in layers[m]:
+        css.append(f'#ck-NONE{m}:checked ~ * .L{m}{L}{{display:none}}')
+    for tag in ('ALL', 'NONE'):
+        css.append(f'#ck-{tag}{m}:checked ~ .ctl label[for=ck-{tag}{m}]{{border-color:#b3541e;color:#0b0b0b;box-shadow:inset 0 0 0 1px #b3541e;background:#fdf3ec}}')
+        css.append(f'#ck-{tag}{m}:checked ~ .ctl label[for^="ck-L{m}"]{{opacity:.35}}')
+    chips_layer[m] = (f'<label for="ck-ALL{m}" class="ovr">ALL 全选</label>'
+                      f'<label for="ck-NONE{m}" class="ovr">NONE 全不选</label>' + ''.join(row))
 
 panels = []
 for m, mt in MODELS:
@@ -159,6 +173,7 @@ FRAG_CSS = f'''.vizP{{margin:10px 0}}
 .vizP .ctl{{background:#fff;border:1px solid #ddd;border-radius:8px;padding:8px 12px;margin:8px 0;display:flex;gap:6px;flex-wrap:wrap;align-items:center}}
 .vizP .ctl label{{border:1.5px solid #c9c8c2;border-radius:14px;padding:2px 10px;cursor:pointer;font-size:12px;color:#52514e;user-select:none;white-space:nowrap}}
 .vizP .ctl label i{{display:inline-block;width:10px;height:10px;border-radius:5px;margin-right:6px;vertical-align:-1px}}
+.vizP .ctl label.ovr{{border-style:dashed;font-weight:600;color:#b3541e}}
 .vizP .ctl .hd{{font-weight:600;color:#1a1a2e;font-size:12.5px;margin-right:4px}}
 .vizP .panel svg{{width:100%;height:auto;border:1px solid #ddd;border-radius:8px;margin:2px 0 10px}}
 .vizP .chartlbl{{font-size:12px;color:#555;margin-top:6px}}
@@ -181,7 +196,7 @@ FRAG_BODY = f'''{INTRO}
 <div class="ctl"><span class="hd">models / 模型</span>{''.join(chips_model)}</div>
 <div class="ctl"><span class="hd">Flash layers</span>{chips_layer['flash']}</div>
 <div class="ctl"><span class="hd">Pro layers</span>{chips_layer['pro']}</div>
-<div class="ctl"><span class="hd">V3.2 layers</span><span class="note">(默认只勾 bench 层 14/34/54,勾选更多以展开)</span>{chips_layer['v32']}</div>
+<div class="ctl"><span class="hd">V3.2 layers</span><span class="note">(默认只勾 bench 层 14/34/54;ALL/NONE 为覆盖开关——勾上后强制全显/全隐该模型所有层,逐层勾选暂被忽略并置灰,取消覆盖即恢复;两者同时勾选时 NONE 优先)</span>{chips_layer['v32']}</div>
 {''.join(panels)}
 {OUTRO}
 </div>'''
