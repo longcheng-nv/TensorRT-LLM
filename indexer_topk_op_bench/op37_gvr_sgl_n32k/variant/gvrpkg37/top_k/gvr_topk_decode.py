@@ -319,6 +319,8 @@ class GvrTopKKernel:
         dist_p4: Optional[bool] = None,  # [op37-dp4]
         tight_bracket: Optional[bool] = None,  # [op37-lj]
         tb_qfracs: Optional[tuple] = None,  # [op37-lj]
+        tb_escape: Optional[bool] = None,  # [op37-esc]
+        tb_esc_qfracs: Optional[tuple] = None,  # [op37-esc]
         tb_debug: bool = False,  # [op37-lj]
     ):
         # cluster_size: number of CTAs cooperating per row. 1 = single-CTA
@@ -519,7 +521,6 @@ class GvrTopKKernel:
         # (a HIGH threshold whose count is likely < K, donating a hi bracket
         # / sure set even on high-hit rows); + vseed pmean column => M_thr=10.
         self.tight_bracket = bool(tight_bracket) if tight_bracket is not None else False
-        self.tb_debug = bool(tb_debug) and self.tight_bracket
         if self.tight_bracket:
             if not enable_r0:
                 raise ValueError("tight_bracket=True requires enable_r0=True")
@@ -529,6 +530,44 @@ class GvrTopKKernel:
             r0_qfracs = self.tb_qfracs
         else:
             self.tb_qfracs = ()
+        # [op37-esc] tb_escape: escape-only bracket (LJ_TAX_DIAGNOSIS verdict
+        # (c)). First P2 pass keeps the BASE narrow ladder (zero warm tax);
+        # ONLY on a base-admission miss the kernel re-walks the still-live
+        # P1b hist with the dense tb_esc_qfracs ladder, runs ONE extra M_esc-
+        # wide count pass, and bracket-admits into the tight_bracket band
+        # P3/P4 (sure set streamed to output, band ranked for the rest). If
+        # the escape bracket also fails, the seeded log-falsi refine runs
+        # with the (now M_esc-point) tightened bracket. Default OFF compiles
+        # the original text (PTX byte-identity contract).
+        self.tb_escape = bool(tb_escape) if tb_escape is not None else False
+        if self.tb_escape:
+            if self.tight_bracket:
+                raise ValueError("tb_escape and tight_bracket are mutually exclusive")
+            if not enable_r0:
+                raise ValueError("tb_escape=True requires enable_r0=True")
+            if not fb_fix:
+                raise ValueError("tb_escape=True requires fb_fix=True")
+            if tb_esc_qfracs is None:
+                # Thin escape ladder (2026-07-21 tb_thin ablation, b200-069):
+                # on the cold flash/512k BS512 win cell the 3+vseed thin
+                # first-pass ladder kept the FULL P2 refine kill (0.55x, same
+                # as the 10-column ladder) while paying near-zero P3 tax
+                # (1.01x vs 1.19x) — net 1.408 vs the wide ladder's 1.228.
+                tb_esc_qfracs = (0.85, 0.35, 0.05)
+            self.tb_esc_qfracs = tuple(float(q) for q in tb_esc_qfracs)
+            assert all(0.0 < q < 1.0 for q in self.tb_esc_qfracs), self.tb_esc_qfracs
+            assert list(self.tb_esc_qfracs) == sorted(self.tb_esc_qfracs, reverse=True), (
+                "tb_esc_qfracs must be descending h (ascending threshold value)"
+            )
+        else:
+            self.tb_esc_qfracs = ()
+        self.M_esc = len(self.tb_esc_qfracs)
+        self.esc_qneeds = tuple(
+            max(1, int(math.ceil(q * top_k))) for q in self.tb_esc_qfracs
+        )
+        # tb_band: the band P3/P4 machinery is traced (either flavor).
+        self.tb_band = self.tight_bracket or self.tb_escape
+        self.tb_debug = bool(tb_debug) and self.tb_band
         if enable_r0 and p1b_cache is None:
             if cluster_size > 1:
                 p1b_cache = True
@@ -648,10 +687,10 @@ class GvrTopKKernel:
             )
         # [op37-lj] band P4 is implemented on the leader-local exact
         # rank-scatter only; distP4 keeps its own path (leave dist_p4 off).
-        if self.tight_bracket and (not self.enable_p4_rank_scatter or self.dist_p4):
+        if self.tb_band and (not self.enable_p4_rank_scatter or self.dist_p4):
             raise ValueError(
-                "tight_bracket=True requires enable_p4_rank_scatter=True and "
-                f"dist_p4=False; got enable_p4_rank_scatter="
+                "tight_bracket/tb_escape=True requires enable_p4_rank_scatter="
+                f"True and dist_p4=False; got enable_p4_rank_scatter="
                 f"{self.enable_p4_rank_scatter}, dist_p4={self.dist_p4}"
             )
 
@@ -1158,6 +1197,58 @@ class GvrTopKKernel:
         cute.arch.barrier()
 
     # ------------------------------------------------------------------
+    # [op37-esc] phase1b_escape_rungs — dense escape-ladder rung
+    # extraction. Re-walks the STILL-LIVE P1b histogram (smem_hist is
+    # untouched between P1b and band-P3's scratch reuse; nothing between
+    # the base admission and this call writes it) with the dense
+    # tb_esc_qfracs needs, writing M_esc thresholds to s_mt_thr. No hist
+    # rebuild, no gather — warp-0 walk only (~1us). Same bin mapping as
+    # phase1b_hspace_rungs (s_thr[1]/s_thr[2] still hold P1's v_lo/v_hi
+    # on the miss path: the base admission only writes s_thr[0]).
+    # ------------------------------------------------------------------
+    @cute.jit
+    def phase1b_escape_rungs(self, smem_hist, s_thr, s_mt_thr, tidx, warp_id, lane):
+        M = cutlass.const_expr(self.M_esc)
+        NB = cutlass.const_expr(256)
+        SEG = cutlass.const_expr(8)
+
+        v_lo = s_thr[1]
+        v_hi = s_thr[2]
+        width = (v_hi - v_lo) / cutlass.Float32(NB)
+
+        if warp_id == cutlass.Int32(0):
+            top = cutlass.Int32(NB - 1) - lane * cutlass.Int32(SEG)
+            seg_frag = cute.make_fragment((SEG,), cutlass.Int32)
+            part = cutlass.Int32(0)
+            for j in cutlass.range_constexpr(SEG):
+                v8 = smem_hist[top - cutlass.Int32(j)]
+                seg_frag[j] = v8
+                part = part + v8
+            tp = part
+            for off_i in cutlass.range_constexpr(5):
+                off_v = cutlass.const_expr(1 << off_i)
+                other = cute.arch.shuffle_sync_up(tp, off_v, mask_and_clamp=0)
+                if lane >= cutlass.Int32(off_v):
+                    tp = tp + other
+            excl = tp - part
+            total = cute.arch.shuffle_sync(tp, cutlass.Int32(self.WARP_SIZE - 1))
+            run = cutlass.Int32(0)
+            for j in cutlass.range_constexpr(SEG):
+                run = run + seg_frag[j]
+                cum_at = excl + run
+                cum_before = cum_at - seg_frag[j]
+                for m in cutlass.range_constexpr(M):
+                    if cum_at >= cutlass.Int32(self.esc_qneeds[m]) and cum_before < cutlass.Int32(
+                        self.esc_qneeds[m]
+                    ):
+                        s_mt_thr[m] = v_lo + cutlass.Float32(top - cutlass.Int32(j)) * width
+            if lane == 0:
+                for m in cutlass.range_constexpr(M):
+                    if total < cutlass.Int32(self.esc_qneeds[m]):
+                        s_mt_thr[m] = v_lo
+        cute.arch.barrier()
+
+    # ------------------------------------------------------------------
     # block_count_ge — GE-count of input vs threshold (shared by P2/P3).
     # Per-thread strided accumulate → smem_ptcnt[tid] (for P3 prefix sum)
     # → warp reduce → block reduce → s_iscalars[0] = cand_count.
@@ -1406,8 +1497,13 @@ class GvrTopKKernel:
         warp_id,
         lane,
         smem_ptcnt=None,  # vseed: last column's per-thread counts land here
+        M_ov=None,  # [op37-esc] escape ladder: override column count
+        vseed_ov=None,  # [op37-esc] escape ladder: force vseed routing off
     ):
-        M = cutlass.const_expr(self.M_thr)
+        M = cutlass.const_expr(self.M_thr if M_ov is None else M_ov)
+        use_vseed = cutlass.const_expr(
+            self.r0_vseed if vseed_ov is None else bool(vseed_ov)
+        )
         num_threads = cutlass.const_expr(self.num_threads)
         num_warps = cutlass.const_expr(self.num_warps)
         cluster_size = cutlass.const_expr(self.cluster_size)
@@ -1482,7 +1578,7 @@ class GvrTopKKernel:
             it = it + cutlass.Int32(num_threads)
 
         for m in cutlass.range_constexpr(M):
-            if cutlass.const_expr(self.r0_vseed and m == self.M_qf):
+            if cutlass.const_expr(use_vseed and m == self.M_qf):
                 smem_ptcnt[tidx] = cnt_frag[m]
             else:
                 smem_ptcnt_multi[m * num_threads + tidx] = cnt_frag[m]
@@ -2028,7 +2124,15 @@ class GvrTopKKernel:
         # ---- per-thread lo/hi counts from the multi-count column cache ----
         pc_lo = cutlass.Int32(0)
         pc_hi = cutlass.Int32(0)
-        if cutlass.const_expr(self.r0_vseed):
+        if cutlass.const_expr(self.tb_escape):
+            # [op37-esc] escape-fired brackets index the M_esc escape
+            # columns, ALL of which live in smem_ptcnt_multi (the escape
+            # count pass runs with vseed routing off); the vseed column
+            # mapping below would mis-route lo_m/hi_m == M_qf.
+            pc_lo = smem_ptcnt_multi[lo_m * cutlass.Int32(num_threads) + tidx]
+            if has_hi == cutlass.Int32(1):
+                pc_hi = smem_ptcnt_multi[hi_m * cutlass.Int32(num_threads) + tidx]
+        elif cutlass.const_expr(self.r0_vseed):
             if lo_m == cutlass.Int32(self.M_qf):
                 pc_lo = smem_ptcnt[tidx]
             else:
@@ -5211,13 +5315,18 @@ class GvrTopKKernel:
         # / smem_input above). smem_ptcnt_multi caches M per-thread count
         # columns; s_r0col carries the accepted rung index tid0 -> all.
         if cutlass.const_expr(self.enable_r0):
-            M_r0 = cutlass.const_expr(self.M_thr)
+            # [op37-esc] tb_escape sizes the rung scratch for the WIDER of
+            # the base first-pass ladder and the M_esc escape ladder (the
+            # escape count pass caches all M_esc per-thread columns with
+            # vseed routing off, so the band P3 in-place reads work for
+            # whichever pair fires). Zero growth when tb_escape is off.
+            M_r0 = cutlass.const_expr(max(self.M_thr, self.M_esc))
             # vseed (v3): the pmean column's per-thread counts reuse the
             # existing single-column smem_ptcnt buffer, so the BIG multi
             # buffer only holds the M_qf rung columns -> zero smem growth
             # (the round-1 +2-4KB column pushed 16-bit mb3/T1024 configs over
             # an occupancy cliff: K2048 fp16 BS1024 -26%).
-            M_r0_pt = cutlass.const_expr(self.M_qf)
+            M_r0_pt = cutlass.const_expr(max(self.M_qf, self.M_esc))
             s_mt_thr = smem.allocate_tensor(
                 element_type=cutlass.Float32,
                 layout=cute.make_ordered_layout((M_r0,), order=(0,)),
@@ -5268,7 +5377,8 @@ class GvrTopKKernel:
             # [2]=cnt_hi (cluster-wide), [3]=lo_m, [4]=per-CTA sure-set
             # output base, [5]=spare; s_lj_f[0]=thr_hi. None when OFF so
             # the base SMEM layout is byte-for-byte unchanged.
-            if cutlass.const_expr(self.tight_bracket):
+            # [op37-esc] tb_escape shares the same scratch/band machinery.
+            if cutlass.const_expr(self.tb_band):
                 s_lj_i = smem.allocate_tensor(
                     element_type=cutlass.Int32,
                     layout=cute.make_ordered_layout((6,), order=(0,)),
@@ -5703,6 +5813,11 @@ class GvrTopKKernel:
                             )
                 else:
                     if tidx == 0:
+                        # [op37-esc] default the band-fire flag OFF; the
+                        # escape block below overwrites it on a fire. Must
+                        # happen on the ACCEPT path too (P3/P4 gate on it).
+                        if cutlass.const_expr(self.tb_escape):
+                            s_lj_i[0] = cutlass.Int32(0)
                         # tightest admissible rung = SMALLEST count in [K, kC].
                         # (Explicit argmin: with r0_vseed the pmean column is not
                         # sorted into the rung order; for sorted rungs this is
@@ -5752,7 +5867,226 @@ class GvrTopKKernel:
                 # count passes (op#26 efficiency) instead of ~6. done=1 on
                 # accept so Phase 3 skips its retry-shrink.
                 if bc < cutlass.Int32(0):
-                    if cutlass.const_expr(self.fb_fix):
+                    if cutlass.const_expr(self.tb_escape):
+                        # ---- [op37-esc] escape bracket: dense rung re-walk
+                        # of the live P1b hist + ONE M_esc-wide count pass +
+                        # bracket admission into the band P3/P4. Replaces the
+                        # falsi chain on a fire; seeds it tighter otherwise.
+                        # Warm rows never reach this branch (base admission
+                        # accepted), so the warm-cell cost is zero.
+                        self.phase1b_escape_rungs(
+                            smem_hist, s_thr, s_mt_thr, tidx, warp_id, lane
+                        )
+                        self.block_count_ge_multi(
+                            input_row,
+                            slice_start,
+                            slice_end,
+                            s_mt_thr,
+                            smem_ptcnt_multi,
+                            smem_wcnt_multi,
+                            s_mt_cnt,
+                            s_cluster_partial_m,
+                            do_cluster_sync,
+                            tidx,
+                            warp_id,
+                            lane,
+                            smem_ptcnt=smem_ptcnt,
+                            M_ov=self.M_esc,
+                            vseed_ov=False,
+                        )
+                        cute.arch.barrier()
+                        if tidx == 0:
+                            # Same bracket-admit rule as the tight_bracket
+                            # first pass, over the M_esc escape columns (no
+                            # vseed column). Every CTA's thread0 computes the
+                            # same values from the cluster-wide s_mt_cnt.
+                            lo_me = cutlass.Int32(-1)
+                            lo_ce = cutlass.Int32(2147483647)
+                            hi_me = cutlass.Int32(-1)
+                            hi_ce = cutlass.Int32(-1)
+                            for m in cutlass.range_constexpr(cutlass.const_expr(self.M_esc)):
+                                cme = s_mt_cnt[m]
+                                if cme >= cutlass.Int32(self.top_k) and cme < lo_ce:
+                                    lo_me = cutlass.Int32(m)
+                                    lo_ce = cme
+                                if cme < cutlass.Int32(self.top_k) and cme > hi_ce:
+                                    hi_me = cutlass.Int32(m)
+                                    hi_ce = cme
+                            hi_ce0 = cutlass.Int32(0)
+                            if hi_me >= cutlass.Int32(0):
+                                hi_ce0 = hi_ce
+                            fired_e = cutlass.Int32(0)
+                            if lo_me >= cutlass.Int32(0) and (lo_ce - hi_ce0) <= cutlass.Int32(
+                                self.kC
+                            ):
+                                fired_e = cutlass.Int32(1)
+                            s_lj_i[0] = fired_e
+                            s_lj_i[1] = hi_me
+                            s_lj_i[2] = hi_ce0
+                            s_lj_i[3] = lo_me
+                            if fired_e == cutlass.Int32(1):
+                                thr_hi_e = cutlass.Float32(self.FLT_MAX)
+                                if hi_me >= cutlass.Int32(0):
+                                    thr_hi_e = s_mt_thr[hi_me]
+                                s_lj_f[0] = thr_hi_e
+                                s_thr[0] = s_mt_thr[lo_me]
+                                # cluster-wide band count; band P3 overwrites
+                                # with the CTA-local total (base P3 contract).
+                                s_iscalars[0] = lo_ce - hi_ce0
+                                # done=1: Phase 3 must skip retry-shrink.
+                                s_iscalars[1] = cutlass.Int32(1)
+                        cute.arch.barrier()
+                        if cutlass.const_expr(self.tb_debug):
+                            if tidx == cutlass.Int32(0) and cta_in_cluster == cutlass.Int32(0):
+                                cute.printf(
+                                    "[esc] fired=%d lo_m=%d hi_m=%d cnt_hi=%d band=%d\n",
+                                    s_lj_i[0],
+                                    s_lj_i[3],
+                                    s_lj_i[1],
+                                    s_lj_i[2],
+                                    s_iscalars[0],
+                                )
+                        # Escape bracket failed -> seeded log-falsi over the
+                        # M_esc measured escape rungs (strictly tighter seeds
+                        # than the base rungs). s_lj_i[0] is cluster-uniform,
+                        # so the barriers inside are convergent. Text is the
+                        # fb_fix block below with the seed loop over M_esc
+                        # (ctor requires fb_fix=True with tb_escape).
+                        if s_lj_i[0] == cutlass.Int32(0):
+                            if tidx == cutlass.Int32(0):
+                                blo = v_lo
+                                bhi = v_hi
+                                clo = cutlass.Int32(-1)
+                                chi = cutlass.Int32(-1)
+                                for m in cutlass.range_constexpr(cutlass.const_expr(self.M_esc)):
+                                    cm = s_mt_cnt[m]
+                                    tm = s_mt_thr[m]
+                                    if cm > cutlass.Int32(self.kC) and (
+                                        clo < cutlass.Int32(0) or tm > blo
+                                    ):
+                                        blo = tm
+                                        clo = cm
+                                    if cm < cutlass.Int32(self.top_k) and (
+                                        chi < cutlass.Int32(0) or tm < bhi
+                                    ):
+                                        bhi = tm
+                                        chi = cm
+                                s_thr[1] = blo
+                                s_thr[2] = bhi
+                                s_iscalars[2] = clo  # SEED known rung counts
+                                s_iscalars[3] = chi
+                                s_iscalars[1] = cutlass.Int32(0)  # done=0
+                                cand = (blo + bhi) * cutlass.Float32(0.5)
+                                if clo > cutlass.Int32(0) and chi >= cutlass.Int32(0):
+                                    chic = chi
+                                    if chic < cutlass.Int32(1):
+                                        chic = cutlass.Int32(1)
+                                    l_lo = cmath.log2(cutlass.Float32(clo), fastmath=True)
+                                    l_hi = cmath.log2(cutlass.Float32(chic), fastmath=True)
+                                    den = l_lo - l_hi
+                                    if den > cutlass.Float32(0.0):
+                                        t3 = (cutlass.Float32(self.log2_mstar) - l_hi) / den
+                                        cnd3 = bhi + t3 * (blo - bhi)
+                                        if cnd3 > blo and cnd3 < bhi:
+                                            cand = cnd3
+                                elif chi < cutlass.Int32(0):
+                                    cand = bhi
+                                elif clo < cutlass.Int32(0):
+                                    cand = blo
+                                s_thr[0] = cand
+                            cute.arch.barrier()
+                            rs = cutlass.Int32(0)
+                            while rs < cutlass.Int32(8) and s_iscalars[1] == cutlass.Int32(0):
+                                if rs > cutlass.Int32(0):
+                                    if tidx == cutlass.Int32(0):
+                                        lo3 = s_thr[1]
+                                        hi3 = s_thr[2]
+                                        clo3 = s_iscalars[2]
+                                        chi3 = s_iscalars[3]
+                                        cand = (lo3 + hi3) * cutlass.Float32(0.5)
+                                        if chi3 < cutlass.Int32(0):
+                                            cand = hi3
+                                        elif clo3 < cutlass.Int32(0):
+                                            cand = lo3
+                                        else:
+                                            chic = chi3
+                                            if chic < cutlass.Int32(1):
+                                                chic = cutlass.Int32(1)
+                                            l_lo = cmath.log2(cutlass.Float32(clo3), fastmath=True)
+                                            l_hi = cmath.log2(cutlass.Float32(chic), fastmath=True)
+                                            den3 = l_lo - l_hi
+                                            if den3 > cutlass.Float32(0.0):
+                                                t3 = (cutlass.Float32(self.log2_mstar) - l_hi) / den3
+                                                cnd3 = hi3 + t3 * (lo3 - hi3)
+                                                if cnd3 > lo3 and cnd3 < hi3:
+                                                    cand = cnd3
+                                        s_thr[0] = cand
+                                    cute.arch.barrier()
+                                self.block_count_ge(
+                                    input_row,
+                                    slice_start,
+                                    slice_end,
+                                    s_thr[0],
+                                    smem_ptcnt,
+                                    smem_wcnt,
+                                    s_iscalars,
+                                    s_cluster_partial,
+                                    tidx,
+                                    warp_id,
+                                    lane,
+                                    do_cluster_sync=do_cluster_sync,
+                                    smem_input=smem_input,
+                                )
+                                cute.arch.barrier()
+                                if tidx == cutlass.Int32(0):
+                                    c3 = s_iscalars[0]
+                                    t3v = s_thr[0]
+                                    if c3 >= cutlass.Int32(self.top_k) and c3 <= cutlass.Int32(self.kC):
+                                        s_iscalars[1] = cutlass.Int32(1)  # accept
+                                    elif c3 > cutlass.Int32(self.kC):
+                                        s_thr[1] = t3v
+                                        s_iscalars[2] = c3
+                                        if t3v >= s_thr[2]:
+                                            rng3 = s_thr[2] - s_thr[1]
+                                            if rng3 < cutlass.Float32(1.0):
+                                                rng3 = cutlass.Float32(1.0)
+                                            s_thr[2] = s_thr[2] + rng3 * cutlass.Float32(8.0)
+                                            s_iscalars[3] = cutlass.Int32(-1)
+                                    else:
+                                        s_thr[2] = t3v
+                                        s_iscalars[3] = c3
+                                        if t3v <= s_thr[1]:
+                                            rng3 = s_thr[2] - s_thr[1]
+                                            if rng3 < cutlass.Float32(1.0):
+                                                rng3 = cutlass.Float32(1.0)
+                                            s_thr[1] = s_thr[1] - rng3 * cutlass.Float32(8.0)
+                                            s_iscalars[2] = cutlass.Int32(-1)
+                                cute.arch.barrier()
+                                rs = rs + cutlass.Int32(1)
+                            if s_iscalars[1] != cutlass.Int32(1):
+                                # tie-plateau fail-soft: land on the measured
+                                # undershoot side (count <= kC => no overflow).
+                                self.block_count_ge(
+                                    input_row,
+                                    slice_start,
+                                    slice_end,
+                                    s_thr[2],
+                                    smem_ptcnt,
+                                    smem_wcnt,
+                                    s_iscalars,
+                                    s_cluster_partial,
+                                    tidx,
+                                    warp_id,
+                                    lane,
+                                    do_cluster_sync=do_cluster_sync,
+                                    smem_input=smem_input,
+                                )
+                                cute.arch.barrier()
+                                if tidx == cutlass.Int32(0):
+                                    s_thr[0] = s_thr[2]
+                                    s_iscalars[1] = cutlass.Int32(1)
+                                cute.arch.barrier()
+                    elif cutlass.const_expr(self.fb_fix):
                         if tidx == cutlass.Int32(0):
                             M = cutlass.const_expr(self.M_thr)
                             blo = v_lo
@@ -5930,7 +6264,7 @@ class GvrTopKKernel:
                     cute.arch.cluster_wait()
 
             # ---- Phase 3: cluster-parallel candidate collect ----
-            if cutlass.const_expr(self.tight_bracket):  # [op37-lj]
+            if cutlass.const_expr(self.tb_band):  # [op37-lj]/[op37-esc]
                 # Bracket fired: dual-threshold collect (sure set direct to
                 # output, band to smem). s_lj_i[0] is uniform across every
                 # thread of every cluster CTA (computed from the cluster-wide
@@ -6020,7 +6354,7 @@ class GvrTopKKernel:
             if cutlass.const_expr(cluster_size == 1):
                 # cs=1: the single CTA per row IS the leader.
                 cand_count_p4 = min(s_iscalars[0], cutlass.Int32(self.kC))
-                if cutlass.const_expr(self.tight_bracket):  # [op37-lj]
+                if cutlass.const_expr(self.tb_band):  # [op37-lj]/[op37-esc]
                     if s_lj_i[0] == cutlass.Int32(1):
                         # bracket fired: rank the band for the remaining
                         # need = K - cnt_hi slots at output offset cnt_hi.
@@ -6174,7 +6508,7 @@ class GvrTopKKernel:
 
                     # ---- Phase 4: histogram snap + writeback ----
                     cand_count_p4 = min(s_iscalars[0], cutlass.Int32(self.kC))
-                    if cutlass.const_expr(self.tight_bracket):  # [op37-lj]
+                    if cutlass.const_expr(self.tb_band):  # [op37-lj]/[op37-esc]
                         if s_lj_i[0] == cutlass.Int32(1):
                             tb_base = s_lj_i[2]
                             self.phase4_rank_scatter_band(

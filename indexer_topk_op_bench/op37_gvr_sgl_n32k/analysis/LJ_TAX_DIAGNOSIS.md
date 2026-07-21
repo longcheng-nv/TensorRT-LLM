@@ -88,7 +88,29 @@ not per iteration (P2 cyc 2-2.5x, not Mx); (e) zero added cluster syncs
   band-collect cyc, the whole P3 delta is the missing unroll, not the
   dual-threshold classify.
 
-RESULTS (filled after run): see logs/phase_lj_ablate.log.
+RESULTS (2026-07-21, b200-069 GPU0 — original run interrupted on b200-027;
+4 cells x {tb_off, tb_on, tb_thin, off_nou3}, all 16 exact; wall numbers
+below are the UNTIMED arm's, ratios = base/arm wall vs tb_off):
+
+| cell (hit) | tb_on | tb_thin | off_nou3 | tb_thin P2 cyc | tb_thin P3 cyc | off_nou3 P3 cyc |
+|---|---|---|---|---|---|---|
+| pro/128k BS8 (.326)    | 0.818 | 0.900 | 1.000 | 1.20x | 1.32x | 0.93x |
+| pro/512k BS8 (.230)    | 0.733 | 0.846 | 1.000 | 1.33x | 1.43x | 1.08x |
+| flash/512k BS512 (.057)| 1.217 | **1.408** | 0.973 | **0.55x** | **1.01x** | 1.12x |
+| flash/128k BS2 (.701)  | 0.818 | 0.901 | 1.000 | 1.23x | 1.42x | 0.93x |
+
+- tb_thin: P2 tax collapses with the ladder (2.0-2.5x -> 1.2-1.3x,
+  confirming ~per-column attribution) but the warm NET is still
+  0.85-0.90 — a thin ALWAYS-ON ladder remains a loss; AND on the cold
+  win cell tb_thin keeps the FULL refine kill (P2 0.55x, same as the
+  10-column ladder) with near-zero P3 tax (1.01x) => net 1.408, BIGGER
+  than tb_on's 1.217. The escape ladder does not need to be wide.
+- off_nou3: disabling the base P3 4-way unroll is FREE on warm cells
+  (P3 cyc 0.93-1.08x, wall unchanged) and costs only 1.12x on the
+  BW-rich cell => the band-collect's 1.4-1.6x warm P3 tax is NOT the
+  missing unroll; it is the dual-threshold classify itself. HYPOTHESIS
+  REJECTED — do not port the unroll as the P3 fix; the thin ladder
+  already sidesteps most of the band P3 cost.
 
 ## Verdict — removable vs intrinsic
 
