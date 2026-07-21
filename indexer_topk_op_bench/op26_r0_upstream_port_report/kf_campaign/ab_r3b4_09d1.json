@@ -1,0 +1,62 @@
+[
+ {
+  "uuid": "flash_1024k_L16",
+  "pr_cold": 19.062150000000003,
+  "cand_cold": 10.187100000000001,
+  "speedup_cold": 1.871204758959861,
+  "pr_warm": 17.3261,
+  "cand_warm": 8.98555,
+  "speedup_warm": 1.928218083478474,
+  "cand_exact": true
+ },
+ {
+  "uuid": "flash_1024k_L36",
+  "pr_cold": 18.236549999999998,
+  "cand_cold": 10.03495,
+  "speedup_cold": 1.8173035241829802,
+  "pr_warm": 16.3581,
+  "cand_warm": 9.0031,
+  "speedup_warm": 1.8169408314913753,
+  "cand_exact": true
+ },
+ {
+  "uuid": "flash_512k_L04",
+  "pr_cold": 14.354899999999999,
+  "cand_cold": 9.257299999999999,
+  "speedup_cold": 1.5506573190887192,
+  "pr_warm": 12.92145,
+  "cand_warm": 8.59345,
+  "speedup_warm": 1.5036393997754103,
+  "cand_exact": true
+ },
+ {
+  "uuid": "flash_512k_L24",
+  "pr_cold": 21.6734,
+  "cand_cold": 9.1039,
+  "speedup_cold": 2.380672019683872,
+  "pr_warm": 19.934099999999997,
+  "cand_warm": 8.22075,
+  "speedup_warm": 2.424851747103366,
+  "cand_exact": true
+ },
+ {
+  "uuid": "pro_1024k_L02",
+  "pr_cold": 24.13415,
+  "cand_cold": 9.91025,
+  "speedup_cold": 2.435271562271386,
+  "pr_warm": 20.926099999999998,
+  "cand_warm": 8.860700000000001,
+  "speedup_warm": 2.3616757141083657,
+  "cand_exact": true
+ },
+ {
+  "uuid": "v32_256k_L09",
+  "pr_cold": 19.1723,
+  "cand_cold": 9.7774,
+  "speedup_cold": 1.9608791703315809,
+  "pr_warm": 17.5358,
+  "cand_warm": 8.7407,
+  "speedup_warm": 2.0062237578225997,
+  "cand_exact": true
+ }
+]
