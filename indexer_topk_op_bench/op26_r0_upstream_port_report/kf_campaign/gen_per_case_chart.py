@@ -47,7 +47,7 @@ def by_case(m, isl, L):
     return None
 
 # ---- geometry ---------------------------------------------------------------
-W, H, ML, MR, MT, MB = 1240, 360, 52, 14, 18, 34
+W, H, ML, MR, MT, MB = 1240, 430, 52, 14, 18, 34
 PW, PH = W - ML - MR, H - MT - MB
 LAT_LO, LAT_HI = 2.5, 40.0          # µs, log scale
 SP_LO, SP_HI = 0.6, 4.0             # speedup, linear
@@ -85,15 +85,32 @@ def axes(m, kind):
         p.append(f'<text x="14" y="{MT+PH/2:.0f}" font-size="11" fill="#52514e" transform="rotate(-90 14 {MT+PH/2:.0f})" text-anchor="middle">speedup = PR / cand (paired)</text>')
     return ''.join(p)
 
+def shade(col, f):
+    """Lighten (f>0) / darken (f<0) a #rrggbb color; keeps the arm hue readable per layer."""
+    r, g, b = (int(col[i:i+2], 16) for i in (1, 3, 5))
+    if f >= 0:
+        r, g, b = (round(c + (255 - c) * f) for c in (r, g, b))
+    else:
+        r, g, b = (round(c * (1 + f)) for c in (r, g, b))
+    return f'#{r:02x}{g:02x}{b:02x}'
+
+def gmean(vs):
+    return math.exp(sum(math.log(v) for v in vs) / len(vs))
+
 def series(m, kind):
     out = []
+    nl = len(layers[m])
     for li, L in enumerate(layers[m]):
         dash = DASHES[li % len(DASHES)]
+        # per-layer lightness ramp within the arm hue: shallow layers darker, deep lighter
+        f = -0.28 + 0.62 * (li / max(1, nl - 1))
         lcls = f'L{m}{L}'
         for tag, fn, lab, labc, col, dflt, is_base in ARMS:
             if kind == 'sp' and is_base:
                 continue
-            pts, dots = [], []
+            lcol = shade(col, f)
+            arm_name = lab.split(' gm')[0]
+            pts, dots, vals, per_isl = [], [], [], []
             for isl in isls[m]:
                 u = by_case(m, isl, L)
                 r = grids[tag].get(u)
@@ -104,22 +121,38 @@ def series(m, kind):
                     y = ylat(v)
                     tip = (f'{m} L{L} · ISL {ISL_LBL.get(isl,isl)} (N={r["N"]}) · hit {r["hit"]} · '
                            + (f'PR {float(r["pr_cold"]):.2f}µs' if is_base else
-                              f'{lab.split(" gm")[0]}: {float(r["cand_cold"]):.2f}µs vs PR {float(r["pr_cold"]):.2f}µs = {float(r["speedup_cold"]):.3f}×'))
+                              f'{arm_name}: {float(r["cand_cold"]):.2f}µs vs PR {float(r["pr_cold"]):.2f}µs = {float(r["speedup_cold"]):.3f}×'))
+                    per_isl.append(f'{ISL_LBL.get(isl,isl)}={v:.1f}µs')
                 else:
                     v = float(r['speedup_cold'])
                     y = ysp(min(v, SP_HI))
                     tip = (f'{m} L{L} · ISL {ISL_LBL.get(isl,isl)} (N={r["N"]}) · hit {r["hit"]} · '
-                           f'{lab.split(" gm")[0]}: {v:.3f}× (PR {float(r["pr_cold"]):.2f}µs → {float(r["cand_cold"]):.2f}µs)')
+                           f'{arm_name}: {v:.3f}× (PR {float(r["pr_cold"]):.2f}µs → {float(r["cand_cold"]):.2f}µs)')
+                    per_isl.append(f'{ISL_LBL.get(isl,isl)}={v:.2f}×')
+                vals.append(v)
                 x = xpos(m, isl)
                 pts.append(f'{x:.0f},{y:.1f}')
-                dots.append(f'<circle cx="{x:.0f}" cy="{y:.1f}" r="2.6" fill="{col}"><title>{tip}</title></circle>')
+                dots.append(f'<circle cx="{x:.0f}" cy="{y:.1f}" r="3" fill="{lcol}" stroke="#fff" stroke-width="0.6"><title>{tip}</title></circle>')
+            unit = 'µs' if kind == 'lat' else '×'
+            gsum = (f'{arm_name} · {m} L{L} — geomean {gmean(vals):.2f}{unit}, '
+                    f'min {min(vals):.2f}{unit} @{ISL_LBL.get(isls[m][vals.index(min(vals))], isls[m][vals.index(min(vals))])}, '
+                    f'max {max(vals):.2f}{unit} @{ISL_LBL.get(isls[m][vals.index(max(vals))], isls[m][vals.index(max(vals))])}'
+                    f'\n{" · ".join(per_isl)}')
             da = f' stroke-dasharray="{dash}"' if dash else ''
-            out.append(f'<g class="{tag} {lcls}"><polyline points="{" ".join(pts)}" fill="none" stroke="{col}" stroke-width="1.3" opacity="0.85"{da}/>{"".join(dots)}</g>')
+            out.append(f'<g class="ser {tag} {lcls}"><title>{gsum}</title>'
+                       f'<polyline points="{" ".join(pts)}" fill="none" stroke="#fff" stroke-width="5" opacity="0" pointer-events="stroke"/>'
+                       f'<polyline class="vis" points="{" ".join(pts)}" fill="none" stroke="{lcol}" stroke-width="1.7"{da}/>'
+                       f'{"".join(dots)}</g>')
     return ''.join(out)
 
 # ---- controls + css ----------------------------------------------------------
 inputs, css, chips_arm, chips_model, chips_layer = [], [], [], [], {}
-css.append('.vizP svg g:hover polyline{stroke-width:3;opacity:1}')
+# hover affordances: line thickens + dots grow; all OTHER series fade so the
+# hovered line pops (progressive enhancement via :has; harmless if unsupported).
+css.append('.vizP svg .ser .vis{transition:stroke-width .08s,opacity .08s}')
+css.append('.vizP svg .ser:hover .vis{stroke-width:3.8}')
+css.append('.vizP svg .ser:hover circle{r:4.6}')
+css.append('.vizP svg:has(.ser:hover) .ser:not(:hover){opacity:.15}')
 for tag, fn, lab, labc, col, dflt, _ in ARMS:
     ck = 'checked' if dflt else ''
     inputs.append(f'<input type="checkbox" id="ck-{tag}" {ck}>')
@@ -184,7 +217,9 @@ INTRO = f'''<p class="note">All <b>865 per-layer cases</b> (V4 Flash 21L×9 ISL 
 Only <b>CLEAN full-grid verdicts</b> are shown — the contaminated r2a/r2b runs (double-driver PR-arm inflation, later invalidated
 and re-measured as r2a2_fixed / r2c2g) are excluded. Source: <code>grid_*.csv</code> in <code>kf_campaign/</code>; generator
 <code>gen_per_case_chart.py</code> (idempotent). 全部 865 个逐层 case,冷 L2 nsys 同轮配对计时,不做任何层间平均;仅展示通过锚检的干净终审网格,污染作废的 r2a/r2b 已排除。
-x 轴 = ISL,颜色 = 候选臂,线型 = 层(循环虚线);用复选框选择候选臂/模型/层,悬停任意数据点可见该 case 的精确数值。</p>'''
+x 轴 = ISL,色相 = 候选臂(同臂内明度随层号渐变,浅层深色/深层浅色),线型 = 层(循环虚线);用复选框选择候选臂/模型/层。
+<b>悬停数据点</b>=该 case 精确数值;<b>悬停线条</b>=整条线摘要(几何均值 / 极值 / 逐 ISL 数值),同时其余线自动淡出以突出当前线。
+Hover a point for the exact per-case numbers; hover a line for its full summary (geomean / min / max / per-ISL values) — other lines fade while hovering.</p>'''
 
 OUTRO = f'''<p class="note">Speedup chart clips at {SP_HI}× (a handful of sbx small-N cells reach 3.75×; hover shows the true value).
 加速比图纵轴截断于 {SP_HI}×,悬停可见真实值。Champion ship verdict: c74f_sbx geomean 1.6828×, 865/865 exact, zero cold regressions.</p>'''
