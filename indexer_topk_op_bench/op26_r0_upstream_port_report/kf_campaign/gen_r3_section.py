@@ -23,8 +23,8 @@ HTML = HERE / "KF_PROCESS_LOG.html"
 BAN_S, BAN_E = "<!-- KF-R3BANNER:START -->", "<!-- KF-R3BANNER:END -->"
 SEC_S, SEC_E = "<!-- KF-R3:START -->", "<!-- KF-R3:END -->"
 
-TAG = sys.argv[1] if len(sys.argv) > 1 else "r3gridcompA"
-CHAMP_NAME = "compA"
+TAG = sys.argv[1] if len(sys.argv) > 1 else "r3gridcompB"
+CHAMP_NAME = {"r3gridcompA": "compA", "r3gridcompB": "compB"}.get(TAG, TAG)
 
 SERIES = [  # key, css class, label, color — same palette as §6
     ("xPR",  "s3PR",  "vs GVR PR head",   "#2a78d6"),
@@ -129,7 +129,7 @@ def main():
     kpi = {k: gm([c[k] for c in cells.values() if k in c]) for k, *_ in SERIES}
     kpi_c1 = gm([c["xC1"] for c in cells.values() if c["xC1"]])
     st = {t: grid_stats(t) for t in
-          ["champh2", "r3grid09d1", "r3grid30e7", "r3gridbecd", TAG]}
+          ["champh2", "r3grid09d1", "r3grid30e7", "r3gridbecd", "r3gridcompA", TAG]}
     mn = min(c["xPR"] for c in cells.values())
     regs = sum(1 for c in cells.values() if c["xPR"] < 1.0)
 
@@ -204,8 +204,10 @@ def main():
              "+ contiguous-slice scan partitions / + 连续切片扫描"),
             ("r3gridbecd", "becdc5c7 (r3)",
              "adaptive post-pass-0 finish + register-cached row / 自适应收尾 + 寄存器缓存整行"),
-            (TAG, f"<b>{CHAMP_NAME} (engineer composite)</b>",
-             "becd ⊕ 30e7: k=2048 ∧ 16896&lt;n≤140000 → 30e7 ladder / 工程师复合分派")]:
+            ("r3gridcompA", "compA (engineer composite #1)",
+             "becd ⊕ 30e7: k=2048 ∧ 16896&lt;n≤140000 → 30e7 ladder / 工程师复合分派 #1"),
+            (TAG, f"<b>{CHAMP_NAME} (engineer composite #2, current champion)</b>",
+             "aef33fac (becd + topk_mid tail-selection rungs, mid&lt;1&gt; n≈4099 rung gated out after measured regression) ⊕ 30e7 k2048 dispatch / 工程师复合 #2:并入 topk_mid 尾部选择档(裁掉回退的 mid&lt;1&gt;)")]:
         s = st[tag]
         ladder_rows += (f'<tr><td>{name}</td><td>{s["gm"]:.4f}</td>'
                         f'<td>{s["regs"]} (min {s["mn"]:.3f})</td>'
@@ -290,8 +292,9 @@ joins against the REPORT rival sweep, same protocol as §6.<br>
 {kpis}
 <h3>7.1 Candidate ladder / 候选阶梯(均为全 865 格判决)</h3>
 {ladder}
-<p><span class="cng">compA 对 becd 的净增 +0.13%(拼接估计 ~1.81):分派增益在 v32 32k/64k/128k 实证 +5.4-8.8%,
-非分派档为同字节码,差异属 ±2% 运行噪声。0.999 边界格(pro_64k_L24,同字节码档)待终审 60-rep 裁决。</span></p>
+<p><span class="cng">compB 对 compA 净增 +1.3%:aef33fac 的 topk_mid 单 CTA 尾部选择档治愈 N=16387/8195 弱档
+(pro/flash_64k +19%、32k +8-10%),其 n≈4099 的 mid&lt;1&gt; 档实测回退已被裁除;全格最低格从 0.999 抬到 1.140,
+0 回退不再有边界格。</span></p>
 <h3>7.2 Where the new speed comes from / 新增速度来源</h3>
 <ol>
 <li><b>Cooperative-launch &amp; barrier-ordering elimination / 去 coop-launch 与屏障内存序</b> (09d13c81, +4.7% grid):
@@ -351,14 +354,11 @@ agent 自证同一 solution 两次计时差异显著。</span></li>
 → champion baselines supplied as platform-trace per-workload timings; champion source inlined in the prompt instead.<br>
 <span class="cng">平台缺口 D1:baseline-solution 评测不带 assets → 改用第一期平台 trace 逐格时间,源码内联 prompt。</span></li>
 </ul>
-<p style="font-size:0.9em;color:#52514e">Status at injection: campaign Running (round 3; best internal 1.173 =
-<code>aef33fac</code>, its clean full-grid verdict pending node quiescence — the contaminated first attempt showed
-topk_mid&lt;4&gt; healing the N=16387 rung +18-19% but a topk_mid&lt;1&gt; regression at n≈4099, so the next engineer
-composite gates that rung out). Platform spend ≈$578 of $800 cap. Final acceptance = fresh full grid + 60-rep borderline
-adjudication + rival joins, after campaign close.<br>
-<span class="cng">注入时状态:round 3 运行中(内部最佳 1.173 = aef33fac,其干净全格判决等节点静默;污染首测显示
-topk_mid&lt;4&gt; 治愈 N=16387 档 +18-19%,但 topk_mid&lt;1&gt; 在 n≈4099 回退,下一个工程师复合将裁掉该档)。
-平台花费约 $578/$800;终审待战役收口。</span></p>
+<p style="font-size:0.9em;color:#52514e">Status at injection (07-22): campaign Running (round 3; best internal 1.173 =
+<code>aef33fac</code>, harvested into compB). Platform spend ≈$578 of $800 cap. Final acceptance = fresh full grid of the
+closing champion + borderline adjudication + rival joins, after campaign close.<br>
+<span class="cng">注入时状态(07-22):round 3 运行中(内部最佳 1.173 = aef33fac,已并入 compB);平台花费约 $578/$800;
+终审待战役收口后以收官冠军新鲜全格执行。</span></p>
 {SEC_E}"""
 
     banner = (f'{BAN_S}<div style="background:#e7f6e7;border:1.5px solid #070;border-radius:8px;'
