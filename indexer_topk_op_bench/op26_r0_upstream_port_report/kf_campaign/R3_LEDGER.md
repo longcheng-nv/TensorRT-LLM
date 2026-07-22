@@ -135,6 +135,42 @@ those break uniform team sizing => different design (per-bucket teams +
 real atomic queue), not an upgrade of this kernel. pq_bs.csv +
 ext/RESULTS.md.
 
+### BS>1 extension — FINAL PICTURE (3 experiments closed, 2026-07-22)
+
+One day, three verdicts on umbriel-b200-039, all nsys cold-L2 local-paired
+vs gvr_pr on real rows, 216/216 records exact across the campaign:
+A grid.y batching CONFIRMED (@3fc4a4e82b) -> register diet CONFIRMED
+(@a569e02f96) -> B' persistent queue FALSIFIED (@4b3914a4b4).
+
+Production dispatch shape for a compB-lineage batched port (supersedes the
+plain BS==1 gate of the §7.8 supplement):
+
+| regime | ship path | vs PR head |
+|---|---|---|
+| n <= 16896, ANY BS | grid.y batched single-CTA tiers | 1.61-1.80x, 16/16 BS rows won (BS to 1024) |
+| large-n, BS <= rows_per_wave (~9 @131K) | chunked ext_v4 (MINB=4), single wave | 1.61-2.69x |
+| large-n, BS ~ 2 waves (~16) | ext_v4 | ~parity (flash 1.13 / pro 0.84) |
+| beyond | batched PR arm (fallback fuse) | PR arm wins |
+
+Load-bearing facts: (1) team = ceil(n/2048) exactly — the register-resident
+constraint is hard, and the shipped bump-to-148 is unnecessary (BS=1 parity
+1.006); (2) extra rows inside one co-resident wave are ~free (+5% BS=1->4);
+(3) occupancy was register-bound (56 regs), launch_bounds(512,4) gives 32
+regs with ZERO spill and only ~2% single-row tax — cheapest lever of the
+campaign; (4) multi-wave time is exactly waves x single-wave, and chunked
+launch boundaries are effectively free (span tax <= 1.02), which is
+precisely why B' had no room: any persistent design chases that <= 2% while
+paying a >= 5% in-kernel sync floor; (5) the fence-less L1 hazard remedies
+(ldcg post-barrier reads + gen*8192+iter*8+pass tokens + inter-row team
+barrier) are proven correct and reusable wherever intra-launch slice reuse
+appears — they just don't pay HERE.
+
+Open items for a production port: ragged-batch design (per-bucket teams +
+atomic queue — new kernel, only if serving traces show drain-limited
+waves); v30 lineage (K=2048 mid-n 16896<n<=140000) still sequential in the
+ext — needs the same team treatment before a full-envelope batched ship;
+865-grid regression gate + BS-sweep dual exactness before any PR.
+
 One-line thesis: the collapse is a misallocated parallelism axis, not an
 algorithm loss — reallocate the co-residency budget from "1 row x whole GPU"
 to "BS rows x ceil(n/2048)-CTA teams"; the barrier demotes to team scope
