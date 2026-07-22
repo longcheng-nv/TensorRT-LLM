@@ -1,0 +1,5 @@
+nsys_reps/
+champion/build_pt/
+*.sqlite
+*.nsys-rep
+__pycache__/
