@@ -22,6 +22,10 @@ void topk_launch_tp(const float* logits, long W, int n, int k, int* out,
 void topk_launch_tp2(const float* logits, long W, int n, int k, int* out,
                      int BS, cudaStream_t stream);
 unsigned int topk_tp2_fallbacks();
+void topk_launch_tp3(const float* logits, long W, int n, int k, int* out,
+                     int BS, cudaStream_t stream);
+unsigned int topk_tp3_fallbacks();
+void topk_tp3_stats(int out3[3]);
 void topk_ext_info(int n, int k, int BS, int info[5]);
 void topk_fast_stats(int minb, int out5[5]);
 void topk_pq_stats(int minb, int out5[5]);
@@ -74,6 +78,24 @@ void run_batch_tp2(torch::Tensor logits, int64_t n_valid,
 
 int64_t tp2_fallbacks() { return (int64_t)topk_tp2_fallbacks(); }
 
+void run_batch_tp3(torch::Tensor logits, int64_t n_valid,
+                   torch::Tensor indices) {
+    TORCH_CHECK(logits.is_contiguous() && indices.is_contiguous());
+    auto stream = at::cuda::getCurrentCUDAStream();
+    topk_launch_tp3(logits.data_ptr<float>(), (long)logits.size(1),
+                    (int)n_valid, (int)indices.size(1),
+                    indices.data_ptr<int>(), (int)logits.size(0),
+                    stream.stream());
+}
+
+int64_t tp3_fallbacks() { return (int64_t)topk_tp3_fallbacks(); }
+
+std::vector<int64_t> tp3_stats() {
+    int s[3] = {0, 0, 0};
+    topk_tp3_stats(s);
+    return {s[0], s[1], s[2]};
+}
+
 void run_batch_pq(torch::Tensor logits, int64_t n_valid,
                   torch::Tensor indices, int64_t minb) {
     TORCH_CHECK(logits.is_contiguous() && indices.is_contiguous());
@@ -112,6 +134,10 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
           "D2 sampled-estimate single-pass arm");
     m.def("tp2_fallbacks", &tp2_fallbacks,
           "read-and-reset D2 fallback-row counter");
+    m.def("run_batch_tp3", &run_batch_tp3,
+          "tp3 fused single-kernel mid-BS arm");
+    m.def("tp3_fallbacks", &tp3_fallbacks, "read-and-reset tp3 fallback count");
+    m.def("tp3_stats", &tp3_stats, "(numRegs, localBytes, cap) for tp3_kernel");
     m.def("run_batch_pq", &run_batch_pq,
           "B' persistent-queue: one launch consumes the whole batch");
     m.def("pq_stats", &pq_stats, "resource stats for topk_fast_pq<minb>");
