@@ -151,3 +151,11 @@ Updated 2026-07-22 (会话暂停：用户要求迁移到另一台机器)。
   输给 secant 计数(prior-free 死路自证);弱 ld.global.cg 自旋会读stale。
 - 判官注意: 有 agent 记录 "compliance judge 按源码 hash 缓存,可用微小
   编辑绕过 buggy 判决" — 收割时人工复核合规不可省。
+
+## Round 2
+
+- **r2_be2d8f30 收割**(`gvr_topk_cuda_r2_wider_direct`, 内部 1.1513, r002-a002):
+  KCMAX 8192→8448(盖住 N=8195→npad 8256 的整个弱带 rung)→ 8K 带走整行
+  直通道;kC 分层 (K≥2048→8192, 否则 6144)。28-cell 探针(GPU1):
+  **cold gm 1.5106, 0 回退, 28/28 exact**(flash_32k 0.98→1.30,
+  pro_4k 2.20, v32_4k 2.14)。全格 r4r2wdg 已发 GPU1-3。
