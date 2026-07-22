@@ -116,6 +116,68 @@ def chart(pts_by_series, w=760, h=330, ymin=0.5, ymax=2.7, title=""):
     return "".join(s)
 
 
+
+EVENTS = [  # (hours since 07-21 12:00Z, lane, label, detail, kind)
+    (1.55, 0, "prepare fail D1", "baseline-solution evaluator does not stage assets (0/28) -> platform-trace baselines workaround", "warn"),
+    (1.67, 0, "campaign start", "gvr-topk-r3 e5q1zgr... 6 agents/round, champion c74f_sbx as baseline", "camp"),
+    (1.9, 1, "PR-head arm refresh", "e6fdbfac3d -> b14ec40e1b (only gvr_topk_decode.py changed)", "loc"),
+    (1.95, 1, "probe 1.7193", "champion vs NEW head, 28 cells, 0 reg, exact", "loc"),
+    (2.3, 1, "grid champh2 1.6770", "Bar denominators: 865 cells, 0 reg, 865/865 exact; anchors vs old head med 1.005", "verd"),
+    (5.75, 0, "round 1 close: best 0.9956", "= verbatim champion resubmit (platform noise calib +-0.5%); only real variant 5f3daaf8", "camp"),
+    (6.4, 1, "5f3daaf8 = WASH", "provably-exact warm-hint filter: 1.0001 in its n>=512K activation zone", "dead"),
+    (7.5, 0, "09d13c81 internal 1.0351", "regular launch + fence-less sense-token grid barrier", "camp"),
+    (8.0, 1, "probe INVALIDATED", "foreign 8-GPU job 100% util; quiet-echo scripting bug fixed to gated launches", "warn"),
+    (9.8, 1, "grid 09d1 1.7553", "NEW COMPOSITE +4.3%: coop rungs +6-11%, 0 reg, 865 exact", "verd"),
+    (10.3, 1, "ordering study", "threadfence -11% / acq_rel -8% / surgical -8%: the win IS the omitted barrier ordering", "dead"),
+    (10.9, 0, "30e79029 internal 1.0577", "+ contiguous-slice scan partitions", "camp"),
+    (11.6, 1, "grid 30e7 1.7714", "NEW COMPOSITE +5.0%; at op35 UB reference 1.771", "verd"),
+    (12.4, 0, "becdc5c7 internal 1.1566", "adaptive post-pass-0 fast-tail + register-cached row", "camp"),
+    (13.2, 1, "grid becd 1.7848", "NEW COMPOSITE +6.6%; v32 mid-n loses to 30e7 -> engineer dispatch", "verd"),
+    (14.1, 1, "grid compA 1.7873", "becd + k2048-mid-n->30e7 dispatch; 1 borderline 0.999", "verd"),
+    (16.5, 0, "aef33fac internal 1.1726", "+ topk_mid single-CTA tail-selection rungs (4k<=n<=16387)", "camp"),
+    (17.9, 1, "aef3 grid CONTAMINATED", "anchor p95 1.542 (foreign job GPUs 2-5); signal kept: mid<4> heals 16387 +19%, mid<1> regresses n~4099", "warn"),
+    (18.5, 1, "compB built", "aef3 minus mid<1> rung + 30e7 k2048 dispatch", "loc"),
+    (26.0, 1, "grid compB 1.8267", "NEW COMPOSITE +8.1% vs champion; min 1.140, NO borderline; 865/865 exact", "verd"),
+    (27.5, 0, "round 3 close, cost $761", "17 kernels; round 4 = final (cap $800)", "camp"),
+]
+
+def timeline_fig():
+    W, H = 980, 300
+    L, R2, T, B = 20, 20, 46, 30
+    t0, t1 = 1.0, 28.5
+    lanes = {0: 90, 1: 200}
+    kcol = {"camp": "#2a78d6", "loc": "#52514e", "verd": "#0b6e4f", "warn": "#b3541e", "dead": "#8b2635"}
+    def X(t):
+        return L + (t - t0) / (t1 - t0) * (W - L - R2)
+    s = [f'<svg viewBox="0 0 {W} {H}" role="img" style="max-width:100%;background:var(--vz-surface);'
+         f'border:1px solid var(--vz-grid);border-radius:8px">']
+    for lane, y in lanes.items():
+        s.append(f'<line x1="{L}" y1="{y}" x2="{W-R2}" y2="{y}" stroke="var(--vz-grid)" stroke-width="1.4"/>')
+    s.append(f'<text x="{L}" y="{lanes[0]-58}" font-size="12" font-weight="700" fill="var(--vz-text1)" font-family="sans-serif">KF cloud campaign (internal scale, ~15µs floor)</text>')
+    s.append(f'<text x="{L}" y="{lanes[1]+62}" font-size="12" font-weight="700" fill="var(--vz-text1)" font-family="sans-serif">Local 8xB200 verify arm (nsys cold-L2 vs PR head, 865 cells)</text>')
+    for hh, lbl in [(1.67, "07-21 13:40Z"), (13.7, "07-22 01:40Z"), (26.0, "07-22 02:0xZ+")]:
+        s.append(f'<text x="{X(hh):.0f}" y="{H-8}" font-size="10" text-anchor="middle" fill="var(--vz-text2)" font-family="sans-serif">{lbl}</text>')
+    flip = 1
+    for t, lane, label, detail, kind in EVENTS:
+        x, y = X(t), lanes[lane]
+        col = kcol[kind]
+        up = (flip := -flip) > 0
+        ty = y - 14 - (10 if up else -38)
+        s.append(f'<g><line x1="{x:.0f}" y1="{y}" x2="{x:.0f}" y2="{ty+12:.0f}" stroke="{col}" stroke-width="1"/>'
+                 f'<circle cx="{x:.0f}" cy="{y}" r="5.5" fill="{col}" stroke="var(--vz-surface)" stroke-width="2">'
+                 f'<title>{label} — {detail}</title></circle>'
+                 f'<text x="{x:.0f}" y="{ty:.0f}" font-size="9.5" text-anchor="middle" fill="{col}" '
+                 f'font-family="sans-serif">{label}</text>'
+                 f'<title>{label}</title></g>')
+    leg_x = L
+    for kind, lbl in [("camp", "campaign event"), ("verd", "full-865 verdict"), ("loc", "local arm"), ("warn", "incident"), ("dead", "falsified")]:
+        s.append(f'<circle cx="{leg_x+6}" cy="{H-44}" r="5" fill="{kcol[kind]}"/>'
+                 f'<text x="{leg_x+16}" y="{H-40}" font-size="10.5" fill="var(--vz-text2)" font-family="sans-serif">{lbl}</text>')
+        leg_x += 16 + 9 * len(lbl) + 18
+    s.append("</svg>")
+    return "".join(s)
+
+
 def grid_stats(tag):
     rows = list(csv.DictReader(open(HERE / f"grid_{tag}.csv")))
     sp = [float(r["speedup_cold"]) for r in rows]
@@ -279,6 +341,7 @@ def main():
 <tr><td>surgical (relaxed spin + trailing acquire)</td><td>scoped, off-critical-path attempt</td><td>1.615</td><td>rejected — ordering cost is intrinsic / 否决:排序代价是本质的(release 必须在关键路径上等 L2 写落地)</td></tr>
 </table>"""
 
+    tl = timeline_fig()
     section = f"""{SEC_S}{css}
 <h2 id="sec-7">7 · R3 campaign — beyond-champion / 第二期战役(超越冠军)</h2>
 <p><b>Campaign <code>gvr-topk-r3</code></b> (<code>e5q1zgrfhs0z57dj6850kc444r</code>, started 07-21 13:40Z; 6 agents/round =
@@ -290,6 +353,12 @@ joins against the REPORT rival sweep, same protocol as §6.<br>
 <span class="cng">第二期以 §6 冠军为 baseline(平台 trace 逐格时间 + 源码内联 prompt);判决 = 865 真实格,nsys 冷-L2,
 同卡配对 vs <b>PR#16457 当前 head b14ec40e1b</b>;每次运行逐档锚检(新旧 head 锚差中位 1.005);对手比值经 PR 臂逐格归一,口径与 §6 一致。</span></p>
 {kpis}
+<h3>7.0 Timeline / 时间线</h3>
+<div class="vizR"><figure style="margin:8px 0">{tl}
+<figcaption style="font-size:0.9em;color:#444"><b>Fig. R0 — R3 campaign timeline: cloud rounds (top lane) vs local
+verify arm (bottom lane).</b> Hover markers for details; colors = event class.<br>
+<span class="cng">图 R0 — 第二期战役时间线:上=云端轮次(内部尺度),下=本地判决臂(nsys 冷-L2);悬停看详情;颜色=事件类别。</span>
+</figcaption></figure></div>
 <h3>7.1 Candidate ladder / 候选阶梯(均为全 865 格判决)</h3>
 {ladder}
 <p><span class="cng">compB 对 compA 净增 +1.3%:aef33fac 的 topk_mid 单 CTA 尾部选择档治愈 N=16387/8195 弱档
