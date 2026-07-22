@@ -1,3 +1,6 @@
 nsys_reps/
+nsys_reps_rv/
 compB_src/build_pt/
 results/*.log
+results_rv/*.log
+results*/driver*.log
