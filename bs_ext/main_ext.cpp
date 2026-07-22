@@ -25,6 +25,14 @@ unsigned int topk_tp2_fallbacks();
 void topk_launch_tp3(const float* logits, long W, int n, int k, int* out,
                      int BS, cudaStream_t stream);
 unsigned int topk_tp3_fallbacks();
+void topk_launch_auto(const float* logits, long W, int n, int k, int* out,
+                      int BS, cudaStream_t stream);
+int topk_auto_pick(int n, int BS);
+void topk_launch_tp4(const float* logits, long W, int n, int k, int* out,
+                     int BS, cudaStream_t stream);
+unsigned int topk_tp4_fallbacks();
+void topk_set_tp4_max_bs(int v);
+void topk_set_forceC(int c3, int c4);
 void topk_tp3_stats(int out3[3]);
 void topk_ext_info(int n, int k, int BS, int info[5]);
 void topk_fast_stats(int minb, int out5[5]);
@@ -90,6 +98,34 @@ void run_batch_tp3(torch::Tensor logits, int64_t n_valid,
 
 int64_t tp3_fallbacks() { return (int64_t)topk_tp3_fallbacks(); }
 
+void run_batch_auto(torch::Tensor logits, int64_t n_valid,
+                    torch::Tensor indices) {
+    TORCH_CHECK(logits.is_contiguous() && indices.is_contiguous());
+    auto stream = at::cuda::getCurrentCUDAStream();
+    topk_launch_auto(logits.data_ptr<float>(), (long)logits.size(1),
+                     (int)n_valid, (int)indices.size(1),
+                     indices.data_ptr<int>(), (int)logits.size(0),
+                     stream.stream());
+}
+
+void run_batch_tp4(torch::Tensor logits, int64_t n_valid,
+                   torch::Tensor indices) {
+    TORCH_CHECK(logits.is_contiguous() && indices.is_contiguous());
+    auto stream = at::cuda::getCurrentCUDAStream();
+    topk_launch_tp4(logits.data_ptr<float>(), (long)logits.size(1),
+                    (int)n_valid, (int)indices.size(1),
+                    indices.data_ptr<int>(), (int)logits.size(0),
+                    stream.stream());
+}
+
+int64_t tp4_fallbacks() { return (int64_t)topk_tp4_fallbacks(); }
+void set_tp4_max_bs(int64_t v) { topk_set_tp4_max_bs((int)v); }
+void set_forceC(int64_t c3, int64_t c4) { topk_set_forceC((int)c3, (int)c4); }
+
+int64_t auto_pick(int64_t n, int64_t bs) {
+    return (int64_t)topk_auto_pick((int)n, (int)bs);
+}
+
 std::vector<int64_t> tp3_stats() {
     int s[3] = {0, 0, 0};
     topk_tp3_stats(s);
@@ -138,6 +174,13 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
           "tp3 fused single-kernel mid-BS arm");
     m.def("tp3_fallbacks", &tp3_fallbacks, "read-and-reset tp3 fallback count");
     m.def("tp3_stats", &tp3_stats, "(numRegs, localBytes, cap) for tp3_kernel");
+    m.def("run_batch_auto", &run_batch_auto,
+          "unified dispatcher: v4 single-wave / tp3 / tp2 by (n, BS)");
+    m.def("auto_pick", &auto_pick, "arm id the dispatcher would choose");
+    m.def("run_batch_tp4", &run_batch_tp4, "tp4 exact-hist fused 2-pass arm");
+    m.def("tp4_fallbacks", &tp4_fallbacks, "read-and-reset tp4 ladder count");
+    m.def("set_tp4_max_bs", &set_tp4_max_bs, "dispatcher tp4/tp3 crossover");
+    m.def("set_forceC", &set_forceC, "debug: force tp3/tp4 C (0 = auto)");
     m.def("run_batch_pq", &run_batch_pq,
           "B' persistent-queue: one launch consumes the whole batch");
     m.def("pq_stats", &pq_stats, "resource stats for topk_fast_pq<minb>");
