@@ -60,3 +60,30 @@ drive_bs_ext.sh, parse_bs_ext.py -> ext_bs.csv. First launch of the driver
 was invalidated (missing `grep -E '^(flash|pro|v32) '` list filter -> 3
 shards ran the same cell and overwrote one nsys rep; quarantined in
 contaminated_run1/, full re-run clean).
+
+## Register-diet follow-up (active 2 -> 4) — DONE, same day
+
+Diagnosis (`fast_stats`): limiter was REGISTERS, not smem/carveout —
+topk_fast<1> = 56 regs / 41.3KB smem / active=2 (max-carveout no-op).
+`__launch_bounds__(512, MINB)` template: MINB=3 -> 40 regs + 16B spill,
+active=3; **MINB=4 -> 32 regs, ZERO local spill, active=4** -> cap=592,
+rows_per_wave=9 at team=65.
+
+nsys cold-L2 verdict (diet_bs.csv, 4 arms paired per cell, 48/48 exact),
+N=131075, ext_v4 vs the validated ext_v1 (active=2) and gvr_pr:
+
+| BS | v4 waves | v4/v1 (fl/pro) | v4/gvr (fl/pro) | pooled gm v4/gvr |
+|---|---|---|---|---|
+| 1 | 1 | 0.98 / 0.98 | 2.69 / 1.95 | 2.29 |
+| 4 | 1 | 0.98 / 0.98 | 2.43 / 1.75 | 2.06 |
+| 8 | **1** (was 2) | **1.73 / 1.74** | 2.20 / 1.61 | **1.88** |
+| 16 | 2 (was 4) | 1.73 / 1.76 | 1.13 / 0.84 | 0.98 |
+| 32 | 4 | 1.73 / 1.77 | 0.62 / 0.46 | 0.54 |
+
+- Diet tax at BS<=4: ~2% (32-reg codegen, no spill) — acceptable.
+- BS=8 now fits ONE wave: 11.2us (~= BS=1's 9.0us + 24%), 1.73x over v1;
+  win vs PR arm extends through BS=8 (both cells), pooled crossover moves
+  BS~8 -> BS~16 (flash still wins at 16, pro crosses ~12).
+- Multi-wave region gains a uniform 1.73-1.77x from halved wave count.
+- Ship shape: ext_v4 (MINB=4) dominates v1 from BS=8 up and costs ~2% at
+  BS<=4; single-variant ship = v4, or v1@BS<=4 + v4@BS>=8 if the 2% matters.

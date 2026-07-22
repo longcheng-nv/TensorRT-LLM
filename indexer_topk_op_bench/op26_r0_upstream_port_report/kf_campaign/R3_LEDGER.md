@@ -110,6 +110,17 @@ batched arm. Next lever: register diet on topk_fast to raise active 2->4+
 (smem allows 5), doubling rows_per_wave and pushing the crossover out.
 Details + protocol: kf_bs_scaling/ext/RESULTS.md (ext_bs.csv canonical).
 
+**Register-diet DONE (same day): active 2->4 achieved, crossover pushed
+BS~8 -> BS~16.** Limiter was registers (56 regs), NOT smem/carveout.
+`__launch_bounds__(512,4)` template forces 32 regs with ZERO local spill
+-> cap 592, rows_per_wave 9 @ team=65. nsys verdict (48/48 exact,
+diet_bs.csv): diet tax ~2% at BS<=4; BS=8 now single-wave 11.2us =
+1.73x over active=2 ext, 2.20/1.61x vs gvr_pr; multi-wave region uniformly
++1.73-1.77x; pooled v4-vs-gvr gm: 2.29/2.06/1.88/0.98/0.54 at BS
+1/4/8/16/32. Ship shape: single variant MINB=4 (dominates from BS=8, -2%
+below) or v1@BS<=4 + v4@BS>=8 dispatch. active=5 would need <=25 regs —
+diminishing; remaining headroom is the persistent queue (B').
+
 One-line thesis: the collapse is a misallocated parallelism axis, not an
 algorithm loss — reallocate the co-residency budget from "1 row x whole GPU"
 to "BS rows x ceil(n/2048)-CTA teams"; the barrier demotes to team scope

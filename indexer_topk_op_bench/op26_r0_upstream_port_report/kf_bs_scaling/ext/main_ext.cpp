@@ -13,7 +13,10 @@
 
 void topk_launch_ext(const float* logits, long W, int n, int k, int* out,
                      int BS, cudaStream_t stream);
+void topk_launch_ext_v(const float* logits, long W, int n, int k, int* out,
+                       int BS, int minb, cudaStream_t stream);
 void topk_ext_info(int n, int k, int BS, int info[5]);
+void topk_fast_stats(int minb, int out5[5]);
 
 void run_batch_ext(torch::Tensor logits, int64_t n_valid,
                    torch::Tensor indices) {
@@ -23,6 +26,22 @@ void run_batch_ext(torch::Tensor logits, int64_t n_valid,
                     (int)n_valid, (int)indices.size(1),
                     indices.data_ptr<int>(), (int)logits.size(0),
                     stream.stream());
+}
+
+void run_batch_ext_v(torch::Tensor logits, int64_t n_valid,
+                     torch::Tensor indices, int64_t minb) {
+    TORCH_CHECK(logits.is_contiguous() && indices.is_contiguous());
+    auto stream = at::cuda::getCurrentCUDAStream();
+    topk_launch_ext_v(logits.data_ptr<float>(), (long)logits.size(1),
+                      (int)n_valid, (int)indices.size(1),
+                      indices.data_ptr<int>(), (int)logits.size(0),
+                      (int)minb, stream.stream());
+}
+
+std::vector<int64_t> fast_stats(int64_t minb) {
+    int s[5] = {0, 0, 0, 0, 0};
+    topk_fast_stats((int)minb, s);
+    return {s[0], s[1], s[2], s[3], s[4]};
 }
 
 std::vector<int64_t> ext_info(int64_t n, int64_t k, int64_t bs) {
@@ -36,4 +55,9 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
           "compB BS>1 extension: batched exact top-k, one call per batch");
     m.def("ext_info", &ext_info,
           "(path, team, cap, rows_per_wave, waves) for (n, k, BS)");
+    m.def("run_batch_ext_v", &run_batch_ext_v,
+          "extension with register-diet variant minb in {1,2,3,4}");
+    m.def("fast_stats", &fast_stats,
+          "(numRegs, staticSmem, localBytes, active_default, active_maxcarveout)"
+          " for topk_fast<minb>");
 }
