@@ -181,9 +181,13 @@ __device__ __forceinline__ float max_below_pass(Smem<TB>* s, const float4* base,
 }
 
 // P1: hint gather + stats + rung ladder from the hint-value CCDF.
-template <int TB, int AR = RUNGS>
+template <int TB, int AR = RUNGS, int HS = 1>
 __device__ __forceinline__ void phase1(Smem<TB>* s, const float* __restrict__ logits,
                                        const int* __restrict__ pre_idx, int K, int npad, int tid) {
+  // HS > 1: sample every HS-th hint. The initial threshold ladder comes from
+  // the sample's quantiles; the secant loop's below-bracket extension covers
+  // the lost >=K floor guarantee (skeleton unchanged: hint guess -> secant).
+  const int Ks = (K + HS - 1) / HS;   // sampled hint count
   constexpr int T = TB;
   constexpr int NWARP = TB / 32;
   if (tid < 64) s->hist[tid] = 0;
@@ -192,7 +196,7 @@ __device__ __forceinline__ void phase1(Smem<TB>* s, const float* __restrict__ lo
   float mn = FLT_MAX, mx = -FLT_MAX;
 #pragma unroll
   for (int jj = 0; jj < 4; ++jj) {
-    int j = tid + jj * T;
+    int j = (tid + jj * T) * HS;
     hok[jj] = (j < K);
     if (hok[jj]) {
       int hidx = __ldg(pre_idx + j);
@@ -258,13 +262,13 @@ __device__ __forceinline__ void phase1(Smem<TB>* s, const float* __restrict__ lo
     // lane covers bins [62-2t, 63-2t]; x = count of hints in bins >= 62-2t
     int A = x - S;  // count strictly above this lane's chunk
     float binw = (hmax - hmin) * (1.0f / 64.0f);
-    int qtrim = (K * 97) / 100;
+    int qtrim = (Ks * 97) / 100;
     if (A < qtrim && x >= qtrim) {
       int b = (A + h1 >= qtrim) ? (63 - 2 * tid) : (62 - 2 * tid);
       s->hminmax[0] = hmin + binw * (float)b;  // trim point
     }
     if (tid == 31 && x < qtrim) s->hminmax[0] = hmin;  // all bins can't reach qtrim
-    if (tid == 0) s->rungs[AR - 1] = hmin;  // guaranteed count >= K globally
+    if (tid == 0) s->rungs[AR - 1] = hmin;  // HS==1: guaranteed count >= K globally
   }
   __syncthreads();
   float tlow = s->hminmax[0];
@@ -297,18 +301,21 @@ __device__ __forceinline__ void phase1(Smem<TB>* s, const float* __restrict__ lo
     // Ladder: one rung extrapolated ABOVE hmax (low-overlap layers can need a
     // threshold above every hint value), quantile rungs below, hmin floor.
     int qt[RUNGS - 2];
-    if constexpr (AR == 6) {
-      qt[0] = (K * 15) / 100;
-      qt[1] = (K * 40) / 100;
-      qt[2] = (K * 70) / 100;
-      qt[3] = (K * 92) / 100;
+    if constexpr (AR == 4) {
+      qt[0] = (Ks * 25) / 100;
+      qt[1] = (Ks * 65) / 100;
+    } else if constexpr (AR == 6) {
+      qt[0] = (Ks * 15) / 100;
+      qt[1] = (Ks * 40) / 100;
+      qt[2] = (Ks * 70) / 100;
+      qt[3] = (Ks * 92) / 100;
     } else {
-      qt[0] = (K * 10) / 100;
-      qt[1] = (K * 25) / 100;
-      qt[2] = (K * 45) / 100;
-      qt[3] = (K * 65) / 100;
-      qt[4] = (K * 82) / 100;
-      qt[5] = (K * 94) / 100;
+      qt[0] = (Ks * 10) / 100;
+      qt[1] = (Ks * 25) / 100;
+      qt[2] = (Ks * 45) / 100;
+      qt[3] = (Ks * 65) / 100;
+      qt[4] = (Ks * 82) / 100;
+      qt[5] = (Ks * 94) / 100;
     }
     int tot = __shfl_sync(0xFFFFFFFFu, x, 31);  // total hints in stage-2 range
 #pragma unroll
@@ -324,11 +331,15 @@ __device__ __forceinline__ void phase1(Smem<TB>* s, const float* __restrict__ lo
   __syncthreads();
 }
 
-template <int CS, int TB>
+template <int CS, int TB, int AR = RUNGS, int HS = 1>
 __global__ void __launch_bounds__(TB, 1) gvr_topk_kernel(
     const float* __restrict__ logits, const int* __restrict__ pre_idx,
     int* __restrict__ out, int npad, int K, int kC) {
   extern __shared__ __align__(16) unsigned char smem_raw[];
+  // batched rows: one cluster per row along grid.y; BS=1 keeps row 0 (no-op)
+  logits += (size_t)blockIdx.y * npad;
+  pre_idx += (size_t)blockIdx.y * K;
+  out += (size_t)blockIdx.y * K;
   constexpr int T = TB;
   constexpr int NWARP = TB / 32;
   Smem<TB>* s = reinterpret_cast<Smem<TB>*>(smem_raw);
@@ -368,8 +379,8 @@ __global__ void __launch_bounds__(TB, 1) gvr_topk_kernel(
     C = s->rcnt[0];
     cbase = s->rpre[0];
   } else {
-    phase1<TB>(s, logits, pre_idx, K, npad, tid);
-    count_pass<TB, RUNGS>(s, base, v0, v1, tid);
+    phase1<TB, AR, HS>(s, logits, pre_idx, K, npad, tid);
+    count_pass<TB, AR>(s, base, v0, v1, tid);
     exchange_counts<TB, CS>(s, xch & 1, tid, rank);
     xch++;
 
@@ -377,7 +388,7 @@ __global__ void __launch_bounds__(TB, 1) gvr_topk_kernel(
     int c_lo = 0x7fffffff, c_hi = 0;
     float span0 = fmaxf(s->hminmax[1] - s->hminmax[0], 1e-3f);
     float lct = __logf(sqrtf((float)K * (float)kC));  // secant target (geometric mid)
-    int Rcur = RUNGS;
+    int Rcur = AR;
     for (int pass = 0;; ++pass) {
       // rungs descend in t, so counts ascend; first rung with count >= K
       int j = 0;
@@ -393,40 +404,40 @@ __global__ void __launch_bounds__(TB, 1) gvr_topk_kernel(
       if (j > 0 && s->rungs[j - 1] <= t_hi) { t_hi = s->rungs[j - 1]; c_hi = s->rcnt[j - 1]; }
 
       bool descend = (pass >= MAXPASS);
-      float nr[RUNGS];  // next pass's rung ladder (descending)
+      float nr[AR];  // next pass's rung ladder (descending)
       if (!descend) {
         if (isinf(t_hi)) {
           // every measured count > kC: geometric ladder walking up
           float step = span0 * (float)(1 << (pass * 3 < 24 ? pass * 3 : 24));
 #pragma unroll
-          for (int r = 0; r < RUNGS; ++r) nr[r] = t_lo + step * (float)(1 << (RUNGS - 1 - r));
+          for (int r = 0; r < AR; ++r) nr[r] = t_lo + step * (float)(1 << (AR - 1 - r));
           if (isinf(nr[0])) descend = true;
         } else if (t_lo == -FLT_MAX) {
           float step = span0 * (float)(1 << (pass * 3 < 24 ? pass * 3 : 24));
 #pragma unroll
-          for (int r = 0; r < RUNGS; ++r) nr[r] = t_hi - step * (float)(1 << r);
+          for (int r = 0; r < AR; ++r) nr[r] = t_hi - step * (float)(1 << r);
         } else {
           // secant anchor: log-CCDF is near-linear in t, so counts spaced
           // geometrically between c_hi and c_lo map to a LINEAR ladder in t.
           // 8 inner rungs shrink the bracket >= 9x per pass.
-          float dt = (t_hi - t_lo) * (1.0f / (float)(RUNGS + 1));
+          float dt = (t_hi - t_lo) * (1.0f / (float)(AR + 1));
 #pragma unroll
-          for (int r = 0; r < RUNGS; ++r) nr[r] = t_hi - dt * (float)(r + 1);
-          if (!(nr[RUNGS - 1] > t_lo && nr[0] < t_hi)) descend = true;  // bracket collapsed: plateau
+          for (int r = 0; r < AR; ++r) nr[r] = t_hi - dt * (float)(r + 1);
+          if (!(nr[AR - 1] > t_lo && nr[0] < t_hi)) descend = true;  // bracket collapsed: plateau
         }
       }
       if (descend) break;
 
       __syncthreads();
-      if (tid < RUNGS) {
+      if (tid < AR) {
         s->rcnt_local[tid] = 0;
         s->rungs[tid] = nr[tid];
       }
       __syncthreads();
-      count_pass<TB, RUNGS>(s, base, v0, v1, tid);
+      count_pass<TB, AR>(s, base, v0, v1, tid);
       exchange_counts<TB, CS>(s, xch & 1, tid, rank);
       xch++;
-      Rcur = RUNGS;
+      Rcur = AR;
     }
 
     if (chosen < 0) {
@@ -701,11 +712,15 @@ __device__ __forceinline__ float max_below_reg(Smem<TB>* s, const float4 (&a)[MA
   }
 }
 
-template <int CS, int TB, int MAXV, int AR = RUNGS>
+template <int CS, int TB, int MAXV, int AR = RUNGS, int HS = 1>
 __global__ void __launch_bounds__(TB, 1) gvr_topk_reg(
     const float* __restrict__ logits, const int* __restrict__ pre_idx,
     int* __restrict__ out, int npad, int K, int kC) {
   extern __shared__ __align__(16) unsigned char smem_raw[];
+  // batched rows: one cluster per row along grid.y; BS=1 keeps row 0 (no-op)
+  logits += (size_t)blockIdx.y * npad;
+  pre_idx += (size_t)blockIdx.y * K;
+  out += (size_t)blockIdx.y * K;
   constexpr int T = TB;
   constexpr int NWARP = TB / 32;
   Smem<TB>* s = reinterpret_cast<Smem<TB>*>(smem_raw);
@@ -736,7 +751,7 @@ __global__ void __launch_bounds__(TB, 1) gvr_topk_reg(
   int chosen = -1, C = 0, cbase = 0;
   int m_gt = -1;  // >= 0 --> plateau direct-emit mode
 
-  phase1<TB, AR>(s, logits, pre_idx, K, npad, tid);
+  phase1<TB, AR, HS>(s, logits, pre_idx, K, npad, tid);
   count_reg<TB, AR, MAXV>(s, a, tid);
   exchange_counts<TB, CS, AR>(s, xch & 1, tid, rank);
   xch++;
@@ -1214,6 +1229,9 @@ template <int TB>
 __global__ void __launch_bounds__(TB, 1) direct_topk_kernel(
     const float* __restrict__ logits, int* __restrict__ out, int npad, int K) {
   extern __shared__ __align__(16) unsigned char smem_raw[];
+  // batched rows: one CTA per row along grid.y; BS=1 keeps row 0 (no-op)
+  logits += (size_t)blockIdx.y * npad;
+  out += (size_t)blockIdx.y * K;
   DSmem<TB>* s = reinterpret_cast<DSmem<TB>*>(smem_raw);
   int tid = threadIdx.x;
   for (int b = tid; b < 2048; b += TB) s->hist[b] = 0;
@@ -1236,32 +1254,34 @@ __global__ void __launch_bounds__(TB, 1) direct_topk_kernel(
 }
 
 template <int TB>
-static void launch_direct(const float* logits, int* out, int npad, int K, cudaStream_t stream) {
+static void launch_direct(const float* logits, int* out, int npad, int K, int BS,
+                          cudaStream_t stream) {
   static bool inited = false;
   if (!inited) {
     cudaFuncSetAttribute(direct_topk_kernel<TB>, cudaFuncAttributeMaxDynamicSharedMemorySize,
                          (int)sizeof(DSmem<TB>));
     inited = true;
   }
-  direct_topk_kernel<TB><<<1, TB, sizeof(DSmem<TB>), stream>>>(logits, out, npad, K);
+  direct_topk_kernel<TB><<<dim3(1, BS), TB, sizeof(DSmem<TB>), stream>>>(logits, out, npad, K);
 }
 
-template <int CS, int TB>
+template <int CS, int TB, int AR = RUNGS, int HS = 1>
 static void launch_gvr(const float* logits, const int* pre_idx, int* out, int npad, int K, int kC,
-                       cudaStream_t stream) {
+                       int BS, cudaStream_t stream) {
   static bool inited = false;
   if (!inited) {
-    cudaFuncSetAttribute(gvr_topk_kernel<CS, TB>, cudaFuncAttributeMaxDynamicSharedMemorySize,
+    cudaFuncSetAttribute(gvr_topk_kernel<CS, TB, AR, HS>, cudaFuncAttributeMaxDynamicSharedMemorySize,
                          (int)sizeof(Smem<TB>));
     if (CS > 8)
-      cudaFuncSetAttribute(gvr_topk_kernel<CS, TB>, cudaFuncAttributeNonPortableClusterSizeAllowed, 1);
+      cudaFuncSetAttribute(gvr_topk_kernel<CS, TB, AR, HS>, cudaFuncAttributeNonPortableClusterSizeAllowed, 1);
     inited = true;
   }
   if constexpr (CS == 1) {
-    gvr_topk_kernel<1, TB><<<1, TB, sizeof(Smem<TB>), stream>>>(logits, pre_idx, out, npad, K, kC);
+    gvr_topk_kernel<1, TB, AR, HS><<<dim3(1, BS), TB, sizeof(Smem<TB>), stream>>>(
+        logits, pre_idx, out, npad, K, kC);
   } else {
     cudaLaunchConfig_t cfg = {};
-    cfg.gridDim = dim3(CS, 1, 1);
+    cfg.gridDim = dim3(CS, BS, 1);
     cfg.blockDim = dim3(TB, 1, 1);
     cfg.dynamicSmemBytes = sizeof(Smem<TB>);
     cfg.stream = stream;
@@ -1272,28 +1292,29 @@ static void launch_gvr(const float* logits, const int* pre_idx, int* out, int np
     attrs[0].val.clusterDim.z = 1;
     cfg.attrs = attrs;
     cfg.numAttrs = 1;
-    cudaLaunchKernelEx(&cfg, gvr_topk_kernel<CS, TB>, logits, pre_idx, out, npad, K, kC);
+    cudaLaunchKernelEx(&cfg, gvr_topk_kernel<CS, TB, AR, HS>, logits, pre_idx, out, npad, K, kC);
   }
 }
 
 
-template <int CS, int TB, int MAXV, int AR = RUNGS>
+template <int CS, int TB, int MAXV, int AR = RUNGS, int HS = 1>
 static void launch_reg(const float* logits, const int* pre_idx, int* out, int npad, int K, int kC,
-                       cudaStream_t stream) {
+                       int BS, cudaStream_t stream) {
   static bool inited = false;
   if (!inited) {
-    cudaFuncSetAttribute(gvr_topk_reg<CS, TB, MAXV, AR>, cudaFuncAttributeMaxDynamicSharedMemorySize,
+    cudaFuncSetAttribute(gvr_topk_reg<CS, TB, MAXV, AR, HS>, cudaFuncAttributeMaxDynamicSharedMemorySize,
                          (int)sizeof(Smem<TB>));
     if (CS > 8)
-      cudaFuncSetAttribute(gvr_topk_reg<CS, TB, MAXV, AR>,
+      cudaFuncSetAttribute(gvr_topk_reg<CS, TB, MAXV, AR, HS>,
                            cudaFuncAttributeNonPortableClusterSizeAllowed, 1);
     inited = true;
   }
   if constexpr (CS == 1) {
-    gvr_topk_reg<1, TB, MAXV, AR><<<1, TB, sizeof(Smem<TB>), stream>>>(logits, pre_idx, out, npad, K, kC);
+    gvr_topk_reg<1, TB, MAXV, AR, HS><<<dim3(1, BS), TB, sizeof(Smem<TB>), stream>>>(
+        logits, pre_idx, out, npad, K, kC);
   } else {
     cudaLaunchConfig_t cfg = {};
-    cfg.gridDim = dim3(CS, 1, 1);
+    cfg.gridDim = dim3(CS, BS, 1);
     cfg.blockDim = dim3(TB, 1, 1);
     cfg.dynamicSmemBytes = sizeof(Smem<TB>);
     cfg.stream = stream;
@@ -1304,41 +1325,199 @@ static void launch_reg(const float* logits, const int* pre_idx, int* out, int np
     attrs[0].val.clusterDim.z = 1;
     cfg.attrs = attrs;
     cfg.numAttrs = 1;
-    cudaLaunchKernelEx(&cfg, gvr_topk_reg<CS, TB, MAXV, AR>, logits, pre_idx, out, npad, K, kC);
+    cudaLaunchKernelEx(&cfg, gvr_topk_reg<CS, TB, MAXV, AR, HS>, logits, pre_idx, out, npad, K, kC);
   }
 }
 
-void gvr_topk_launch(const float* logits, const int* pre_idx, int* out, int npad, int K,
+// BS>1 dispatch (op38): probe-measured per-(npad, K, BS) winners.
+// Three regimes per tier: low BS = the BS=1-optimal register-resident ladder
+// (launch amortizes, latency dominates), mid BS = single-cluster register
+// path (fewer sync partners, more rows in flight), high BS = streaming
+// re-scan kernel (low registers -> 2 CTAs/SM occupancy; per-wave working set
+// is L2-resident so count passes are cheap) with hint sampling (HS) and a
+// short AR4/AR6 ladder. Skeleton everywhere: preIdx-hinted threshold guess ->
+// secant-log refinement -> exact refine/emit.
+static void launch_bs(const float* logits, const int* pre_idx, int* out, int npad, int K, int kC,
+                      int BS, cudaStream_t stream) {
+  if (npad <= DKCMAX) {  // direct tier: batched radix CTAs; streaming from BS>=256
+    if (BS < 256)
+      launch_direct<1024>(logits, out, npad, K, BS, stream);
+    else
+      launch_gvr<1, 512, 4, 2>(logits, pre_idx, out, npad, K, kC, BS, stream);
+    return;
+  }
+  if (npad < 16896) {  // CS1 register-resident holds to BS<=128
+    if (BS <= 128)
+      launch_reg<1, 512, 9>(logits, pre_idx, out, npad, K, kC, BS, stream);
+    else
+      launch_gvr<1, 512, 4, 2>(logits, pre_idx, out, npad, K, kC, BS, stream);
+    return;
+  }
+  if (npad <= 49152) {
+    if (BS <= 8) {
+      launch_reg<8, 512, 3>(logits, pre_idx, out, npad, K, kC, BS, stream);
+    } else if (BS <= 128) {
+      if (K <= 512)
+        launch_reg<1, 1024, 9, 4, 2>(logits, pre_idx, out, npad, K, kC, BS, stream);
+      else
+        launch_reg<1, 1024, 9, 6, 2>(logits, pre_idx, out, npad, K, kC, BS, stream);
+    } else {
+      if (K <= 512)
+        launch_gvr<1, 512, 4, 2>(logits, pre_idx, out, npad, K, kC, BS, stream);
+      else
+        launch_gvr<1, 512, 6, 4>(logits, pre_idx, out, npad, K, kC, BS, stream);
+    }
+    return;
+  }
+  if (npad <= 98304) {
+    if (BS <= 8)
+      // vpc = ceil(npad/4/8): MAXV4 only holds to npad 65536 (original tiers)
+      if (npad <= 65536)
+        launch_reg<8, 512, 4>(logits, pre_idx, out, npad, K, kC, BS, stream);
+      else
+        launch_reg<8, 512, 8>(logits, pre_idx, out, npad, K, kC, BS, stream);
+    else if (BS <= 64)
+      launch_gvr<2, 1024, 6, 4>(logits, pre_idx, out, npad, K, kC, BS, stream);
+    else
+      launch_gvr<1, 512, 4, 2>(logits, pre_idx, out, npad, K, kC, BS, stream);
+    return;
+  }
+  if (npad <= 131072) {
+    if (BS <= 4)
+      launch_reg<8, 512, 8>(logits, pre_idx, out, npad, K, kC, BS, stream);
+    else if (BS <= 32)
+      launch_reg<4, 1024, 9, 6, 2>(logits, pre_idx, out, npad, K, kC, BS, stream);
+    else if (BS <= 64)
+      launch_gvr<2, 1024, 4, 2>(logits, pre_idx, out, npad, K, kC, BS, stream);
+    else
+      launch_gvr<1, 1024, 4, 2>(logits, pre_idx, out, npad, K, kC, BS, stream);
+    return;
+  }
+  if (npad <= 163840) {
+    if (BS <= 4) {
+      if (K >= 2048)
+        launch_reg<16, 512, 5, 6>(logits, pre_idx, out, npad, K, kC, BS, stream);
+      else
+        launch_reg<16, 512, 5>(logits, pre_idx, out, npad, K, kC, BS, stream);
+    } else if (BS <= 16) {
+      launch_reg<8, 512, 10, 6, 4>(logits, pre_idx, out, npad, K, kC, BS, stream);
+    } else if (BS <= 64) {
+      launch_gvr<2, 1024, 4, 2>(logits, pre_idx, out, npad, K, kC, BS, stream);
+    } else {
+      launch_gvr<1, 1024, 4, 2>(logits, pre_idx, out, npad, K, kC, BS, stream);
+    }
+    return;
+  }
+  if (npad <= 262144) {
+    if (BS <= 4) {
+      if (K == 2048)
+        launch_reg<16, 512, 8>(logits, pre_idx, out, npad, K, kC, BS, stream);
+      else
+        launch_reg<16, 512, 8, 6>(logits, pre_idx, out, npad, K, kC, BS, stream);
+    } else if (BS <= 16) {
+      if (K <= 512)
+        launch_reg<8, 1024, 8, 4, 2>(logits, pre_idx, out, npad, K, kC, BS, stream);
+      else
+        launch_reg<8, 1024, 8, 6, 2>(logits, pre_idx, out, npad, K, kC, BS, stream);
+    } else if (BS <= 64) {
+      if (K <= 512)
+        launch_gvr<2, 1024, 4, 2>(logits, pre_idx, out, npad, K, kC, BS, stream);
+      else
+        launch_gvr<2, 1024, 6, 4>(logits, pre_idx, out, npad, K, kC, BS, stream);
+    } else {
+      if (K <= 512)
+        launch_gvr<1, 1024, 4, 2>(logits, pre_idx, out, npad, K, kC, BS, stream);
+      else
+        launch_gvr<1, 1024, 4, 4>(logits, pre_idx, out, npad, K, kC, BS, stream);
+    }
+    return;
+  }
+  launch_gvr<16, 512>(logits, pre_idx, out, npad, K, kC, BS, stream);
+}
+
+void gvr_topk_launch(const float* logits, const int* pre_idx, int* out, int npad, int K, int BS,
                      cudaStream_t stream) {
   int kC = (K >= 2048) ? 8192 : 6144;
+  if (BS > 1) return launch_bs(logits, pre_idx, out, npad, K, kC, BS, stream);
+  // BS==1: the r3_v11 ladder below is untouched (865-cell verdict carries over).
   // MAXV is matched tightly to each tier: mostly-dummy register slots cost
   // real time (predicated loads + dead compares), so keep slots nearly full.
+  // Batched rows ride grid.y (one cluster per row); BS=1 grid is identical to
+  // the single-row original, so the BS=1 verdict carries over unchanged.
   if (npad <= DKCMAX)
-    launch_direct<1024>(logits, out, npad, K, stream);
+    launch_direct<1024>(logits, out, npad, K, BS, stream);
   else if (npad < 16384)
-    launch_reg<1, 512, 8>(logits, pre_idx, out, npad, K, kC, stream);   // vpc <= 4095
+    launch_reg<1, 512, 8>(logits, pre_idx, out, npad, K, kC, BS, stream);   // vpc <= 4095
   else if (npad < 32768)
-    launch_reg<4, 512, 4>(logits, pre_idx, out, npad, K, kC, stream);   // vpc <= 2048
+    launch_reg<4, 512, 4>(logits, pre_idx, out, npad, K, kC, BS, stream);   // vpc <= 2048
   else if (npad <= 49152)
-    launch_reg<8, 512, 3>(logits, pre_idx, out, npad, K, kC, stream);   // vpc <= 1536
+    launch_reg<8, 512, 3>(logits, pre_idx, out, npad, K, kC, BS, stream);   // vpc <= 1536
   else if (npad <= 65536)
-    launch_reg<8, 512, 4>(logits, pre_idx, out, npad, K, kC, stream);   // vpc <= 2048
+    launch_reg<8, 512, 4>(logits, pre_idx, out, npad, K, kC, BS, stream);   // vpc <= 2048
   else if (npad <= 131072)
-    launch_reg<8, 512, 8>(logits, pre_idx, out, npad, K, kC, stream);   // vpc <= 4096
+    launch_reg<8, 512, 8>(logits, pre_idx, out, npad, K, kC, BS, stream);   // vpc <= 4096
   else if (npad <= 163840)
     // AR6's shifted quantile ladder measured faster on every K=2048 cell of
     // this tier (-0.5 to -3.1us); K<=1024 regressed (+3us convergence misses).
     if (K >= 2048)
-      launch_reg<16, 512, 5, 6>(logits, pre_idx, out, npad, K, kC, stream);  // vpc <= 2560
+      launch_reg<16, 512, 5, 6>(logits, pre_idx, out, npad, K, kC, BS, stream);  // vpc <= 2560
     else
-      launch_reg<16, 512, 5>(logits, pre_idx, out, npad, K, kC, stream);
+      launch_reg<16, 512, 5>(logits, pre_idx, out, npad, K, kC, BS, stream);
   else if (npad <= 262144)
     // AR6 measured faster for K=512 (-0.7 to -1.3us) and K=1024 (r2-validated)
     // at this tier; K=2048 unmeasured here, keep the denser AR8 ladder.
     if (K == 2048)
-      launch_reg<16, 512, 8>(logits, pre_idx, out, npad, K, kC, stream);  // vpc <= 4096
+      launch_reg<16, 512, 8>(logits, pre_idx, out, npad, K, kC, BS, stream);  // vpc <= 4096
     else
-      launch_reg<16, 512, 8, 6>(logits, pre_idx, out, npad, K, kC, stream);
+      launch_reg<16, 512, 8, 6>(logits, pre_idx, out, npad, K, kC, BS, stream);
   else
-    launch_gvr<16, 512>(logits, pre_idx, out, npad, K, kC, stream);     // streaming for huge n
+    launch_gvr<16, 512>(logits, pre_idx, out, npad, K, kC, BS, stream);     // streaming for huge n
+}
+
+// Probe entry: runtime (cs, maxv, ar) -> register-resident template variant.
+// Caller must guarantee vpc = ceil(npad/4/cs) <= maxv*512. Used to measure the
+// BS-aware (CS, MAXV) ladder empirically; production dispatch is built from
+// the winners.
+void gvr_topk_launch_cfg(const float* logits, const int* pre_idx, int* out, int npad, int K,
+                         int BS, int tb, int cs, int maxv, int ar, int hs, cudaStream_t stream) {
+  int kC = (K >= 2048) ? 8192 : 6144;
+#define CFGH(TBV, CSV, MVV, ARV, HSV) \
+  if (tb == TBV && cs == CSV && maxv == MVV && ar == ARV && hs == HSV) \
+    return launch_reg<CSV, TBV, MVV, ARV, HSV>(logits, pre_idx, out, npad, K, kC, BS, stream);
+  CFGH(1024, 1, 9, 8, 2) CFGH(1024, 1, 9, 8, 4) CFGH(1024, 1, 9, 6, 2) CFGH(1024, 1, 9, 4, 2)
+  CFGH(1024, 1, 9, 4, 1) CFGH(1024, 1, 9, 6, 1)
+  CFGH(1024, 2, 9, 8, 2) CFGH(1024, 2, 9, 8, 4) CFGH(1024, 2, 9, 6, 2)
+  CFGH(1024, 4, 9, 8, 2) CFGH(1024, 4, 9, 8, 4) CFGH(1024, 4, 9, 6, 2) CFGH(1024, 4, 9, 6, 1)
+  CFGH(1024, 8, 8, 6, 2) CFGH(1024, 8, 8, 6, 4) CFGH(1024, 8, 8, 4, 2)
+  CFGH(512, 1, 9, 8, 2) CFGH(512, 1, 9, 8, 4) CFGH(512, 1, 9, 4, 2)
+  CFGH(512, 8, 10, 6, 2) CFGH(512, 8, 10, 6, 4)
+  CFGH(512, 16, 8, 6, 2)
+#undef CFGH
+  // maxv == 0 -> streaming kernel (global re-scan per pass; low-reg, high-occ)
+#define CFGS(TBV, CSV, ARV, HSV) \
+  if (tb == TBV && cs == CSV && maxv == 0 && ar == ARV && hs == HSV) \
+    return launch_gvr<CSV, TBV, ARV, HSV>(logits, pre_idx, out, npad, K, kC, BS, stream);
+  CFGS(512, 1, 8, 1) CFGS(512, 2, 8, 1) CFGS(512, 4, 8, 1)
+  CFGS(1024, 1, 8, 1) CFGS(1024, 2, 8, 1) CFGS(1024, 4, 8, 1)
+  CFGS(1024, 1, 8, 2) CFGS(1024, 1, 8, 4) CFGS(1024, 1, 6, 2) CFGS(1024, 1, 6, 4)
+  CFGS(1024, 1, 4, 2) CFGS(1024, 1, 4, 4) CFGS(1024, 1, 6, 1) CFGS(1024, 1, 4, 1)
+  CFGS(1024, 2, 8, 2) CFGS(1024, 2, 6, 2) CFGS(1024, 2, 4, 2) CFGS(1024, 2, 6, 4)
+  CFGS(512, 1, 8, 2) CFGS(512, 1, 6, 2) CFGS(512, 1, 4, 2) CFGS(512, 1, 6, 4)
+#undef CFGS
+#define CFG(TBV, CSV, MVV, ARV) \
+  if (tb == TBV && cs == CSV && maxv == MVV && ar == ARV && hs == 1) \
+    return launch_reg<CSV, TBV, MVV, ARV>(logits, pre_idx, out, npad, K, kC, BS, stream);
+  CFG(512, 1, 8, 8) CFG(512, 1, 9, 8) CFG(512, 1, 9, 6)
+  CFG(512, 2, 5, 8) CFG(512, 2, 9, 8) CFG(512, 2, 9, 6)
+  CFG(512, 4, 4, 8) CFG(512, 4, 5, 8) CFG(512, 4, 9, 8) CFG(512, 4, 9, 6)
+  CFG(512, 8, 3, 8) CFG(512, 8, 5, 8) CFG(512, 8, 9, 8) CFG(512, 8, 10, 8)
+  CFG(512, 8, 9, 6) CFG(512, 8, 10, 6)
+  CFG(512, 16, 5, 8) CFG(512, 16, 8, 8) CFG(512, 16, 5, 6) CFG(512, 16, 8, 6)
+  CFG(1024, 1, 5, 8) CFG(1024, 1, 8, 8) CFG(1024, 1, 9, 8) CFG(1024, 1, 9, 6)
+  CFG(1024, 2, 5, 8) CFG(1024, 2, 9, 8) CFG(1024, 2, 9, 6)
+  CFG(1024, 4, 5, 8) CFG(1024, 4, 9, 8) CFG(1024, 4, 9, 6)
+  CFG(1024, 8, 5, 8) CFG(1024, 8, 8, 8) CFG(1024, 8, 5, 6) CFG(1024, 8, 8, 6)
+#undef CFG
+  // unknown combo: fall back to the production dispatch
+  gvr_topk_launch(logits, pre_idx, out, npad, K, BS, stream);
 }
