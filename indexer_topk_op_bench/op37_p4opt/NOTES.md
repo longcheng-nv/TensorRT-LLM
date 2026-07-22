@@ -100,3 +100,10 @@ nsys cold-L2, 25 batches. **SHIP RULE: PASS.**
 
 d1a DSMEM fixtures (validate_d1a_fixtures.py, GPU5): hit1.0/miss/noise/
 degrade x cs{2,4,8,16} x K{512,1024,2048} x {base,d1a,all} = 144 checks.
+
+## d1a DSMEM fixtures result (2026-07-22, GPU5)
+
+validate_d1a_fixtures.py: **144/144 OK, zero FAIL** — forced-hit(1.0) /
+forced-miss / noise / short-row degrade (do_cluster_sync=False with
+p4_peer_push ON) x cs{2,4,8,16} x K{512,1024,2048} x {base,d1a,all}.
+Ship item 3 CLOSED. Log: d1a_fixtures.log.
