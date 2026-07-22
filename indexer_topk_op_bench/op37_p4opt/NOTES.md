@@ -107,3 +107,20 @@ validate_d1a_fixtures.py: **144/144 OK, zero FAIL** — forced-hit(1.0) /
 forced-miss / noise / short-row degrade (do_cluster_sync=False with
 p4_peer_push ON) x cs{2,4,8,16} x K{512,1024,2048} x {base,d1a,all}.
 Ship item 3 CLOSED. Log: d1a_fixtures.log.
+
+## Phase differential result (2026-07-22, GPU4, gvrpkg37t ptime twin)
+
+26 rep cells x {base, all}, 20 cold-L2 launches, monotone 52/52, absolute us
+anchored to same-node ship run. **PASS: the speedup lives in P4.**
+- 25/26 cells: every non-P4 phase delta within gate (|d| <= max(0.4us,
+  15% d_total)); d_P4 ~= d_total everywhere (e.g. flash_128k_L42
+  d_total 5.51 / d_P4 5.39; pro_512k 3.39/3.56; v32_128k 2.11/2.51 with
+  small negative offsets in P1/P2 = compile/noise jitter).
+- 1 marginal flag: flash_512k_L02 p3_collect -0.42us in the all arm
+  (FASTER, not a regression; flash_1024k same direction +0.30). Mechanism:
+  d1a peer-push moves candidate transport out of the leader-wait window,
+  shifting the P3/P4 stamp boundary at cs=8. Benign by direction and by
+  mechanism; no phase regressed anywhere.
+Raw: ship/phase_diff_37.json, phase_diff_37.log. Ship item 2 CLOSED.
+
+## Ship checklist status: ALL GREEN (items 1-3); remaining = item 4 PR packaging.
