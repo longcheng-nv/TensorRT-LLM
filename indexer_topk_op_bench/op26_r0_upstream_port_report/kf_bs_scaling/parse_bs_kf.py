@@ -64,6 +64,10 @@ def main():
         rep = repdir / f"{jl.stem}.nsys-rep"
         kern = parse_rep(rep) if rep.exists() else {}
         span = parse_rep_span(rep) if rep.exists() else {}
+        fix = repdir / f"{jl.stem}_fix.nsys-rep"   # solo re-measure top-ups
+        if fix.exists():
+            kern.update(parse_rep(fix))
+            span.update(parse_rep_span(fix))
         for line in jl.read_text().splitlines():
             r = json.loads(line)
             if "error" in r:
