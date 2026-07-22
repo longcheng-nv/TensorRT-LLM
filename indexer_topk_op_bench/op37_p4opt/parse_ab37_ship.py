@@ -45,7 +45,8 @@ def main():
     us = {}       # (uuid, dt, arm) -> us
     meta = {}     # (uuid, dt) -> (cs, N, K, exact_base, exact_all)
     inexact = []
-    batches = sorted(SHIP.glob("ship_*.csv"))
+    # ENVELOPE RULING (user, 2026-07-22): verdict = real865 fp32 only.
+    batches = sorted(SHIP.glob("ship_real865_*.csv"))
     print(f"[parse] {len(batches)} completed batches")
     for c in batches:
         tag = c.stem[len("ship_"):]
@@ -110,18 +111,17 @@ def main():
             print(f"   {rg:10s} n={len(v):3d} gm={gm(v):.4f} "
                   f"min={min(v):.4f} max={max(v):.4f}")
 
-    # per-K breakdown on synth axes (dtype interaction)
-    for ax in ("worst", "best"):
-        rs = by_axis.get(ax, [])
-        by_kdt = defaultdict(list)
-        for r in rs:
-            by_kdt[(r["K"], r["dt"])].append(r["ratio"])
-        if by_kdt:
-            print(f"\n-- {ax} by (K, dtype):")
-            for k in sorted(by_kdt):
-                v = by_kdt[k]
-                print(f"   K={k[0]:<5d} {k[1]:5s} n={len(v)} gm={gm(v):.4f} "
-                      f"min={min(v):.4f}")
+    # per-(K, N) breakdown on the real axis
+    rs = by_axis.get("real", [])
+    by_kn = defaultdict(list)
+    for r in rs:
+        by_kn[(r["K"], r["N"])].append(r["ratio"])
+    if by_kn:
+        print("\n-- real by (K, N):")
+        for k in sorted(by_kn):
+            v = by_kn[k]
+            print(f"   K={k[0]:<5d} N={k[1]:<8d} n={len(v):2d} gm={gm(v):.4f} "
+                  f"min={min(v):.4f} max={max(v):.4f}")
 
     ship_ok = (verdict.get("real", {}).get("gm", 0) > 1.0
                and all(v["worst"] >= 0.975 for v in verdict.values())

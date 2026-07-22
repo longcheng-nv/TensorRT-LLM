@@ -122,17 +122,14 @@ def launch_cfg_dt(logits, N, dt_name):
 
 
 def all_batches():
+    # ENVELOPE RULING (user, 2026-07-22): perf verdict = SS7b real
+    # decode-capture only, BS=1, fp32, K={512,1024,2048} (flash/pro/v32),
+    # ISL 4k-1M. synth best/worst + realdt bf16/fp16 axes DROPPED from the
+    # ship verdict (batch_cells modes kept for ad-hoc probes).
     b = []
     for m in ("flash", "pro", "v32"):
         for isl in REAL_ISLS[m]:
             b.append(f"real865 {m} {isl}")
-    for scen in ("best", "worst"):
-        for K in (512, 1024, 2048):
-            for dt in ("fp32", "fp16", "bf16"):
-                b.append(f"synth {scen} {K} {dt}")
-    for m in ("flash", "pro", "v32"):
-        for dt in ("bf16", "fp16"):
-            b.append(f"realdt {m} {dt}")
     return b
 
 

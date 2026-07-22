@@ -70,3 +70,13 @@ geomean base/arm (worst cell):
   os.remove and absolute ncu path.
 - plateau/narrow synth exactness failures are BASE behavior — do not burn
   time re-deriving (characterized: undershoot on giant tie class).
+
+## Ship-verdict envelope ruling (user, 2026-07-22)
+
+Perf verdict axis = **SS7b real decode-capture only, BS=1, fp32**,
+K={512,1024,2048} (flash/pro/v32), ISL 4k-1M — the full 865-cell real grid.
+Synth best/worst grids and the bf16/fp16 dtype axis are DROPPED from the ship
+verdict (driver still supports them for ad-hoc probes). Harness:
+ab37_ship.py + drive_ab37_ship.sh (25 real865 batches, arms {base,all},
+paired same-GPU nsys cold-L2, <=2 concurrent, batch csv = resume marker);
+parser parse_ab37_ship.py emits per-rung/per-(K,N) tables + worst-cell rule.
