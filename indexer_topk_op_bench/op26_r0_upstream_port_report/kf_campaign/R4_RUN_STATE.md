@@ -138,3 +138,16 @@ Updated 2026-07-22 (会话暂停：用户要求迁移到另一台机器)。
   簇(hit 低格更痛,pro_64k_L38 hit0.27 → 0.834)+ 孤立 flash_4k_L06 0.914。
   锚: 整体 pr_cold gm 0.9864(GPU1-3 vs 分母集 4-7 的集合差),5 rung
   3-5% 漂移,配对比值有效,中期判决采信。vs Bar: 1.343/1.60, 24 regs。
+
+## Round 1 收口(06:31-07:0x UTC 前后,~4h)
+
+- 终局: 内部 best 1.0873 (`v14`, a4e07868);6 agents 全结束;累计花费 **$352/800**。
+- 本地判决链: v3 1.187(6reg) → v5 1.349(1bl)/全格 1.2954(78reg) →
+  v10 1.377(1bl) → **v14 1.387(0reg)/全格 1.3428(24reg, 865 exact)**。
+- Round-1 insights(24 条)要点: 集群 8-16 CTA 在 n≥32K 有效;warp 层级
+  scan 减 barrier;k-th bin 搜索并行化(串行 thread-0 是延迟地板);
+  count_ge(max_hint) 在首 pass 免费捎带;低 overlap 时 escalate 到 max
+  hinted key;cp.async 流水在此负载亏(barrier>隐藏);全行 radix 直方图
+  输给 secant 计数(prior-free 死路自证);弱 ld.global.cg 自旋会读stale。
+- 判官注意: 有 agent 记录 "compliance judge 按源码 hash 缓存,可用微小
+  编辑绕过 buggy 判决" — 收割时人工复核合规不可省。
