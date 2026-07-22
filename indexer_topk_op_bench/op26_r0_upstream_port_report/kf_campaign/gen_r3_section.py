@@ -516,6 +516,7 @@ def main():
 
     tl = timeline_fig()
     section = f"""{SEC_S}{css}
+<div class="wrap">
 <h2 id="sec-7">7 · R3 campaign — beyond-champion / 第二期战役(超越冠军)</h2>
 <p><b>Campaign <code>gvr-topk-r3</code></b> (<code>e5q1zgrfhs0z57dj6850kc444r</code>, 07-21 13:40Z → 07-22 close-out;
 6 agents/round = 2×Fable-5(high) + 2×GPT-5.6-sol(high) + 2×Opus-4.8; baseline = §6 champion <code>c74f_sbx</code>,
@@ -630,6 +631,7 @@ session-normalized medians for GVR PR head / sglang v2 / radix_cutedsl / flashin
 <span class="cng">图 R3 — 865 格全量总览:每层一条细曲线(蓝色按层深渐变,悬停任意点看 层/N/hit/数值),
 粗绿线 = {CHAMP_NAME} 中位数。metric 复选框在「对 PR 加速比」与「绝对核时间 µs」两个视图间切换;
 µs 视图下可用 arm 复选框叠加 GVR PR head / sglang v2 / radix_cutedsl / flashinfer 的中位线(同会话归一)。</span></figcaption></div>
+</div>
 {SEC_E}"""
 
     banner = (f'{BAN_S}<div style="background:#e7f6e7;border:1.5px solid #070;border-radius:8px;'
