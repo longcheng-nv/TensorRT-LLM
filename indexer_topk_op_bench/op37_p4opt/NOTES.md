@@ -80,3 +80,23 @@ verdict (driver still supports them for ad-hoc probes). Harness:
 ab37_ship.py + drive_ab37_ship.sh (25 real865 batches, arms {base,all},
 paired same-GPU nsys cold-L2, <=2 concurrent, batch csv = resume marker);
 parser parse_ab37_ship.py emits per-rung/per-(K,N) tables + worst-cell rule.
+
+## FULL-GRID SHIP VERDICT (2026-07-22, umbriel-b200-027 GPUs 2/3, user envelope)
+
+865/865 real cells (SS7b grid, BS=1 fp32), arms {base, all}, paired same-GPU
+nsys cold-L2, 25 batches. **SHIP RULE: PASS.**
+
+- geomean base/all **1.1284**, win 863/865, worst-cell **0.9945**
+  (pro_4k_L16, ~launch-floor N=1027), 865/865 >= 0.975. Exactness 865/865
+  both arms.
+- per rung: cs1-small 1.1480 (n=320) / cs1-mid 1.1010 (n=218) /
+  cs4 1.1103 (n=109) / cs8 1.1366 (n=218).
+- per K: K512 1.13-1.18 all ISL; K1024 1.11-1.21; K2048 (v32) 1.07-1.12 —
+  weakest band = v32 16k/32k cs1 (1.0713-1.0785 gm, min 1.0358, still
+  all-win).
+- tail cell flash_128k_L42 = 1.5144 (K512 exact-tail blow-up eliminated).
+- raw: ship/ship_cells.csv, ship/ship_verdict.json, per-batch csv+rep in
+  ship/ (reps gitignored).
+
+d1a DSMEM fixtures (validate_d1a_fixtures.py, GPU5): hit1.0/miss/noise/
+degrade x cs{2,4,8,16} x K{512,1024,2048} x {base,d1a,all} = 144 checks.

@@ -1,0 +1,14 @@
+{
+ "verdict": {
+  "real": {
+   "n": 865,
+   "gm": 1.1284,
+   "worst": 0.9945,
+   "worst_cell": "pro_4k_L16/fp32",
+   "wins": 863,
+   "ge0975": 865
+  }
+ },
+ "inexact": [],
+ "ship": true
+}
