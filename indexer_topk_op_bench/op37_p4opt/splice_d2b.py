@@ -11,7 +11,7 @@ exact-tail/p4tt repair are replaced by:
   scatter pass:  bin > b*  -> positional write (unchanged semantics)
                  bin == b* -> collect (value_bits, idx) pairs into
                               smem_hist[2o]/[2o+1]  (<=128 pairs)
-  warp0 select:  repeated warp-max over the pairs writes the top
+  rank select:   all-thread O(n^2) rank over the pairs writes the top
                  need = K - rank_above exactly to [rank_above, K)
 Value-set exact by construction (bit-equal ties pick arbitrarily — same
 contract as the existing p4tt/exact-tail). The cnt[b*] > 128 fallback is
@@ -51,7 +51,7 @@ OLD = """        self.p4_rs_rw_search = (
 NEW = OLD + (
     "        # [d2b] tiny-bin fine skip: when cnt[b*] <= 128 (all real decode\n"
     "        # cells measured, probe_d2b) replace the fine recursion + tail\n"
-    "        # repair with a collect + warp0 exact select.\n"
+    "        # repair with a collect + all-thread rank select.\n"
     "        if p4_fine_skip is None:\n"
     "            p4_fine_skip = False\n"
     "        self.p4_fine_skip = (\n"
@@ -118,55 +118,45 @@ SKIP = """                # [d2b] tiny-bin fine skip (CTA-uniform runtime gate).
                                 smem_hist[osk + osk + cutlass.Int32(1)] = smem_vals[isk]
                         isk = isk + cutlass.Int32(num_threads)
                     cute.arch.barrier()
-                    # warp0 exact top-need select: repeated warp-max over the
-                    # <=128 collected pairs (consumed flag = idx slot -1, so a
-                    # genuine -FLT_MAX value stays selectable).
-                    if warp_id == cutlass.Int32(0):
-                        navl = s_iscalars[0]
-                        if navl > cutlass.Int32(128):
-                            navl = cutlass.Int32(128)
-                        rsel = cutlass.Int32(0)
-                        while rsel < need_sk:
-                            bv = cutlass.Float32(self.NEG_FLT_MAX)
-                            bs = cutlass.Int32(-1)
-                            for jsl in cutlass.range_constexpr(4):
-                                slot = lane + cutlass.Int32(jsl * 32)
-                                if slot < navl:
-                                    idx_s = smem_hist[slot + slot + cutlass.Int32(1)]
-                                    if idx_s >= cutlass.Int32(0):
-                                        bits_s = smem_hist[slot + slot]
-                                        val_s = cutlass.Float32(
-                                            llvm.bitcast(
-                                                cutlass.Float32.mlir_type,
-                                                bits_s.ir_value(),
-                                            )
-                                        )
-                                        if bs < cutlass.Int32(0) or val_s > bv:
-                                            bv = val_s
-                                            bs = slot
-                            wmax = self.warp_reduce_max_f32(bv)
-                            pred_o = cutlass.Int32(0)
-                            if bs >= cutlass.Int32(0):
-                                if bv == wmax:
-                                    pred_o = cutlass.Int32(1)
-                            own = cute.arch.vote_ballot_sync(
-                                pred_o != cutlass.Int32(0)
+                    # [d2b-v2] all-thread O(n^2) rank select over the <=128
+                    # collected pairs: thread t owns slot t, counts elements
+                    # ranked above it (value desc, slot index breaks bit-equal
+                    # ties), writes output[rank_above + rank] iff rank < need.
+                    # No atomics, no warp-sync chain — the round-1 repeated
+                    # warp-max variant serialized ~need redux+ballot latencies
+                    # and lost 25-40% at K2048.
+                    navl = s_iscalars[0]
+                    if navl > cutlass.Int32(128):
+                        navl = cutlass.Int32(128)
+                    if tidx < navl:
+                        my_bits = smem_hist[tidx + tidx]
+                        my_val = cutlass.Float32(
+                            llvm.bitcast(
+                                cutlass.Float32.mlir_type, my_bits.ir_value()
                             )
-                            if own != cutlass.Uint32(0):
-                                low_o = own & (cutlass.Uint32(0) - own)
-                                src_o = cutlass.Int32(
-                                    cute.arch.popc(low_o - cutlass.Uint32(1))
+                        )
+                        rank_t = cutlass.Int32(0)
+                        tsl = cutlass.Int32(0)
+                        while tsl < navl:
+                            ob = smem_hist[tsl + tsl]
+                            ov = cutlass.Float32(
+                                llvm.bitcast(
+                                    cutlass.Float32.mlir_type, ob.ir_value()
                                 )
-                                if lane == src_o:
-                                    pos2 = rank_above + rsel
-                                    if pos2 < cutlass.Int32(kK):
-                                        if cutlass.const_expr(self.return_output_values):
-                                            output_values_row[pos2] = self.dtype(bv)
-                                        output_indices_row[pos2] = smem_hist[
-                                            bs + bs + cutlass.Int32(1)
-                                        ]
-                                    smem_hist[bs + bs + cutlass.Int32(1)] = cutlass.Int32(-1)
-                            rsel = rsel + cutlass.Int32(1)
+                            )
+                            if ov > my_val:
+                                rank_t = rank_t + cutlass.Int32(1)
+                            elif ov == my_val and tsl < tidx:
+                                rank_t = rank_t + cutlass.Int32(1)
+                            tsl = tsl + cutlass.Int32(1)
+                        if rank_t < need_sk:
+                            pos2 = rank_above + rank_t
+                            if pos2 < cutlass.Int32(kK):
+                                if cutlass.const_expr(self.return_output_values):
+                                    output_values_row[pos2] = self.dtype(my_val)
+                                output_indices_row[pos2] = smem_hist[
+                                    tidx + tidx + cutlass.Int32(1)
+                                ]
                     cute.arch.barrier()
                 else:
 """

@@ -1,0 +1,4 @@
+nsys_reps/
+*.sqlite
+*.nsys-rep
+__pycache__/
