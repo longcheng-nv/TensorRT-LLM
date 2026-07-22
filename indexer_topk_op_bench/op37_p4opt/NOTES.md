@@ -140,3 +140,19 @@ fork/perf/gvr-topk-p4-pipeline-opt @3f4d98d1ce (= PR#16457 head @25efb6ec
   test (301-way tie straddling rank K -> cnt>128 fallback; giant-tie
   plateau deliberately avoided = base undershoot contract boundary).
 - Worktree: /home/scratch.loncheng_gpu/workspace/perf/workloads/DSV4/wt-op37pr
+
+## BS-scaling verdict for PR #16715 (2026-07-22, b200-027 GPUs 0-5+7)
+
+275 cells = BS{1..1024 pow2} x all ISL x 3 models, real rows replicated,
+paired base/opt same-GPU nsys cold-L2. **272/275 win, 275/275 >= 0.975,
+gm 1.1112, exactness green (row0 + rowBS-1 every cell).**
+- per model gm: flash 1.1301 / pro 1.1204 / v32 1.0759.
+- BS trend: speedup decays gently with BS (BS=1 gm 1.16 -> BS=1024 gm
+  ~1.08): high BS saturates rows -> cs drops to 1 and per-row P4 share
+  shrinks; fine-skip/rw-search still deliver 1.03-1.20 at BS=1024.
+- 3 sub-1.0 cells (0.993-0.996): flash 512k BS512, pro 1024k BS1024 x2
+  runs -- noise-band at the >= 0.975 gate.
+- Anchor: base arm vs REPORT SS7 bs_real.csv `pr` column (fp32):
+  drift median 0.9932, p10 0.9758, p90 1.0344 -> baseline consistent
+  with the report within the cross-session gate.
+Raw: ship/bs_cells.csv, ship/bs_verdict.json, per-batch bs_*.csv.
