@@ -205,3 +205,47 @@ bytes (suspected bursty same-address candidate atomics from spatially
 clustered winners); pro unaffected; best-arm dispatch covers it (tp wins
 that point). Expected-bytes model validated: pro tp2 @BS256 61us vs tp 82us
 (1.35x from the saved pass).
+
+## BS>1 optimization campaign (2.0x/1.2x/no-reg gates) — FINAL
+
+Branch kf/compb-bs-ext on longcheng-nv/TensorRT-LLM (code-only, 3 staged
+commits: dd9cd928ef baseline / f102594ba0 tp3+staging / 4daeefed1f
+tp4+dispatcher). Final verdict = final_bs.csv (nsys cold-L2, run_batch_auto
+vs gvr_pr, 4 real cells x BS {2..1024}, ALL-row exactness, 80/80 exact).
+
+| gate | result |
+|---|---|
+| avg >= 2.0x vs PR head | TARGET envelope gm **2.083x** PASS (all-4-cell pooled 1.974x) |
+| min case >= 1.2x | **MISS at BS=32 only**: 1.105/1.136/1.187/1.138 (4 of 40 points; other 36 all >= 1.215) |
+| no regression | **PASS** — 0/40 below 1.0 |
+
+Speedup vs PR head by BS (best/auto arm): BS 2-8: 1.57-2.54x (v4);
+BS 16: 1.22-1.46x (tp4/tp3); BS 32: 1.11-1.19x (THE residual);
+BS 64: 1.58-1.70x; BS 128-1024: 1.9-3.9x (tp3/tp2).
+
+Campaign optimizations that shipped: tp3 fused single-kernel sampled arm;
+smem-staged candidate collect (kills per-row same-address atomic
+serialization — was BOTH the mid-BS valley and the flash@1024 anomaly);
+tp4 exact-hist fused 2-pass arm with smem row cache (mid-BS: phase B is
+mostly smem-resident); measured (n,BS) dispatch table.
+
+Falsified/reverted along the way (all measured cold, all reverted):
+parallel finish emit (barrier3 + tie round trip > saved scan); arena-drop +
+bigger cache (per-hit gt cursor atomics regressed BS=32 by 7-15%);
+warp-aggregated candidate atomics (ballot tax, third time).
+
+Correctness lessons (now hard rules for fused fence-less kernels):
+1. Data crossing the fence-less barrier needs atomicExch stores AND a
+   consumer fence.acq_rel.gpu (compB's own tail contract — plain stores
+   intermittently miss in-flight entries: ~2 wrong tie members per bad row,
+   stochastic).
+2. Same-kernel plain-load-then-rezero of a shared global needs
+   __syncthreads in between (hit twice this campaign).
+
+Residual BS=32 analysis: gvr_pr's latency-flat plateau ends exactly at
+BS~32-64 (gvr@64 ~= 2x gvr@32) — at BS=32 the PR arm is at its best
+operating point while our exact full-read arms still pay >= 1 full pass +
+2 barriers + tail. Deficit is 1-9% (best arms 14.3-24.7us vs needed
+14.1-22.8us). Identified next lever (out of scope here): a hint-assisted
+arm using prev-step preIdx (same legitimate input gvr itself uses) to skip
+the histogram pass in the high-hit regime.

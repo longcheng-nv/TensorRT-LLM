@@ -12,7 +12,7 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent.parent.parent / "report"))
 from parse_nsys_full import parse_rep  # noqa: E402
 
-ARM = {0: "v4", 1: "tp3", 2: "tp2"}
+ARM = {0: "v4", 1: "tp4", 2: "tp3", 3: "tp2"}
 
 
 def main():
