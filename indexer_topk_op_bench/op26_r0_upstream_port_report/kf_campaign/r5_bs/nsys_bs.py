@@ -68,8 +68,7 @@ def cand_call(b, mod, entry):
     K, N, bs = b["K"], b["N"], b["bs"]
     out = torch.empty(bs, K, dtype=torch.int32, device=DEV)
     fn = getattr(mod, entry)
-    cid = b["cell_id"]
-    return (lambda: fn(b["logits"], b["preIdx"], N, cid, out)), out
+    return (lambda: fn(b["logits"], b["preIdx"], N, out)), out
 
 
 def exact_bs(b, out):

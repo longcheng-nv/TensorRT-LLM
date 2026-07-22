@@ -255,3 +255,10 @@ Updated 2026-07-22 (会话暂停：用户要求迁移到另一台机器)。
   BS∈{1,4,32,128,256,1024},极端角点(高BS×大N)平台外、留本地 750 格判决;
   prompt 已注明。教训: custom_inputs 与非 custom 不可混 + submit 路径不可信,
   平台 workload 一律走 safetensors。
+- **R5 v2 首收割 r5r1_39789012**(`gvr-topk-batched-v2`, 内部 0.794):
+  36 案例探针(9 cell × BS{4,32,256,1024}, GPU2 净, 锚 gm 1.0002):
+  **总 gm 0.834, 36/36 exact**。两极: 4k 全段强(bs1024 达 1.98-3.37×);
+  中/大 N × BS≥32 重亏(pro_1024k bs1024 0.25, 64k 带 0.36-0.59,
+  flash_512k 0.67-0.71)— 吞吐域仍输 head 原生批。round 1 早期符合预期。
+  harness 修复: v2 契约 4 参(cell_id 已删),cand_call 已同步;
+  首次探针(GPU1, 带外来 parked)因签名错未测成 → 作废,r5p1b 为准。
