@@ -27,12 +27,18 @@ Started 2026-07-22, session on umbriel-b200-048. 目标 = 算子硬件级仿真�
 |---|---|---|
 | 986099603 | smart | **FAIL**：`cudaReplayer -ReportInfo` 后静默 exit 1（4s，stdout/stderr 无错误） |
 | 986109781 | smart (原样重试) | **FAIL**：同签名 → 确定性 |
-| 986111834 | **perfsim (对照)** | **跑通**：APIC_Capture PASS → Trace3D_Gen …；dashboard = https://compute-nexus.nvidia.com/workflows/runs/139023 |
+| 986111834 | **perfsim (512K cs=8)** | APIC_Capture/Trace3D_Gen PASS → **PerfSim 段 38min 后 FAIL**；err 仅 Talos 可读（浏览器 SSO）：`…/batch_260721_210116/results/000001/814978.814979.err`；dashboard = https://compute-nexus.nvidia.com/workflows/runs/139023 |
+| 986242686 | **perfsim (128K cs=1 对照)** | 检验 cluster 假设：pro_128k_L30 (N=32771, cs=1, 非 cluster launch)，trace=`/trace/1750`（本地 `gvr_topk_pro128kL30_cs1_k11.cuda.tgz`）；IN-FLIGHT |
 
-**结论：trace 无罪；smart flow 服务端 bug**（`-enableMorph`/`-pic` 均为 flow.smart
+**结论 1：trace 无罪；smart flow 服务端 bug**（`-enableMorph`/`-pic` 均为 flow.smart
 合法 flag；June-4 版 cudaReplayer 本地对本 trace ReportInfo exit 0，apicInfo.yml 完好）。
 待办：把 smart 静默失败报给服务 owner（skill 作者 bshan@nvidia.com）；修复后同
 `/trace/1748` 一键重投 smart 拿 SM 级流水。
+
+**假设 2（检验中）：PerfSim 段 512K FAIL 疑因 thread-block cluster**——该 cell
+cs=8（8-CTA cluster + DSMEM + cluster barrier，grid 8×1×1 携 cluster dims），
+仿真模型可能不支持；cs=1 对照 = Job 986242686。若 cs=1 过 → 坐实，
+流水图先在 cs=1 regime 出；若 cs=1 也挂 → 需 Talos err 文本重定位。
 
 ## 流水图产出位置（perfsim 完成后）
 

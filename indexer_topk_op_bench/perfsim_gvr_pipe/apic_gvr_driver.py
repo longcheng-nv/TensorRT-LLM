@@ -19,7 +19,9 @@ sys.path.insert(0, str(KFC.parent.parent / "harness"))
 from gvrpkg.top_k.gvr_topk_decode import GvrTopKKernel  # noqa: E402
 import real_data_v4cap as v4  # noqa: E402
 
-b = v4.get_bundle("pro", "512k", 30, "fp32")
+b = v4.get_bundle(os.environ.get("CELL_MODEL", "pro"),
+                  os.environ.get("CELL_ISL", "512k"),
+                  int(os.environ.get("CELL_LAYER", "30")), "fp32")
 K, cr, N = b["K"], b["cr"], b["N"]
 lg = b["logits"].contiguous()
 pre = b["preIdx"].contiguous()
