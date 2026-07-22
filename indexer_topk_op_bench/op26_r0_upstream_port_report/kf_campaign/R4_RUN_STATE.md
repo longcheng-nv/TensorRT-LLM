@@ -182,3 +182,6 @@ Updated 2026-07-22 (会话暂停：用户要求迁移到另一台机器)。
   (GPU1): **cold gm 1.6669, 0 回退, 28/28 exact**。全格 r4v27g 已发。
   注: op32 曾判 register-resident 在小 N latency 地板 WASH — 此处机制
   不同(中段消重扫),且实测大幅有效。
+- **v27 全格 865(r4v27g, GPU1-3)**: **geomean 1.5824, 865/865 exact,
+  回退 2**(pro_64k_L38 0.916 真实; v32_16k_L30 0.978 边界可 60-rep 裁)。
+  p5 1.160, max 3.472。vs Bar: **1.582/1.60**, ~1-2 regs。现任本地 champion。
