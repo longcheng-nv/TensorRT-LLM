@@ -7,6 +7,13 @@ Node: umbriel-b200-027 (8×B200). Started 2026-07-21 13:40Z.
 
 ## Decisions
 
+- **D4 (skeleton adjudication, USER, 2026-07-22): Bar-first, loose-skeleton
+  per campaign-1 precedent.** Constraint (a) preIdx-prior vacated by
+  measurement evidence (12 June falsifications + campaign-1 r1 ×3 + R3
+  5f3daaf8 WASH 1.0001); (b) retained as histogram-prefix threshold
+  refinement; (c) fully retained. No cosmetic hint path. Ship object = compA
+  lineage; report must state this explicitly with the evidence chain.
+
 - **D1 (baseline packaging workaround).** `kf campaign prepare` with
   `--baseline-solution` failed: the platform baseline evaluator does not stage
   campaign assets (0/28 workloads — safetensors missing). Workaround: champion

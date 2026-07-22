@@ -40,6 +40,7 @@ summary { cursor:pointer; font-weight:600; color:var(--acc); }
 
 <h1>KernelFactory Campaign — DeepSeek-V4 Indexer Top-K decode BS=1<br>
 <small>target: +20% avg vs PR#16457 GVR on §4 real data (865 cells), zero regression<br>目标:§4 真实数据(865 格)上对 PR#16457 GVR 平均 +20%,零回归</small></h1>
+<!-- KF-R3BANNER:START --><div style="background:#e7f6e7;border:1.5px solid #070;border-radius:8px;padding:10px 16px;margin:12px 0;font-size:0.95em"><b>2026-07-22 R3 update / 第二期战役进展:</b> current champion = <b>compA</b> (becdc5c7 ⊕ 30e79029 dispatch) — <b>1.7873× geomean vs PR#16457 current head</b> (865/865 exact, 1 borderline cell), +6.6% over the §6 campaign-1 champion. §6 numbers below are the campaign-1 historical record (vs old head e6fdbfac3d). See <a href="#sec-7">§7</a>. / 现任冠军 compA 对 PR 当前 head 全格 1.7873×;§6 为第一期历史记录;详见 <a href="#sec-7">§7</a>。</div><!-- KF-R3BANNER:END -->
 
 <div class="card">
 <span class="kpi">Campaign ID <code>tfb91bvwm972kfyf1bc1trj5e0</code></span>
@@ -1194,5 +1195,89 @@ unconditionally exact on all 865 cases; SGLang v2 is conditionally exact (kMaxNu
 <!-- KF-PERCASE:END -->
 
 </div>
+<!-- KF-R3:START -->
+<h1 id="sec-7" style="margin-top:40px">7 · R3 campaign — beyond-champion / 第二期战役(超越冠军)</h1>
+<p><b>Campaign</b> <code>gvr-topk-r3</code> (<code>e5q1zgrfhs0z57dj6850kc444r</code>), started 2026-07-21 13:40Z,
+6 agents/round (2×fable-5 high + 2×gpt-5.6-sol high + 2×n3-opus-4.8), baseline = campaign-1 champion
+<code>c74f_sbx</code> (platform-measured per-workload timings; champion source inlined in prompt v2).
+Verdict grids: 865 real decode cells, nsys cold-L2, paired same-GPU vs <b>PR#16457 current head
+<code>b14ec40e1b</code></b> (anchor drift vs old head e6fdbfac3d: median 1.005 — the 07-20/21 P4 commits do not
+move this envelope). <br><span style="color:#444">第二期以第一期冠军为 baseline;判决全部对 PR 当前 head 现测配对;
+新旧 head 锚差中位 1.005(P4 系列提交对本包络无实质影响)。</span></p>
+
+<div style="display:flex;gap:12px;flex-wrap:wrap;margin:14px 0">
+  <div style="flex:1 1 150px;background:#eef7f2;border:1px solid #0b6e4f;border-radius:8px;padding:10px 14px">
+    <div style="font-size:1.5em;font-weight:700">1.7873×</div>
+    <div style="font-size:0.85em;color:#333">compA geomean vs PR head (865 cells) / 对 PR 当前 head 全格 geomean</div></div>
+  <div style="flex:1 1 150px;background:#eef7f2;border:1px solid #0b6e4f;border-radius:8px;padding:10px 14px">
+    <div style="font-size:1.5em;font-weight:700">+6.6%</div>
+    <div style="font-size:0.85em;color:#333">vs campaign-1 champion / 较第一期冠军净增</div></div>
+  <div style="flex:1 1 150px;background:#eef7f2;border:1px solid #0b6e4f;border-radius:8px;padding:10px 14px">
+    <div style="font-size:1.5em;font-weight:700">865/865</div>
+    <div style="font-size:0.85em;color:#333">exact / 精确</div></div>
+  <div style="flex:1 1 150px;background:#eef7f2;border:1px solid #0b6e4f;border-radius:8px;padding:10px 14px">
+    <div style="font-size:1.5em;font-weight:700">1<span style="font-size:0.55em"> @&lt;1.0 (min 0.999)</span></div>
+    <div style="font-size:0.85em;color:#333">cold regressions (borderline → 60-rep adjudication) / 冷回退(边界格待 60-rep 裁决)</div></div>
+</div>
+<h2>7.1 Candidate ladder / 候选阶梯(全格判决)</h2>
+<table style="border-collapse:collapse;font-size:0.9em"><thead>
+<tr><th>kernel</th><th>gm vs PR head</th><th>regs&lt;1.0</th><th>exact</th><th>vs champion</th><th>what it adds / 增量</th></tr></thead>
+<tbody><tr><td>champion c74f_sbx (R1 起点 baseline)</td><td style="text-align:right"><b>1.6770</b></td><td style="text-align:right">0</td><td style="text-align:right">865/865</td><td style="text-align:right">—</td><td>campaign-1 ship, re-measured on PR head b14ec40e1b / 第一期交付,在当前 head 上现测</td></tr><tr><td>09d13c81 (r2-a?)</td><td style="text-align:right"><b>1.7553</b></td><td style="text-align:right">0</td><td style="text-align:right">865/865</td><td style="text-align:right">1.0467</td><td>regular launch + fence-less sense-reversing grid barrier / 常规 launch + 免序自旋屏障(去 coop-launch 溢价)</td></tr><tr><td>30e79029 (r3)</td><td style="text-align:right"><b>1.7714</b></td><td style="text-align:right">0</td><td style="text-align:right">865/865</td><td style="text-align:right">1.0563</td><td>+ contiguous-slice scan partitions / + 连续切片扫描</td></tr><tr><td>becdc5c7 (r3)</td><td style="text-align:right"><b>1.7848</b></td><td style="text-align:right">0</td><td style="text-align:right">865/865</td><td style="text-align:right">1.0643</td><td>adaptive post-pass0 finish (whole-bucket / ≤4096 smem fast-tail + last-arriver refine / ladder), register-cached keys / 自适应收尾 + 寄存器缓存整行</td></tr><tr><td><b>compA = becd ⊕ 30e7 (engineer composite, SHIP candidate)</b></td><td style="text-align:right"><b>1.7873</b></td><td style="text-align:right">1 (min 0.999)</td><td style="text-align:right">865/865</td><td style="text-align:right">1.0658</td><td>k=2048 ∧ 16896&lt;n≤140000 → 30e7 ladder; else becd / 工程师复合分派</td></tr></tbody></table>
+<p style="font-size:0.9em;color:#444">compA composite-vs-becd net +0.13% measured (splice estimate ~1.81 —
+non-dispatched rungs run byte-identical code, deltas there are ±2% run noise; the k2048-mid-n dispatch itself
+verified +5.4-8.8% on v32 32k/64k/128k rungs). / compA 的分派增益在 v32 中档实证 +5.4-8.8%,其余档位差异为运行噪声。</p>
+<h2>7.2 Where the new speed comes from / 新增速度来源</h2>
+<ol>
+<li><b>Cooperative launch &amp; barrier-ordering elimination / 去 coop-launch 与屏障排序</b> (09d1, +4.7% grid):
+regular launch + sense-reversing spin barrier (generation-token, no per-launch reset), grid sized to co-residency.
+Every formally-ordered variant measured 8–11% slower — the win IS the omitted ordering. Safety argument (documented
+in R3_LEDGER.md): merged-histogram lines are first plain-touched only after the barrier, L1 invalidates at launch
+boundaries, pre-barrier writes are L2 atomics ⇒ post-barrier loads cannot hit stale L1. Flagged for production-port review.
+
+<table style="border-collapse:collapse;font-size:0.9em"><thead>
+<tr><th>barrier variant / 屏障变体</th><th>ordering / 内存序</th><th>28-cell cold gm vs PR</th><th>verdict / 判决</th></tr></thead><tbody>
+<tr><td>09d13c81 as-harvested</td><td>relaxed intrinsics, no fence</td><td><b>~1.72</b></td><td>fastest — win source / 胜利来源</td></tr>
+<tr><td>+ __threadfence pair</td><td>membar.gl</td><td>1.566</td><td>−11% REJECTED</td></tr>
+<tr><td>scoped acq_rel asm</td><td>atom.acq_rel/ld.acquire.gpu</td><td>1.614</td><td>−8% REJECTED</td></tr>
+<tr><td>surgical (relaxed spin + trailing acquire)</td><td>scoped, off critical path attempt</td><td>1.615</td><td>REJECTED — ordering cost is intrinsic (release must drain the block's L2-pending writes on the critical path) / 排序代价是本质的</td></tr>
+</tbody></table></li>
+<li><b>Contiguous-slice scan / 连续切片扫描</b> (30e7, +1.2%): per-block contiguous float4 slices replace
+grid-stride interleave — better cold-data locality.</li>
+<li><b>Adaptive post-pass-0 finish + register-cached row / 自适应收尾 + 寄存器缓存</b> (becd, +1.5% net):
+one 11-bit MSB histogram pass, then 3-way dispatch on boundary-bucket size T: whole-bucket direct write (1 barrier),
+T≤4096 smem-staged compaction + non-spinning rendezvous + last-arriver single-block 21-bit refine (1 barrier, no drain),
+else classic 11/11/10 ladder. Keys live in registers (1×float4+tail/thread) — zero global re-reads across passes.
+Slow twins (large-tie cells) gain 1.37–1.51×; v32 mid-n prefers the 30e7 ladder → engineer dispatch (compA).</li>
+</ol>
+<h2>7.3 compA per model × ISL / 分模型×序列长度(上=compA,下灰=champion;vs PR head)</h2>
+<table style="border-collapse:collapse;font-size:0.85em"><tr><th>model</th><th>4k</th><th>8k</th><th>16k</th><th>32k</th><th>64k</th><th>128k</th><th>256k</th><th>512k</th><th>1024k</th></tr><tr><td><b>flash</b></td><td style="text-align:right"><b>2.30</b><br><span style="color:#52514e;font-size:0.85em">2.32</span></td><td style="text-align:right"><b>2.06</b><br><span style="color:#52514e;font-size:0.85em">2.07</span></td><td style="text-align:right"><b>1.76</b><br><span style="color:#52514e;font-size:0.85em">1.78</span></td><td style="text-align:right"><b>1.34</b><br><span style="color:#52514e;font-size:0.85em">1.35</span></td><td style="text-align:right"><b>1.17</b><br><span style="color:#52514e;font-size:0.85em">1.17</span></td><td style="text-align:right"><b>1.53</b><br><span style="color:#52514e;font-size:0.85em">1.32</span></td><td style="text-align:right"><b>1.69</b><br><span style="color:#52514e;font-size:0.85em">1.54</span></td><td style="text-align:right"><b>1.88</b><br><span style="color:#52514e;font-size:0.85em">1.60</span></td><td style="text-align:right"><b>2.19</b><br><span style="color:#52514e;font-size:0.85em">1.69</span></td></tr><tr><td><b>pro</b></td><td style="text-align:right"><b>2.32</b><br><span style="color:#52514e;font-size:0.85em">2.43</span></td><td style="text-align:right"><b>2.14</b><br><span style="color:#52514e;font-size:0.85em">2.18</span></td><td style="text-align:right"><b>1.80</b><br><span style="color:#52514e;font-size:0.85em">1.85</span></td><td style="text-align:right"><b>1.38</b><br><span style="color:#52514e;font-size:0.85em">1.39</span></td><td style="text-align:right"><b>1.14</b><br><span style="color:#52514e;font-size:0.85em">1.14</span></td><td style="text-align:right"><b>1.58</b><br><span style="color:#52514e;font-size:0.85em">1.29</span></td><td style="text-align:right"><b>1.71</b><br><span style="color:#52514e;font-size:0.85em">1.55</span></td><td style="text-align:right"><b>1.93</b><br><span style="color:#52514e;font-size:0.85em">1.64</span></td><td style="text-align:right"><b>2.40</b><br><span style="color:#52514e;font-size:0.85em">1.91</span></td></tr><tr><td><b>v32</b></td><td style="text-align:right"><b>2.27</b><br><span style="color:#52514e;font-size:0.85em">2.28</span></td><td style="text-align:right"><b>1.65</b><br><span style="color:#52514e;font-size:0.85em">1.66</span></td><td style="text-align:right"><b>1.31</b><br><span style="color:#52514e;font-size:0.85em">1.31</span></td><td style="text-align:right"><b>1.61</b><br><span style="color:#52514e;font-size:0.85em">1.45</span></td><td style="text-align:right"><b>1.99</b><br><span style="color:#52514e;font-size:0.85em">1.80</span></td><td style="text-align:right"><b>2.08</b><br><span style="color:#52514e;font-size:0.85em">1.88</span></td><td style="text-align:right"><b>2.03</b><br><span style="color:#52514e;font-size:0.85em">1.82</span></td><td style="text-align:right">—</td><td style="text-align:right">—</td></tr></table>
+<figure style="margin:16px 0"><svg viewBox="0 0 860 300" style="max-width:100%;background:#fcfcfb;border:1px solid #e4e3df;border-radius:8px"><line x1="56" y1="243.5" x2="844" y2="243.5" stroke="#8b8a85" stroke-width="1.4"/><line x1="56" y1="180.8" x2="844" y2="180.8" stroke="#e4e3df" stroke-width="1"/><line x1="56" y1="118.2" x2="844" y2="118.2" stroke="#e4e3df" stroke-width="1"/><line x1="56" y1="55.6" x2="844" y2="55.6" stroke="#e4e3df" stroke-width="1"/><text x="48" y="247.5" font-size="11" text-anchor="end" fill="#52514e">1.0×</text><text x="48" y="184.8" font-size="11" text-anchor="end" fill="#52514e">1.5×</text><text x="48" y="122.2" font-size="11" text-anchor="end" fill="#52514e">2.0×</text><text x="48" y="59.6" font-size="11" text-anchor="end" fill="#52514e">2.5×</text><text x="56.0" y="274" font-size="11" text-anchor="middle" fill="#52514e">4k</text><text x="154.5" y="274" font-size="11" text-anchor="middle" fill="#52514e">8k</text><text x="253.0" y="274" font-size="11" text-anchor="middle" fill="#52514e">16k</text><text x="351.5" y="274" font-size="11" text-anchor="middle" fill="#52514e">32k</text><text x="450.0" y="274" font-size="11" text-anchor="middle" fill="#52514e">64k</text><text x="548.5" y="274" font-size="11" text-anchor="middle" fill="#52514e">128k</text><text x="647.0" y="274" font-size="11" text-anchor="middle" fill="#52514e">256k</text><text x="745.5" y="274" font-size="11" text-anchor="middle" fill="#52514e">512k</text><text x="844.0" y="274" font-size="11" text-anchor="middle" fill="#52514e">1024k</text><polyline class="sCH" points="56.0,77.5 154.5,135.1 253.0,177.3 351.5,191.8 450.0,185.9 548.5,170.6 647.0,157.4 745.5,165.3 844.0,141.1" fill="none" stroke="#8a8a8a" stroke-width="2.2"/><circle class="sCH" cx="56.0" cy="77.5" r="4" fill="#8a8a8a"><title>champion c74f_sbx @ 4k: 2.325× vs PR head</title></circle><circle class="sCH" cx="154.5" cy="135.1" r="4" fill="#8a8a8a"><title>champion c74f_sbx @ 8k: 1.865× vs PR head</title></circle><circle class="sCH" cx="253.0" cy="177.3" r="4" fill="#8a8a8a"><title>champion c74f_sbx @ 16k: 1.528× vs PR head</title></circle><circle class="sCH" cx="351.5" cy="191.8" r="4" fill="#8a8a8a"><title>champion c74f_sbx @ 32k: 1.413× vs PR head</title></circle><circle class="sCH" cx="450.0" cy="185.9" r="4" fill="#8a8a8a"><title>champion c74f_sbx @ 64k: 1.460× vs PR head</title></circle><circle class="sCH" cx="548.5" cy="170.6" r="4" fill="#8a8a8a"><title>champion c74f_sbx @ 128k: 1.582× vs PR head</title></circle><circle class="sCH" cx="647.0" cy="157.4" r="4" fill="#8a8a8a"><title>champion c74f_sbx @ 256k: 1.687× vs PR head</title></circle><circle class="sCH" cx="745.5" cy="165.3" r="4" fill="#8a8a8a"><title>champion c74f_sbx @ 512k: 1.624× vs PR head</title></circle><circle class="sCH" cx="844.0" cy="141.1" r="4" fill="#8a8a8a"><title>champion c74f_sbx @ 1024k: 1.817× vs PR head</title></circle><polyline class="sCA" points="56.0,81.6 154.5,136.9 253.0,179.1 351.5,182.4 450.0,175.8 548.5,140.7 647.0,134.3 745.5,129.8 844.0,79.4" fill="none" stroke="#0b6e4f" stroke-width="2.2"/><circle class="sCA" cx="56.0" cy="81.6" r="4" fill="#0b6e4f"><title>compA (R3) @ 4k: 2.292× vs PR head</title></circle><circle class="sCA" cx="154.5" cy="136.9" r="4" fill="#0b6e4f"><title>compA (R3) @ 8k: 1.851× vs PR head</title></circle><circle class="sCA" cx="253.0" cy="179.1" r="4" fill="#0b6e4f"><title>compA (R3) @ 16k: 1.514× vs PR head</title></circle><circle class="sCA" cx="351.5" cy="182.4" r="4" fill="#0b6e4f"><title>compA (R3) @ 32k: 1.487× vs PR head</title></circle><circle class="sCA" cx="450.0" cy="175.8" r="4" fill="#0b6e4f"><title>compA (R3) @ 64k: 1.540× vs PR head</title></circle><circle class="sCA" cx="548.5" cy="140.7" r="4" fill="#0b6e4f"><title>compA (R3) @ 128k: 1.820× vs PR head</title></circle><circle class="sCA" cx="647.0" cy="134.3" r="4" fill="#0b6e4f"><title>compA (R3) @ 256k: 1.872× vs PR head</title></circle><circle class="sCA" cx="745.5" cy="129.8" r="4" fill="#0b6e4f"><title>compA (R3) @ 512k: 1.908× vs PR head</title></circle><circle class="sCA" cx="844.0" cy="79.4" r="4" fill="#0b6e4f"><title>compA (R3) @ 1024k: 2.310× vs PR head</title></circle><text x="56" y="290" font-size="11" fill="#52514e">ISL (sequence length) — geomean nsys cold-L2 speedup vs PR#16457 head b14ec40e1b, 865 real cells / 按 ISL 的 geomean 加速比(对 PR 当前 head)</text></svg>
+<figcaption style="font-size:0.9em;color:#444">Fig. R3-1 — compA vs champion by ISL (hover points for values).
+/ 图 R3-1 — compA 与冠军按 ISL 的对比(悬停看数值)。</figcaption></figure>
+<h2>7.4 Skeleton-constraint adjudication / 骨架约束裁决</h2>
+<p><b>Decision (operator, 2026-07-22): Bar-first, loose-skeleton per campaign-1 precedent.</b>
+The composite lineage keeps (b) threshold refinement in histogram-prefix form and (c) exact tie-robust refine,
+but does NOT consume <code>pre_idx</code> — constraint (a) is vacated by measurement, not by neglect: hint-seeded
+variants were falsified repeatedly (June history ×12; campaign-1 r1 ×3; R3 <code>5f3daaf8</code> provably-exact
+warm filter = WASH 1.0001 in its own activation zone). The +60% bar and a strict GVR skeleton are mutually
+incompatible on this workload (in-skeleton ceiling ≈1.28, op20/21/35). No cosmetic hint path is added.<br>
+<span style="color:#444">裁决:Bar 优先,骨架按第一期先例宽松解读。(a) preIdx 先验由测量证据豁免(hint 变体屡次证伪,
+R3 的可证明精确 warm-filter 在自身激活区亦为 1.0001 WASH);(b) 以 histogram 前缀精化等价保留;(c) 完整保留。
+不做化妆式 hint 挂载。</span></p>
+<h2>7.5 Incidents & discipline / 事故与纪律</h2>
+<ul>
+<li>Foreign 8-GPU job intermittently occupied the node from ~17:40Z day-1: one probe verdict invalidated
+(unconditional quiet-echo scripting bug — fixed to gated launches); all subsequent measurements anchor-checked
+per cell (±6% vs champh2 refs), full grids run on explicitly-free GPU lists (<code>drive_grid_gpulist.sh</code>).
+/ 外部作业间歇占卡:一次探针作废;此后逐格锚检+空闲卡白名单分片。</li>
+<li>Platform noise calibrated round-1: verbatim champion resubmission scored 0.9956 (±0.5% band).
+/ 平台噪声标定:原样重交 = 0.9956。</li>
+<li>Platform gap: prepare's baseline-solution evaluator does not stage campaign assets → champion baselines
+supplied as platform-trace timings instead (workaround D1). / 平台缺口 D1:baseline-solution 评测不带 assets,改用平台 trace 时间。</li>
+</ul>
+<p style="font-size:0.9em;color:#52514e">Status at injection time: campaign Running (round 3), best internal 1.157
+(becdc5c7), platform spend ≈$578 of $800 cap. Final acceptance (fresh full grid + 60-rep borderline adjudication +
+rival joins) pending campaign close. / 注入时状态:round 3 运行中,平台花费约 $578/$800;终审待战役收口。</p>
+<!-- KF-R3:END -->
 </body>
 </html>
