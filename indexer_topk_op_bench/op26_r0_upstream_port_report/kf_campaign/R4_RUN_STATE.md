@@ -111,3 +111,10 @@ Updated 2026-07-22 (会话暂停：用户要求迁移到另一台机器)。
   清空)→ pkill 三连清场 + 部分 rep 隔离 INVALID_r4v5g/,新 tag r4v5g2
   在 GPU5,6,7 3-shard 重发(launch 后核对恰 3 nsys+3 python)。
   本机外来负载会跳卡,每次 launch 前后必须双查。
+- **v5_cs16 全格 865 判决(r4v5g2, GPU5-7)**: **geomean 1.2954,865/865
+  exact,78 回退(min 0.851, p5 0.968)**。回退带 = N≈8K-16K(v32_8k 簇
+  0.889-0.913、N=8195 的 flash/pro 0.915-0.930、N=16387 0.908-0.922)——
+  v3 的 32K 弱带被 v5 dispatch 修复后弱带下移到 8-16K 单/4-CTA 过渡区。
+  锚检查: 25 rung 中 4 个 med 漂移 3.4-7.3%(跨 GPU 集合可解释;配对比值
+  不受影响;ship 级判决需漂移补测)。vs Bar: Bar-3 PASS / Bar-1 1.295<1.60 /
+  Bar-2 FAIL(78)。round 1 仍在演进,继续监控。
