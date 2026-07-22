@@ -32,6 +32,23 @@ One-off spin-barrier LIVELOCK observed (compB v32_128k_L54 BS=1024, >40min,
 solo retry clean 9ms/call) -> transient co-residency loss, not data-dependent;
 new evidence for the fence-less-barrier ship constraint above.
 
+Mechanism of the near-linear BS collapse (2026-07-22 analysis, confirmed
+against harvest/r3_compB/kernel.cu): compB has NO batch dimension by contract
+(`topk_launch(logits, n, k, out, stream)` is single-row per the SOLBench
+problem), so BS>1 = host loop of BS sequential same-stream launches. Each
+large-n launch sizes its grid to full-GPU co-residency
+(cudaOccupancyMaxActiveBlocksPerMultiprocessor + sense-reversing grid
+barrier), i.e. one row saturates the whole B200 -> total time is exactly
+proportional to BS. Concurrent per-row streams are illegal: static global
+g_scratch/g_gen (generation-token barrier words) would race. Batched rivals
+launch once with batch as a grid axis and are latency-bound/underutilized at
+BS=1, so extra rows are near-free until ~BS=128 saturation — hence the ratio
+halves per BS doubling (1.874 -> 0.925 -> 0.470 -> 0.238 ...) and flattens at
+~0.022-0.025 once rivals also go linear. Launch gaps are NOT the cause:
+span/kernel tax measured <=1.04. Net: the collapse is the designed
+whole-GPU-per-row latency trade, structural, not fixable in-harness ->
+BS==1 dispatch gate is the correct (and only) production remedy.
+
 ## Decisions
 
 - **D4 (skeleton adjudication, USER, 2026-07-22): Bar-first, loose-skeleton
