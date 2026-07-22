@@ -103,3 +103,11 @@ Updated 2026-07-22 (会话暂停：用户要求迁移到另一台机器)。
   4K 大胜 1.15-1.86,≥512K 稳胜 1.08-1.45。未过 Bar-2,不上全格;
   等 round 演进。注:平台 insights 只读,mid-campaign 无 operator steering
   通道,判决材料留作收口后 fork --append-prompt。
+- **r1_35721475 收割**(`gvr_topk_cuda_v5_cs16`, 内部 1.0333): 同骨架,
+  dispatch 重调(1CTA<16K / 4<32K / 8<131K / 16≥131K)。28-cell 探针:
+  **cold gm 1.3490, 28/28 exact, 1 边界回退**(flash_32k_L16 0.977,
+  待 60-rep 裁定)。过线 → 865 全格判决。
+- 全格首发 r4v5g 作废重发: 启动后发现外来 171GB 常驻已迁至 GPU4(0-3 反而
+  清空)→ pkill 三连清场 + 部分 rep 隔离 INVALID_r4v5g/,新 tag r4v5g2
+  在 GPU5,6,7 3-shard 重发(launch 后核对恰 3 nsys+3 python)。
+  本机外来负载会跳卡,每次 launch 前后必须双查。
