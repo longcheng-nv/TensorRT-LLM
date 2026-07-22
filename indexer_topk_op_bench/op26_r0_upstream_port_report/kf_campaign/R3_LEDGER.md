@@ -340,3 +340,26 @@ L1-persistent-across-launch arch, breaks this. Flag for production port review.
   bracket/kb512 commits do not materially move these cells); champion start
   vs current head = 1.6770 (vs 1.6828 on old head), consistent with the
   1.005 anchor shift.
+
+## BS>1 campaign to 2.0x/1.2x gates (2026-07-22 evening) — CLOSED
+
+Branch kf/compb-bs-ext @ longcheng-nv (3 staged code commits: dd9cd928ef /
+f102594ba0 / 4daeefed1f). Final (final_bs.csv, 4 real cells x BS 2-1024,
+80/80 exact): **TARGET gm 2.083x PASS (goal 2.0) / zero regressions PASS /
+min 1.105x @BS=32 — 1.2x gate missed at 4/40 points only (all BS=32,
+1.11-1.19)**; other 36 points all >= 1.215.
+
+New arms this campaign: tp3 fused sampled single-kernel; tp4 exact-hist
+fused 2-pass w/ smem row cache; smem-staged collect (root cause kill:
+per-row same-address candidate atomics = mid-BS valley AND flash@1024
+anomaly); measured (N,BS) dispatch table.
+
+HARD RULE (cost: hours of stochastic corruption): data crossing the
+fence-less spinning barrier between CTAs needs atomicExch stores AND
+consumer fence.acq_rel.gpu — exactly compB's own tail contract; plain
+stores drop in-flight entries. Falsified & reverted cold: parallel finish,
+arena-for-cache trade, warp-agg candidate atomics (3rd time).
+
+BS=32 residual: gvr's latency plateau edge; next lever = preIdx
+hint-assisted arm (legitimate input, skips hist pass at high hit).
+Report: ext/REPORT_BSEXT.html (bilingual, local only).
