@@ -60,3 +60,34 @@ segment inst_executed shares vs Experiment-A cycle shares per cell.
 - ncu_p4_one.py, drive_ncu_p4.sh, parse_ncu_p4.py
 - outputs: p4pipe_full_g*.json(l), p4pipe_full.csv, nsys_reps/ (NOT in git),
   ncu_reps/ (NOT in git)
+
+## RESULTS (2026-07-22, campaign DONE)
+
+Exp A full 865: exact 865/865, mono 865/865, ovh med +1.3% p95 +4.6%
+(8 cells >7%: 7 flash 256k/1024k borderline, flash_128k_L42 +16.6% = §9e's
+reproducible stamp-tax cell), P4-share drift vs §9e med +0.004.
+- Per-rung sub-P4 medians (us / share-of-P4): cs1 fine 1.53-1.56/31-34% >
+  scatter 0.83-1.21/18-25% > coarse_search 0.73-0.84/15-19%; cs4 wait+gather
+  3.00/35%; cs8 wait 1.41/14% + gather 3.11/33% = 4.68us = 47% of P4 = 24%
+  of kernel. Dominant substage: fine 491, dsmem_gather 267, scatter 96.
+- Core select (minmax->scatter) rung-invariant: 4.27/4.96/4.76us
+  (cs1/cs4/cs8) -> cluster P4 ballooning is pure wait+gather (distP4 target).
+- Spearman(N, peer_wait us) +0.82 cs4 / +0.78 cs8.
+- coarse_hist steps with K (=kNumBins): 0.37/0.50/0.60us K512/1024/2048.
+- Tail: med 5-6% of P4; >15% in 34 v32 K2048 cells + 2 K512 cells;
+  flash_128k_L42 (K512, no p4tt: gate top_k>=1024) = 5823 tail inst (26x),
+  41.6% of P4 -> p4tt-below-K1024 lever.
+Exp B NCU 13 cells (CS2R clock-landmark segmentation, 15 stamps/14 segments,
+inst share tracks cyc share in rank order): fine is latency-bound (3 BARs,
+inst share << cyc share); dsmem_gather = generic LD.E remote loads + loop
+overhead; peer_wait = LDCU/STG spin; stalls flip no_instruction 17.6 (cs1
+icache) -> barrier 23-24 cyc/issue (cs>=4).
+Report: §9f injected (update_report_p4pipe.py, marker P4PIPE, 4 Plotly figs
+Q1-Q4, lever map, per-model/ISL + NCU tables).
+
+Gotchas hit: /usr/local/cuda PATH ghost made `env ncu` ELOOP -> call the
+resolved /opt/nvidia/.../ncu ELF directly; ncu -s counts ALL kernels without
+-k (first run profiled a cub kernel; skip-guard then hid the 2 stale reps —
+always -k regex:gvr_topk_kernel_gvrpkgp4t); CS2R R,SRZ is a zero idiom, not
+a clock stamp (filter SR_CLOCK); source-page CSV has a "Kernel Name" preamble
+row; per-reason stalls only on --page raw.
