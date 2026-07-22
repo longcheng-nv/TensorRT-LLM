@@ -22,7 +22,8 @@ import torch.cuda.profiler as prof
 HERE = Path(__file__).resolve().parent
 REPORT = HERE.parent
 BENCH = REPORT.parent
-sys.path.insert(0, str(HERE / "gvrpkg_head"))
+import os  # noqa: E402
+sys.path.insert(0, str(HERE / os.environ.get("GVRPKG_DIR", "gvrpkg_04a0")))
 sys.path.insert(0, str(BENCH / "harness"))
 sys.path.insert(0, str(HERE))
 

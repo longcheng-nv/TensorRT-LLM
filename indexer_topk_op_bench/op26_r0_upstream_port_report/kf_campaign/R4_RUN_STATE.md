@@ -48,3 +48,21 @@ Updated 2026-07-22 (会话暂停：用户要求迁移到另一台机器)。
   （新容器）、venv（若目标机器无既有 gvr-prefill venv）。
 - GPU 健康备忘（若迁去这些机器）：b200-019 GPU0 坏散热 pin GPU1；
   b200-035 GPU0 热节流 nsys 用 GPU1；b200-036 GPU1 坏散热 timing 只用 GPU0。
+
+---
+
+## 2026-07-22 T2 进展(执行机器 = umbriel-b200-027, 8×B200 空闲)
+
+- 疑难#1 解决: `gvrpkg_head/`、`gvrpkg_e6fd/` 在 NFS 上均存在(上一台机器 find 误报)。
+  gvrpkg_head 实为 in-tree @6140078816 + ruff 格式化(残差仅格式);距 pinned head
+  只差 a707cfe41c(LB-hybrid SMEM 均衡修复, kc_diet 参数)。
+- **T0 DONE**: `gvrpkg_04a0/` = pinned head 04a0900ff7 in-tree GVR 文件逐字节原样。
+  `build_pr_head_solution.py` → `pr_head_solution.json`(cute_dsl 语言, main.py::run
+  DPS 入口, cr = 1 if k==2048 else 4, seq_lens = n*cr, 与 quick_ab.pr_call 同义)。
+  冒烟 exact: flash_4k_L24 / v32_256k_L12 / pro_1024k_L40 / flash_1024k_L36 全 True。
+- harness 包路径参数化: nsys_ab.py / quick_ab.py 读 `GVRPKG_DIR`(默认改为
+  **gvrpkg_04a0** — R4 起 gvr_pr 臂 = pinned head;旧 tag 已归档不受影响)。
+- ws/prompt.md 已替换为 §B v3-coldstart(旧版备份 ws/prompt_r3.md.bak)。
+- T1 parity gate IN-FLIGHT: GPU6 背靠背双跑 tag=parity04a0/parityhead(arms=gvr_pr,
+  28 cells)→ 每 cell cold 中位配对, |gm 漂移|≤2% 过线。两包同名不可同进程,
+  故取同 GPU 连续两次 nsys 配对(机器空闲)。日志 parity_r4.log。

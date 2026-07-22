@@ -1,4 +1,4 @@
-# DeepSeek-V4 Indexer Top-K Decode (BS=1, fp32, B200) — Optimize the Production GVR Kernel
+# DeepSeek-V4 Indexer Top-K Decode (BS=1, fp32, B200) — Beat the Round-2 Champion
 
 ## Problem
 
@@ -12,9 +12,9 @@ strictly greater than the k-th value must appear, on every run.
 
 `pre_idx[1, k]` is the PREVIOUS decode step's top-k (temporal warm hint).
 Overlap with the true top-k ranges 0.02–1.0 across workloads (typically
->0.5). Exploiting it is REQUIRED (see skeleton below), but correctness and
-the no-regression bar must hold even at 0.02 overlap. You may NOT branch
-on any estimate of hint quality computed outside the kernel (hit-rate is
+>0.5). Exploit it (e.g. threshold seeding), but correctness and the
+no-regression bar must hold even at 0.02 overlap. You may NOT branch on
+any estimate of hint quality computed outside the kernel (hit-rate is
 unknowable at inference); in-kernel admission escape / lagged feedback is
 fine.
 
@@ -29,64 +29,70 @@ real indexer scores (near-exponential CCDF); algorithms that look good on
 `randn` behave differently here. Priority for effort allocation:
 V4-Pro > others; n ≥ 32K > small n.
 
-## Baseline
+## Baseline — this is the hard part
 
-The baseline solution you are given is the CURRENT PRODUCTION kernel: the
-guess-verify-refine (GVR) top-K from TensorRT-LLM PR#16457 (latest head,
-including its K=2048 tail-ladder tuning). Its structure: seed a threshold
-guess from `pre_idx`, verify/refine the threshold with a secant solve in
-log space, then exactly collect the surviving candidates. Read its full
-source first — your job is to make THIS kernel faster, not to replace it.
-Incremental surgery is the expected strategy; you must find the profitable
-directions yourself by profiling and analysis.
-
-One measured fact about where its time goes (from the external report on
-the full 865-cell grid): the FINAL-COLLECT block (threshold handoff +
-refine + writeback, "P4") dominates — it is the largest phase on 827 of
-865 cells, median ~37% of kernel time (range 23–58%). The mid scan/count
-passes are second. How to attack that is yours to work out.
+The baseline you must beat is NOT the original production kernel. It is
+the ROUND-2 CHAMPION of the previous campaign on this exact problem: a
+guess-verify-refine (GVR) design with all-CTA cooperative scanning for
+n ≥ 8448, per-pass early-exit, a bottom-k complement kernel for high-hint
+rows, a dedicated `<<<1,1024>>>` single-CTA rung for 8448 < n ≤ 16896, and
+secant+log threshold refinement seeded from `pre_idx`. It already runs
+1.68× faster (external nsys, cold-L2) than the production kernel it
+replaced, is exact on all 865 external cells, and regresses none of them.
+Its full source is provided as the baseline solution — read it first;
+incremental surgery on it is a legitimate strategy.
 
 ## Target
 
-- **Required:** geomean speedup > 1.0× over the given baseline with NO
-  workload slower (no-regression is a hard acceptance bar — a kernel that
-  wins big on average but loses any cell will be rejected downstream).
-  The external acceptance goal is +60% geomean on the full 865-cell grid;
-  every incremental win counts toward it.
+- **Required:** geomean speedup > 1.0× over the given champion baselines
+  with NO workload slower (no-regression is a hard acceptance bar — a
+  kernel that wins big on average but loses any cell will be rejected
+  downstream). Meaningful wins are +5–15% geomean; single-cell heroics
+  that lose elsewhere are worthless.
 - Final acceptance re-measures externally with nsys cold-L2 on all 865
   real cells (the cells here are a stratified subset). Platform timings
-  have a ~15µs floor that compresses your true speedup roughly 1.3–1.4× —
-  do not tune to the harness floor; win in kernel time. Do not overfit to
-  these exact n values: `n` is dynamic (up to ~1.05M), `k ∈ {512, 1024,
-  2048}` at runtime, hint quality is dynamic.
+  have a ~15µs floor that compresses your true speedup — do not tune to
+  the harness floor; win in kernel time. Do not overfit to these exact n
+  values: `n` is dynamic (up to ~1.05M), `k ∈ {512, 1024, 2048}` at
+  runtime, hint quality is dynamic.
 
-## Required algorithmic skeleton — HARD compliance rule
+## Required algorithmic skeleton
 
 Keep the GVR skeleton: (a) `pre_idx` as the threshold prior, (b) a
 secant+log-transform style exact threshold solve (or an equivalent
 threshold-refinement structure), (c) an exact refine of the surviving
 candidates. Any per-stage restructuring that preserves exactness is
-allowed. Mature primitives (histogram ladders, radix digit passes) may be
-absorbed INTO stages.
+allowed (the champion's all-coop scan, early-exit, and complement kernel
+are precedents). Mature primitives (histogram ladders, radix digit
+passes) may be absorbed INTO stages, but do not replace the whole kernel
+with a generic radix-select / full-sort top-k and do not build a
+per-case dispatcher across unrelated top-k operators.
 
-**Non-negotiable:** a submission that abandons the `pre_idx` prior, or
-replaces the threshold-prior structure wholesale with a prior-free
-selection algorithm (plain radix-select, full sort, sampling-based
-selection), is NON-COMPLIANT and will be rejected even if it is faster.
-Likewise, do not build a per-case dispatcher across unrelated top-k
-operators. The goal of this campaign is a better GVR, not a different
-algorithm.
+## Where the remaining time is (measured, nsys/NCU — start here)
+
+1. **P4 block (final collect: handoff + refine + writeback) is the
+   dominant cost: median ~37% of kernel time (23–58%) across the grid.**
+   Known-untried levers: eliminate the leader-CTA value-handoff and
+   parallelize the final collect across cluster CTAs ("distP4");
+   confine the P4 threshold search to warp0 to remove 2–3 block-wide
+   barriers.
+2. Mid passes (scan + count + falsification) are 17–48%; per-pass
+   early-exit already harvests much of this in the champion.
+3. For n ≥ 512K only: a (warp, window) sideband that lets the scan skip
+   provably sub-threshold windows may pay; it measured ~0 replay benefit
+   at smaller n.
 
 ## Dead ends — measured net-negative on THIS workload/hardware; do not re-discover
 
 1. BS=1 is latency-bound, not bandwidth-bound (24% occupancy, <1% DRAM at
-   small n). Bandwidth-oriented rewrites miss the bottleneck.
+   small n). The multi-CTA cooperation lever is ALREADY in the champion —
+   re-deriving it is not progress.
 2. `pre_idx` warm-hint grafted onto radix-select: no win (hint only helps
-   threshold-style skeletons) — and prior-free pivots are banned anyway.
+   threshold-style skeletons).
 3. Private per-warp histograms to avoid smem atomics: loses (SM100
    pipelines same-address atomics fine).
-4. Multi-CTA for SMALL n (< ~8K): launch/sync overhead dominates;
-   single-CTA wins there.
+4. Multi-CTA for SMALL n (< ~8K): launch/sync overhead dominates; the
+   champion's single-CTA rungs win there.
 5. More than 8–32 CTAs at large n: merge cost eats the scan win.
 6. Per-element ballot/popc slot-reservation to fuse count+collect into
    one pass: coordination ≈ a full extra pass.
@@ -94,13 +100,12 @@ algorithm.
    hits.
 8. Extra secant/interpolation refinement rounds: each is a
    barrier-separated pass; keep passes ≤2.
-9. CUB DeviceRadixSort / full sort: ~10× too slow at these sizes (and
-   banned as a wholesale replacement).
+9. CUB DeviceRadixSort / full sort: ~10× too slow at these sizes.
 10. Fusing the final-collect histogram into the P3 scan loop: pollutes
     the scan inner loop, −15%.
 11. Shrinking histogram bins below 512 for k=2048: exact-tail scratch
     overflows (silent UB); kNumBins=512 at k=2048 is already in the
-    baseline.
+    production baseline.
 12. Launch-config-only retuning: ceiling measured at ~1.025×.
 13. CUDA graphs / replay amortization are banned by the compliance judge —
     win inside the kernel.

@@ -29,7 +29,8 @@ import torch
 HERE = Path(__file__).resolve().parent
 REPORT = HERE.parent
 BENCH = REPORT.parent
-sys.path.insert(0, str(HERE / "gvrpkg_head"))
+import os  # noqa: E402
+sys.path.insert(0, str(HERE / os.environ.get("GVRPKG_DIR", "gvrpkg_04a0")))
 sys.path.insert(0, str(BENCH / "harness"))
 
 from gvrpkg.top_k.gvr_topk_decode import GvrTopKKernel  # noqa: E402  (gvrpkg_head)
