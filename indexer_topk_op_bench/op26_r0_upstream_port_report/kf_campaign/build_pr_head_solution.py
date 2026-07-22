@@ -48,7 +48,8 @@ def main():
     for p in sorted(PKG.rglob("*.py")):
         if "__pycache__" in p.parts:
             continue
-        sources.append({"path": str(p.relative_to(PKG)), "content": p.read_text()})
+        content = p.read_text() or "# package marker\n"
+        sources.append({"path": str(p.relative_to(PKG)), "content": content})
     sol = {
         "name": "gvr_pr16457_head_04a0900f",
         "definition": "indexer_topk_decode_bs1_real",

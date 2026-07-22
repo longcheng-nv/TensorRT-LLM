@@ -66,3 +66,18 @@ Updated 2026-07-22 (会话暂停：用户要求迁移到另一台机器)。
 - T1 parity gate IN-FLIGHT: GPU6 背靠背双跑 tag=parity04a0/parityhead(arms=gvr_pr,
   28 cells)→ 每 cell cold 中位配对, |gm 漂移|≤2% 过线。两包同名不可同进程,
   故取同 GPU 连续两次 nsys 配对(机器空闲)。日志 parity_r4.log。
+- **prepare 失败→D1 复现**: 平台 baseline evaluator 不 stage 资产(0/28
+  safetensors missing,与 R3 D1 同缺口)。变通(campaign-1 先例):
+  `gen_r4_baselines.py` → baselines.jsonl = parity04a0 冷中位(28 格,
+  pinned head 本地 nsys 纯 kernel 时间,平台 geomean 口径 14.30µs);
+  campaign.yaml 切 baselines 路径,baseline_solution: null。
+- prompt 上限 32768B → `gen_prompt_appendix.py` 生成基线源码 digest
+  (GvrParams+pick_config 全文 + 全 phase 签名/docstring,19.9KB),
+  §Baseline 段加计时尺度 steering(外部纯 kernel 分母 → 平台平价读数
+  ~0.5-0.9x,勿灰心);最终 prompt 27.7KB。
+- **T2 DONE — campaign STARTED**: `pra6srbd7h4pqecqbgxgm15rgg`
+  (gvr-topk-cold60, 2026-07-22T02:48Z, effort high, max $800/8h)。
+- **T3 IN-FLIGHT**: 865 格 pinned-head 分母 grid tag=r4pr;外来作业占
+  GPU0-3(62-82% util,19-75GB,R3 D3 同款)→ 新驱动
+  drive_grid_pr_gpulist.sh 只用安静 GPU4-7,4 shards。
+- 监控:monitor_campaign.sh 后台轮询(round advance / +0.02 / terminal 退出)。

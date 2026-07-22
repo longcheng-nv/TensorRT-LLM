@@ -31,14 +31,27 @@ V4-Pro > others; n ≥ 32K > small n.
 
 ## Baseline
 
-The baseline solution you are given is the CURRENT PRODUCTION kernel: the
+The baseline you must beat is the CURRENT PRODUCTION kernel: the
 guess-verify-refine (GVR) top-K from TensorRT-LLM PR#16457 (latest head,
 including its K=2048 tail-ladder tuning). Its structure: seed a threshold
 guess from `pre_idx`, verify/refine the threshold with a secant solve in
-log space, then exactly collect the surviving candidates. Read its full
-source first — your job is to make THIS kernel faster, not to replace it.
-Incremental surgery is the expected strategy; you must find the profitable
-directions yourself by profiling and analysis.
+log space, then exactly collect the surviving candidates. It is written in
+CuTe DSL (Python); a verbatim source digest — full config/dispatch/
+orchestration layers plus the signature and docstring of every phase
+primitive — is in the APPENDIX at the bottom of this brief. Read it first —
+your job is to make THIS algorithm faster (re-expressed in CUDA C++), not
+to replace it. You must find the profitable directions yourself by
+profiling and analysis.
+
+The per-workload baseline timings (your speedup denominator) are EXTERNAL
+nsys cold-L2 pure-kernel-time medians of exactly that production kernel on
+an idle B200 — they contain none of the ~15µs harness floor your own
+platform measurements include. Consequence: at true kernel parity your
+platform speedup will read ~0.5-0.9x, NOT 1.0x; the compression is
+strongest on the smallest workloads. Do not be discouraged by sub-1.0
+readings early on — track your RELATIVE progress across submissions, and
+judge absolute wins by how much kernel time you save on the large-n cells
+where the floor is a smaller fraction.
 
 One measured fact about where its time goes (from the external report on
 the full 865-cell grid): the FINAL-COLLECT block (threshold handoff +
