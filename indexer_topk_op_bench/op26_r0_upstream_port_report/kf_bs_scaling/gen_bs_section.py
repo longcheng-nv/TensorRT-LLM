@@ -107,7 +107,14 @@ def chart(kser, sser=None, w=760, h=360, title="", cls_extra=""):
     s.append(f'<text x="{lpad+pw/2}" y="{h-6}" font-size="11" text-anchor="middle" '
              f'fill="var(--vz-text2)" {FONT}>BS (same real row replicated)</text>')
 
-    def draw(ser, mcls, dash):
+    def draw(ser, mcls, dash, with_labels):
+        # collision-avoided end labels: sort by y, enforce 13px separation
+        ends = {}
+        if with_labels:
+            raw = [(key, Y(ser[key][-1][1])) for key, *_ in SERIES if ser.get(key)]
+            for j, (key, y) in enumerate(sorted(raw, key=lambda kv: kv[1])):
+                prev = ends[sorted(raw, key=lambda kv: kv[1])[j - 1][0]] if j else -1e9
+                ends[key] = max(y, prev + 13)
         for key, _, _, cls, label, col in SERIES:
             pts = ser.get(key) or []
             if not pts:
@@ -120,15 +127,16 @@ def chart(kser, sser=None, w=760, h=360, title="", cls_extra=""):
                 g.append(f'<circle cx="{X(i):.1f}" cy="{Y(v):.1f}" r="4" fill="{col}" '
                          f'stroke="var(--vz-surface)" stroke-width="1.5">'
                          f'<title>{label} @ BS={BS_GRID[i]}: {v:.3f}×</title></circle>')
-            li, lv = pts[-1]
-            g.append(f'<text x="{X(li)+8:.1f}" y="{Y(lv)+4:.1f}" font-size="10.5" '
-                     f'fill="{col}" {FONT}>{label.replace("vs ", "")}</text>')
+            if with_labels:
+                li, _ = pts[-1]
+                g.append(f'<text x="{X(li)+8:.1f}" y="{ends[key]+4:.1f}" font-size="10.5" '
+                         f'fill="{col}" {FONT}>{label.replace("vs ", "")}</text>')
             g.append("</g>")
             s.append("".join(g))
 
-    draw(kser, "mk", "")
+    draw(kser, "mk", "", True)
     if sser:
-        draw(sser, "ms", ' stroke-dasharray="6 4"')
+        draw(sser, "ms", ' stroke-dasharray="6 4"', False)
     s.append("</svg>")
     return "".join(s)
 
