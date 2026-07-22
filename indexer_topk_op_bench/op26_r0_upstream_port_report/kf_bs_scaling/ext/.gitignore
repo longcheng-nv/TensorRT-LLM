@@ -1,0 +1,7 @@
+*.sqlite
+*.nsys-rep
+*.qdstrm
+nsys_reps/
+build_pt*/
+__pycache__/
+contaminated_run1/

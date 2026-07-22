@@ -93,6 +93,23 @@ exactness, nsys cold-L2, per-batch p95 anchors, GVR arm local-retest rule
 (cross-node drift med 1.09). Watch: L2 set-conflicts across BS hist slices;
 spin threads stealing issue slots under full SM load (nanosleep backoff).
 
+**MINIMAL VALIDATION DONE (2026-07-22, umbriel-b200-039, kf_bs_scaling/ext/):
+both hypotheses CONFIRMED, 126/126 exact.** nsys cold-L2, 3 arms paired per
+cell (gvr_pr local anchor / compB-seq / compB-ext), real rows, 6 cells.
+(A) grid.y batching of the single-CTA tiers: flat to BS=64, beats gvr_pr
+1.61-1.80x at EVERY BS 1..1024 (16/16 wins per BS row), up to 157x vs
+sequential compB — small-n win region extends to the whole BS axis.
+(B) row teams at N=131075 (team=65, measured cap=296 => active=2/SM
+register-bound, rows_per_wave=4): BS=1 parity 1.006/1.016 (team-only grid ==
+shipped bump-to-148 grid); single wave BS=4 costs +5% over BS=1 => extra
+rows ~free as predicted; vs gvr_pr 2.49x/1.81x @BS4 (was 0.470x sequential);
+multi-wave linear in waves, crossover vs PR arm at BS~8, batched arm wins
+from BS=16. Span/kernel tax <=1.02 everywhere. Implied gate: ext for
+n<=16896 any BS; large-n ext while BS <= rows_per_wave (~2 waves), else
+batched arm. Next lever: register diet on topk_fast to raise active 2->4+
+(smem allows 5), doubling rows_per_wave and pushing the crossover out.
+Details + protocol: kf_bs_scaling/ext/RESULTS.md (ext_bs.csv canonical).
+
 One-line thesis: the collapse is a misallocated parallelism axis, not an
 algorithm loss — reallocate the co-residency budget from "1 row x whole GPU"
 to "BS rows x ceil(n/2048)-CTA teams"; the barrier demotes to team scope
