@@ -234,3 +234,8 @@ Updated 2026-07-22 (会话暂停：用户要求迁移到另一台机器)。
 - R4 末段收割 r3_28dc11f6(per-K AR dispatch, 内部 1.3701): 探针 1.7847
   (0 reg)与 r3_v11 1.7835 打平;全格 r4r3cg 判决中(与 R5 无 GPU 冲突,
   R5 平台跑,本地 GPU1-3 归 R4 判决)。
+- **★★ R4 三 Bar 全达成 — 新 champion r3_28dc11f6**(`gvr_topk_r3_perK_dispatch`,
+  内部 1.3701): 全格 865 = **geomean 1.6531, 865/865 exact, 0 真实回退**
+  (唯一 <1.0 格 pro_64k_L38 grid 0.991@15rep → 60-rep 裁定 **1.0129** = 噪声;
+  warm 0.908 记录在案,验收口径 = nsys cold)。min(裁定后)>0.99, p5 1.221,
+  max 3.516。Bar-1 ✅ 1.6531/1.60 · Bar-2 ✅ · Bar-3 ✅。
