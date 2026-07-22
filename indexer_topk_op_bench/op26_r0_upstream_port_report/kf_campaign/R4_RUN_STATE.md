@@ -194,3 +194,10 @@ Updated 2026-07-22 (会话暂停：用户要求迁移到另一台机器)。
 - Round 2 终局: 内部 best 1.2887(52f7d1a2 r2_v9);50 kernels scored;
   花费 ~$493。本地链 round-2 增量: r2_wd 1.441 → v25 1.521 → **v27 1.5824**
   (865 exact, 2 regs)。Round 3 启动。
+
+## Round 3
+
+- **r3_489c71dc 收割**(`gvr_topk_cuda_r3_a003_v1`, 内部 1.3209): v27
+  寄存器驻留 + fused count publication barrier + P4 直方图清零重叠。
+  28-cell 探针(GPU1): **cold gm 1.7257, 0 回退, 28/28 exact**。
+  全格 r4r3ag 已发 GPU1-3。花费已 $725/800,round 3 大概率末轮。
