@@ -1329,9 +1329,117 @@ static void launch_reg(const float* logits, const int* pre_idx, int* out, int np
   }
 }
 
+// BS>1 dispatch (op38): probe-measured per-(npad, K, BS) winners.
+// Three regimes per tier: low BS = the BS=1-optimal register-resident ladder
+// (launch amortizes, latency dominates), mid BS = single-cluster register
+// path (fewer sync partners, more rows in flight), high BS = streaming
+// re-scan kernel (low registers -> 2 CTAs/SM occupancy; per-wave working set
+// is L2-resident so count passes are cheap) with hint sampling (HS) and a
+// short AR4/AR6 ladder. Skeleton everywhere: preIdx-hinted threshold guess ->
+// secant-log refinement -> exact refine/emit.
+static void launch_bs(const float* logits, const int* pre_idx, int* out, int npad, int K, int kC,
+                      int BS, cudaStream_t stream) {
+  if (npad <= DKCMAX) {  // direct tier: batched radix CTAs; streaming from BS>=256
+    if (BS < 256)
+      launch_direct<1024>(logits, out, npad, K, BS, stream);
+    else
+      launch_gvr<1, 512, 4, 2>(logits, pre_idx, out, npad, K, kC, BS, stream);
+    return;
+  }
+  if (npad < 16896) {  // CS1 register-resident holds to BS<=128
+    if (BS <= 128)
+      launch_reg<1, 512, 9>(logits, pre_idx, out, npad, K, kC, BS, stream);
+    else
+      launch_gvr<1, 512, 4, 2>(logits, pre_idx, out, npad, K, kC, BS, stream);
+    return;
+  }
+  if (npad <= 49152) {
+    if (BS <= 8) {
+      launch_reg<8, 512, 3>(logits, pre_idx, out, npad, K, kC, BS, stream);
+    } else if (BS <= 128) {
+      if (K <= 512)
+        launch_reg<1, 1024, 9, 4, 2>(logits, pre_idx, out, npad, K, kC, BS, stream);
+      else
+        launch_reg<1, 1024, 9, 6, 2>(logits, pre_idx, out, npad, K, kC, BS, stream);
+    } else {
+      if (K <= 512)
+        launch_gvr<1, 512, 4, 2>(logits, pre_idx, out, npad, K, kC, BS, stream);
+      else
+        launch_gvr<1, 512, 6, 4>(logits, pre_idx, out, npad, K, kC, BS, stream);
+    }
+    return;
+  }
+  if (npad <= 98304) {
+    if (BS <= 8)
+      // vpc = ceil(npad/4/8): MAXV4 only holds to npad 65536 (original tiers)
+      if (npad <= 65536)
+        launch_reg<8, 512, 4>(logits, pre_idx, out, npad, K, kC, BS, stream);
+      else
+        launch_reg<8, 512, 8>(logits, pre_idx, out, npad, K, kC, BS, stream);
+    else if (BS <= 64)
+      launch_gvr<2, 1024, 6, 4>(logits, pre_idx, out, npad, K, kC, BS, stream);
+    else
+      launch_gvr<1, 512, 4, 2>(logits, pre_idx, out, npad, K, kC, BS, stream);
+    return;
+  }
+  if (npad <= 131072) {
+    if (BS <= 4)
+      launch_reg<8, 512, 8>(logits, pre_idx, out, npad, K, kC, BS, stream);
+    else if (BS <= 32)
+      launch_reg<4, 1024, 9, 6, 2>(logits, pre_idx, out, npad, K, kC, BS, stream);
+    else if (BS <= 64)
+      launch_gvr<2, 1024, 4, 2>(logits, pre_idx, out, npad, K, kC, BS, stream);
+    else
+      launch_gvr<1, 1024, 4, 2>(logits, pre_idx, out, npad, K, kC, BS, stream);
+    return;
+  }
+  if (npad <= 163840) {
+    if (BS <= 4) {
+      if (K >= 2048)
+        launch_reg<16, 512, 5, 6>(logits, pre_idx, out, npad, K, kC, BS, stream);
+      else
+        launch_reg<16, 512, 5>(logits, pre_idx, out, npad, K, kC, BS, stream);
+    } else if (BS <= 16) {
+      launch_reg<8, 512, 10, 6, 4>(logits, pre_idx, out, npad, K, kC, BS, stream);
+    } else if (BS <= 64) {
+      launch_gvr<2, 1024, 4, 2>(logits, pre_idx, out, npad, K, kC, BS, stream);
+    } else {
+      launch_gvr<1, 1024, 4, 2>(logits, pre_idx, out, npad, K, kC, BS, stream);
+    }
+    return;
+  }
+  if (npad <= 262144) {
+    if (BS <= 4) {
+      if (K == 2048)
+        launch_reg<16, 512, 8>(logits, pre_idx, out, npad, K, kC, BS, stream);
+      else
+        launch_reg<16, 512, 8, 6>(logits, pre_idx, out, npad, K, kC, BS, stream);
+    } else if (BS <= 16) {
+      if (K <= 512)
+        launch_reg<8, 1024, 8, 4, 2>(logits, pre_idx, out, npad, K, kC, BS, stream);
+      else
+        launch_reg<8, 1024, 8, 6, 2>(logits, pre_idx, out, npad, K, kC, BS, stream);
+    } else if (BS <= 64) {
+      if (K <= 512)
+        launch_gvr<2, 1024, 4, 2>(logits, pre_idx, out, npad, K, kC, BS, stream);
+      else
+        launch_gvr<2, 1024, 6, 4>(logits, pre_idx, out, npad, K, kC, BS, stream);
+    } else {
+      if (K <= 512)
+        launch_gvr<1, 1024, 4, 2>(logits, pre_idx, out, npad, K, kC, BS, stream);
+      else
+        launch_gvr<1, 1024, 4, 4>(logits, pre_idx, out, npad, K, kC, BS, stream);
+    }
+    return;
+  }
+  launch_gvr<16, 512>(logits, pre_idx, out, npad, K, kC, BS, stream);
+}
+
 void gvr_topk_launch(const float* logits, const int* pre_idx, int* out, int npad, int K, int BS,
                      cudaStream_t stream) {
   int kC = (K >= 2048) ? 8192 : 6144;
+  if (BS > 1) return launch_bs(logits, pre_idx, out, npad, K, kC, BS, stream);
+  // BS==1: the r3_v11 ladder below is untouched (865-cell verdict carries over).
   // MAXV is matched tightly to each tier: mostly-dummy register slots cost
   // real time (predicated loads + dead compares), so keep slots nearly full.
   // Batched rows ride grid.y (one cluster per row); BS=1 grid is identical to
