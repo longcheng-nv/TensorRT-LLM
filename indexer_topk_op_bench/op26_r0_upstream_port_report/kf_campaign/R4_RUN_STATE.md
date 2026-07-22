@@ -188,3 +188,9 @@ Updated 2026-07-22 (会话暂停：用户要求迁移到另一台机器)。
 - r2_52f7d1a2(`r2_v9`, 内部 1.2887): v27 基础上 K=1024 reg-kernel RUNGS=6
   单格特调。28-cell 探针 1.6591(0 reg, 28/28 exact)— 低于 v27 的 1.6669,
   子集 wash → 不上全格,v27 保持本地 champion。
+
+## Round 2 收口 → Round 3
+
+- Round 2 终局: 内部 best 1.2887(52f7d1a2 r2_v9);50 kernels scored;
+  花费 ~$493。本地链 round-2 增量: r2_wd 1.441 → v25 1.521 → **v27 1.5824**
+  (865 exact, 2 regs)。Round 3 启动。
