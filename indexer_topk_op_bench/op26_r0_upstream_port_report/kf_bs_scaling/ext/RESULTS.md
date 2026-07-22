@@ -122,3 +122,45 @@ varies and load imbalance makes chunked waves drain-limited — but ragged
 rows also break uniform team sizing (team = ceil(n/2048)), so that is a
 different design (per-bucket teams + real atomic queue), not an upgrade of
 this kernel.
+
+## D1 throughput arm — minimal validation DONE (direction CONFIRMED, 1.6x
+## full-range target at 93%)
+
+Barrier-free 3-kernel pipeline (apply_tp_edits.py -> tp_hist / tp_collect /
+tp_finish): split-row smem hist + packed atomic merge; split-row collect
+with plain per-hit global atomics; single-CTA finish (compB fast-tail
+refine, T>CAP in-CTA ladder over row re-reads). __ldcs streaming reads.
+Launch boundaries replace ALL synchronization and keep the fence-less L1
+legs valid (no ldcg needed — unlike B').
+
+Three iterations inside the experiment:
+1. C = 2*SM/BS cap 8: high-BS confirmed (tp/gvr 1.98 pooled @BS1024) but
+   BS 8-64 valley (0.74-1.10) — underfeeding, tp at BS=32 was 3.9x off its
+   own BS=1024 per-row cost.
+2. C -> 4*SM/BS cap 32 + K2 dual-ballot removed (hits/row ~ k << n: plain
+   atomics beat the per-element ballot tax): flash BS=8 30.6 -> 17.1us.
+3. RACE found & fixed at BS=1024 (~1 bad row / 20k): tp_finish zeroed
+   hist_r with no __syncthreads() after the per-thread T = hist_r[b0]
+   loads — fast threads zeroed the bin a slow thread was still reading.
+   One barrier fixes it; 122,880 row-checks clean after.
+
+Final nsys cold-L2 verdict (tp_bs.csv, 36/36 exact, N=131075):
+
+| BS | tp/gvr (fl/pro) | best(tp,v4)/gvr pooled | note |
+|---|---|---|---|
+| 8 | 1.35 / 1.23 | 1.88 (v4) | latency arm still best |
+| 16 | 1.27 / 1.12 | 1.19 (tp) | tp overtakes v4 |
+| 32 | 0.88 / 0.81 | 0.85 | THE valley |
+| 64 | 1.19 / 1.05 | 1.12 | |
+| 256 | 2.24 / 1.73 | 1.97 | |
+| 1024 | 3.09 / 2.19 | 2.60 | roofline math held |
+
+OVERALL best-arm gm over BS 8-1024: **1.489x vs PR head** (target 1.6;
+was 1.29 at iteration 1). High end decisively confirmed; the residual
+deficit is localized at BS 32-64 where gvr_pr is still in its own
+latency-flat region (~27us denominator) while tp already scales with work.
+Absolute headroom remains large: tp @BS=32 is ~31us vs a ~5us 2-pass DRAM
+floor. Next levers (D2 iteration): sampled-estimate single-pass collect
+(cuts ~40% of tp bytes), K2+K3 fusion for whole-bucket rows, C shape tuning
+at BS 32-64. Estimated to close the 1.6x gap; out of minimal-validation
+scope.

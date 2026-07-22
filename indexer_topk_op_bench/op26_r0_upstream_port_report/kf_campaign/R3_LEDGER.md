@@ -171,6 +171,25 @@ waves); v30 lineage (K=2048 mid-n 16896<n<=140000) still sequential in the
 ext — needs the same team treatment before a full-envelope batched ship;
 865-grid regression gate + BS-sweep dual exactness before any PR.
 
+**D1 throughput arm — minimal validation DONE (2026-07-22): direction
+CONFIRMED, BS 8-1024 target at 93%.** Barrier-free 3-kernel pipeline
+(split-row hist / split-row collect / single-CTA finish, __ldcs streaming;
+launch boundaries = all sync, fence-less legs stay valid — no ldcg).
+Final verdict (tp_bs.csv, 36/36 exact, N=131K): tp/gvr pooled 1.97x @BS256,
+2.60x @BS1024 (flash 3.09) — roofline math held; best-arm(tp,v4) gm over
+BS 8-1024 = **1.489x vs PR head** (target 1.6, iteration-1 was 1.29).
+Residual deficit localized at BS 32-64 (0.85/1.12) where gvr is still
+latency-flat (~27us) while tp scales with work; tp @BS32 ~31us vs ~5us
+2-pass DRAM floor => large headroom. In-experiment lessons: (i) valley was
+underfeeding — C 2xSM/cap8 -> 4xSM/cap32 + dropping K2's per-element dual
+ballot (hits ~ k << n => plain atomics win) took flash BS=8 30.6->17.1us;
+(ii) RACE class note: re-zeroing a global hist in the SAME kernel that
+plain-loads it needs a __syncthreads between the loads and the zero loop
+(stochastic 1-row corruption at BS=1024, 122,880 row-checks clean after
+fix). Next levers to close 1.6x: D2 sampled-estimate single-pass collect
+(~40% byte cut), K2+K3 fusion for whole-bucket rows, C shape at BS 32-64.
+ext/RESULTS.md final section.
+
 One-line thesis: the collapse is a misallocated parallelism axis, not an
 algorithm loss — reallocate the co-residency budget from "1 row x whole GPU"
 to "BS rows x ceil(n/2048)-CTA teams"; the barrier demotes to team scope
