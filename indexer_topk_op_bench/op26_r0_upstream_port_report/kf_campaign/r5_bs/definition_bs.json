@@ -1,0 +1,59 @@
+{
+ "name": "indexer_topk_decode_bs_real",
+ "description": "DeepSeek indexer decode top-k, REAL captured logits rows (SS7b grid), batched: BS copies of the same row. fp32 in, int32 indices out, tie-robust per-row exactness.",
+ "op_type": "selection",
+ "axes": {
+  "b": {
+   "type": "var",
+   "description": "batch size (1..1024), all rows identical copies"
+  },
+  "n": {
+   "type": "var",
+   "description": "valid row length (post-compression)"
+  },
+  "k": {
+   "type": "var",
+   "description": "top-k: 512/1024/2048"
+  },
+  "npad": {
+   "type": "expr",
+   "expression": "(n + 63) // 64 * 64"
+  }
+ },
+ "inputs": {
+  "logits": {
+   "shape": [
+    "b",
+    "npad"
+   ],
+   "dtype": "float32"
+  },
+  "pre_idx": {
+   "shape": [
+    "b",
+    "k"
+   ],
+   "dtype": "int32"
+  },
+  "n_valid": {
+   "shape": null,
+   "dtype": "int32"
+  },
+  "cell_id": {
+   "shape": null,
+   "dtype": "int32"
+  }
+ },
+ "outputs": {
+  "indices": {
+   "shape": [
+    "b",
+    "k"
+   ],
+   "dtype": "int32"
+  }
+ },
+ "custom_inputs_entrypoint": "gen_inputs",
+ "custom_correctness_entrypoint": "check_topk",
+ "reference": "import os\nimport torch\n\n_CELL_FILES = [\"cell_flash_1024k_L10.safetensors\", \"cell_flash_1024k_L22.safetensors\", \"cell_flash_1024k_L34.safetensors\", \"cell_flash_128k_L10.safetensors\", \"cell_flash_128k_L22.safetensors\", \"cell_flash_128k_L34.safetensors\", \"cell_flash_16k_L10.safetensors\", \"cell_flash_16k_L22.safetensors\", \"cell_flash_16k_L34.safetensors\", \"cell_flash_256k_L10.safetensors\", \"cell_flash_256k_L22.safetensors\", \"cell_flash_256k_L34.safetensors\", \"cell_flash_32k_L10.safetensors\", \"cell_flash_32k_L22.safetensors\", \"cell_flash_32k_L34.safetensors\", \"cell_flash_4k_L10.safetensors\", \"cell_flash_4k_L22.safetensors\", \"cell_flash_4k_L34.safetensors\", \"cell_flash_512k_L10.safetensors\", \"cell_flash_512k_L22.safetensors\", \"cell_flash_512k_L34.safetensors\", \"cell_flash_64k_L10.safetensors\", \"cell_flash_64k_L22.safetensors\", \"cell_flash_64k_L34.safetensors\", \"cell_flash_8k_L10.safetensors\", \"cell_flash_8k_L22.safetensors\", \"cell_flash_8k_L34.safetensors\", \"cell_pro_1024k_L14.safetensors\", \"cell_pro_1024k_L30.safetensors\", \"cell_pro_1024k_L46.safetensors\", \"cell_pro_128k_L14.safetensors\", \"cell_pro_128k_L30.safetensors\", \"cell_pro_128k_L46.safetensors\", \"cell_pro_16k_L14.safetensors\", \"cell_pro_16k_L30.safetensors\", \"cell_pro_16k_L46.safetensors\", \"cell_pro_256k_L14.safetensors\", \"cell_pro_256k_L30.safetensors\", \"cell_pro_256k_L46.safetensors\", \"cell_pro_32k_L14.safetensors\", \"cell_pro_32k_L30.safetensors\", \"cell_pro_32k_L46.safetensors\", \"cell_pro_4k_L14.safetensors\", \"cell_pro_4k_L30.safetensors\", \"cell_pro_4k_L46.safetensors\", \"cell_pro_512k_L14.safetensors\", \"cell_pro_512k_L30.safetensors\", \"cell_pro_512k_L46.safetensors\", \"cell_pro_64k_L14.safetensors\", \"cell_pro_64k_L30.safetensors\", \"cell_pro_64k_L46.safetensors\", \"cell_pro_8k_L14.safetensors\", \"cell_pro_8k_L30.safetensors\", \"cell_pro_8k_L46.safetensors\", \"cell_v32_128k_L14.safetensors\", \"cell_v32_128k_L34.safetensors\", \"cell_v32_128k_L54.safetensors\", \"cell_v32_16k_L14.safetensors\", \"cell_v32_16k_L34.safetensors\", \"cell_v32_16k_L54.safetensors\", \"cell_v32_256k_L14.safetensors\", \"cell_v32_256k_L34.safetensors\", \"cell_v32_256k_L54.safetensors\", \"cell_v32_32k_L14.safetensors\", \"cell_v32_32k_L34.safetensors\", \"cell_v32_32k_L54.safetensors\", \"cell_v32_4k_L14.safetensors\", \"cell_v32_4k_L34.safetensors\", \"cell_v32_4k_L54.safetensors\", \"cell_v32_64k_L14.safetensors\", \"cell_v32_64k_L34.safetensors\", \"cell_v32_64k_L54.safetensors\", \"cell_v32_8k_L14.safetensors\", \"cell_v32_8k_L34.safetensors\", \"cell_v32_8k_L54.safetensors\"]\n\n\ndef _load_row(cell_id, device):\n    from safetensors.torch import load_file\n    fn = _CELL_FILES[int(cell_id)]\n    bases = [\".\", os.environ.get(\"CUDAGYM_STAGING_DIR\", \".\")]\n    try:\n        bases.append(os.path.dirname(os.path.abspath(__file__)))\n    except NameError:\n        pass\n    for base in bases:\n        p = os.path.join(base, fn)\n        if os.path.exists(p):\n            d = load_file(p)\n            return d[\"logits\"].to(device), d[\"pre_idx\"].to(device)\n    raise FileNotFoundError(fn)\n\n\ndef gen_inputs(axes_and_scalars, device, seed):\n    \"\"\"SS7b batch construction: the SAME captured row materialized b times.\"\"\"\n    b = int(axes_and_scalars[\"b\"])\n    cell_id = int(axes_and_scalars[\"cell_id\"])\n    logits, pre_idx = _load_row(cell_id, device)\n    return {\"logits\": logits.expand(b, -1).contiguous().float(),\n            \"pre_idx\": pre_idx.expand(b, -1).contiguous().to(torch.int32)}\n\n\ndef run(logits, pre_idx, n_valid, cell_id):\n    b = logits.shape[0]\n    k = pre_idx.shape[1]\n    vals = logits[:, :n_valid].float()\n    return torch.topk(vals, k, dim=1, largest=True,\n                      sorted=True).indices.to(torch.int32)\n\n\ndef check_topk(ref_outputs, user_outputs, *, mandatory, tie, k, n, b):\n    \"\"\"Tie-robust top-k index-set check, applied to EVERY batch row\n    (all rows are copies of the same captured row).\"\"\"\n    out = user_outputs[\"indices\"].to(torch.int64).cpu()\n    problems = []\n    if out.shape != (b, k):\n        problems.append(f\"shape {tuple(out.shape)} != ({b},{k})\")\n    else:\n        mand = torch.tensor(mandatory, dtype=torch.int64)\n        tie_t = (torch.tensor(tie, dtype=torch.int64) if len(tie)\n                 else torch.empty(0, dtype=torch.int64))\n        allowed = torch.cat([mand, tie_t])\n        for i in range(b):\n            idx = out[i]\n            if int(idx.min()) < 0 or int(idx.max()) >= n:\n                problems.append(f\"row {i}: index out of range\"); break\n            if torch.unique(idx).numel() != k:\n                problems.append(f\"row {i}: duplicate indices\"); break\n            if not bool(torch.isin(idx, allowed).all()):\n                problems.append(f\"row {i}: index outside true top-k set\"); break\n            if not bool(torch.isin(mand, idx).all()):\n                problems.append(f\"row {i}: missing mandatory index\"); break\n    passed = len(problems) == 0\n    return {\"indices\": {\"passed\": passed, \"message\": \"; \".join(problems) or \"ok\"}}\n"
+}
