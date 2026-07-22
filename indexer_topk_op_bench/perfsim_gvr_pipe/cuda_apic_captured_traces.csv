@@ -1,0 +1,2 @@
+APIC trace,relocate scheme,status,pp log size,pp log time,pp analyze time,total pp time,capture time,full kernel name
+"/tmp/claude-150713/-home-scratch-loncheng-gpu-workspace-perf-workloads-DSV4-TensorRT-LLM/59a240e1-bbc3-4299-854e-2411e95c7fab/scratchpad/apic_cap2/CUDA_APIC_TRACES/PID8092_20260722_034219/p8092_k0052_kernel_cutlass_gvr_topk_kernel_gvrpkgtop_kgvr_topk_decodeGvrTopKKernel_object_at__tensorptrf32gmemalign32oi641_tensorptri32gmemalign16o102410241_tensorptri32gmemo1_None_tensorptri32gmemal_0/cuda.api",AUTO0,PASSED,NA,NA,NA,5.00 s,28,NotFound
