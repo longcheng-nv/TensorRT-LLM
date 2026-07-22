@@ -201,3 +201,12 @@ Updated 2026-07-22 (会话暂停：用户要求迁移到另一台机器)。
   寄存器驻留 + fused count publication barrier + P4 直方图清零重叠。
   28-cell 探针(GPU1): **cold gm 1.7257, 0 回退, 28/28 exact**。
   全格 r4r3ag 已发 GPU1-3。花费已 $725/800,round 3 大概率末轮。
+- **★ Bar-1 首达: r3_a003_v1 全格 865(r4r3ag)= geomean 1.6184 ≥ 1.60,
+  865/865 exact,回退 1**(pro_64k_L38)。60-rep 裁定: L38 = 0.970 cold
+  (warm 0.858)— 3% 真实回退,窗外,Bar-2 差此一格。该格特征 =
+  hit 0.269 全带最低(同 N/K 的 L52 hit0.37 已 ≥1.0),修复通道只能是
+  kernel 内 admission 逃逸(hit-rate dispatch 违禁)。
+  锚: overall 0.9865,5 rung 3-9% 漂移(pro_4k 1.087 最大;配对比值有效,
+  ship 判决时若定此候选需在单一 GPU 集上复测定稿)。
+- 状态: Bar-1 ✅ 1.6184 / Bar-2 差 1 格(-3%) / Bar-3 ✅。round 3 继续
+  ($725/800,可能被预算截断),等它清最后一格或收口。
