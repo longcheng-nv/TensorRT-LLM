@@ -219,3 +219,18 @@ Updated 2026-07-22 (会话暂停：用户要求迁移到另一台机器)。
   Bar-3 ✅。L38 = hit 0.269 全带最低,寄存器驻留把它从 v14 时代 -17% 压到
   -4%,秒差 ~0.4µs,机理 = 低 hint 下 secant 轮数多(合规修复只剩 kernel 内
   admission 逃逸;或收口后 fork steering)。
+
+## R5 BS 战役(gvr-topk-bs2x)启动
+
+- **R5 campaign STARTED**: `rngnxv95cx5qfdmte69vz0b0n8`(2026-07-22T14:55Z,
+  effort high, $800/8h)。目标: §7b 750 真实格(75 cell × BS2-1024)avg ≥2.0×
+  vs pinned head 原生批 + 全格 ≥1.0 + 抬最低;BS=1 守 r3_v11 水位。
+- 工装: r5_bs/{definition_bs(全 custom 输入, cell 为 axis, gen_inputs 从资产
+  物化同行×BS), workload_bs 47 条, nsys_bs.py 本地判决, drive_grid_bs.sh}。
+  平台校验坑: custom 与非 custom 输入不可混 → n_valid 也走 custom。
+- **R5 本地分母 DONE (r5pr)**: head 原生批 750/750 exact,grid_r5pr.csv;
+  baselines_bs.jsonl 47 条(BS=1 守门取自 R4 grid_r4pr2)。
+- r3_v11 已推 fork 留档: 分支 kf/r4-champion-r3v11-bs1 @4c82d9a8。
+- R4 末段收割 r3_28dc11f6(per-K AR dispatch, 内部 1.3701): 探针 1.7847
+  (0 reg)与 r3_v11 1.7835 打平;全格 r4r3cg 判决中(与 R5 无 GPU 冲突,
+  R5 平台跑,本地 GPU1-3 归 R4 判决)。
