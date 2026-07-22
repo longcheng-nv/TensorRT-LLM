@@ -246,3 +246,12 @@ Updated 2026-07-22 (会话暂停：用户要求迁移到另一台机器)。
   3 轮到 1.65,未及第一 lineage 积累值(与 handoff 期望管理一致,如实入账)。
 - R4 campaign 平台侧仍 Running(round 3 残余 agent,$966>800,等预算截断);
   champion 已定稿 28dc11f6,后续平台残余候选须超 1.3701 才重开判决。
+- **R5 v1 平台故障 → 止损重开 v2**: submit 评测路径对 custom_inputs 全判
+  0.0% correctness(agents 4 个正确 kernel 复证,本地 cudagym evaluate 全过;
+  bugs 26583/84/97/26600/26602;R4 safetensors 路径无此问题 ⇒ 缺口 =
+  custom_inputs × submit 评测端)。v1 campaign rngnxv95… Cancelled(账面 $9,
+  round1 全废/n3 超时)。**v2 = gvr-topk-bs2x-v2 @vk9m3tetqh165a5y01j7nnrns0**
+  (21:06Z STARTED): 物化 [BS,npad] safetensors 30 workloads/210MB,
+  BS∈{1,4,32,128,256,1024},极端角点(高BS×大N)平台外、留本地 750 格判决;
+  prompt 已注明。教训: custom_inputs 与非 custom 不可混 + submit 路径不可信,
+  平台 workload 一律走 safetensors。
