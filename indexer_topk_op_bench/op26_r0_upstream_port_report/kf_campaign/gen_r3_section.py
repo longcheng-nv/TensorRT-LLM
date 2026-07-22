@@ -1,269 +1,391 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES.
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Idempotent injector: §7 R3 campaign section for KF_PROCESS_LOG.html.
+"""Idempotent §7 R3-campaign injector for KF_PROCESS_LOG.html.
 
-Computes every number live from the verdict CSVs (no frozen literals), then
-replaces the marker regions:
-  <!-- KF-R3BANNER:START/END -->  (status banner right after the H1)
-  <!-- KF-R3:START/END -->        (the §7 section, appended before </body>)
+Same conventions as gen_final_section.py (§6): h2 section, .cng CN glosses,
+KPI tiles, .vizR chips charts (CSS-only, no <script>), PR-arm-normalized
+rival joins, 25-group summary + per-model per-LAYER detail tables.
+Numbers are computed live from grid_<TAG>.csv; re-run after every new champion
+verdict to refresh (marker-region replace only).
 
-  python3 gen_r3_section.py
+  python3 gen_r3_section.py [TAG]     # default TAG=r3gridcompA
 """
+import collections
 import csv
 import math
-import statistics
-from collections import defaultdict
+import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-LOG = HERE / "KF_PROCESS_LOG.html"
-
+REPORT = HERE.parent
+HTML = HERE / "KF_PROCESS_LOG.html"
 BAN_S, BAN_E = "<!-- KF-R3BANNER:START -->", "<!-- KF-R3BANNER:END -->"
 SEC_S, SEC_E = "<!-- KF-R3:START -->", "<!-- KF-R3:END -->"
 
+TAG = sys.argv[1] if len(sys.argv) > 1 else "r3gridcompA"
+CHAMP_NAME = "compA"
+
+SERIES = [  # key, css class, label, color — same palette as §6
+    ("xPR",  "s3PR",  "vs GVR PR head",   "#2a78d6"),
+    ("xSGL", "s3SGL", "vs sglang v2",     "#008300"),
+    ("xRDX", "s3RDX", "vs radix_cutedsl", "#e87ba4"),
+    ("xFI",  "s3FI",  "vs flashinfer",    "#eda100"),
+]
 ISLS = ["4k", "8k", "16k", "32k", "64k", "128k", "256k", "512k", "1024k"]
+MODELS = ["flash", "pro", "v32"]
 
 
-def load(tag):
-    return {r["uuid"]: r for r in csv.DictReader(open(HERE / f"grid_{tag}.csv"))}
+def gm(v):
+    return math.exp(sum(map(math.log, v)) / len(v)) if v else None
 
 
-def gm(vals):
-    return math.exp(sum(math.log(v) for v in vals) / len(vals))
+def load():
+    riv = collections.defaultdict(dict)
+    for r in csv.DictReader(open(REPORT / "rival_layers_full.csv")):
+        riv[r["op"]][f"{r['model']}_{r['isl']}_L{int(r['L']):02d}"] = float(r["us"])
+    rep_pr = {f"{r['model']}_{r['isl']}_L{int(r['layer']):02d}": float(r["pr"])
+              for r in csv.DictReader(open(REPORT / "real_3arm_layers_full.csv"))}
+    champ1 = {r["uuid"]: float(r["cand_cold"])
+              for r in csv.DictReader(open(HERE / "grid_champh2.csv"))}
+    cells = {}
+    for r in csv.DictReader(open(HERE / f"grid_{TAG}.csv")):
+        u = r["uuid"]
+        pk, ck = float(r["pr_cold"]), float(r["cand_cold"])
+        d = {"model": r["model"], "isl": r["isl"], "layer": int(r["layer"]),
+             "N": r["N"], "hit": r["hit"], "us": ck,
+             "xPR": float(r["speedup_cold"]),
+             "xC1": champ1[u] / ck if u in champ1 else None}
+        for op, key in [("sglang_v2", "xSGL"), ("radix_cutedsl", "xRDX"),
+                        ("flashinfer_topk", "xFI")]:
+            if u in riv[op] and u in rep_pr:
+                d[key] = (riv[op][u] / ck) * (pk / rep_pr[u])
+        cells[u] = d
+    return cells
+
+
+def series_points(cells, model=None):
+    out = {}
+    for key, *_ in SERIES:
+        pts = []
+        for i, isl in enumerate(ISLS):
+            v = [c[key] for c in cells.values()
+                 if c["isl"] == isl and key in c and (model is None or c["model"] == model)]
+            if v:
+                pts.append((i, gm(v)))
+        out[key] = pts
+    return out
+
+
+def chart(pts_by_series, w=760, h=330, ymin=0.5, ymax=2.7, title=""):
+    lpad, rpad, tpad, bpad = 52, 16, 26, 40
+    pw, ph = w - lpad - rpad, h - tpad - bpad
+    def X(i): return lpad + pw * i / (len(ISLS) - 1)
+    def Y(v): return tpad + ph * (1 - (v - ymin) / (ymax - ymin))
+    s = [f'<svg viewBox="0 0 {w} {h}" role="img" aria-label="{title}" '
+         f'style="max-width:100%;background:var(--vz-surface);border:1px solid var(--vz-grid);border-radius:8px">']
+    for gv in [0.5, 1.0, 1.5, 2.0, 2.5]:
+        y = Y(gv)
+        em = ' stroke-width="1.6"' if gv == 1.0 else ' stroke-width="1"'
+        col = "var(--vz-ref)" if gv == 1.0 else "var(--vz-grid)"
+        s.append(f'<line x1="{lpad}" y1="{y:.1f}" x2="{w-rpad}" y2="{y:.1f}" stroke="{col}"{em}/>')
+        s.append(f'<text x="{lpad-8}" y="{y+4:.1f}" font-size="11" text-anchor="end" '
+                 f'fill="var(--vz-text2)" font-family="sans-serif">{gv:.1f}×</text>')
+    for i, isl in enumerate(ISLS):
+        s.append(f'<text x="{X(i):.1f}" y="{h-bpad+18}" font-size="11" text-anchor="middle" '
+                 f'fill="var(--vz-text2)" font-family="sans-serif">{isl}</text>')
+    s.append(f'<text x="{lpad+pw/2}" y="{h-6}" font-size="11" text-anchor="middle" '
+             f'fill="var(--vz-text2)" font-family="sans-serif">ISL (sequence length)</text>')
+    for key, cls, label, col in SERIES:
+        pts = pts_by_series.get(key) or []
+        if not pts:
+            continue
+        poly = " ".join(f"{X(i):.1f},{Y(v):.1f}" for i, v in pts)
+        g = [f'<g class="{cls}">',
+             f'<polyline points="{poly}" fill="none" stroke="{col}" stroke-width="2"/>']
+        for i, v in pts:
+            g.append(f'<circle cx="{X(i):.1f}" cy="{Y(v):.1f}" r="4.5" fill="{col}" '
+                     f'stroke="var(--vz-surface)" stroke-width="2">'
+                     f'<title>{label} @ {ISLS[i]}: {v:.3f}×</title></circle>')
+        li, lv = pts[-1]
+        g.append(f'<text x="{X(li)+8:.1f}" y="{Y(lv)+4:.1f}" font-size="11" '
+                 f'fill="var(--vz-text1)" font-family="sans-serif">{label.replace("vs ","")}</text>')
+        g.append("</g>")
+        s.append("".join(g))
+    s.append("</svg>")
+    return "".join(s)
 
 
 def grid_stats(tag):
-    rows = load(tag)
-    sp = [float(r["speedup_cold"]) for r in rows.values()]
-    exact = sum(1 for r in rows.values() if r["cand_exact"] == "True")
+    rows = list(csv.DictReader(open(HERE / f"grid_{tag}.csv")))
+    sp = [float(r["speedup_cold"]) for r in rows]
     return dict(gm=gm(sp), mn=min(sp), regs=sum(1 for v in sp if v < 1.0),
-                exact=exact, n=len(sp), rows=rows)
-
-
-def per_isl(rows):
-    d = defaultdict(list)
-    for r in rows.values():
-        d[r["isl"]].append(float(r["speedup_cold"]))
-    return {k: gm(v) for k, v in d.items()}
-
-
-def per_model_isl(rows):
-    d = defaultdict(list)
-    for r in rows.values():
-        d[(r["model"], r["isl"])].append(float(r["speedup_cold"]))
-    return {k: gm(v) for k, v in d.items()}
-
-
-def fmt(x, nd=3):
-    return f"{x:.{nd}f}"
-
-
-def svg_ladder_chart(champ_isl, compa_isl):
-    """Two-series per-ISL geomean polyline chart, native SVG tooltips."""
-    W, H, L, R, T, B = 860, 300, 56, 16, 18, 44
-    xs = [isl for isl in ISLS if isl in champ_isl]
-    ymin, ymax = 0.9, 2.8
-    def X(i):
-        return L + i * (W - L - R) / (len(xs) - 1)
-    def Y(v):
-        return T + (ymax - v) / (ymax - ymin) * (H - T - B)
-    grid, labels = [], []
-    for g in [1.0, 1.5, 2.0, 2.5]:
-        grid.append(f'<line x1="{L}" y1="{Y(g):.1f}" x2="{W-R}" y2="{Y(g):.1f}" '
-                    f'stroke="{"#8b8a85" if g==1.0 else "#e4e3df"}" '
-                    f'stroke-width="{1.4 if g==1.0 else 1}"/>')
-        labels.append(f'<text x="{L-8}" y="{Y(g)+4:.1f}" font-size="11" '
-                      f'text-anchor="end" fill="#52514e">{g}×</text>')
-    for i, isl in enumerate(xs):
-        labels.append(f'<text x="{X(i):.1f}" y="{H-B+18}" font-size="11" '
-                      f'text-anchor="middle" fill="#52514e">{isl}</text>')
-    series = []
-    for cls, color, name, data in [
-            ("sCH", "#8a8a8a", "champion c74f_sbx", champ_isl),
-            ("sCA", "#0b6e4f", "compA (R3)", compa_isl)]:
-        pts = " ".join(f"{X(i):.1f},{Y(data[isl]):.1f}" for i, isl in enumerate(xs))
-        dots = "".join(
-            f'<circle class="{cls}" cx="{X(i):.1f}" cy="{Y(data[isl]):.1f}" r="4" '
-            f'fill="{color}"><title>{name} @ {isl}: {data[isl]:.3f}× vs PR head'
-            f'</title></circle>' for i, isl in enumerate(xs))
-        series.append(f'<polyline class="{cls}" points="{pts}" fill="none" '
-                      f'stroke="{color}" stroke-width="2.2"/>' + dots)
-    return (f'<svg viewBox="0 0 {W} {H}" style="max-width:100%;background:#fcfcfb;'
-            f'border:1px solid #e4e3df;border-radius:8px">'
-            + "".join(grid) + "".join(labels) + "".join(series)
-            + f'<text x="{L}" y="{H-10}" font-size="11" fill="#52514e">'
-            f'ISL (sequence length) — geomean nsys cold-L2 speedup vs PR#16457 '
-            f'head b14ec40e1b, 865 real cells / 按 ISL 的 geomean 加速比(对 PR 当前 head)</text></svg>')
+                exact=sum(1 for r in rows if r["cand_exact"] == "True"), n=len(sp))
 
 
 def main():
-    champ = grid_stats("champh2")
-    g09 = grid_stats("r3grid09d1")
-    g30 = grid_stats("r3grid30e7")
-    gbe = grid_stats("r3gridbecd")
-    gca = grid_stats("r3gridcompA")
+    cells = load()
+    n = len(cells)
+    kpi = {k: gm([c[k] for c in cells.values() if k in c]) for k, *_ in SERIES}
+    kpi_c1 = gm([c["xC1"] for c in cells.values() if c["xC1"]])
+    st = {t: grid_stats(t) for t in
+          ["champh2", "r3grid09d1", "r3grid30e7", "r3gridbecd", TAG]}
+    mn = min(c["xPR"] for c in cells.values())
+    regs = sum(1 for c in cells.values() if c["xPR"] < 1.0)
 
-    # compA vs champion per-cell
-    vs_champ = gm([float(champ["rows"][u]["cand_cold"]) / float(gca["rows"][u]["cand_cold"])
-                   for u in gca["rows"]])
-    champ_isl = per_isl(champ["rows"])
-    compa_isl = per_isl(gca["rows"])
-    pmi_champ = per_model_isl(champ["rows"])
-    pmi_compa = per_model_isl(gca["rows"])
+    # ---- CSS (namespaced .vizR / ck3-, ck4-, ck3-m-) ----
+    css = ["<style>.vizR{--vz-surface:#fcfcfb;--vz-grid:#e4e3df;--vz-ref:#8b8a85;"
+           "--vz-text1:#0b0b0b;--vz-text2:#52514e;margin:14px 0}",
+           ".vizR .chips{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}",
+           ".vizR .chips label{border:1.5px solid #c9c8c2;border-radius:16px;padding:3px 12px;"
+           "cursor:pointer;font-size:0.85em;color:#52514e;user-select:none}",
+           ".vizR .chips label b{font-weight:600}",
+           ".vizR input{position:absolute;opacity:0;pointer-events:none}"]
+    for pfx in ("ck3", "ck4"):
+        for key, cls, _, col in SERIES:
+            css.append(f".vizR #{pfx}-{cls}:not(:checked) ~ * .{cls}{{display:none}}")
+            css.append(f".vizR #{pfx}-{cls}:checked ~ .chips label[for={pfx}-{cls}]"
+                       f"{{border-color:{col};color:#0b0b0b;box-shadow:inset 0 0 0 1px {col}}}")
+            css.append(f".vizR .chips label[for={pfx}-{cls}] i{{display:inline-block;width:10px;height:10px;"
+                       f"border-radius:5px;background:{col};margin-right:6px}}")
+    for m in MODELS:
+        css.append(f".vizR #ck3-m-{m}:not(:checked) ~ * .sm3-{m}{{display:none}}")
+        css.append(f".vizR #ck3-m-{m}:checked ~ .chips label[for=ck3-m-{m}]"
+                   f"{{border-color:#555;color:#0b0b0b}}")
+    css.append(".vizR .smrow{display:flex;gap:10px;flex-wrap:wrap}"
+               ".vizR .smrow figure{flex:1 1 340px;margin:0}</style>")
+    css = "".join(css)
 
-    ladder = [
-        ("champion c74f_sbx (R1 起点 baseline)", champ, "—",
-         "campaign-1 ship, re-measured on PR head b14ec40e1b / 第一期交付,在当前 head 上现测"),
-        ("09d13c81 (r2-a?)", g09, fmt(g09["gm"] / champ["gm"], 4),
-         "regular launch + fence-less sense-reversing grid barrier / 常规 launch + 免序自旋屏障(去 coop-launch 溢价)"),
-        ("30e79029 (r3)", g30, fmt(g30["gm"] / champ["gm"], 4),
-         "+ contiguous-slice scan partitions / + 连续切片扫描"),
-        ("becdc5c7 (r3)", gbe, fmt(gbe["gm"] / champ["gm"], 4),
-         "adaptive post-pass0 finish (whole-bucket / ≤4096 smem fast-tail + last-arriver refine / ladder), register-cached keys / 自适应收尾 + 寄存器缓存整行"),
-        ("<b>compA = becd ⊕ 30e7 (engineer composite, SHIP candidate)</b>", gca,
-         fmt(gca["gm"] / champ["gm"], 4),
-         "k=2048 ∧ 16896&lt;n≤140000 → 30e7 ladder; else becd / 工程师复合分派"),
-    ]
-    rows_html = ""
-    for name, st, dvs, note in ladder:
-        rows_html += (f'<tr><td>{name}</td><td style="text-align:right"><b>{fmt(st["gm"],4)}</b></td>'
-                      f'<td style="text-align:right">{st["regs"]}{"" if st["regs"]==0 else " (min %s)"%fmt(st["mn"])}</td>'
-                      f'<td style="text-align:right">{st["exact"]}/{st["n"]}</td>'
-                      f'<td style="text-align:right">{dvs}</td><td>{note}</td></tr>')
+    inputs = "".join(f'<input type="checkbox" id="ck3-{cls}" checked>' for _, cls, _, _ in SERIES)
+    inputs2 = "".join(f'<input type="checkbox" id="ck4-{cls}" checked>' for _, cls, _, _ in SERIES)
+    minputs = "".join(f'<input type="checkbox" id="ck3-m-{m}" checked>' for m in MODELS)
+    chips = ('<div class="chips">'
+             + "".join(f'<label for="ck3-{cls}"><i></i><b>{lbl}</b></label>'
+                       for _, cls, lbl, _ in SERIES) + "</div>")
+    mchips = ('<div class="chips">series ▸ '
+              + "".join(f'<label for="ck4-{cls}"><i></i><b>{lbl}</b></label>'
+                        for _, cls, lbl, _ in SERIES)
+              + " &nbsp;model ▸ "
+              + "".join(f'<label for="ck3-m-{m}"><b>{m}</b></label>' for m in MODELS)
+              + "</div>")
 
-    # per model×ISL compA table with CN gloss header
-    pmi_html = '<tr><th>model</th>' + "".join(f'<th>{i}</th>' for i in ISLS) + '</tr>'
-    for m in ["flash", "pro", "v32"]:
-        cells = ""
-        for i in ISLS:
-            v = pmi_compa.get((m, i))
-            c = pmi_champ.get((m, i))
-            cells += ('<td style="text-align:right">—</td>' if v is None else
-                      f'<td style="text-align:right"><b>{v:.2f}</b><br>'
-                      f'<span style="color:#52514e;font-size:0.85em">{c:.2f}</span></td>')
-        pmi_html += f'<tr><td><b>{m}</b></td>{cells}</tr>'
+    r1 = chart(series_points(cells), title=f"{CHAMP_NAME} geomean speedup by ISL, all models")
+    sm = []
+    for m in MODELS:
+        sm.append(f'<figure class="sm3-{m}">'
+                  + chart(series_points(cells, m), w=430, h=280,
+                          title=f"{m} geomean speedup by ISL")
+                  + f'<figcaption style="font-size:0.85em;color:#52514e;text-align:center">{m}</figcaption></figure>')
 
-    kpi = f"""
-<div style="display:flex;gap:12px;flex-wrap:wrap;margin:14px 0">
-  <div style="flex:1 1 150px;background:#eef7f2;border:1px solid #0b6e4f;border-radius:8px;padding:10px 14px">
-    <div style="font-size:1.5em;font-weight:700">{fmt(gca["gm"],4)}×</div>
-    <div style="font-size:0.85em;color:#333">compA geomean vs PR head (865 cells) / 对 PR 当前 head 全格 geomean</div></div>
-  <div style="flex:1 1 150px;background:#eef7f2;border:1px solid #0b6e4f;border-radius:8px;padding:10px 14px">
-    <div style="font-size:1.5em;font-weight:700">+{(gca["gm"]/champ["gm"]-1)*100:.1f}%</div>
-    <div style="font-size:0.85em;color:#333">vs campaign-1 champion / 较第一期冠军净增</div></div>
-  <div style="flex:1 1 150px;background:#eef7f2;border:1px solid #0b6e4f;border-radius:8px;padding:10px 14px">
-    <div style="font-size:1.5em;font-weight:700">{gca["exact"]}/{gca["n"]}</div>
-    <div style="font-size:0.85em;color:#333">exact / 精确</div></div>
-  <div style="flex:1 1 150px;background:#eef7f2;border:1px solid #0b6e4f;border-radius:8px;padding:10px 14px">
-    <div style="font-size:1.5em;font-weight:700">{gca["regs"]}<span style="font-size:0.55em"> @&lt;1.0 (min {fmt(gca["mn"])})</span></div>
-    <div style="font-size:0.85em;color:#333">cold regressions (borderline → 60-rep adjudication) / 冷回退(边界格待 60-rep 裁决)</div></div>
-</div>"""
+    # ---- KPI tiles (§6 style) ----
+    kpis = ('<div style="display:flex;gap:12px;flex-wrap:wrap;margin:12px 0">'
+            + "".join(
+        f'<div style="border:1px solid #ddd;border-radius:8px;padding:10px 18px;text-align:center">'
+        f'<div style="font-size:1.5em;font-weight:700">{v}</div>'
+        f'<div style="font-size:0.8em;color:#52514e">{k}</div></div>'
+        for k, v in [
+            ("geomean vs GVR PR head / 对 PR 当前 head", f"{kpi['xPR']:.4f}×"),
+            ("vs campaign-1 champion / 对第一期冠军", f"{kpi_c1:.4f}×"),
+            ("vs sglang v2", f"{kpi['xSGL']:.3f}×"),
+            ("vs radix_cutedsl", f"{kpi['xRDX']:.3f}×"),
+            ("vs flashinfer", f"{kpi['xFI']:.3f}×"),
+            ("exact / 精确", f"{n}/865"),
+            ("cold regressions / 冷回退", f"{regs} (min {mn:.3f})"),
+        ]) + "</div>")
+
+    # ---- candidate ladder ----
+    ladder_rows = ""
+    for tag, name, note in [
+            ("champh2", "champion c74f_sbx (baseline, §6)",
+             "campaign-1 ship re-measured on current head / 第一期交付,当前 head 现测"),
+            ("r3grid09d1", "09d13c81 (r2)",
+             "regular launch + fence-less sense-token grid barrier / 常规 launch + 免序自旋屏障"),
+            ("r3grid30e7", "30e79029 (r3)",
+             "+ contiguous-slice scan partitions / + 连续切片扫描"),
+            ("r3gridbecd", "becdc5c7 (r3)",
+             "adaptive post-pass-0 finish + register-cached row / 自适应收尾 + 寄存器缓存整行"),
+            (TAG, f"<b>{CHAMP_NAME} (engineer composite)</b>",
+             "becd ⊕ 30e7: k=2048 ∧ 16896&lt;n≤140000 → 30e7 ladder / 工程师复合分派")]:
+        s = st[tag]
+        ladder_rows += (f'<tr><td>{name}</td><td>{s["gm"]:.4f}</td>'
+                        f'<td>{s["regs"]} (min {s["mn"]:.3f})</td>'
+                        f'<td>{s["exact"]}/{s["n"]}</td>'
+                        f'<td>{s["gm"]/st["champh2"]["gm"]:.4f}</td><td>{note}</td></tr>')
+    ladder = ('<table><tr><th>kernel (full-865 verdict)</th><th>gm vs PR head</th>'
+              '<th>cells &lt;1.0</th><th>exact</th><th>vs champion</th><th>increment / 增量</th></tr>'
+              + ladder_rows + "</table>")
+
+    # ---- 25-group summary (§6 style) + per-layer detail tables ----
+    groups = collections.defaultdict(list)
+    for c in cells.values():
+        groups[(c["model"], c["isl"])].append(c)
+    rows = []
+    for m in MODELS:
+        for isl in ISLS:
+            g = groups.get((m, isl))
+            if not g:
+                continue
+            cols = [gm([c[k] for c in g if k in c]) for k, *_ in SERIES]
+            mnv = min(c["xPR"] for c in g)
+            rows.append(f"<tr><td>{m}_{isl}</td><td>{len(g)}</td>"
+                        + "".join(f"<td>{v:.3f}</td>" if v else "<td>-</td>" for v in cols)
+                        + f"<td>{gm([c['xC1'] for c in g if c['xC1']]):.3f}</td>"
+                        + f"<td>{mnv:.3f}</td></tr>")
+    table25 = ('<details><summary>Table view — 25 model×ISL groups / 25 个模型×ISL 组汇总</summary>'
+               '<table><tr><th>group</th><th>layers</th>'
+               + "".join(f"<th>{lbl}</th>" for _, _, lbl, _ in SERIES)
+               + "<th>vs champion</th><th>min ×PR</th></tr>" + "".join(rows) + "</table></details>")
+
+    # per-layer detail: one <details> per model, all layers × ISLs
+    def fmt_cell(c):
+        parts = [f"{c['xPR']:.2f}"]
+        return parts[0]
+    layer_tables = []
+    for m in MODELS:
+        isls = [i for i in ISLS if (m, i) in groups]
+        layers = sorted({c["layer"] for c in cells.values() if c["model"] == m})
+        by = {(c["layer"], c["isl"]): c for c in cells.values() if c["model"] == m}
+        hdr = ("<tr><th rowspan=2>layer</th>"
+               + "".join(f'<th colspan=4 style="text-align:center">{i}</th>' for i in isls) + "</tr>"
+               "<tr>" + "".join("<th>PR</th><th>sgl</th><th>rdx</th><th>c1</th>" for _ in isls) + "</tr>")
+        body = []
+        for L in layers:
+            tds = []
+            for i in isls:
+                c = by.get((L, i))
+                if not c:
+                    tds.append("<td>-</td>" * 4)
+                    continue
+                def f(v, lo=1.0):
+                    if v is None:
+                        return "<td>-</td>"
+                    sty = ' style="background:#fbecec"' if v < lo else ""
+                    return f"<td{sty}>{v:.2f}</td>"
+                tds.append(f(c["xPR"]) + f(c.get("xSGL")) + f(c.get("xRDX")) + f(c.get("xC1")))
+            body.append(f"<tr><td>L{L:02d}</td>{''.join(tds)}</tr>")
+        layer_tables.append(
+            f'<details><summary>{m} — per-layer detail (columns per ISL: vs PR head · vs sglang v2 · '
+            f'vs radix_cutedsl · vs campaign-1 champion; red = &lt;1.0) / {m} 逐层明细'
+            f'(每 ISL 四列:对 PR·对 sglang v2·对 radix·对第一期冠军;红底 = &lt;1.0)</summary>'
+            f'<div style="overflow-x:auto"><table style="font-size:0.78em;white-space:nowrap">{hdr}{"".join(body)}</table></div></details>')
 
     barrier_tbl = """
-<table style="border-collapse:collapse;font-size:0.9em"><thead>
-<tr><th>barrier variant / 屏障变体</th><th>ordering / 内存序</th><th>28-cell cold gm vs PR</th><th>verdict / 判决</th></tr></thead><tbody>
-<tr><td>09d13c81 as-harvested</td><td>relaxed intrinsics, no fence</td><td><b>~1.72</b></td><td>fastest — win source / 胜利来源</td></tr>
-<tr><td>+ __threadfence pair</td><td>membar.gl</td><td>1.566</td><td>−11% REJECTED</td></tr>
-<tr><td>scoped acq_rel asm</td><td>atom.acq_rel/ld.acquire.gpu</td><td>1.614</td><td>−8% REJECTED</td></tr>
-<tr><td>surgical (relaxed spin + trailing acquire)</td><td>scoped, off critical path attempt</td><td>1.615</td><td>REJECTED — ordering cost is intrinsic (release must drain the block's L2-pending writes on the critical path) / 排序代价是本质的</td></tr>
-</tbody></table>"""
+<table><tr><th>barrier variant / 屏障变体</th><th>memory ordering / 内存序</th><th>28-cell cold gm vs PR</th><th>verdict / 判决</th></tr>
+<tr><td><code>09d13c81</code> as-harvested</td><td>relaxed intrinsics, no fence</td><td><b>~1.72</b></td><td>fastest — the win source / 胜利来源</td></tr>
+<tr><td>+ <code>__threadfence</code> pair</td><td>membar.gl</td><td>1.566</td><td>−11%, rejected / 否决</td></tr>
+<tr><td>scoped acq_rel asm</td><td>atom.acq_rel / ld.acquire.gpu</td><td>1.614</td><td>−8%, rejected / 否决</td></tr>
+<tr><td>surgical (relaxed spin + trailing acquire)</td><td>scoped, off-critical-path attempt</td><td>1.615</td><td>rejected — ordering cost is intrinsic / 否决:排序代价是本质的(release 必须在关键路径上等 L2 写落地)</td></tr>
+</table>"""
 
-    section = f"""{SEC_S}
-<h1 id="sec-7" style="margin-top:40px">7 · R3 campaign — beyond-champion / 第二期战役(超越冠军)</h1>
-<p><b>Campaign</b> <code>gvr-topk-r3</code> (<code>e5q1zgrfhs0z57dj6850kc444r</code>), started 2026-07-21 13:40Z,
-6 agents/round (2×fable-5 high + 2×gpt-5.6-sol high + 2×n3-opus-4.8), baseline = campaign-1 champion
-<code>c74f_sbx</code> (platform-measured per-workload timings; champion source inlined in prompt v2).
-Verdict grids: 865 real decode cells, nsys cold-L2, paired same-GPU vs <b>PR#16457 current head
-<code>b14ec40e1b</code></b> (anchor drift vs old head e6fdbfac3d: median 1.005 — the 07-20/21 P4 commits do not
-move this envelope). <br><span style="color:#444">第二期以第一期冠军为 baseline;判决全部对 PR 当前 head 现测配对;
-新旧 head 锚差中位 1.005(P4 系列提交对本包络无实质影响)。</span></p>
-{kpi}
-<h2>7.1 Candidate ladder / 候选阶梯(全格判决)</h2>
-<table style="border-collapse:collapse;font-size:0.9em"><thead>
-<tr><th>kernel</th><th>gm vs PR head</th><th>regs&lt;1.0</th><th>exact</th><th>vs champion</th><th>what it adds / 增量</th></tr></thead>
-<tbody>{rows_html}</tbody></table>
-<p style="font-size:0.9em;color:#444">compA composite-vs-becd net +0.13% measured (splice estimate ~1.81 —
-non-dispatched rungs run byte-identical code, deltas there are ±2% run noise; the k2048-mid-n dispatch itself
-verified +5.4-8.8% on v32 32k/64k/128k rungs). / compA 的分派增益在 v32 中档实证 +5.4-8.8%,其余档位差异为运行噪声。</p>
-<h2>7.2 Where the new speed comes from / 新增速度来源</h2>
+    section = f"""{SEC_S}{css}
+<h2 id="sec-7">7 · R3 campaign — beyond-champion / 第二期战役(超越冠军)</h2>
+<p><b>Campaign <code>gvr-topk-r3</code></b> (<code>e5q1zgrfhs0z57dj6850kc444r</code>, started 07-21 13:40Z; 6 agents/round =
+2×Fable-5(high) + 2×GPT-5.6-sol(high) + 2×Opus-4.8; baseline = §6 champion <code>c74f_sbx</code>, its platform-trace timings
+as <code>baselines.jsonl</code> and full source inlined in prompt v2). Verdict grids: 865 real decode cells (BS=1), nsys cold-L2,
+paired same-GPU vs <b>PR#16457 CURRENT head <code>b14ec40e1b</code></b>; per-rung <code>pr_cold</code> anchors checked every run
+(old-vs-new-head anchor: median 1.005 — the 07-20/21 P4 commits do not move this envelope). Rival ratios are PR-arm-normalized
+joins against the REPORT rival sweep, same protocol as §6.<br>
+<span class="cng">第二期以 §6 冠军为 baseline(平台 trace 逐格时间 + 源码内联 prompt);判决 = 865 真实格,nsys 冷-L2,
+同卡配对 vs <b>PR#16457 当前 head b14ec40e1b</b>;每次运行逐档锚检(新旧 head 锚差中位 1.005);对手比值经 PR 臂逐格归一,口径与 §6 一致。</span></p>
+{kpis}
+<h3>7.1 Candidate ladder / 候选阶梯(均为全 865 格判决)</h3>
+{ladder}
+<p><span class="cng">compA 对 becd 的净增 +0.13%(拼接估计 ~1.81):分派增益在 v32 32k/64k/128k 实证 +5.4-8.8%,
+非分派档为同字节码,差异属 ±2% 运行噪声。0.999 边界格(pro_64k_L24,同字节码档)待终审 60-rep 裁决。</span></p>
+<h3>7.2 Where the new speed comes from / 新增速度来源</h3>
 <ol>
-<li><b>Cooperative launch &amp; barrier-ordering elimination / 去 coop-launch 与屏障排序</b> (09d1, +4.7% grid):
-regular launch + sense-reversing spin barrier (generation-token, no per-launch reset), grid sized to co-residency.
-Every formally-ordered variant measured 8–11% slower — the win IS the omitted ordering. Safety argument (documented
-in R3_LEDGER.md): merged-histogram lines are first plain-touched only after the barrier, L1 invalidates at launch
-boundaries, pre-barrier writes are L2 atomics ⇒ post-barrier loads cannot hit stale L1. Flagged for production-port review.
+<li><b>Cooperative-launch &amp; barrier-ordering elimination / 去 coop-launch 与屏障内存序</b> (09d13c81, +4.7% grid):
+regular launch + sense-token spin barrier (host generation counter ⇒ tokens never collide across launches, no per-launch
+reset), grid sized to co-residency. Every formally-ordered variant measured 8–11% slower — the win IS the omitted ordering.
+Safety argument (R3_LEDGER.md): merged-histogram lines are first plain-touched only after the barrier; L1 invalidates at
+launch boundaries; pre-barrier writes are L2 atomics ⇒ post-barrier plain loads cannot observe stale L1. Flagged for
+production-port review.<br><span class="cng">常规 launch + sense 令牌自旋屏障(host 代数计数器,跨 launch 永不撞号);
+一切形式化排序变体都慢 8-11% — 胜利正是来自省掉排序。安全论证:merged histogram 在屏障前无 plain 读、L1 在 kernel 边界失效、
+屏障前写为 L2 原子 ⇒ 屏障后 plain 读不可能命中陈旧 L1。已标记为生产移植评审项。</span>
 {barrier_tbl}</li>
-<li><b>Contiguous-slice scan / 连续切片扫描</b> (30e7, +1.2%): per-block contiguous float4 slices replace
-grid-stride interleave — better cold-data locality.</li>
-<li><b>Adaptive post-pass-0 finish + register-cached row / 自适应收尾 + 寄存器缓存</b> (becd, +1.5% net):
-one 11-bit MSB histogram pass, then 3-way dispatch on boundary-bucket size T: whole-bucket direct write (1 barrier),
-T≤4096 smem-staged compaction + non-spinning rendezvous + last-arriver single-block 21-bit refine (1 barrier, no drain),
-else classic 11/11/10 ladder. Keys live in registers (1×float4+tail/thread) — zero global re-reads across passes.
-Slow twins (large-tie cells) gain 1.37–1.51×; v32 mid-n prefers the 30e7 ladder → engineer dispatch (compA).</li>
+<li><b>Contiguous-slice scan / 连续切片扫描</b> (30e79029, +1.2%): per-block contiguous float4 slices replace grid-stride
+interleave — better cold-data locality. <span class="cng">每块扫连续 float4 切片,替代 grid-stride 交错,冷数据局部性更好。</span></li>
+<li><b>Adaptive post-pass-0 finish + register-cached row / 自适应收尾 + 寄存器缓存整行</b> (becdc5c7, +1.5% net):
+one 11-bit MSB histogram pass, then 3-way dispatch on boundary-bucket size T — whole-bucket direct write (1 barrier);
+T≤4096: smem-staged compaction + non-spinning rendezvous + last-arriver single-block 21-bit refine (1 barrier, no drain);
+else classic 11/11/10 ladder. Keys live in registers (1×float4 + tail scalar per thread) — zero global re-reads across passes.
+Slow twins (large-tie cells) gain 1.37–1.51×; v32 mid-n prefers the 30e7 ladder → engineer dispatch = {CHAMP_NAME}.<br>
+<span class="cng">一遍 11-bit MSB histogram 后按边界桶大小三路分派:整桶直写(1 屏障)/小桶 smem 压缩 + 非自旋会合 +
+末位到达块独占精化(1 屏障,无排水尾)/大桶回退 11/11/10 梯子;keys 全程驻寄存器,后续 pass 零全局重读。
+慢双子格收益 1.37-1.51×;v32 中档偏好 30e7 梯子 → 工程师分派 = {CHAMP_NAME}。</span></li>
 </ol>
-<h2>7.3 compA per model × ISL / 分模型×序列长度(上=compA,下灰=champion;vs PR head)</h2>
-<table style="border-collapse:collapse;font-size:0.85em">{pmi_html}</table>
-<figure style="margin:16px 0">{svg_ladder_chart(champ_isl, compa_isl)}
-<figcaption style="font-size:0.9em;color:#444">Fig. R3-1 — compA vs champion by ISL (hover points for values).
-/ 图 R3-1 — compA 与冠军按 ISL 的对比(悬停看数值)。</figcaption></figure>
-<h2>7.4 Skeleton-constraint adjudication / 骨架约束裁决</h2>
-<p><b>Decision (operator, 2026-07-22): Bar-first, loose-skeleton per campaign-1 precedent.</b>
-The composite lineage keeps (b) threshold refinement in histogram-prefix form and (c) exact tie-robust refine,
-but does NOT consume <code>pre_idx</code> — constraint (a) is vacated by measurement, not by neglect: hint-seeded
-variants were falsified repeatedly (June history ×12; campaign-1 r1 ×3; R3 <code>5f3daaf8</code> provably-exact
-warm filter = WASH 1.0001 in its own activation zone). The +60% bar and a strict GVR skeleton are mutually
-incompatible on this workload (in-skeleton ceiling ≈1.28, op20/21/35). No cosmetic hint path is added.<br>
-<span style="color:#444">裁决:Bar 优先,骨架按第一期先例宽松解读。(a) preIdx 先验由测量证据豁免(hint 变体屡次证伪,
-R3 的可证明精确 warm-filter 在自身激活区亦为 1.0001 WASH);(b) 以 histogram 前缀精化等价保留;(c) 完整保留。
-不做化妆式 hint 挂载。</span></p>
-<h2>7.5 Incidents & discipline / 事故与纪律</h2>
+<h3>7.3 {CHAMP_NAME} vs rivals, by ISL / 对手对比(按 ISL)</h3>
+<div class="vizR">{inputs}{chips}
+<figure style="margin:8px 0">{r1}
+<figcaption style="font-size:0.9em;color:#444"><b>Fig. R1 — {CHAMP_NAME} geomean speedup by ISL (865 cells, all models pooled).</b>
+Toggle series with the chips; hover points for values. 1.0× line = parity.<br>
+<span class="cng">图 R1 — 按 ISL 的 geomean 加速比(勾选切换系列;悬停看数值;1.0× 为持平线)。</span></figcaption></figure></div>
+<div class="vizR">{minputs}{inputs2}{mchips}
+<div class="smrow">{''.join(sm)}</div>
+<figcaption style="font-size:0.9em;color:#444"><b>Fig. R2 — per-model small multiples (flash K=512 · pro K=1024 · v32 K=2048).</b>
+Model and series chips both filter.<br><span class="cng">图 R2 — 分模型小倍图(模型与系列复选框皆可过滤)。</span></figcaption></div>
+{table25}
+{''.join(layer_tables)}
+<h3>7.4 Skeleton-constraint adjudication / 骨架约束裁决</h3>
+<div class="card"><b>Decision (operator, 2026-07-22): Bar-first, loose-skeleton per the campaign-1 precedent.</b>
+The composite lineage keeps (b) threshold refinement — in histogram-prefix form — and (c) the exact tie-robust refine,
+but does NOT consume <code>pre_idx</code>: constraint (a) is vacated by measurement, not neglect. Hint-seeded variants were
+falsified repeatedly (June history ×12; campaign-1 round-1 ×3; R3 <code>5f3daaf8</code>: a provably-exact warm filter —
+admission superset ≥k regardless of hint quality — measured WASH 1.0001 inside its own n≥512K activation zone).
+The +60% bar and a strict GVR skeleton are mutually incompatible on this workload (in-skeleton ceiling ≈1.28, op20/21/35).
+No cosmetic hint path is added.<br>
+<span class="cng">裁决(2026-07-22,用户):Bar 优先,骨架按第一期先例宽松解读。(a) preIdx 先验由测量证据豁免
+(hint 变体屡次证伪;R3 的可证明精确 warm-filter 在其自身激活区亦为 1.0001 WASH);(b) 以 histogram 前缀精化等价保留;
+(c) 完整保留。+60% 门与严格 GVR 骨架在本负载上互斥(骨架内天花板 ≈1.28)。不做化妆式 hint 挂载。</span></div>
+<h3>7.5 Incidents &amp; discipline / 事故与纪律</h3>
 <ul>
-<li>Foreign 8-GPU job intermittently occupied the node from ~17:40Z day-1: one probe verdict invalidated
-(unconditional quiet-echo scripting bug — fixed to gated launches); all subsequent measurements anchor-checked
-per cell (±6% vs champh2 refs), full grids run on explicitly-free GPU lists (<code>drive_grid_gpulist.sh</code>).
-/ 外部作业间歇占卡:一次探针作废;此后逐格锚检+空闲卡白名单分片。</li>
-<li>Platform noise calibrated round-1: verbatim champion resubmission scored 0.9956 (±0.5% band).
-/ 平台噪声标定:原样重交 = 0.9956。</li>
-<li>Platform gap: prepare's baseline-solution evaluator does not stage campaign assets → champion baselines
-supplied as platform-trace timings instead (workaround D1). / 平台缺口 D1:baseline-solution 评测不带 assets,改用平台 trace 时间。</li>
+<li>Foreign 8-GPU job intermittently occupies this node since day-1 ~17:40Z: one probe verdict invalidated (unconditional
+quiet-echo scripting bug → fixed to gated launches); one aef33fac full grid discarded (anchor p95 1.542). All measurements
+now anchor-gated per cell; grids run on explicitly-free GPU lists (<code>drive_grid_gpulist.sh</code>).<br>
+<span class="cng">外部 8 卡作业间歇占用本节点:一次探针判废(quiet-echo 无条件 bug,已改门控);一次 aef33fac 全格判废
+(锚 p95 1.542)。此后逐格锚检 + 空闲卡白名单分片。</span></li>
+<li>Platform noise calibrated in round 1: a verbatim champion resubmission scored 0.9956 (±0.5% band); an agent logged the
+same solution timing 17/23/20 vs 23/28/26 µs across runs.<br><span class="cng">平台噪声标定:champion 原样重交 = 0.9956;
+agent 自证同一 solution 两次计时差异显著。</span></li>
+<li>Platform gap (D1): <code>prepare --baseline-solution</code> does not stage campaign assets (0/28 safetensors found)
+→ champion baselines supplied as platform-trace per-workload timings; champion source inlined in the prompt instead.<br>
+<span class="cng">平台缺口 D1:baseline-solution 评测不带 assets → 改用第一期平台 trace 逐格时间,源码内联 prompt。</span></li>
 </ul>
-<p style="font-size:0.9em;color:#52514e">Status at injection time: campaign Running (round 3), best internal 1.157
-(becdc5c7), platform spend ≈$578 of $800 cap. Final acceptance (fresh full grid + 60-rep borderline adjudication +
-rival joins) pending campaign close. / 注入时状态:round 3 运行中,平台花费约 $578/$800;终审待战役收口。</p>
+<p style="font-size:0.9em;color:#52514e">Status at injection: campaign Running (round 3; best internal 1.173 =
+<code>aef33fac</code>, its clean full-grid verdict pending node quiescence — the contaminated first attempt showed
+topk_mid&lt;4&gt; healing the N=16387 rung +18-19% but a topk_mid&lt;1&gt; regression at n≈4099, so the next engineer
+composite gates that rung out). Platform spend ≈$578 of $800 cap. Final acceptance = fresh full grid + 60-rep borderline
+adjudication + rival joins, after campaign close.<br>
+<span class="cng">注入时状态:round 3 运行中(内部最佳 1.173 = aef33fac,其干净全格判决等节点静默;污染首测显示
+topk_mid&lt;4&gt; 治愈 N=16387 档 +18-19%,但 topk_mid&lt;1&gt; 在 n≈4099 回退,下一个工程师复合将裁掉该档)。
+平台花费约 $578/$800;终审待战役收口。</span></p>
 {SEC_E}"""
 
     banner = (f'{BAN_S}<div style="background:#e7f6e7;border:1.5px solid #070;border-radius:8px;'
               f'padding:10px 16px;margin:12px 0;font-size:0.95em"><b>2026-07-22 R3 update / 第二期战役进展:</b> '
-              f'current champion = <b>compA</b> (becdc5c7 ⊕ 30e79029 dispatch) — <b>{fmt(gca["gm"],4)}× geomean vs '
-              f'PR#16457 current head</b> (865/865 exact, {gca["regs"]} borderline cell), '
-              f'+{(gca["gm"]/champ["gm"]-1)*100:.1f}% over the §6 campaign-1 champion. '
-              f'§6 numbers below are the campaign-1 historical record (vs old head e6fdbfac3d). '
-              f'See <a href="#sec-7">§7</a>. / 现任冠军 compA 对 PR 当前 head 全格 {fmt(gca["gm"],4)}×;'
-              f'§6 为第一期历史记录;详见 <a href="#sec-7">§7</a>。</div>{BAN_E}')
+              f'current champion = <b>{CHAMP_NAME}</b> (becdc5c7 ⊕ 30e79029 dispatch) — <b>{kpi["xPR"]:.4f}× geomean vs '
+              f'PR#16457 current head</b> (865/865 exact, {regs} borderline cell), '
+              f'{kpi_c1:.4f}× over the §6 campaign-1 champion; vs sglang v2 {kpi["xSGL"]:.3f}× · vs radix_cutedsl '
+              f'{kpi["xRDX"]:.3f}×. §6 below is the campaign-1 historical record (vs old head e6fdbfac3d). '
+              f'See <a href="#sec-7">§7</a>. / 现任冠军 {CHAMP_NAME} 对 PR 当前 head 全格 {kpi["xPR"]:.4f}×,'
+              f'对第一期冠军 {kpi_c1:.4f}×;§6 为第一期历史记录;详见 <a href="#sec-7">§7</a>。</div>{BAN_E}')
 
-    html = LOG.read_text()
-    # section: replace existing region or append before </body>
+    html = HTML.read_text()
     if SEC_S in html:
-        pre, rest = html.split(SEC_S, 1)
-        _, post = rest.split(SEC_E, 1)
-        html = pre + section + post
+        html = html[:html.index(SEC_S)] + section + html[html.index(SEC_E) + len(SEC_E):]
     elif "</body>" in html:
         html = html.replace("</body>", section + "\n</body>", 1)
     else:
         html += section
-    # banner: replace or insert after first </h1>
     if BAN_S in html:
-        pre, rest = html.split(BAN_S, 1)
-        _, post = rest.split(BAN_E, 1)
-        html = pre + banner + post
+        html = html[:html.index(BAN_S)] + banner + html[html.index(BAN_E) + len(BAN_E):]
     else:
         i = html.find("</h1>")
-        assert i > 0, "no h1 found"
         html = html[:i + 5] + "\n" + banner + html[i + 5:]
-    LOG.write_text(html)
-    print(f"injected §7 ({len(section)} chars) + banner; compA gm={gca['gm']:.4f}, "
-          f"vs champion {vs_champ:.4f}")
+    HTML.write_text(html)
+    print(f"§7 injected ({len(section)} chars) tag={TAG}: "
+          f"xPR={kpi['xPR']:.4f} xSGL={kpi['xSGL']:.3f} xRDX={kpi['xRDX']:.3f} "
+          f"xFI={kpi['xFI']:.3f} vsC1={kpi_c1:.4f}")
 
 
 if __name__ == "__main__":
