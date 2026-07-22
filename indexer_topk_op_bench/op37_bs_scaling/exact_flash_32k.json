@@ -1,0 +1,90 @@
+{
+ "flash_32k|BS1|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_32k|BS1|champion": [
+  true,
+  ""
+ ],
+ "flash_32k|BS2|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_32k|BS2|champion": [
+  true,
+  ""
+ ],
+ "flash_32k|BS4|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_32k|BS4|champion": [
+  true,
+  ""
+ ],
+ "flash_32k|BS8|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_32k|BS8|champion": [
+  true,
+  ""
+ ],
+ "flash_32k|BS16|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_32k|BS16|champion": [
+  true,
+  ""
+ ],
+ "flash_32k|BS32|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_32k|BS32|champion": [
+  true,
+  ""
+ ],
+ "flash_32k|BS64|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_32k|BS64|champion": [
+  true,
+  ""
+ ],
+ "flash_32k|BS128|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_32k|BS128|champion": [
+  true,
+  ""
+ ],
+ "flash_32k|BS256|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_32k|BS256|champion": [
+  true,
+  ""
+ ],
+ "flash_32k|BS512|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_32k|BS512|champion": [
+  true,
+  ""
+ ],
+ "flash_32k|BS1024|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_32k|BS1024|champion": [
+  true,
+  ""
+ ]
+}
