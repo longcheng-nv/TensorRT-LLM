@@ -121,6 +121,20 @@ diet_bs.csv): diet tax ~2% at BS<=4; BS=8 now single-wave 11.2us =
 below) or v1@BS<=4 + v4@BS>=8 dispatch. active=5 would need <=25 regs —
 diminishing; remaining headroom is the persistent queue (B').
 
+**B' persistent queue DONE: FALSIFIED on uniform batches (no-ship).**
+Implemented in full with the C-remedies (per-team slice reuse + __ldcg
+post-barrier reads + gen*8192+iter*8+pass tokens + inter-row team barrier,
+skipped on last row) — remedies CORRECT (42/42 nsys + all-row exactness to
+BS=128), but pq loses to chunked ext_v4 everywhere: kernel-sum 1.05-1.31x,
+fair span metric 1.03-1.31x slower, converging-not-reaching parity at high
+BS. Economics: persistent can only reclaim the inter-wave launch gap
+(measured <=2%, v4 span tax 1.01-1.02) while paying a 5-30% overhead floor
+(per-row barrier + cg loads + loop codegen, 72-80B spill). Ship shape stays
+chunked ext_v4. Residual niche = ragged batches (drain-limited waves), but
+those break uniform team sizing => different design (per-bucket teams +
+real atomic queue), not an upgrade of this kernel. pq_bs.csv +
+ext/RESULTS.md.
+
 One-line thesis: the collapse is a misallocated parallelism axis, not an
 algorithm loss — reallocate the co-residency budget from "1 row x whole GPU"
 to "BS rows x ceil(n/2048)-CTA teams"; the barrier demotes to team scope

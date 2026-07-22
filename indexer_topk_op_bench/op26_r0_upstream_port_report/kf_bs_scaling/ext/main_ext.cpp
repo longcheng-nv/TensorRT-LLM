@@ -15,8 +15,11 @@ void topk_launch_ext(const float* logits, long W, int n, int k, int* out,
                      int BS, cudaStream_t stream);
 void topk_launch_ext_v(const float* logits, long W, int n, int k, int* out,
                        int BS, int minb, cudaStream_t stream);
+void topk_launch_pq_v(const float* logits, long W, int n, int k, int* out,
+                      int BS, int minb, cudaStream_t stream);
 void topk_ext_info(int n, int k, int BS, int info[5]);
 void topk_fast_stats(int minb, int out5[5]);
+void topk_pq_stats(int minb, int out5[5]);
 
 void run_batch_ext(torch::Tensor logits, int64_t n_valid,
                    torch::Tensor indices) {
@@ -44,6 +47,22 @@ std::vector<int64_t> fast_stats(int64_t minb) {
     return {s[0], s[1], s[2], s[3], s[4]};
 }
 
+void run_batch_pq(torch::Tensor logits, int64_t n_valid,
+                  torch::Tensor indices, int64_t minb) {
+    TORCH_CHECK(logits.is_contiguous() && indices.is_contiguous());
+    auto stream = at::cuda::getCurrentCUDAStream();
+    topk_launch_pq_v(logits.data_ptr<float>(), (long)logits.size(1),
+                     (int)n_valid, (int)indices.size(1),
+                     indices.data_ptr<int>(), (int)logits.size(0),
+                     (int)minb, stream.stream());
+}
+
+std::vector<int64_t> pq_stats(int64_t minb) {
+    int s[5] = {0, 0, 0, 0, 0};
+    topk_pq_stats((int)minb, s);
+    return {s[0], s[1], s[2], s[3], s[4]};
+}
+
 std::vector<int64_t> ext_info(int64_t n, int64_t k, int64_t bs) {
     int info[5] = {0, 0, 0, 0, 0};
     topk_ext_info((int)n, (int)k, (int)bs, info);
@@ -60,4 +79,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("fast_stats", &fast_stats,
           "(numRegs, staticSmem, localBytes, active_default, active_maxcarveout)"
           " for topk_fast<minb>");
+    m.def("run_batch_pq", &run_batch_pq,
+          "B' persistent-queue: one launch consumes the whole batch");
+    m.def("pq_stats", &pq_stats, "resource stats for topk_fast_pq<minb>");
 }

@@ -1326,6 +1326,608 @@ void fast_stats_v(int minb, int out5[5]) {
         default: fast_stats_t<1>(out5); break;
     }
 }
+
+// __ldcg (L2-only) twin of find_boundary_bins for the persistent-queue path:
+// per-team scratch slices are reused across row iterations WITHIN one launch,
+// so the "L1 invalidated at launch boundary" leg of the fence-less safety
+// argument does not apply -- post-barrier global-histogram loads must bypass
+// L1.
+__device__ __forceinline__ void find_boundary_bins_cg(
+        const unsigned int* __restrict__ hist, int nb,
+        unsigned int* warp_totals, int* s_bin, int* s_above,
+        int remaining) {
+    const int tid = threadIdx.x;
+    const int lane = tid & 31;
+    const int warp = tid >> 5;
+    const int bins_per_thread = nb >> 9;   // nb / BLOCK, BLOCK == 512
+    const int base = tid * bins_per_thread;
+    unsigned int b[4];
+    unsigned int local = 0;
+    if (bins_per_thread == 4) {
+        uint4 v = __ldcg(reinterpret_cast<const uint4*>(hist + base));
+        b[0] = v.x; b[1] = v.y; b[2] = v.z; b[3] = v.w;
+        local = v.x + v.y + v.z + v.w;
+    } else {
+        uint2 v = __ldcg(reinterpret_cast<const uint2*>(hist + base));
+        b[0] = v.x; b[1] = v.y; b[2] = 0u; b[3] = 0u;
+        local = v.x + v.y;
+    }
+    unsigned int suffix = local;
+#pragma unroll
+    for (int off = 1; off < 32; off <<= 1) {
+        unsigned int v = __shfl_down_sync(0xffffffffu, suffix, off);
+        if (lane + off < 32) suffix += v;
+    }
+    if (lane == 0) warp_totals[warp] = suffix;
+    __syncthreads();
+    unsigned int higher_warps = 0;
+#pragma unroll
+    for (int w = 0; w < (BLOCK >> 5); ++w)
+        if (w > warp) higher_warps += warp_totals[w];
+    unsigned int higher = suffix - local + higher_warps;
+    if ((int)higher < remaining && (int)(higher + local) >= remaining) {
+        unsigned int cumulative = higher;
+        int boundary = base;
+        int above = (int)higher;
+#pragma unroll
+        for (int j = 3; j >= 0; --j) {
+            if (j >= bins_per_thread) continue;
+            unsigned int next = cumulative + b[j];
+            if ((int)next >= remaining) {
+                boundary = base + j;
+                above = (int)cumulative;
+                break;
+            }
+            cumulative = next;
+        }
+        *s_bin = boundary;
+        *s_above = above;
+    }
+    __syncthreads();
+}
+
+// B' persistent-queue kernel: one launch, nteams teams loop rows round-robin.
+template<int MINB>
+__global__ __launch_bounds__(BLOCK, MINB)
+void topk_fast_pq(const float* __restrict__ logits, long rstride, int n, int k,
+                  unsigned int* __restrict__ scratch, int* __restrict__ out,
+                  unsigned int gen, int team, int BS) {
+    const int nteams = gridDim.x / team;
+    const int team_id = blockIdx.x / team;
+    const int bx = blockIdx.x - team_id * team;
+    scratch += (size_t)team_id * (size_t)SCRATCH_WORDS;
+    const int gridsz = team;
+    const int tid = threadIdx.x;
+    const int lane = tid & 31;
+    const int gtid = bx * BLOCK + tid;
+    const int gstride = gridsz * BLOCK;
+    unsigned int* hist0_g = scratch + HIST0;
+    unsigned int* gt_write = scratch + CNT + 0;
+    unsigned int* tie_write = scratch + CNT + 1;
+    unsigned int* g_arrive = scratch + CNT + 2;
+    unsigned int* g_release = scratch + CNT + 3;
+    unsigned int* tail_arrive = scratch + CNT + 4;
+    uint2* tiebuf = reinterpret_cast<uint2*>(scratch + TIEBUF);
+
+    // shared: 2048-word histogram, reused after the first barrier as the
+    // per-block compaction staging area (gt indices + tie pairs).
+    __shared__ __align__(16) unsigned char smem_raw[2048 * 4 + CAP * 8];
+    unsigned int* sh_hist = reinterpret_cast<unsigned int*>(smem_raw);
+    int* st_gt = reinterpret_cast<int*>(smem_raw);
+    uint2* st_tie = reinterpret_cast<uint2*>(smem_raw + 2048 * 4);
+
+    __shared__ unsigned int warp_totals[16];
+    __shared__ int s_bin;
+    __shared__ int s_above;
+    __shared__ int s_ngt, s_ntie, s_gtbase, s_tiebase, s_cnt, s_flag;
+    __shared__ unsigned int s_eqk[32];
+    __shared__ int s_eqv[32];
+
+
+    for (int row = team_id, iter = 0; row < BS; row += nteams, ++iter) {
+        const float* lgr = logits + (size_t)row * (size_t)rstride;
+        int* outr = out + (size_t)row * (size_t)k;
+        const unsigned int sense0 = gen * 8192u + (unsigned int)iter * 8u;
+        [&]() {
+            // ---- register-cached keys: one float4 + one tail scalar per thread ----
+            const int n4 = n & ~3;
+            const int nv4 = n4 >> 2;
+            const float4* in4 = reinterpret_cast<const float4*>(lgr);
+            unsigned int kv[4];
+            const bool vok = gtid < nv4;
+            if (vok) {
+                float4 f = in4[gtid];
+                kv[0] = fkey(f.x); kv[1] = fkey(f.y);
+                kv[2] = fkey(f.z); kv[3] = fkey(f.w);
+            } else {
+                kv[0] = kv[1] = kv[2] = kv[3] = 0u;
+            }
+            const int ptail = n4 + gtid;
+            const bool tok = ptail < n;
+            const unsigned int ktail = tok ? fkey(lgr[ptail]) : 0u;
+            // overflow region (n beyond register capacity); never taken for the
+            // benchmark shapes but keeps the kernel correct for any n.
+            const int ov_iters = nv4 > gstride
+                ? (nv4 - gstride + gstride - 1) / gstride : 0;
+        
+            if (gtid == 0) { *gt_write = 0u; *tie_write = 0u; }
+        
+            // ---- pass 0: 11-bit MSB histogram ----
+            for (int i = tid; i < 2048; i += BLOCK) sh_hist[i] = 0u;
+            __syncthreads();
+            if (vok) {
+                atomicAdd(&sh_hist[kv[0] >> 21], 1u);
+                atomicAdd(&sh_hist[kv[1] >> 21], 1u);
+                atomicAdd(&sh_hist[kv[2] >> 21], 1u);
+                atomicAdd(&sh_hist[kv[3] >> 21], 1u);
+            }
+            if (tok) atomicAdd(&sh_hist[ktail >> 21], 1u);
+            for (int it = 0; it < ov_iters; ++it) {
+                int i4 = gstride + it * gstride + gtid;
+                if (i4 < nv4) {
+                    float4 f = in4[i4];
+                    atomicAdd(&sh_hist[fkey(f.x) >> 21], 1u);
+                    atomicAdd(&sh_hist[fkey(f.y) >> 21], 1u);
+                    atomicAdd(&sh_hist[fkey(f.z) >> 21], 1u);
+                    atomicAdd(&sh_hist[fkey(f.w) >> 21], 1u);
+                }
+            }
+            __syncthreads();
+            // merge as packed 64-bit adds: per-bin totals < 2^20, no carry between
+            // the two 32-bit halves; halves the global atomic count.
+            {
+                const uint2* sh2 = reinterpret_cast<const uint2*>(sh_hist);
+                unsigned long long* g2 = reinterpret_cast<unsigned long long*>(hist0_g);
+                for (int i = tid; i < 1024; i += BLOCK) {
+                    uint2 c = sh2[i];
+                    if (c.x | c.y)
+                        atomicAdd(&g2[i], ((unsigned long long)c.y << 32) | c.x);
+                }
+            }
+            global_barrier(g_arrive, g_release, gridsz, sense0);
+        
+            find_boundary_bins_cg(hist0_g, 2048, warp_totals, &s_bin, &s_above, k);
+            const int b0 = s_bin;
+            const int above0 = s_above;
+            const int T = (int)__ldcg(&hist0_g[b0]);
+            const int R = k - above0;
+            const bool whole = T == R;
+        
+            if (whole || T <= CAP) {
+                // ---- fast finishes: staged compaction, then arrive-and-exit ----
+                if (tid == 0) { s_ngt = 0; s_ntie = 0; }
+                __syncthreads();
+        #pragma unroll
+                for (int j = 0; j < 4; ++j) {
+                    if (vok) {
+                        unsigned int d = kv[j] >> 21;
+                        if ((int)d > b0) {
+                            st_gt[atomicAdd(&s_ngt, 1)] = 4 * gtid + j;
+                        } else if ((int)d == b0) {
+                            st_tie[atomicAdd(&s_ntie, 1)] =
+                                make_uint2(kv[j], (unsigned int)(4 * gtid + j));
+                        }
+                    }
+                }
+                if (tok) {
+                    unsigned int d = ktail >> 21;
+                    if ((int)d > b0) st_gt[atomicAdd(&s_ngt, 1)] = ptail;
+                    else if ((int)d == b0)
+                        st_tie[atomicAdd(&s_ntie, 1)] =
+                            make_uint2(ktail, (unsigned int)ptail);
+                }
+                for (int it = 0; it < ov_iters; ++it) {
+                    int i4 = gstride + it * gstride + gtid;
+                    if (i4 < nv4) {
+                        float4 f = in4[i4];
+                        unsigned int kk[4] = {fkey(f.x), fkey(f.y), fkey(f.z), fkey(f.w)};
+        #pragma unroll
+                        for (int j = 0; j < 4; ++j) {
+                            unsigned int d = kk[j] >> 21;
+                            if ((int)d > b0) st_gt[atomicAdd(&s_ngt, 1)] = 4 * i4 + j;
+                            else if ((int)d == b0)
+                                st_tie[atomicAdd(&s_ntie, 1)] =
+                                    make_uint2(kk[j], (unsigned int)(4 * i4 + j));
+                        }
+                    }
+                }
+                __syncthreads();
+                if (tid == 0) {
+                    s_gtbase = s_ngt ? (int)atomicAdd(gt_write, (unsigned int)s_ngt) : 0;
+                    s_tiebase = s_ntie ? (int)atomicAdd(tie_write, (unsigned int)s_ntie) : 0;
+                }
+                __syncthreads();
+                for (int i = tid; i < s_ngt; i += BLOCK) outr[s_gtbase + i] = st_gt[i];
+                if (whole) {
+                    for (int i = tid; i < s_ntie; i += BLOCK)
+                        outr[above0 + s_tiebase + i] = (int)st_tie[i].y;
+                } else {
+                    // L2-direct atomic stores: visible to the last arriver through the
+                    // same atomic-chain contract the spinning barrier relies on.
+                    unsigned long long* tb64 =
+                        reinterpret_cast<unsigned long long*>(tiebuf + s_tiebase);
+                    for (int i = tid; i < s_ntie; i += BLOCK) {
+                        uint2 e = st_tie[i];
+                        atomicExch(&tb64[i], ((unsigned long long)e.y << 32) | e.x);
+                    }
+                }
+                __syncthreads();
+                if (tid == 0) {
+                    unsigned int t = atomicAdd(tail_arrive, 1u);
+                    s_flag = (t + 1u == (unsigned int)gridsz) ? 1 : 0;
+                }
+                __syncthreads();
+                if (!s_flag) return;
+                // ---- last arriver: exclusive owner of scratch from here ----
+                if (tid == 0) atomicExch(tail_arrive, 0u);
+                asm volatile("fence.acq_rel.gpu;" ::: "memory");
+        
+                if (!whole) {
+                    // refine low 21 bits of the T (<= CAP) boundary-bucket pairs
+                    unsigned int tk[PT];
+                    int tv[PT];
+        #pragma unroll
+                    for (int j = 0; j < PT; ++j) {
+                        if (j * BLOCK >= T) break;
+                        int p = tid + j * BLOCK;
+                        if (p < T) {
+                            uint2 e = __ldcg(&tiebuf[p]);
+                            tk[j] = e.x; tv[j] = (int)e.y;
+                        } else { tk[j] = 0u; tv[j] = 0; }
+                    }
+                    __syncthreads();
+                    // pass A: bits 20..10 (2048 bins)
+                    for (int i = tid; i < 2048; i += BLOCK) sh_hist[i] = 0u;
+                    __syncthreads();
+        #pragma unroll
+                    for (int j = 0; j < PT; ++j) {
+                        if (j * BLOCK >= T) break;
+                        if (tid + j * BLOCK < T)
+                            atomicAdd(&sh_hist[(tk[j] >> 10) & 2047u], 1u);
+                    }
+                    __syncthreads();
+                    find_boundary_bins(sh_hist, 2048, warp_totals, &s_bin, &s_above, R);
+                    const int bA = s_bin;
+                    const int aboveA = s_above;
+                    const int TA = (int)sh_hist[bA];
+                    const bool wholeA = aboveA + TA == R;
+                    if (tid == 0) { s_cnt = 0; s_ntie = 0; }
+                    __syncthreads();
+                    // combined collect: pass-A winners straight to out; boundary-bin
+                    // ties gathered into a 32-slot shared list for the warp finisher.
+        #pragma unroll
+                    for (int j = 0; j < PT; ++j) {
+                        if (j * BLOCK >= T) break;
+                        bool active = tid + j * BLOCK < T;
+                        int binA = active ? (int)((tk[j] >> 10) & 2047u) : -1;
+                        bool p = wholeA ? (binA >= bA) : (binA > bA);
+                        unsigned int m = __ballot_sync(0xffffffffu, p);
+                        if (p) {
+                            int r = __popc(m & ((1u << lane) - 1));
+                            int leader = __ffs(m) - 1;
+                            int base = 0;
+                            if (lane == leader) base = atomicAdd(&s_cnt, __popc(m));
+                            base = __shfl_sync(m, base, leader);
+                            outr[above0 + base + r] = tv[j];
+                        }
+                        if (!wholeA && binA == bA) {
+                            int q = atomicAdd(&s_ntie, 1);
+                            if (q < 32) { s_eqk[q] = tk[j]; s_eqv[q] = tv[j]; }
+                        }
+                    }
+                    __syncthreads();
+                    if (!wholeA) {
+                        const int R2 = R - aboveA;
+                        if (TA <= 32) {
+                            // warp-serial top-R2 of the <=32 boundary ties: R2 rounds
+                            // of max-reduction over the low 10 bits (full-key ties at
+                            // the k-th value may resolve either way).
+                            if (tid < 32) {
+                                unsigned int score =
+                                    tid < TA ? ((s_eqk[tid] & 1023u) + 1u) : 0u;
+                                for (int r = 0; r < R2; ++r) {
+                                    unsigned int bs = score;
+                                    int bl = tid;
+        #pragma unroll
+                                    for (int off = 16; off; off >>= 1) {
+                                        unsigned int os =
+                                            __shfl_down_sync(0xffffffffu, bs, off);
+                                        int ol = __shfl_down_sync(0xffffffffu, bl, off);
+                                        if (tid + off < 32 && os > bs) { bs = os; bl = ol; }
+                                    }
+                                    int winner = __shfl_sync(0xffffffffu, bl, 0);
+                                    if (tid == winner) {
+                                        outr[above0 + aboveA + r] = s_eqv[tid];
+                                        score = 0u;
+                                    }
+                                }
+                            }
+                        } else {
+                            // rare big-tie fallback: pass B over bits 9..0 (1024 bins)
+                            __syncthreads();
+                            for (int i = tid; i < 1024; i += BLOCK) sh_hist[i] = 0u;
+                            __syncthreads();
+        #pragma unroll
+                            for (int j = 0; j < PT; ++j) {
+                                if (j * BLOCK >= T) break;
+                                if ((tid + j * BLOCK < T) &&
+                                    (int)((tk[j] >> 10) & 2047u) == bA)
+                                    atomicAdd(&sh_hist[tk[j] & 1023u], 1u);
+                            }
+                            __syncthreads();
+                            find_boundary_bins(sh_hist, 1024, warp_totals,
+                                               &s_bin, &s_above, R2);
+                            const int bB = s_bin;
+        #pragma unroll
+                            for (int j = 0; j < PT; ++j) {
+                                if (j * BLOCK >= T) break;
+                                bool inA = (tid + j * BLOCK < T) &&
+                                           (int)((tk[j] >> 10) & 2047u) == bA;
+                                bool p = inA && (int)(tk[j] & 1023u) > bB;
+                                unsigned int m = __ballot_sync(0xffffffffu, p);
+                                if (p) {
+                                    int r = __popc(m & ((1u << lane) - 1));
+                                    int leader = __ffs(m) - 1;
+                                    int base = 0;
+                                    if (lane == leader) base = atomicAdd(&s_cnt, __popc(m));
+                                    base = __shfl_sync(m, base, leader);
+                                    outr[above0 + base + r] = tv[j];
+                                }
+                            }
+                            __syncthreads();
+                            // full-key ties at the exact k-th value: any subset fills
+        #pragma unroll
+                            for (int j = 0; j < PT; ++j) {
+                                if (j * BLOCK >= T) break;
+                                bool inA = (tid + j * BLOCK < T) &&
+                                           (int)((tk[j] >> 10) & 2047u) == bA;
+                                bool p = inA && (int)(tk[j] & 1023u) == bB;
+                                unsigned int m = __ballot_sync(0xffffffffu, p);
+                                if (p) {
+                                    int r = __popc(m & ((1u << lane) - 1));
+                                    int leader = __ffs(m) - 1;
+                                    int base = 0;
+                                    if (lane == leader) base = atomicAdd(&s_cnt, __popc(m));
+                                    base = __shfl_sync(m, base, leader);
+                                    int slot = base + r;
+                                    if (slot < R) outr[above0 + slot] = tv[j];
+                                }
+                            }
+                        }
+                    }
+                }
+                // re-zero pass-0 histogram for the next launch (only block touching
+                // scratch at this point; every other block has already arrived).
+                for (int i = tid; i < 2048; i += BLOCK) hist0_g[i] = 0u;
+                return;
+            }
+        
+            // ---- fallback: boundary bucket too large; classic 11/11/10 ladder ----
+            int remaining = R;
+            int total_above = above0;
+            unsigned int prefix = ((unsigned int)b0) << 21;
+            int consumed = 11;
+        #pragma unroll
+            for (int pass = 1; pass < 3; ++pass) {
+                const int shift = pass == 1 ? 10 : 0;
+                const int bits = pass == 1 ? 11 : 10;
+                const int nb = 1 << bits;
+                const unsigned int digit_mask = (unsigned int)(nb - 1);
+                const unsigned int high_mask = 0xffffffffu << (shift + bits);
+                for (int i = tid; i < nb; i += BLOCK) sh_hist[i] = 0u;
+                __syncthreads();
+        #pragma unroll
+                for (int j = 0; j < 4; ++j)
+                    if (vok && (kv[j] & high_mask) == (prefix & high_mask))
+                        atomicAdd(&sh_hist[(kv[j] >> shift) & digit_mask], 1u);
+                if (tok && (ktail & high_mask) == (prefix & high_mask))
+                    atomicAdd(&sh_hist[(ktail >> shift) & digit_mask], 1u);
+                for (int it = 0; it < ov_iters; ++it) {
+                    int i4 = gstride + it * gstride + gtid;
+                    if (i4 < nv4) {
+                        float4 f = in4[i4];
+                        unsigned int kk[4] = {fkey(f.x), fkey(f.y), fkey(f.z), fkey(f.w)};
+        #pragma unroll
+                        for (int j = 0; j < 4; ++j)
+                            if ((kk[j] & high_mask) == (prefix & high_mask))
+                                atomicAdd(&sh_hist[(kk[j] >> shift) & digit_mask], 1u);
+                    }
+                }
+                __syncthreads();
+                unsigned int* merged = scratch + (pass == 1 ? HIST1 : HIST2);
+                for (int i = tid; i < nb; i += BLOCK) {
+                    unsigned int c = sh_hist[i];
+                    if (c) atomicAdd(&merged[i], c);
+                }
+                global_barrier(g_arrive, g_release, gridsz,
+                               sense0 + (unsigned int)pass);
+                find_boundary_bins_cg(merged, nb, warp_totals, &s_bin,
+                                      &s_above, remaining);
+                bool whole_bucket = s_above + (int)__ldcg(&merged[s_bin]) == remaining;
+                prefix |= ((unsigned int)s_bin) << shift;
+                total_above += s_above;
+                remaining -= s_above;
+                consumed += bits;
+                if (whole_bucket) break;
+            }
+        
+            // non-spinning rendezvous: after this point every block has finished
+            // reading the merged histograms, so the last arriver may re-zero them.
+            __threadfence();
+            __syncthreads();
+            if (tid == 0) {
+                unsigned int t = atomicAdd(tail_arrive, 1u);
+                s_flag = (t + 1u == (unsigned int)gridsz) ? 1 : 0;
+            }
+            __syncthreads();
+            const bool last = s_flag != 0;
+        
+            const int final_shift = 32 - consumed;
+            const unsigned int threshold = final_shift ? (prefix >> final_shift) : prefix;
+            const int ties_needed = remaining;
+        #pragma unroll
+            for (int j = 0; j < 5; ++j) {
+                bool valid = j < 4 ? vok : tok;
+                unsigned int key = j < 4 ? kv[j] : ktail;
+                int i = j < 4 ? 4 * gtid + j : ptail;
+                if (final_shift) key >>= final_shift;
+                bool gt = valid && key > threshold;
+                bool eq = valid && key == threshold;
+                unsigned int gm = __ballot_sync(0xffffffffu, gt);
+                unsigned int em = __ballot_sync(0xffffffffu, eq);
+                if (gt) {
+                    int rank = __popc(gm & ((1u << lane) - 1));
+                    int leader = __ffs(gm) - 1;
+                    int base = 0;
+                    if (lane == leader) base = (int)atomicAdd(gt_write, (unsigned int)__popc(gm));
+                    base = __shfl_sync(gm, base, leader);
+                    outr[base + rank] = i;
+                }
+                if (eq) {
+                    int rank = __popc(em & ((1u << lane) - 1));
+                    int leader = __ffs(em) - 1;
+                    int base = 0;
+                    if (lane == leader) base = (int)atomicAdd(tie_write, (unsigned int)__popc(em));
+                    base = __shfl_sync(em, base, leader);
+                    int slot = base + rank;
+                    if (slot < ties_needed) outr[total_above + slot] = i;
+                }
+            }
+            for (int it = 0; it < ov_iters; ++it) {
+                int i4 = gstride + it * gstride + gtid;
+                bool in = i4 < nv4;
+                float4 f;
+                if (in) f = in4[i4];
+        #pragma unroll
+                for (int j = 0; j < 4; ++j) {
+                    unsigned int key = in ? fkey(j == 0 ? f.x : j == 1 ? f.y : j == 2 ? f.z : f.w) : 0u;
+                    int i = 4 * i4 + j;
+                    if (final_shift) key >>= final_shift;
+                    bool gt = in && key > threshold;
+                    bool eq = in && key == threshold;
+                    unsigned int gm = __ballot_sync(0xffffffffu, gt);
+                    unsigned int em = __ballot_sync(0xffffffffu, eq);
+                    if (gt) {
+                        int rank = __popc(gm & ((1u << lane) - 1));
+                        int leader = __ffs(gm) - 1;
+                        int base = 0;
+                        if (lane == leader) base = (int)atomicAdd(gt_write, (unsigned int)__popc(gm));
+                        base = __shfl_sync(gm, base, leader);
+                        outr[base + rank] = i;
+                    }
+                    if (eq) {
+                        int rank = __popc(em & ((1u << lane) - 1));
+                        int leader = __ffs(em) - 1;
+                        int base = 0;
+                        if (lane == leader) base = (int)atomicAdd(tie_write, (unsigned int)__popc(em));
+                        base = __shfl_sync(em, base, leader);
+                        int slot = base + rank;
+                        if (slot < ties_needed) outr[total_above + slot] = i;
+                    }
+                }
+            }
+            if (last) {
+                for (int i = tid; i < CNT; i += BLOCK) scratch[i] = 0u;
+                if (tid == 0) atomicExch(tail_arrive, 0u);
+            }
+        
+        }();
+        // stand-in for the launch boundary: the last arriver's scratch
+        // re-zero must be complete (and ordered) before this team's next row
+        // starts merging into the same slice. Skipped when this team has no
+        // further row (kernel exit is the boundary then).
+        if (row + nteams < BS)
+            global_barrier(g_arrive, g_release, gridsz, sense0 + 7u);
+    }
+}
+
+static unsigned int* g_scratch_pq = nullptr;
+static int g_pq_teams = 0;
+static unsigned int g_gen_pq = 0;
+static int g_cap_pq[5] = {0, 0, 0, 0, 0};
+
+template<int MINB>
+static void pq_caps(int* team_out, int* cap_out, int n) {
+    if (!g_cap_pq[MINB]) {
+        cudaFuncSetAttribute(topk_fast_pq<MINB>,
+                             cudaFuncAttributePreferredSharedMemoryCarveout,
+                             cudaSharedmemCarveoutMaxShared);
+        int active = 0;
+        cudaOccupancyMaxActiveBlocksPerMultiprocessor(
+            &active, topk_fast_pq<MINB>, BLOCK, 0);
+        if (active < 1) active = 1;
+        if (!g_sms)
+            cudaDeviceGetAttribute(&g_sms, cudaDevAttrMultiProcessorCount, 0);
+        g_cap_pq[MINB] = active * g_sms;
+    }
+    *team_out = (n + 2047) / 2048;
+    *cap_out = g_cap_pq[MINB];
+}
+
+template<int MINB>
+static void launch_fast_pq(const float* logits, long W, int n, int k,
+                           int* out, int BS, cudaStream_t stream) {
+    int team, cap;
+    pq_caps<MINB>(&team, &cap, n);
+    if (team > cap || BS > 8192) {   // iter bound 1023 needs BS/nteams small
+        for (int r = 0; r < BS; ++r)
+            topk_launch(logits + (size_t)r * (size_t)W, n, k,
+                        out + (size_t)r * (size_t)k, stream);
+        return;
+    }
+    int nteams = cap / team;
+    if (nteams > BS) nteams = BS;
+    if (g_pq_teams < nteams) {
+        if (g_scratch_pq) cudaFree(g_scratch_pq);
+        cudaMalloc(&g_scratch_pq,
+                   (size_t)nteams * SCRATCH_WORDS * sizeof(unsigned int));
+        cudaMemset(g_scratch_pq, 0,
+                   (size_t)nteams * SCRATCH_WORDS * sizeof(unsigned int));
+        g_pq_teams = nteams;
+    }
+    ++g_gen_pq;
+    topk_fast_pq<MINB><<<nteams * team, BLOCK, 0, stream>>>(
+        logits, W, n, k, g_scratch_pq, out, g_gen_pq, team, BS);
+}
+
+void launch_fast_pq_v(const float* logits, long W, int n, int k, int* out,
+                      int BS, int minb, cudaStream_t stream) {
+    switch (minb) {
+        case 2: launch_fast_pq<2>(logits, W, n, k, out, BS, stream); break;
+        case 3: launch_fast_pq<3>(logits, W, n, k, out, BS, stream); break;
+        case 4: launch_fast_pq<4>(logits, W, n, k, out, BS, stream); break;
+        default: launch_fast_pq<1>(logits, W, n, k, out, BS, stream); break;
+    }
+}
+
+template<int MINB>
+static void pq_stats_t(int out5[5]) {
+    cudaFuncAttributes a;
+    cudaFuncGetAttributes(&a, topk_fast_pq<MINB>);
+    out5[0] = a.numRegs;
+    out5[1] = (int)a.sharedSizeBytes;
+    out5[2] = (int)a.localSizeBytes;
+    int act = 0;
+    cudaOccupancyMaxActiveBlocksPerMultiprocessor(&act, topk_fast_pq<MINB>,
+                                                  BLOCK, 0);
+    out5[3] = act;
+    cudaFuncSetAttribute(topk_fast_pq<MINB>,
+                         cudaFuncAttributePreferredSharedMemoryCarveout,
+                         cudaSharedmemCarveoutMaxShared);
+    act = 0;
+    cudaOccupancyMaxActiveBlocksPerMultiprocessor(&act, topk_fast_pq<MINB>,
+                                                  BLOCK, 0);
+    out5[4] = act;
+}
+
+void pq_stats_v(int minb, int out5[5]) {
+    switch (minb) {
+        case 2: pq_stats_t<2>(out5); break;
+        case 3: pq_stats_t<3>(out5); break;
+        case 4: pq_stats_t<4>(out5); break;
+        default: pq_stats_t<1>(out5); break;
+    }
+}
 } // namespace aefm
 
 namespace v30 {
@@ -1914,3 +2516,21 @@ void topk_launch_ext_v(const float* logits, long W, int n, int k, int* out,
 }
 
 void topk_fast_stats(int minb, int out5[5]) { aefm::fast_stats_v(minb, out5); }
+
+// B' persistent-queue entries.
+void topk_launch_pq_v(const float* logits, long W, int n, int k, int* out,
+                      int BS, int minb, cudaStream_t stream) {
+    if (k == 2048 && n > 16896 && n <= 140000) {
+        for (int r = 0; r < BS; ++r)
+            v30::topk_launch(logits + (size_t)r * (size_t)W, n, k,
+                             out + (size_t)r * (size_t)k, stream);
+        return;
+    }
+    if (n <= 16896) {
+        aefm::topk_launch_batched(logits, W, n, k, out, BS, stream);
+        return;
+    }
+    aefm::launch_fast_pq_v(logits, W, n, k, out, BS, minb, stream);
+}
+
+void topk_pq_stats(int minb, int out5[5]) { aefm::pq_stats_v(minb, out5); }
