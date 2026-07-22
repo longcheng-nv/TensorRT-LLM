@@ -1,0 +1,17 @@
+uuid,arm,K,N,cs,exact
+flash_4k_L02,base,512,1027,1,True
+flash_4k_L02,opt,512,1027,1,True
+flash_128k_L42,base,512,32771,1,True
+flash_128k_L42,opt,512,32771,1,True
+flash_512k_L02,base,512,131075,8,True
+flash_512k_L02,opt,512,131075,8,True
+pro_8k_L30,base,1024,2051,1,True
+pro_8k_L30,opt,1024,2051,1,True
+pro_128k_L30,base,1024,32771,1,True
+pro_128k_L30,opt,1024,32771,1,True
+pro_1024k_L30,base,1024,262127,8,True
+pro_1024k_L30,opt,1024,262127,8,True
+v32_16k_L34,base,2048,16399,1,True
+v32_16k_L34,opt,2048,16399,1,True
+v32_256k_L34,base,2048,163775,8,True
+v32_256k_L34,opt,2048,163775,8,True

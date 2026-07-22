@@ -124,3 +124,19 @@ anchored to same-node ship run. **PASS: the speedup lives in P4.**
 Raw: ship/phase_diff_37.json, phase_diff_37.log. Ship item 2 CLOSED.
 
 ## Ship checklist status: ALL GREEN (items 1-3); remaining = item 4 PR packaging.
+
+## Follow-up PR OPENED (draft, 2026-07-22)
+
+**PR #16715** (draft, stacked on #16457): branch
+fork/perf/gvr-topk-p4-pipeline-opt @3f4d98d1ce (= PR#16457 head @25efb6ec
++ d2a/d2b/d1a splices + fp32 default-ON + unit tests).
+- Head drift vs campaign snapshot (~58 lines: kc_diet + LB SMEM pinning)
+  absorbed: all splice anchors hit; flags add no SMEM and resolve
+  dtype-uniform (LB dual-instance layout guard unaffected).
+- Reproduce-on-head validation: ported-package fixtures 144/144; ctor
+  default resolution fp32 ON / bf16 fp16 OFF; 8-cell paired nsys smoke
+  geomean 1.1912 min 1.0756, 16/16 exact (ship/ship_prsmoke.csv).
+- Tests added: main matrix + (fp32,512)/(fp32,1024); tie-cluster fallback
+  test (301-way tie straddling rank K -> cnt>128 fallback; giant-tie
+  plateau deliberately avoided = base undershoot contract boundary).
+- Worktree: /home/scratch.loncheng_gpu/workspace/perf/workloads/DSV4/wt-op37pr
