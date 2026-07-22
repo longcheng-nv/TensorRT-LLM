@@ -176,3 +176,9 @@ Updated 2026-07-22 (会话暂停：用户要求迁移到另一台机器)。
 - **v25 全格 865(r4v25g, GPU1-3)**: **geomean 1.5208, 865/865 exact,
   回退仅 2**(pro_64k_L38 hit0.27 → 0.912; v32_16k_L30 hit0.50 → 0.948;
   p5 1.104, max 3.177)。vs Bar: **1.521/1.60**, 2 regs。
+- **r2_ce05e032 收割**(`gvr_topk_cuda_v27`, 内部 1.2669): 寄存器驻留 GVR
+  (npad≤262144 整行一次读进寄存器,count/secant/collect 全程零重扫,
+  与 P1 hint gather 重叠)+ 大 N 流式 + 直通道;骨架保留。28-cell 探针
+  (GPU1): **cold gm 1.6669, 0 回退, 28/28 exact**。全格 r4v27g 已发。
+  注: op32 曾判 register-resident 在小 N latency 地板 WASH — 此处机制
+  不同(中段消重扫),且实测大幅有效。
