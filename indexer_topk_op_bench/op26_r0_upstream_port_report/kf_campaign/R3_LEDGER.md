@@ -19,6 +19,19 @@ Campaign id: `e5q1zgrfhs0z57dj6850kc444r` (KF managed B200, effort high,
 max_rounds 20, max_duration 8h, max_cost $800, stagnation 4).
 Node: umbriel-b200-027 (8×B200). Started 2026-07-21 13:40Z.
 
+## BS-scaling supplement (2026-07-22, post-close — §7.8 of KF_PROCESS_LOG.html)
+
+compB across BS 1-1024 (real rows replicated, 75 rungs = REPORT §8b per-layer
+envelope), all 5 arms local-paired on umbriel-b200-019 (kf_bs_scaling/):
+BS=1 wins ALL arms (vs PR 1.874 / sglang_v2 1.182 / radix 1.754 / flashinfer
+1.606); crossover already at BS=2; BS=1024 batched arms 45-125x faster ->
+production port needs a BS==1 dispatch gate (legal: BS known at launch).
+Cross-node PR-normalization was REJECTED: only the cuteDSL GVR arm drifts
+locally (med 1.09, p95 2.4 at high BS; rivals reproduce 027 at med 1.000).
+One-off spin-barrier LIVELOCK observed (compB v32_128k_L54 BS=1024, >40min,
+solo retry clean 9ms/call) -> transient co-residency loss, not data-dependent;
+new evidence for the fence-less-barrier ship constraint above.
+
 ## Decisions
 
 - **D4 (skeleton adjudication, USER, 2026-07-22): Bar-first, loose-skeleton
