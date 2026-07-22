@@ -1,0 +1,7 @@
+# nsys/ncu artifacts embed environment tokens — never commit
+nsys_reps/
+ncu_reps/
+*.sqlite
+*.nsys-rep
+*.ncu-rep
+__pycache__/
