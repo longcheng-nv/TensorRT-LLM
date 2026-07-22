@@ -239,3 +239,10 @@ Updated 2026-07-22 (会话暂停：用户要求迁移到另一台机器)。
   (唯一 <1.0 格 pro_64k_L38 grid 0.991@15rep → 60-rep 裁定 **1.0129** = 噪声;
   warm 0.908 记录在案,验收口径 = nsys cold)。min(裁定后)>0.99, p5 1.221,
   max 3.516。Bar-1 ✅ 1.6531/1.60 · Bar-2 ✅ · Bar-3 ✅。
+- **横向对照(PR-arm 归一, r4r3cg)**: champion 28dc11f6 vs sglang_v2
+  gm **1.099**(win 567/865, 弱区 N=8195 gm 0.80)· vs radix_cutedsl
+  gm **1.593**(win 845/865)。与第一 lineage 对照: compB 1.8267 vs
+  (R3 时点 head)>本期 1.6531 vs 04a0 —— 冷启动+骨架硬锁下第二 lineage
+  3 轮到 1.65,未及第一 lineage 积累值(与 handoff 期望管理一致,如实入账)。
+- R4 campaign 平台侧仍 Running(round 3 残余 agent,$966>800,等预算截断);
+  champion 已定稿 28dc11f6,后续平台残余候选须超 1.3701 才重开判决。
