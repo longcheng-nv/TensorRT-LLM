@@ -94,3 +94,12 @@ Updated 2026-07-22 (会话暂停：用户要求迁移到另一台机器)。
   **865/865 exact**;grid_r4pr2.csv(pr_cold/pr_warm)。同节点锚:与
   parity04a0 28 格重叠 gm=1.0079(0.8%,±尾 0.881/1.092 为小 N 冷噪声);
   跨节点 R3 锚不可用(既有教训)。此 grid 即本节点后续所有 rung 锚基准。
+- **T4 首收割 r1_a275c747**(round1 内部 0.9188,claude-fable agent,
+  `gvr_topk_cuda_v3`): 骨架合规 PASS(P1 hint-CCDF rung ladder / P2 8-rung
+  多阈值+log-secant / P4 candidates 内 radix 精修+tie-ticket,dispatch 仅按
+  npad 1/4/8 CTA)。28-cell 探针(GPU6): **cold gm 1.1867, 28/28 exact,
+  6/28 回退** — 回退全在 N≈16K-33K 中段带(flash/pro_128k 0.83-0.95,
+  32k 部分 0.93-0.98),与 CTA 档位切换带重合(第一期 r1 同型缺陷);
+  4K 大胜 1.15-1.86,≥512K 稳胜 1.08-1.45。未过 Bar-2,不上全格;
+  等 round 演进。注:平台 insights 只读,mid-campaign 无 operator steering
+  通道,判决材料留作收口后 fork --append-prompt。
