@@ -30,7 +30,7 @@ import sys
 from collections import Counter, defaultdict
 
 DEFAULT_LABELS = [
-    "t0_entry", "p1_gather_stats", "smem_stage", "p1b_rungs",
+    "p1_gather_stats", "smem_stage", "p1b_rungs",
     "p2_count_admission", "p3_collect", "p4_peer_wait", "p4_dsmem_gather",
     "p4_minmax", "p4_coarse_hist", "p4_coarse_search", "p4_fine",
     "p4_scatter", "p4_tail", "epilogue",
@@ -84,7 +84,14 @@ def main():
 
     labels = args.labels.split(",") if args.labels else DEFAULT_LABELS
 
-    rows = list(csv.DictReader(open(args.csv)))
+    # ncu --page source --csv prefixes a `"Kernel Name",<name>` row before
+    # the per-instruction header; skip to the real header line.
+    lines = open(args.csv).read().splitlines()
+    h = next((i for i, l in enumerate(lines)
+              if l.startswith('"Address","Source"')), None)
+    if h is None:
+        sys.exit("no source-page header found")
+    rows = list(csv.DictReader(lines[h:]))
     if not rows:
         sys.exit("empty csv")
     cols = rows[0].keys()
@@ -114,9 +121,12 @@ def main():
         m = re.match(r"([A-Z0-9._]+)", txt)
         return m.group(1) if m else "?"
 
-    # find executed stamp landmarks (CS2R with executed > 0)
+    # find executed stamp landmarks: CS2R clock reads only (CS2R R, SRZ is
+    # a zero idiom, not a stamp), with executed > 0 (skip untaken degenerate
+    # collapse paths)
     marks = [i for i, r in enumerate(rows)
-             if mnemonic(r[c_src]).startswith("CS2R") and fnum(r[c_exec]) > 0]
+             if mnemonic(r[c_src]).startswith("CS2R")
+             and "SR_CLOCK" in r[c_src] and fnum(r[c_exec]) > 0]
     nseg = len(marks) - 1
     print(f"[parse] {len(rows)} sass rows, {len(marks)} executed CS2R stamps "
           f"-> {nseg} segments (labels {len(labels)})")

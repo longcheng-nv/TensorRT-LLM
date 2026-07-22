@@ -1,0 +1,3146 @@
+{
+ "flash_128k_L02": {
+  "cs": 1,
+  "N": 32771,
+  "K": 512,
+  "hit": 0.604,
+  "n_stamps": 15,
+  "total_inst": 29163.0,
+  "stalls_kernelwide": {
+   "no_instruction": 9.453624,
+   "barrier": 3.563361,
+   "long_scoreboard": 2.69346,
+   "wait": 2.126521,
+   "short_scoreboard": 1.332353,
+   "selected": 1.0,
+   "not_selected": 0.598067,
+   "math_pipe_throttle": 0.405945,
+   "branch_resolving": 0.325732,
+   "mio_throttle": 0.186672
+  },
+  "stages": {
+   "p4_peer_wait": {
+    "inst": 32.0,
+    "inst_share": 0.0011,
+    "stall_samples": 0.0,
+    "samp_share": 0.0,
+    "expA_cyc_share_kernel": 0.0011,
+    "expA_share_of_p4": 0.0032,
+    "opcode_class": {
+     "gmem_store": 16.0,
+     "move_misc": 16.0
+    },
+    "key_ops": {
+     "STG": 16.0,
+     "CS2R": 16.0
+    },
+    "top5": {
+     "STG.E.64": 16.0,
+     "CS2R": 16.0
+    }
+   },
+   "p4_dsmem_gather": {
+    "inst": 32.0,
+    "inst_share": 0.0011,
+    "stall_samples": 0.0,
+    "samp_share": 0.0,
+    "expA_cyc_share_kernel": 0.0013,
+    "expA_share_of_p4": 0.004,
+    "opcode_class": {
+     "gmem_store": 16.0,
+     "move_misc": 16.0
+    },
+    "key_ops": {
+     "STG": 16.0,
+     "CS2R": 16.0
+    },
+    "top5": {
+     "STG.E.64": 16.0,
+     "CS2R": 16.0
+    }
+   },
+   "p4_minmax": {
+    "inst": 1104.0,
+    "inst_share": 0.0379,
+    "stall_samples": 1.0,
+    "samp_share": 0.125,
+    "expA_cyc_share_kernel": 0.0272,
+    "expA_share_of_p4": 0.0833,
+    "opcode_class": {
+     "fp": 320.0,
+     "int": 256.0,
+     "smem_load": 192.0,
+     "move_misc": 96.0,
+     "control": 80.0,
+     "other": 80.0,
+     "smem_store": 32.0,
+     "barrier": 32.0,
+     "gmem_store": 16.0
+    },
+    "key_ops": {
+     "LDS": 192.0,
+     "STS": 32.0,
+     "BAR": 32.0
+    },
+    "top5": {
+     "FMNMX3": 288.0,
+     "LDS.128": 128.0,
+     "IMAD.MOV.U32": 80.0,
+     "LDS": 64.0,
+     "BRA": 48.0
+    }
+   },
+   "p4_coarse_hist": {
+    "inst": 1083.0,
+    "inst_share": 0.0371,
+    "stall_samples": 0.0,
+    "samp_share": 0.0,
+    "expA_cyc_share_kernel": 0.0313,
+    "expA_share_of_p4": 0.096,
+    "opcode_class": {
+     "fp": 246.0,
+     "other": 232.0,
+     "int": 196.0,
+     "control": 181.0,
+     "move_misc": 80.0,
+     "smem_load": 34.0,
+     "smem_atomic": 34.0,
+     "smem_store": 32.0,
+     "barrier": 32.0,
+     "gmem_store": 16.0
+    },
+    "key_ops": {
+     "LDS": 34.0,
+     "ATOMS": 34.0,
+     "STS": 32.0
+    },
+    "top5": {
+     "VIADD": 148.0,
+     "BRA": 98.0,
+     "FFMA": 80.0,
+     "VIMNMX": 68.0,
+     "FADD": 66.0
+    }
+   },
+   "p4_coarse_search": {
+    "inst": 1667.0,
+    "inst_share": 0.0572,
+    "stall_samples": 1.0,
+    "samp_share": 0.125,
+    "expA_cyc_share_kernel": 0.0668,
+    "expA_share_of_p4": 0.2048,
+    "opcode_class": {
+     "int": 997.0,
+     "smem_load": 309.0,
+     "control": 177.0,
+     "move_misc": 100.0,
+     "barrier": 48.0,
+     "smem_store": 20.0,
+     "gmem_store": 16.0
+    },
+    "key_ops": {
+     "LDS": 276.0,
+     "BAR": 48.0,
+     "STS": 18.0
+    },
+    "top5": {
+     "IADD3": 583.0,
+     "LDS.128": 276.0,
+     "IMAD.IADD": 103.0,
+     "ISETP.GT.OR": 74.0,
+     "BSYNC.RECONVERGENT": 66.0
+    }
+   },
+   "p4_fine": {
+    "inst": 2084.0,
+    "inst_share": 0.0715,
+    "stall_samples": 2.0,
+    "samp_share": 0.25,
+    "expA_cyc_share_kernel": 0.1219,
+    "expA_share_of_p4": 0.3738,
+    "opcode_class": {
+     "int": 800.0,
+     "control": 415.0,
+     "fp": 261.0,
+     "other": 167.0,
+     "smem_load": 156.0,
+     "move_misc": 101.0,
+     "barrier": 96.0,
+     "smem_store": 67.0,
+     "gmem_store": 16.0,
+     "smem_atomic": 5.0
+    },
+    "key_ops": {
+     "BAR": 96.0,
+     "LDS": 140.0,
+     "STS": 50.0
+    },
+    "top5": {
+     "LOP3.LUT": 272.0,
+     "BRA": 163.0,
+     "IADD3": 147.0,
+     "BSYNC.RECONVERGENT": 138.0,
+     "BSSY.RECONVERGENT": 114.0
+    }
+   },
+   "p4_scatter": {
+    "inst": 1474.0,
+    "inst_share": 0.0505,
+    "stall_samples": 0.0,
+    "samp_share": 0.0,
+    "expA_cyc_share_kernel": 0.0603,
+    "expA_share_of_p4": 0.1849,
+    "opcode_class": {
+     "int": 523.0,
+     "control": 340.0,
+     "other": 162.0,
+     "move_misc": 133.0,
+     "fp": 117.0,
+     "smem_load": 89.0,
+     "gmem_store": 55.0,
+     "smem_atomic": 39.0,
+     "barrier": 16.0
+    },
+    "key_ops": {
+     "LDS": 73.0,
+     "VOTEU": 39.0
+    },
+    "top5": {
+     "BRA": 200.0,
+     "ISETP.GT.AND": 94.0,
+     "BSYNC.RECONVERGENT": 90.0,
+     "VIADD": 84.0,
+     "VIMNMX": 78.0
+    }
+   },
+   "p4_tail": {
+    "inst": 226.0,
+    "inst_share": 0.0077,
+    "stall_samples": 1.0,
+    "samp_share": 0.125,
+    "expA_cyc_share_kernel": 0.016,
+    "expA_share_of_p4": 0.0491,
+    "opcode_class": {
+     "int": 96.0,
+     "control": 81.0,
+     "smem_load": 16.0,
+     "gmem_store": 16.0,
+     "other": 16.0,
+     "move_misc": 1.0
+    },
+    "key_ops": {
+     "LDS": 16.0,
+     "STG": 16.0,
+     "CS2R": 1.0
+    },
+    "top5": {
+     "BRA": 49.0,
+     "IADD3": 32.0,
+     "ISETP.GT.AND": 32.0,
+     "LDS": 16.0,
+     "BSSY.RECONVERGENT": 16.0
+    }
+   }
+  }
+ },
+ "flash_128k_L42": {
+  "cs": 1,
+  "N": 32771,
+  "K": 512,
+  "hit": 0.863,
+  "n_stamps": 15,
+  "total_inst": 33745.0,
+  "stalls_kernelwide": {
+   "no_instruction": 12.544854,
+   "barrier": 4.62767,
+   "long_scoreboard": 2.332637,
+   "wait": 2.245046,
+   "short_scoreboard": 1.448168,
+   "selected": 1.0,
+   "not_selected": 0.577397,
+   "branch_resolving": 0.41268,
+   "math_pipe_throttle": 0.363636,
+   "mio_throttle": 0.186222
+  },
+  "stages": {
+   "p4_peer_wait": {
+    "inst": 32.0,
+    "inst_share": 0.0009,
+    "stall_samples": 0.0,
+    "samp_share": 0.0,
+    "expA_cyc_share_kernel": 0.0007,
+    "expA_share_of_p4": 0.0013,
+    "opcode_class": {
+     "gmem_store": 16.0,
+     "move_misc": 16.0
+    },
+    "key_ops": {
+     "STG": 16.0,
+     "CS2R": 16.0
+    },
+    "top5": {
+     "STG.E.64": 16.0,
+     "CS2R": 16.0
+    }
+   },
+   "p4_dsmem_gather": {
+    "inst": 32.0,
+    "inst_share": 0.0009,
+    "stall_samples": 0.0,
+    "samp_share": 0.0,
+    "expA_cyc_share_kernel": 0.0009,
+    "expA_share_of_p4": 0.0016,
+    "opcode_class": {
+     "gmem_store": 16.0,
+     "move_misc": 16.0
+    },
+    "key_ops": {
+     "STG": 16.0,
+     "CS2R": 16.0
+    },
+    "top5": {
+     "STG.E.64": 16.0,
+     "CS2R": 16.0
+    }
+   },
+   "p4_minmax": {
+    "inst": 1104.0,
+    "inst_share": 0.0327,
+    "stall_samples": 1.0,
+    "samp_share": 0.0714,
+    "expA_cyc_share_kernel": 0.018,
+    "expA_share_of_p4": 0.033,
+    "opcode_class": {
+     "fp": 320.0,
+     "int": 256.0,
+     "smem_load": 192.0,
+     "move_misc": 96.0,
+     "control": 80.0,
+     "other": 80.0,
+     "smem_store": 32.0,
+     "barrier": 32.0,
+     "gmem_store": 16.0
+    },
+    "key_ops": {
+     "LDS": 192.0,
+     "STS": 32.0,
+     "BAR": 32.0
+    },
+    "top5": {
+     "FMNMX3": 288.0,
+     "LDS.128": 128.0,
+     "IMAD.MOV.U32": 80.0,
+     "LDS": 64.0,
+     "BRA": 48.0
+    }
+   },
+   "p4_coarse_hist": {
+    "inst": 862.0,
+    "inst_share": 0.0255,
+    "stall_samples": 0.0,
+    "samp_share": 0.0,
+    "expA_cyc_share_kernel": 0.0206,
+    "expA_share_of_p4": 0.0377,
+    "opcode_class": {
+     "fp": 195.0,
+     "other": 164.0,
+     "int": 162.0,
+     "control": 147.0,
+     "move_misc": 80.0,
+     "smem_store": 32.0,
+     "barrier": 32.0,
+     "smem_load": 17.0,
+     "smem_atomic": 17.0,
+     "gmem_store": 16.0
+    },
+    "key_ops": {
+     "STS": 32.0,
+     "BAR": 32.0,
+     "LDS": 17.0
+    },
+    "top5": {
+     "VIADD": 114.0,
+     "BRA": 81.0,
+     "FFMA": 80.0,
+     "FADD": 49.0,
+     "VIMNMX": 34.0
+    }
+   },
+   "p4_coarse_search": {
+    "inst": 1667.0,
+    "inst_share": 0.0494,
+    "stall_samples": 1.0,
+    "samp_share": 0.0714,
+    "expA_cyc_share_kernel": 0.0402,
+    "expA_share_of_p4": 0.0738,
+    "opcode_class": {
+     "int": 997.0,
+     "smem_load": 309.0,
+     "control": 177.0,
+     "move_misc": 100.0,
+     "barrier": 48.0,
+     "smem_store": 20.0,
+     "gmem_store": 16.0
+    },
+    "key_ops": {
+     "LDS": 276.0,
+     "BAR": 48.0,
+     "STS": 18.0
+    },
+    "top5": {
+     "IADD3": 583.0,
+     "LDS.128": 276.0,
+     "IMAD.IADD": 103.0,
+     "ISETP.GT.OR": 74.0,
+     "BSYNC.RECONVERGENT": 66.0
+    }
+   },
+   "p4_fine": {
+    "inst": 1918.0,
+    "inst_share": 0.0568,
+    "stall_samples": 2.0,
+    "samp_share": 0.1429,
+    "expA_cyc_share_kernel": 0.2141,
+    "expA_share_of_p4": 0.3926,
+    "opcode_class": {
+     "int": 792.0,
+     "control": 352.0,
+     "fp": 219.0,
+     "smem_load": 139.0,
+     "move_misc": 121.0,
+     "other": 108.0,
+     "barrier": 96.0,
+     "smem_store": 67.0,
+     "gmem_store": 16.0,
+     "smem_atomic": 8.0
+    },
+    "key_ops": {
+     "BAR": 96.0,
+     "LDS": 123.0,
+     "STS": 50.0
+    },
+    "top5": {
+     "LOP3.LUT": 272.0,
+     "IADD3": 147.0,
+     "BSYNC.RECONVERGENT": 124.0,
+     "BRA": 115.0,
+     "BSSY.RECONVERGENT": 97.0
+    }
+   },
+   "p4_scatter": {
+    "inst": 846.0,
+    "inst_share": 0.0251,
+    "stall_samples": 0.0,
+    "samp_share": 0.0,
+    "expA_cyc_share_kernel": 0.0251,
+    "expA_share_of_p4": 0.046,
+    "opcode_class": {
+     "int": 293.0,
+     "control": 183.0,
+     "other": 100.0,
+     "fp": 75.0,
+     "move_misc": 73.0,
+     "smem_load": 52.0,
+     "gmem_store": 35.0,
+     "smem_atomic": 19.0,
+     "barrier": 16.0
+    },
+    "key_ops": {
+     "LDS": 36.0,
+     "VOTEU": 19.0
+    },
+    "top5": {
+     "BRA": 108.0,
+     "ISETP.GT.AND": 60.0,
+     "VIADD": 50.0,
+     "VIMNMX": 50.0,
+     "BSYNC.RECONVERGENT": 42.0
+    }
+   },
+   "p4_tail": {
+    "inst": 5823.0,
+    "inst_share": 0.1726,
+    "stall_samples": 5.0,
+    "samp_share": 0.3571,
+    "expA_cyc_share_kernel": 0.2271,
+    "expA_share_of_p4": 0.4164,
+    "opcode_class": {
+     "int": 1892.0,
+     "control": 1437.0,
+     "smem_load": 618.0,
+     "other": 548.0,
+     "fp": 375.0,
+     "barrier": 368.0,
+     "move_misc": 352.0,
+     "smem_store": 208.0,
+     "gmem_store": 17.0,
+     "smem_atomic": 8.0
+    },
+    "key_ops": {
+     "BAR": 368.0,
+     "LDS": 618.0,
+     "STS": 188.0
+    },
+    "top5": {
+     "BRA": 574.0,
+     "IADD3": 509.0,
+     "BSYNC.RECONVERGENT": 490.0,
+     "BSSY.RECONVERGENT": 373.0,
+     "BAR.SYNC.DEFER_BLOCKING": 368.0
+    }
+   }
+  }
+ },
+ "flash_256k_L02": {
+  "cs": 4,
+  "N": 65538,
+  "K": 512,
+  "hit": 0.303,
+  "n_stamps": 15,
+  "total_inst": 66057.0,
+  "stalls_kernelwide": {
+   "barrier": 17.935553,
+   "no_instruction": 9.0382,
+   "long_scoreboard": 4.399548,
+   "wait": 2.19257,
+   "membar": 1.615813,
+   "short_scoreboard": 1.301881,
+   "selected": 1.0,
+   "not_selected": 0.533521,
+   "branch_resolving": 0.435377,
+   "math_pipe_throttle": 0.338019
+  },
+  "stages": {
+   "p4_peer_wait": {
+    "inst": 896.0,
+    "inst_share": 0.0136,
+    "stall_samples": 4.0,
+    "samp_share": 0.1,
+    "expA_cyc_share_kernel": 0.0596,
+    "expA_share_of_p4": 0.114,
+    "opcode_class": {
+     "other": 448.0,
+     "control": 256.0,
+     "move_misc": 128.0,
+     "gmem_store": 64.0
+    },
+    "key_ops": {
+     "STG": 64.0,
+     "CS2R": 64.0
+    },
+    "top5": {
+     "BRA.U": 128.0,
+     "BRA": 128.0,
+     "LDCU": 64.0,
+     "STG.E.64": 64.0,
+     "UISETP.EQ.U32.AND": 64.0
+    }
+   },
+   "p4_dsmem_gather": {
+    "inst": 2197.0,
+    "inst_share": 0.0333,
+    "stall_samples": 1.0,
+    "samp_share": 0.025,
+    "expA_cyc_share_kernel": 0.1079,
+    "expA_share_of_p4": 0.2063,
+    "opcode_class": {
+     "int": 655.0,
+     "control": 542.0,
+     "move_misc": 515.0,
+     "other": 165.0,
+     "gmem_load": 128.0,
+     "smem_store": 96.0,
+     "gmem_store": 64.0,
+     "smem_load": 16.0,
+     "barrier": 16.0
+    },
+    "key_ops": {
+     "STS": 96.0,
+     "STG": 64.0
+    },
+    "top5": {
+     "MOV": 256.0,
+     "BRA": 226.0,
+     "BSSY.RECONVERGENT": 188.0,
+     "ISETP.GT.AND": 164.0,
+     "IMAD.IADD": 153.0
+    }
+   },
+   "p4_minmax": {
+    "inst": 1133.0,
+    "inst_share": 0.0172,
+    "stall_samples": 0.0,
+    "samp_share": 0.0,
+    "expA_cyc_share_kernel": 0.0457,
+    "expA_share_of_p4": 0.0874,
+    "opcode_class": {
+     "fp": 328.0,
+     "int": 274.0,
+     "smem_load": 200.0,
+     "other": 86.0,
+     "control": 83.0,
+     "move_misc": 82.0,
+     "smem_store": 32.0,
+     "barrier": 32.0,
+     "gmem_store": 16.0
+    },
+    "key_ops": {
+     "LDS": 200.0,
+     "STS": 32.0,
+     "BAR": 32.0
+    },
+    "top5": {
+     "FMNMX3": 296.0,
+     "LDS.128": 128.0,
+     "LDS": 72.0,
+     "IMAD.MOV.U32": 64.0,
+     "BRA": 50.0
+    }
+   },
+   "p4_coarse_hist": {
+    "inst": 1307.0,
+    "inst_share": 0.0198,
+    "stall_samples": 0.0,
+    "samp_share": 0.0,
+    "expA_cyc_share_kernel": 0.0302,
+    "expA_share_of_p4": 0.0578,
+    "opcode_class": {
+     "fp": 294.0,
+     "other": 280.0,
+     "int": 276.0,
+     "control": 213.0,
+     "move_misc": 64.0,
+     "smem_load": 50.0,
+     "smem_atomic": 50.0,
+     "smem_store": 32.0,
+     "barrier": 32.0,
+     "gmem_store": 16.0
+    },
+    "key_ops": {
+     "LDS": 50.0,
+     "ATOMS": 50.0,
+     "STS": 32.0
+    },
+    "top5": {
+     "VIADD": 164.0,
+     "BRA": 114.0,
+     "VIMNMX": 100.0,
+     "FADD": 82.0,
+     "FFMA": 80.0
+    }
+   },
+   "p4_coarse_search": {
+    "inst": 1664.0,
+    "inst_share": 0.0252,
+    "stall_samples": 1.0,
+    "samp_share": 0.025,
+    "expA_cyc_share_kernel": 0.0538,
+    "expA_share_of_p4": 0.103,
+    "opcode_class": {
+     "int": 996.0,
+     "smem_load": 309.0,
+     "control": 176.0,
+     "move_misc": 99.0,
+     "barrier": 48.0,
+     "smem_store": 20.0,
+     "gmem_store": 16.0
+    },
+    "key_ops": {
+     "LDS": 276.0,
+     "BAR": 48.0,
+     "STS": 18.0
+    },
+    "top5": {
+     "IADD3": 580.0,
+     "LDS.128": 276.0,
+     "IMAD.IADD": 106.0,
+     "ISETP.GT.OR": 74.0,
+     "BSYNC.RECONVERGENT": 66.0
+    }
+   },
+   "p4_fine": {
+    "inst": 2288.0,
+    "inst_share": 0.0346,
+    "stall_samples": 2.0,
+    "samp_share": 0.05,
+    "expA_cyc_share_kernel": 0.1084,
+    "expA_share_of_p4": 0.2074,
+    "opcode_class": {
+     "int": 849.0,
+     "control": 503.0,
+     "fp": 306.0,
+     "other": 178.0,
+     "smem_load": 172.0,
+     "move_misc": 97.0,
+     "barrier": 96.0,
+     "smem_store": 67.0,
+     "gmem_store": 16.0,
+     "smem_atomic": 4.0
+    },
+    "key_ops": {
+     "BAR": 96.0,
+     "LDS": 156.0
+    },
+    "top5": {
+     "LOP3.LUT": 272.0,
+     "BRA": 186.0,
+     "IADD3": 180.0,
+     "BSYNC.RECONVERGENT": 136.0,
+     "BSSY.RECONVERGENT": 114.0
+    }
+   },
+   "p4_scatter": {
+    "inst": 2010.0,
+    "inst_share": 0.0304,
+    "stall_samples": 1.0,
+    "samp_share": 0.025,
+    "expA_cyc_share_kernel": 0.0661,
+    "expA_share_of_p4": 0.1265,
+    "opcode_class": {
+     "int": 696.0,
+     "control": 496.0,
+     "other": 224.0,
+     "move_misc": 175.0,
+     "fp": 162.0,
+     "smem_load": 119.0,
+     "gmem_store": 69.0,
+     "smem_atomic": 53.0,
+     "barrier": 16.0
+    },
+    "key_ops": {
+     "LDS": 103.0,
+     "VOTEU": 53.0
+    },
+    "top5": {
+     "BRA": 275.0,
+     "ISETP.GT.AND": 123.0,
+     "VIADD": 116.0,
+     "VIMNMX": 108.0,
+     "S2R": 106.0
+    }
+   },
+   "p4_tail": {
+    "inst": 384.0,
+    "inst_share": 0.0058,
+    "stall_samples": 0.0,
+    "samp_share": 0.0,
+    "expA_cyc_share_kernel": 0.0436,
+    "expA_share_of_p4": 0.0834,
+    "opcode_class": {
+     "int": 144.0,
+     "control": 128.0,
+     "move_misc": 64.0,
+     "smem_load": 16.0,
+     "gmem_store": 16.0,
+     "other": 16.0
+    },
+    "key_ops": {
+     "CS2R": 64.0,
+     "LDS": 16.0,
+     "STG": 16.0
+    },
+    "top5": {
+     "BSYNC.RECONVERGENT": 80.0,
+     "ISETP.NE.AND": 64.0,
+     "CS2R": 64.0,
+     "ISETP.GT.AND": 32.0,
+     "BRA": 32.0
+    }
+   }
+  }
+ },
+ "flash_4k_L02": {
+  "cs": 1,
+  "N": 1027,
+  "K": 512,
+  "hit": 0.895,
+  "n_stamps": 15,
+  "total_inst": 12816.0,
+  "stalls_kernelwide": {
+   "no_instruction": 17.568833,
+   "barrier": 14.132349,
+   "long_scoreboard": 2.793944,
+   "wait": 2.589808,
+   "short_scoreboard": 1.787666,
+   "selected": 1.0,
+   "branch_resolving": 0.73774,
+   "not_selected": 0.481019,
+   "mio_throttle": 0.286263,
+   "math_pipe_throttle": 0.198227
+  },
+  "stages": {
+   "p4_peer_wait": {
+    "inst": 32.0,
+    "inst_share": 0.0025,
+    "stall_samples": 0.0,
+    "samp_share": 0.0,
+    "expA_cyc_share_kernel": 0.0015,
+    "expA_share_of_p4": 0.0037,
+    "opcode_class": {
+     "gmem_store": 16.0,
+     "move_misc": 16.0
+    },
+    "key_ops": {
+     "STG": 16.0,
+     "CS2R": 16.0
+    },
+    "top5": {
+     "STG.E.64": 16.0,
+     "CS2R": 16.0
+    }
+   },
+   "p4_dsmem_gather": {
+    "inst": 32.0,
+    "inst_share": 0.0025,
+    "stall_samples": 0.0,
+    "samp_share": 0.0,
+    "expA_cyc_share_kernel": 0.002,
+    "expA_share_of_p4": 0.0048,
+    "opcode_class": {
+     "gmem_store": 16.0,
+     "move_misc": 16.0
+    },
+    "key_ops": {
+     "STG": 16.0,
+     "CS2R": 16.0
+    },
+    "top5": {
+     "STG.E.64": 16.0,
+     "CS2R": 16.0
+    }
+   },
+   "p4_minmax": {
+    "inst": 1088.0,
+    "inst_share": 0.0849,
+    "stall_samples": 0.0,
+    "samp_share": 0.0,
+    "expA_cyc_share_kernel": 0.0391,
+    "expA_share_of_p4": 0.0945,
+    "opcode_class": {
+     "fp": 320.0,
+     "int": 256.0,
+     "smem_load": 192.0,
+     "control": 80.0,
+     "other": 80.0,
+     "move_misc": 80.0,
+     "smem_store": 32.0,
+     "barrier": 32.0,
+     "gmem_store": 16.0
+    },
+    "key_ops": {
+     "LDS": 192.0,
+     "STS": 32.0,
+     "BAR": 32.0,
+     "STG": 16.0
+    },
+    "top5": {
+     "FMNMX3": 288.0,
+     "LDS.128": 128.0,
+     "LDS": 64.0,
+     "IMAD.MOV.U32": 64.0,
+     "BRA": 48.0
+    }
+   },
+   "p4_coarse_hist": {
+    "inst": 937.0,
+    "inst_share": 0.0731,
+    "stall_samples": 0.0,
+    "samp_share": 0.0,
+    "expA_cyc_share_kernel": 0.0381,
+    "expA_share_of_p4": 0.0921,
+    "opcode_class": {
+     "int": 224.0,
+     "fp": 216.0,
+     "control": 161.0,
+     "other": 144.0,
+     "move_misc": 64.0,
+     "smem_store": 32.0,
+     "barrier": 32.0,
+     "smem_load": 24.0,
+     "smem_atomic": 24.0,
+     "gmem_store": 16.0
+    },
+    "key_ops": {
+     "STS": 32.0,
+     "BAR": 32.0,
+     "LDS": 24.0
+    },
+    "top5": {
+     "BRA": 88.0,
+     "VIADD": 80.0,
+     "FFMA": 80.0,
+     "FADD": 56.0,
+     "IADD3": 48.0
+    }
+   },
+   "p4_coarse_search": {
+    "inst": 1693.0,
+    "inst_share": 0.1321,
+    "stall_samples": 2.0,
+    "samp_share": 0.25,
+    "expA_cyc_share_kernel": 0.0966,
+    "expA_share_of_p4": 0.2334,
+    "opcode_class": {
+     "int": 1018.0,
+     "smem_load": 309.0,
+     "control": 177.0,
+     "move_misc": 104.0,
+     "barrier": 48.0,
+     "smem_store": 20.0,
+     "gmem_store": 16.0,
+     "other": 1.0
+    },
+    "key_ops": {
+     "LDS": 276.0,
+     "BAR": 48.0,
+     "STS": 18.0
+    },
+    "top5": {
+     "IADD3": 564.0,
+     "LDS.128": 276.0,
+     "IMAD.IADD": 90.0,
+     "ISETP.GT.OR": 74.0,
+     "BSYNC.RECONVERGENT": 66.0
+    }
+   },
+   "p4_fine": {
+    "inst": 1842.0,
+    "inst_share": 0.1437,
+    "stall_samples": 2.0,
+    "samp_share": 0.25,
+    "expA_cyc_share_kernel": 0.1524,
+    "expA_share_of_p4": 0.3683,
+    "opcode_class": {
+     "int": 571.0,
+     "control": 372.0,
+     "fp": 225.0,
+     "other": 185.0,
+     "move_misc": 161.0,
+     "smem_load": 146.0,
+     "barrier": 96.0,
+     "smem_store": 67.0,
+     "gmem_store": 16.0,
+     "smem_atomic": 3.0
+    },
+    "key_ops": {
+     "BAR": 96.0,
+     "LDS": 130.0,
+     "STS": 50.0
+    },
+    "top5": {
+     "BRA": 142.0,
+     "IADD3": 130.0,
+     "BSYNC.RECONVERGENT": 126.0,
+     "BSSY.RECONVERGENT": 104.0,
+     "BAR.SYNC.DEFER_BLOCKING": 96.0
+    }
+   },
+   "p4_scatter": {
+    "inst": 1065.0,
+    "inst_share": 0.0831,
+    "stall_samples": 0.0,
+    "samp_share": 0.0,
+    "expA_cyc_share_kernel": 0.0511,
+    "expA_share_of_p4": 0.1235,
+    "opcode_class": {
+     "int": 382.0,
+     "control": 250.0,
+     "other": 102.0,
+     "move_misc": 97.0,
+     "fp": 81.0,
+     "smem_load": 67.0,
+     "gmem_store": 43.0,
+     "smem_atomic": 27.0,
+     "barrier": 16.0
+    },
+    "key_ops": {
+     "LDS": 51.0,
+     "VOTEU": 27.0
+    },
+    "top5": {
+     "BRA": 143.0,
+     "ISETP.GT.AND": 70.0,
+     "BSYNC.RECONVERGENT": 67.0,
+     "VIMNMX": 54.0,
+     "S2R": 54.0
+    }
+   },
+   "p4_tail": {
+    "inst": 226.0,
+    "inst_share": 0.0176,
+    "stall_samples": 0.0,
+    "samp_share": 0.0,
+    "expA_cyc_share_kernel": 0.0333,
+    "expA_share_of_p4": 0.0804,
+    "opcode_class": {
+     "int": 96.0,
+     "control": 81.0,
+     "smem_load": 16.0,
+     "gmem_store": 16.0,
+     "other": 16.0,
+     "move_misc": 1.0
+    },
+    "key_ops": {
+     "LDS": 16.0,
+     "STG": 16.0,
+     "CS2R": 1.0
+    },
+    "top5": {
+     "BRA": 49.0,
+     "ISETP.GT.AND": 32.0,
+     "LDS": 16.0,
+     "BSSY.RECONVERGENT": 16.0,
+     "STG.E.64": 16.0
+    }
+   }
+  }
+ },
+ "flash_512k_L02": {
+  "cs": 8,
+  "N": 131075,
+  "K": 512,
+  "hit": 0.604,
+  "n_stamps": 15,
+  "total_inst": 121934.0,
+  "stalls_kernelwide": {
+   "barrier": 24.257819,
+   "no_instruction": 11.636039,
+   "long_scoreboard": 4.357858,
+   "wait": 2.200298,
+   "membar": 1.779642,
+   "short_scoreboard": 1.197421,
+   "selected": 1.0,
+   "not_selected": 0.630412,
+   "math_pipe_throttle": 0.428834,
+   "branch_resolving": 0.352519
+  },
+  "stages": {
+   "p4_peer_wait": {
+    "inst": 1792.0,
+    "inst_share": 0.0147,
+    "stall_samples": 3.0,
+    "samp_share": 0.033,
+    "expA_cyc_share_kernel": 0.0553,
+    "expA_share_of_p4": 0.1032,
+    "opcode_class": {
+     "other": 896.0,
+     "control": 512.0,
+     "move_misc": 256.0,
+     "gmem_store": 128.0
+    },
+    "key_ops": {
+     "STG": 128.0,
+     "CS2R": 128.0
+    },
+    "top5": {
+     "BRA.U": 256.0,
+     "BRA": 256.0,
+     "LDCU": 128.0,
+     "STG.E.64": 128.0,
+     "UISETP.EQ.U32.AND": 128.0
+    }
+   },
+   "p4_dsmem_gather": {
+    "inst": 3288.0,
+    "inst_share": 0.027,
+    "stall_samples": 2.0,
+    "samp_share": 0.022,
+    "expA_cyc_share_kernel": 0.1709,
+    "expA_share_of_p4": 0.319,
+    "opcode_class": {
+     "int": 1006.0,
+     "control": 886.0,
+     "move_misc": 723.0,
+     "other": 221.0,
+     "gmem_load": 194.0,
+     "gmem_store": 128.0,
+     "smem_store": 98.0,
+     "smem_load": 16.0,
+     "barrier": 16.0
+    },
+    "key_ops": {
+     "STG": 128.0,
+     "STS": 98.0
+    },
+    "top5": {
+     "MOV": 390.0,
+     "BRA": 363.0,
+     "BSSY.RECONVERGENT": 322.0,
+     "ISETP.GT.AND": 235.0,
+     "IMAD.IADD": 203.0
+    }
+   },
+   "p4_minmax": {
+    "inst": 1104.0,
+    "inst_share": 0.0091,
+    "stall_samples": 1.0,
+    "samp_share": 0.011,
+    "expA_cyc_share_kernel": 0.0232,
+    "expA_share_of_p4": 0.0433,
+    "opcode_class": {
+     "fp": 320.0,
+     "int": 272.0,
+     "smem_load": 192.0,
+     "control": 80.0,
+     "other": 80.0,
+     "move_misc": 80.0,
+     "smem_store": 32.0,
+     "barrier": 32.0,
+     "gmem_store": 16.0
+    },
+    "key_ops": {
+     "LDS": 192.0,
+     "STS": 32.0,
+     "BAR": 32.0,
+     "STG": 16.0
+    },
+    "top5": {
+     "FMNMX3": 288.0,
+     "LDS.128": 128.0,
+     "LDS": 64.0,
+     "IMAD.MOV.U32": 64.0,
+     "ISETP.NE.AND": 48.0
+    }
+   },
+   "p4_coarse_hist": {
+    "inst": 1164.0,
+    "inst_share": 0.0095,
+    "stall_samples": 0.0,
+    "samp_share": 0.0,
+    "expA_cyc_share_kernel": 0.0245,
+    "expA_share_of_p4": 0.0458,
+    "opcode_class": {
+     "fp": 261.0,
+     "int": 254.0,
+     "other": 236.0,
+     "control": 191.0,
+     "move_misc": 64.0,
+     "smem_load": 39.0,
+     "smem_atomic": 39.0,
+     "smem_store": 32.0,
+     "barrier": 32.0,
+     "gmem_store": 16.0
+    },
+    "key_ops": {
+     "LDS": 39.0,
+     "ATOMS": 39.0,
+     "STS": 32.0
+    },
+    "top5": {
+     "VIADD": 142.0,
+     "BRA": 103.0,
+     "FFMA": 80.0,
+     "VIMNMX": 78.0,
+     "FADD": 71.0
+    }
+   },
+   "p4_coarse_search": {
+    "inst": 1667.0,
+    "inst_share": 0.0137,
+    "stall_samples": 1.0,
+    "samp_share": 0.011,
+    "expA_cyc_share_kernel": 0.0498,
+    "expA_share_of_p4": 0.093,
+    "opcode_class": {
+     "int": 997.0,
+     "smem_load": 309.0,
+     "control": 177.0,
+     "move_misc": 100.0,
+     "barrier": 48.0,
+     "smem_store": 20.0,
+     "gmem_store": 16.0
+    },
+    "key_ops": {
+     "LDS": 276.0,
+     "BAR": 48.0,
+     "STS": 18.0
+    },
+    "top5": {
+     "IADD3": 579.0,
+     "LDS.128": 276.0,
+     "IMAD.IADD": 107.0,
+     "ISETP.GT.OR": 74.0,
+     "BSYNC.RECONVERGENT": 66.0
+    }
+   },
+   "p4_fine": {
+    "inst": 2128.0,
+    "inst_share": 0.0175,
+    "stall_samples": 2.0,
+    "samp_share": 0.022,
+    "expA_cyc_share_kernel": 0.157,
+    "expA_share_of_p4": 0.2932,
+    "opcode_class": {
+     "int": 792.0,
+     "control": 455.0,
+     "fp": 267.0,
+     "other": 178.0,
+     "smem_load": 161.0,
+     "barrier": 96.0,
+     "move_misc": 94.0,
+     "smem_store": 67.0,
+     "gmem_store": 16.0,
+     "smem_atomic": 2.0
+    },
+    "key_ops": {
+     "BAR": 96.0,
+     "LDS": 145.0
+    },
+    "top5": {
+     "LOP3.LUT": 272.0,
+     "BRA": 173.0,
+     "IADD3": 130.0,
+     "BSYNC.RECONVERGENT": 123.0,
+     "BSSY.RECONVERGENT": 103.0
+    }
+   },
+   "p4_scatter": {
+    "inst": 1589.0,
+    "inst_share": 0.013,
+    "stall_samples": 0.0,
+    "samp_share": 0.0,
+    "expA_cyc_share_kernel": 0.0427,
+    "expA_share_of_p4": 0.0797,
+    "opcode_class": {
+     "int": 552.0,
+     "control": 389.0,
+     "other": 176.0,
+     "move_misc": 139.0,
+     "fp": 123.0,
+     "smem_load": 96.0,
+     "gmem_store": 57.0,
+     "smem_atomic": 41.0,
+     "barrier": 16.0
+    },
+    "key_ops": {
+     "LDS": 80.0,
+     "VOTEU": 41.0
+    },
+    "top5": {
+     "BRA": 215.0,
+     "ISETP.GT.AND": 98.0,
+     "VIADD": 94.0,
+     "VIMNMX": 82.0,
+     "S2R": 82.0
+    }
+   },
+   "p4_tail": {
+    "inst": 576.0,
+    "inst_share": 0.0047,
+    "stall_samples": 1.0,
+    "samp_share": 0.011,
+    "expA_cyc_share_kernel": 0.0106,
+    "expA_share_of_p4": 0.0198,
+    "opcode_class": {
+     "int": 208.0,
+     "control": 192.0,
+     "move_misc": 128.0,
+     "smem_load": 16.0,
+     "gmem_store": 16.0,
+     "other": 16.0
+    },
+    "key_ops": {
+     "CS2R": 128.0,
+     "LDS": 16.0,
+     "STG": 16.0
+    },
+    "top5": {
+     "BSYNC.RECONVERGENT": 144.0,
+     "ISETP.NE.AND": 128.0,
+     "CS2R": 128.0,
+     "ISETP.GT.AND": 32.0,
+     "BRA": 32.0
+    }
+   }
+  }
+ },
+ "pro_1024k_L30": {
+  "cs": 8,
+  "N": 262127,
+  "K": 1024,
+  "hit": 0.267,
+  "n_stamps": 15,
+  "total_inst": 201335.0,
+  "stalls_kernelwide": {
+   "barrier": 18.424992,
+   "long_scoreboard": 3.876493,
+   "wait": 2.160166,
+   "no_instruction": 2.115576,
+   "short_scoreboard": 1.1552,
+   "membar": 1.122982,
+   "selected": 1.0,
+   "not_selected": 0.593212,
+   "math_pipe_throttle": 0.393999,
+   "branch_resolving": 0.321543
+  },
+  "stages": {
+   "p4_peer_wait": {
+    "inst": 1792.0,
+    "inst_share": 0.0089,
+    "stall_samples": 8.0,
+    "samp_share": 0.08,
+    "expA_cyc_share_kernel": 0.0928,
+    "expA_share_of_p4": 0.1902,
+    "opcode_class": {
+     "other": 896.0,
+     "control": 512.0,
+     "move_misc": 256.0,
+     "gmem_store": 128.0
+    },
+    "key_ops": {
+     "STG": 128.0,
+     "CS2R": 128.0
+    },
+    "top5": {
+     "BRA.U": 256.0,
+     "BRA": 256.0,
+     "LDCU": 128.0,
+     "STG.E.64": 128.0,
+     "UISETP.EQ.U32.AND": 128.0
+    }
+   },
+   "p4_dsmem_gather": {
+    "inst": 3120.0,
+    "inst_share": 0.0155,
+    "stall_samples": 2.0,
+    "samp_share": 0.02,
+    "expA_cyc_share_kernel": 0.1496,
+    "expA_share_of_p4": 0.3067,
+    "opcode_class": {
+     "int": 888.0,
+     "control": 852.0,
+     "move_misc": 705.0,
+     "other": 227.0,
+     "gmem_load": 192.0,
+     "gmem_store": 128.0,
+     "smem_store": 96.0,
+     "smem_load": 16.0,
+     "barrier": 16.0
+    },
+    "key_ops": {
+     "STG": 128.0,
+     "STS": 96.0
+    },
+    "top5": {
+     "MOV": 384.0,
+     "BRA": 348.0,
+     "ISETP.GT.AND": 224.0,
+     "IMAD.IADD": 224.0,
+     "PRMT": 192.0
+    }
+   },
+   "p4_minmax": {
+    "inst": 1296.0,
+    "inst_share": 0.0064,
+    "stall_samples": 1.0,
+    "samp_share": 0.01,
+    "expA_cyc_share_kernel": 0.0193,
+    "expA_share_of_p4": 0.0396,
+    "opcode_class": {
+     "fp": 352.0,
+     "int": 304.0,
+     "smem_load": 224.0,
+     "control": 144.0,
+     "move_misc": 112.0,
+     "other": 80.0,
+     "smem_store": 32.0,
+     "barrier": 32.0,
+     "gmem_store": 16.0
+    },
+    "key_ops": {
+     "LDS": 224.0
+    },
+    "top5": {
+     "FMNMX3": 320.0,
+     "LDS.128": 128.0,
+     "LDS": 96.0,
+     "BRA": 80.0,
+     "ISETP.NE.AND": 48.0
+    }
+   },
+   "p4_coarse_hist": {
+    "inst": 1571.0,
+    "inst_share": 0.0078,
+    "stall_samples": 0.0,
+    "samp_share": 0.0,
+    "expA_cyc_share_kernel": 0.0286,
+    "expA_share_of_p4": 0.0587,
+    "opcode_class": {
+     "int": 382.0,
+     "fp": 366.0,
+     "other": 270.0,
+     "control": 261.0,
+     "smem_load": 74.0,
+     "smem_atomic": 74.0,
+     "move_misc": 64.0,
+     "smem_store": 32.0,
+     "barrier": 32.0,
+     "gmem_store": 16.0
+    },
+    "key_ops": {
+     "LDS": 74.0,
+     "ATOMS": 74.0,
+     "STS": 32.0
+    },
+    "top5": {
+     "IMAD": 180.0,
+     "VIMNMX": 148.0,
+     "BRA": 138.0,
+     "VIADD": 106.0,
+     "FADD": 106.0
+    }
+   },
+   "p4_coarse_search": {
+    "inst": 1667.0,
+    "inst_share": 0.0083,
+    "stall_samples": 1.0,
+    "samp_share": 0.01,
+    "expA_cyc_share_kernel": 0.0397,
+    "expA_share_of_p4": 0.0814,
+    "opcode_class": {
+     "int": 998.0,
+     "smem_load": 309.0,
+     "control": 177.0,
+     "move_misc": 99.0,
+     "barrier": 48.0,
+     "smem_store": 20.0,
+     "gmem_store": 16.0
+    },
+    "key_ops": {
+     "LDS": 293.0,
+     "BAR": 48.0,
+     "STS": 18.0
+    },
+    "top5": {
+     "IADD3": 575.0,
+     "LDS.128": 276.0,
+     "IMAD.IADD": 111.0,
+     "ISETP.GT.OR": 74.0,
+     "BSYNC.RECONVERGENT": 66.0
+    }
+   },
+   "p4_fine": {
+    "inst": 2856.0,
+    "inst_share": 0.0142,
+    "stall_samples": 2.0,
+    "samp_share": 0.02,
+    "expA_cyc_share_kernel": 0.0848,
+    "expA_share_of_p4": 0.1739,
+    "opcode_class": {
+     "int": 951.0,
+     "control": 636.0,
+     "fp": 417.0,
+     "other": 305.0,
+     "smem_load": 196.0,
+     "move_misc": 155.0,
+     "barrier": 96.0,
+     "smem_store": 67.0,
+     "smem_atomic": 17.0,
+     "gmem_store": 16.0
+    },
+    "key_ops": {
+     "LDS": 108.0,
+     "BAR": 96.0
+    },
+    "top5": {
+     "LOP3.LUT": 272.0,
+     "BRA": 234.0,
+     "VIMNMX": 182.0,
+     "BSYNC.RECONVERGENT": 173.0,
+     "BSSY.RECONVERGENT": 138.0
+    }
+   },
+   "p4_scatter": {
+    "inst": 3011.0,
+    "inst_share": 0.015,
+    "stall_samples": 1.0,
+    "samp_share": 0.01,
+    "expA_cyc_share_kernel": 0.064,
+    "expA_share_of_p4": 0.1311,
+    "opcode_class": {
+     "int": 1101.0,
+     "control": 757.0,
+     "fp": 273.0,
+     "move_misc": 259.0,
+     "other": 256.0,
+     "smem_load": 171.0,
+     "gmem_store": 97.0,
+     "smem_atomic": 81.0,
+     "barrier": 16.0
+    },
+    "key_ops": {
+     "LDS": 155.0,
+     "VOTEU": 81.0
+    },
+    "top5": {
+     "BRA": 426.0,
+     "ISETP.GT.AND": 188.0,
+     "VIMNMX": 182.0,
+     "BSYNC.RECONVERGENT": 166.0,
+     "S2R": 162.0
+    }
+   },
+   "p4_tail": {
+    "inst": 576.0,
+    "inst_share": 0.0029,
+    "stall_samples": 0.0,
+    "samp_share": 0.0,
+    "expA_cyc_share_kernel": 0.0099,
+    "expA_share_of_p4": 0.0202,
+    "opcode_class": {
+     "int": 208.0,
+     "control": 192.0,
+     "move_misc": 128.0,
+     "smem_load": 16.0,
+     "gmem_store": 16.0,
+     "other": 16.0
+    },
+    "key_ops": {
+     "CS2R": 128.0,
+     "LDS": 16.0,
+     "STG": 16.0
+    },
+    "top5": {
+     "BSYNC": 128.0,
+     "ISETP.NE.AND": 128.0,
+     "CS2R": 128.0,
+     "ISETP.GT.AND": 32.0,
+     "BRA": 32.0
+    }
+   }
+  }
+ },
+ "pro_256k_L30": {
+  "cs": 4,
+  "N": 65539,
+  "K": 1024,
+  "hit": 0.358,
+  "n_stamps": 15,
+  "total_inst": 69121.0,
+  "stalls_kernelwide": {
+   "barrier": 18.110597,
+   "long_scoreboard": 4.392409,
+   "no_instruction": 3.885812,
+   "wait": 2.26968,
+   "membar": 1.561405,
+   "short_scoreboard": 1.264812,
+   "selected": 1.0,
+   "not_selected": 0.580503,
+   "branch_resolving": 0.514869,
+   "math_pipe_throttle": 0.374185
+  },
+  "stages": {
+   "p4_peer_wait": {
+    "inst": 896.0,
+    "inst_share": 0.013,
+    "stall_samples": 4.0,
+    "samp_share": 0.1111,
+    "expA_cyc_share_kernel": 0.0609,
+    "expA_share_of_p4": 0.121,
+    "opcode_class": {
+     "other": 448.0,
+     "control": 256.0,
+     "move_misc": 128.0,
+     "gmem_store": 64.0
+    },
+    "key_ops": {
+     "STG": 64.0,
+     "CS2R": 64.0
+    },
+    "top5": {
+     "BRA.U": 128.0,
+     "BRA": 128.0,
+     "LDCU": 64.0,
+     "STG.E.64": 64.0,
+     "UISETP.EQ.U32.AND": 64.0
+    }
+   },
+   "p4_dsmem_gather": {
+    "inst": 2187.0,
+    "inst_share": 0.0316,
+    "stall_samples": 1.0,
+    "samp_share": 0.0278,
+    "expA_cyc_share_kernel": 0.1057,
+    "expA_share_of_p4": 0.2101,
+    "opcode_class": {
+     "int": 616.0,
+     "move_misc": 556.0,
+     "control": 471.0,
+     "other": 192.0,
+     "gmem_load": 144.0,
+     "smem_store": 112.0,
+     "gmem_store": 64.0,
+     "smem_load": 16.0,
+     "barrier": 16.0
+    },
+    "key_ops": {
+     "STS": 112.0,
+     "STG": 64.0
+    },
+    "top5": {
+     "MOV": 288.0,
+     "BRA": 196.0,
+     "ISETP.GT.AND": 152.0,
+     "IMAD.IADD": 152.0,
+     "PRMT": 144.0
+    }
+   },
+   "p4_minmax": {
+    "inst": 1217.0,
+    "inst_share": 0.0176,
+    "stall_samples": 0.0,
+    "samp_share": 0.0,
+    "expA_cyc_share_kernel": 0.0317,
+    "expA_share_of_p4": 0.063,
+    "opcode_class": {
+     "fp": 328.0,
+     "int": 279.0,
+     "smem_load": 200.0,
+     "control": 133.0,
+     "move_misc": 115.0,
+     "other": 82.0,
+     "smem_store": 32.0,
+     "barrier": 32.0,
+     "gmem_store": 16.0
+    },
+    "key_ops": {
+     "LDS": 200.0,
+     "STS": 32.0
+    },
+    "top5": {
+     "FMNMX3": 296.0,
+     "LDS.128": 128.0,
+     "LDS": 72.0,
+     "BRA": 67.0,
+     "ISETP.NE.AND": 48.0
+    }
+   },
+   "p4_coarse_hist": {
+    "inst": 1272.0,
+    "inst_share": 0.0184,
+    "stall_samples": 1.0,
+    "samp_share": 0.0278,
+    "expA_cyc_share_kernel": 0.0327,
+    "expA_share_of_p4": 0.065,
+    "opcode_class": {
+     "int": 313.0,
+     "fp": 297.0,
+     "control": 215.0,
+     "other": 201.0,
+     "move_misc": 64.0,
+     "smem_load": 51.0,
+     "smem_atomic": 51.0,
+     "smem_store": 32.0,
+     "barrier": 32.0,
+     "gmem_store": 16.0
+    },
+    "key_ops": {
+     "LDS": 51.0,
+     "ATOMS": 51.0,
+     "STS": 32.0
+    },
+    "top5": {
+     "IMAD": 134.0,
+     "BRA": 115.0,
+     "VIMNMX": 102.0,
+     "VIADD": 83.0,
+     "FADD": 83.0
+    }
+   },
+   "p4_coarse_search": {
+    "inst": 1667.0,
+    "inst_share": 0.0241,
+    "stall_samples": 0.0,
+    "samp_share": 0.0,
+    "expA_cyc_share_kernel": 0.0541,
+    "expA_share_of_p4": 0.1077,
+    "opcode_class": {
+     "int": 998.0,
+     "smem_load": 309.0,
+     "control": 177.0,
+     "move_misc": 99.0,
+     "barrier": 48.0,
+     "smem_store": 20.0,
+     "gmem_store": 16.0
+    },
+    "key_ops": {
+     "LDS": 293.0,
+     "BAR": 48.0,
+     "STS": 18.0
+    },
+    "top5": {
+     "IADD3": 575.0,
+     "LDS.128": 276.0,
+     "IMAD.IADD": 111.0,
+     "ISETP.GT.OR": 74.0,
+     "BSYNC.RECONVERGENT": 66.0
+    }
+   },
+   "p4_fine": {
+    "inst": 2556.0,
+    "inst_share": 0.037,
+    "stall_samples": 2.0,
+    "samp_share": 0.0556,
+    "expA_cyc_share_kernel": 0.1184,
+    "expA_share_of_p4": 0.2353,
+    "opcode_class": {
+     "int": 900.0,
+     "control": 530.0,
+     "fp": 354.0,
+     "other": 242.0,
+     "smem_load": 173.0,
+     "move_misc": 159.0,
+     "barrier": 96.0,
+     "smem_store": 67.0,
+     "smem_atomic": 19.0,
+     "gmem_store": 16.0
+    },
+    "key_ops": {
+     "BAR": 96.0,
+     "LDS": 157.0
+    },
+    "top5": {
+     "LOP3.LUT": 272.0,
+     "BRA": 195.0,
+     "BSYNC.RECONVERGENT": 152.0,
+     "VIMNMX": 140.0,
+     "IADD3": 128.0
+    }
+   },
+   "p4_scatter": {
+    "inst": 2360.0,
+    "inst_share": 0.0341,
+    "stall_samples": 1.0,
+    "samp_share": 0.0278,
+    "expA_cyc_share_kernel": 0.0667,
+    "expA_share_of_p4": 0.1325,
+    "opcode_class": {
+     "int": 878.0,
+     "control": 564.0,
+     "move_misc": 217.0,
+     "fp": 210.0,
+     "other": 191.0,
+     "smem_load": 134.0,
+     "gmem_store": 83.0,
+     "smem_atomic": 67.0,
+     "barrier": 16.0
+    },
+    "key_ops": {
+     "LDS": 118.0,
+     "VOTEU": 67.0
+    },
+    "top5": {
+     "BRA": 324.0,
+     "ISETP.GT.AND": 153.0,
+     "VIMNMX": 140.0,
+     "S2R": 134.0,
+     "POPC": 134.0
+    }
+   },
+   "p4_tail": {
+    "inst": 384.0,
+    "inst_share": 0.0056,
+    "stall_samples": 0.0,
+    "samp_share": 0.0,
+    "expA_cyc_share_kernel": 0.0332,
+    "expA_share_of_p4": 0.066,
+    "opcode_class": {
+     "int": 144.0,
+     "control": 128.0,
+     "move_misc": 64.0,
+     "smem_load": 16.0,
+     "gmem_store": 16.0,
+     "other": 16.0
+    },
+    "key_ops": {
+     "CS2R": 64.0,
+     "LDS": 16.0,
+     "STG": 16.0
+    },
+    "top5": {
+     "BSYNC": 64.0,
+     "ISETP.NE.AND": 64.0,
+     "CS2R": 64.0,
+     "ISETP.GT.AND": 32.0,
+     "BRA": 32.0
+    }
+   }
+  }
+ },
+ "pro_4k_L02": {
+  "cs": 1,
+  "N": 1027,
+  "K": 1024,
+  "hit": 1.0,
+  "n_stamps": 11,
+  "total_inst": 7069.0,
+  "stalls_kernelwide": {
+   "barrier": 10.212291,
+   "no_instruction": 5.752793,
+   "long_scoreboard": 5.382809,
+   "wait": 2.56323,
+   "short_scoreboard": 1.670518,
+   "selected": 1.0,
+   "branch_resolving": 0.863382,
+   "not_selected": 0.434992,
+   "mio_throttle": 0.253174,
+   "math_pipe_throttle": 0.186262
+  },
+  "stages": {
+   "p4_peer_wait": {
+    "inst": 32.0,
+    "inst_share": 0.0045,
+    "stall_samples": 0.0,
+    "samp_share": 0.0,
+    "expA_cyc_share_kernel": 0.0028,
+    "expA_share_of_p4": 0.0772,
+    "opcode_class": {
+     "gmem_store": 16.0,
+     "move_misc": 16.0
+    },
+    "key_ops": {
+     "STG": 16.0,
+     "CS2R": 16.0
+    },
+    "top5": {
+     "STG.E.64": 16.0,
+     "CS2R": 16.0
+    }
+   },
+   "p4_dsmem_gather": {
+    "inst": 32.0,
+    "inst_share": 0.0045,
+    "stall_samples": 0.0,
+    "samp_share": 0.0,
+    "expA_cyc_share_kernel": 0.0007,
+    "expA_share_of_p4": 0.0185,
+    "opcode_class": {
+     "gmem_store": 16.0,
+     "move_misc": 16.0
+    },
+    "key_ops": {
+     "STG": 16.0,
+     "CS2R": 16.0
+    },
+    "top5": {
+     "STG.E.64": 16.0,
+     "CS2R": 16.0
+    }
+   },
+   "p4_minmax": {
+    "inst": 561.0,
+    "inst_share": 0.0794,
+    "stall_samples": 0.0,
+    "samp_share": 0.0,
+    "expA_cyc_share_kernel": 0.0278,
+    "expA_share_of_p4": 0.7546,
+    "opcode_class": {
+     "int": 256.0,
+     "control": 96.0,
+     "other": 80.0,
+     "smem_load": 48.0,
+     "gmem_store": 48.0,
+     "move_misc": 33.0
+    },
+    "key_ops": {
+     "LDS": 48.0,
+     "STG": 48.0
+    },
+    "top5": {
+     "BRA": 64.0,
+     "IADD3": 64.0,
+     "IMAD.MOV.U32": 64.0,
+     "VIADD": 64.0,
+     "LDS": 48.0
+    }
+   },
+   "p4_coarse_hist": {
+    "inst": 11.0,
+    "inst_share": 0.0016,
+    "stall_samples": 0.0,
+    "samp_share": 0.0,
+    "expA_cyc_share_kernel": 0.0,
+    "expA_share_of_p4": 0.0,
+    "opcode_class": {
+     "int": 6.0,
+     "gmem_store": 3.0,
+     "control": 1.0,
+     "move_misc": 1.0
+    },
+    "key_ops": {
+     "STG": 3.0,
+     "CS2R": 1.0
+    },
+    "top5": {
+     "IMAD.MOV.U32": 6.0,
+     "STG.E.128": 2.0,
+     "STG.E.64": 1.0,
+     "BRA": 1.0,
+     "CS2R": 1.0
+    }
+   },
+   "p4_coarse_search": {
+    "inst": 2.0,
+    "inst_share": 0.0003,
+    "stall_samples": 0.0,
+    "samp_share": 0.0,
+    "expA_cyc_share_kernel": 0.0,
+    "expA_share_of_p4": 0.0,
+    "opcode_class": {
+     "gmem_store": 1.0,
+     "move_misc": 1.0
+    },
+    "key_ops": {
+     "STG": 1.0,
+     "CS2R": 1.0
+    },
+    "top5": {
+     "STG.E.64": 1.0,
+     "CS2R": 1.0
+    }
+   }
+  }
+ },
+ "pro_8k_L30": {
+  "cs": 1,
+  "N": 2051,
+  "K": 1024,
+  "hit": 0.461,
+  "n_stamps": 15,
+  "total_inst": 13732.0,
+  "stalls_kernelwide": {
+   "barrier": 8.790591,
+   "no_instruction": 8.664629,
+   "long_scoreboard": 2.658448,
+   "wait": 2.553709,
+   "short_scoreboard": 2.060027,
+   "selected": 1.0,
+   "branch_resolving": 0.803503,
+   "mio_throttle": 0.459341,
+   "not_selected": 0.419368,
+   "math_pipe_throttle": 0.156868
+  },
+  "stages": {
+   "p4_peer_wait": {
+    "inst": 32.0,
+    "inst_share": 0.0023,
+    "stall_samples": 0.0,
+    "samp_share": 0.0,
+    "expA_cyc_share_kernel": 0.0017,
+    "expA_share_of_p4": 0.0033,
+    "opcode_class": {
+     "gmem_store": 16.0,
+     "move_misc": 16.0
+    },
+    "key_ops": {
+     "STG": 16.0,
+     "CS2R": 16.0
+    },
+    "top5": {
+     "STG.E.64": 16.0,
+     "CS2R": 16.0
+    }
+   },
+   "p4_dsmem_gather": {
+    "inst": 32.0,
+    "inst_share": 0.0023,
+    "stall_samples": 0.0,
+    "samp_share": 0.0,
+    "expA_cyc_share_kernel": 0.0004,
+    "expA_share_of_p4": 0.0008,
+    "opcode_class": {
+     "gmem_store": 16.0,
+     "move_misc": 16.0
+    },
+    "key_ops": {
+     "STG": 16.0,
+     "CS2R": 16.0
+    },
+    "top5": {
+     "STG.E.64": 16.0,
+     "CS2R": 16.0
+    }
+   },
+   "p4_minmax": {
+    "inst": 1168.0,
+    "inst_share": 0.0851,
+    "stall_samples": 1.0,
+    "samp_share": 0.2,
+    "expA_cyc_share_kernel": 0.0495,
+    "expA_share_of_p4": 0.098,
+    "opcode_class": {
+     "fp": 320.0,
+     "int": 240.0,
+     "smem_load": 192.0,
+     "control": 128.0,
+     "move_misc": 112.0,
+     "other": 96.0,
+     "smem_store": 32.0,
+     "barrier": 32.0,
+     "gmem_store": 16.0
+    },
+    "key_ops": {
+     "LDS": 192.0
+    },
+    "top5": {
+     "FMNMX3": 288.0,
+     "LDS.128": 128.0,
+     "LDS": 64.0,
+     "BRA": 64.0,
+     "IMAD.MOV.U32": 48.0
+    }
+   },
+   "p4_coarse_hist": {
+    "inst": 1064.0,
+    "inst_share": 0.0775,
+    "stall_samples": 0.0,
+    "samp_share": 0.0,
+    "expA_cyc_share_kernel": 0.0479,
+    "expA_share_of_p4": 0.0949,
+    "opcode_class": {
+     "int": 265.0,
+     "fp": 249.0,
+     "control": 183.0,
+     "other": 153.0,
+     "move_misc": 64.0,
+     "smem_load": 35.0,
+     "smem_atomic": 35.0,
+     "smem_store": 32.0,
+     "barrier": 32.0,
+     "gmem_store": 16.0
+    },
+    "key_ops": {
+     "LDS": 35.0,
+     "ATOMS": 35.0
+    },
+    "top5": {
+     "BRA": 99.0,
+     "FFMA": 80.0,
+     "IMAD": 70.0,
+     "VIMNMX": 70.0,
+     "VIADD": 67.0
+    }
+   },
+   "p4_coarse_search": {
+    "inst": 1718.0,
+    "inst_share": 0.1251,
+    "stall_samples": 0.0,
+    "samp_share": 0.0,
+    "expA_cyc_share_kernel": 0.1009,
+    "expA_share_of_p4": 0.1999,
+    "opcode_class": {
+     "int": 1046.0,
+     "smem_load": 309.0,
+     "control": 177.0,
+     "move_misc": 101.0,
+     "barrier": 48.0,
+     "smem_store": 20.0,
+     "gmem_store": 16.0,
+     "other": 1.0
+    },
+    "key_ops": {
+     "LDS": 276.0,
+     "BAR": 48.0,
+     "STS": 18.0
+    },
+    "top5": {
+     "IADD3": 575.0,
+     "LDS.128": 276.0,
+     "IMAD.IADD": 111.0,
+     "ISETP.GT.OR": 74.0,
+     "BSYNC.RECONVERGENT": 66.0
+    }
+   },
+   "p4_fine": {
+    "inst": 1954.0,
+    "inst_share": 0.1423,
+    "stall_samples": 2.0,
+    "samp_share": 0.4,
+    "expA_cyc_share_kernel": 0.1803,
+    "expA_share_of_p4": 0.3572,
+    "opcode_class": {
+     "int": 609.0,
+     "control": 421.0,
+     "fp": 270.0,
+     "other": 190.0,
+     "smem_load": 157.0,
+     "move_misc": 121.0,
+     "barrier": 96.0,
+     "smem_store": 67.0,
+     "gmem_store": 16.0,
+     "smem_atomic": 7.0
+    },
+    "key_ops": {
+     "BAR": 96.0,
+     "LDS": 141.0,
+     "STS": 50.0
+    },
+    "top5": {
+     "BRA": 165.0,
+     "BSYNC.RECONVERGENT": 141.0,
+     "IADD3": 128.0,
+     "BSSY.RECONVERGENT": 115.0,
+     "VIMNMX": 100.0
+    }
+   },
+   "p4_scatter": {
+    "inst": 1529.0,
+    "inst_share": 0.1113,
+    "stall_samples": 1.0,
+    "samp_share": 0.2,
+    "expA_cyc_share_kernel": 0.0832,
+    "expA_share_of_p4": 0.1648,
+    "opcode_class": {
+     "int": 578.0,
+     "control": 349.0,
+     "move_misc": 145.0,
+     "fp": 126.0,
+     "other": 119.0,
+     "smem_load": 94.0,
+     "gmem_store": 59.0,
+     "smem_atomic": 43.0,
+     "barrier": 16.0
+    },
+    "key_ops": {
+     "LDS": 78.0,
+     "VOTEU": 43.0,
+     "ATOMS": 43.0,
+     "SHFL": 43.0
+    },
+    "top5": {
+     "BRA": 208.0,
+     "ISETP.GT.AND": 101.0,
+     "BSYNC.RECONVERGENT": 90.0,
+     "S2R": 86.0,
+     "POPC": 86.0
+    }
+   },
+   "p4_tail": {
+    "inst": 226.0,
+    "inst_share": 0.0165,
+    "stall_samples": 0.0,
+    "samp_share": 0.0,
+    "expA_cyc_share_kernel": 0.0416,
+    "expA_share_of_p4": 0.0823,
+    "opcode_class": {
+     "int": 96.0,
+     "control": 81.0,
+     "smem_load": 16.0,
+     "gmem_store": 16.0,
+     "other": 16.0,
+     "move_misc": 1.0
+    },
+    "key_ops": {
+     "LDS": 16.0,
+     "STG": 16.0,
+     "CS2R": 1.0
+    },
+    "top5": {
+     "BRA": 49.0,
+     "ISETP.GT.AND": 32.0,
+     "LDS": 16.0,
+     "BSSY.RECONVERGENT": 16.0,
+     "STG.E.64": 16.0
+    }
+   }
+  }
+ },
+ "v32_128k_L14": {
+  "cs": 8,
+  "N": 131087,
+  "K": 2048,
+  "hit": 0.904,
+  "n_stamps": 15,
+  "total_inst": 153762.0,
+  "stalls_kernelwide": {
+   "barrier": 23.033284,
+   "no_instruction": 4.772572,
+   "long_scoreboard": 3.954147,
+   "wait": 2.068761,
+   "membar": 1.429701,
+   "short_scoreboard": 1.123234,
+   "selected": 1.0,
+   "not_selected": 0.613026,
+   "branch_resolving": 0.513892,
+   "math_pipe_throttle": 0.459517
+  },
+  "stages": {
+   "p4_peer_wait": {
+    "inst": 1792.0,
+    "inst_share": 0.0117,
+    "stall_samples": 4.0,
+    "samp_share": 0.044,
+    "expA_cyc_share_kernel": 0.077,
+    "expA_share_of_p4": 0.1439,
+    "opcode_class": {
+     "other": 896.0,
+     "control": 512.0,
+     "move_misc": 256.0,
+     "gmem_store": 128.0
+    },
+    "key_ops": {
+     "STG": 128.0,
+     "CS2R": 128.0
+    },
+    "top5": {
+     "BRA.U": 256.0,
+     "BRA": 256.0,
+     "LDCU": 128.0,
+     "STG.E.64": 128.0,
+     "UISETP.EQ.U32.AND": 128.0
+    }
+   },
+   "p4_dsmem_gather": {
+    "inst": 3744.0,
+    "inst_share": 0.0243,
+    "stall_samples": 2.0,
+    "samp_share": 0.022,
+    "expA_cyc_share_kernel": 0.1871,
+    "expA_share_of_p4": 0.3499,
+    "opcode_class": {
+     "int": 1030.0,
+     "move_misc": 997.0,
+     "control": 761.0,
+     "other": 340.0,
+     "gmem_load": 276.0,
+     "smem_store": 180.0,
+     "gmem_store": 128.0,
+     "smem_load": 16.0,
+     "barrier": 16.0
+    },
+    "key_ops": {
+     "STS": 180.0,
+     "STG": 128.0
+    },
+    "top5": {
+     "MOV": 568.0,
+     "BRA": 319.0,
+     "PRMT": 276.0,
+     "LD.E": 276.0,
+     "ISETP.GT.AND": 236.0
+    }
+   },
+   "p4_minmax": {
+    "inst": 1296.0,
+    "inst_share": 0.0084,
+    "stall_samples": 2.0,
+    "samp_share": 0.022,
+    "expA_cyc_share_kernel": 0.0222,
+    "expA_share_of_p4": 0.0415,
+    "opcode_class": {
+     "fp": 352.0,
+     "int": 288.0,
+     "smem_load": 224.0,
+     "control": 144.0,
+     "move_misc": 112.0,
+     "other": 96.0,
+     "smem_store": 32.0,
+     "barrier": 32.0,
+     "gmem_store": 16.0
+    },
+    "key_ops": {
+     "LDS": 224.0
+    },
+    "top5": {
+     "FMNMX3": 320.0,
+     "LDS.128": 128.0,
+     "LDS": 96.0,
+     "BRA": 80.0,
+     "ISETP.NE.AND": 48.0
+    }
+   },
+   "p4_coarse_hist": {
+    "inst": 1444.0,
+    "inst_share": 0.0094,
+    "stall_samples": 0.0,
+    "samp_share": 0.0,
+    "expA_cyc_share_kernel": 0.0299,
+    "expA_share_of_p4": 0.0559,
+    "opcode_class": {
+     "fp": 381.0,
+     "int": 317.0,
+     "other": 253.0,
+     "control": 207.0,
+     "smem_load": 79.0,
+     "smem_atomic": 79.0,
+     "move_misc": 64.0,
+     "barrier": 32.0,
+     "gmem_store": 16.0,
+     "smem_store": 16.0
+    },
+    "key_ops": {
+     "LDS": 79.0,
+     "ATOMS": 79.0,
+     "BAR": 32.0
+    },
+    "top5": {
+     "IMAD": 158.0,
+     "VIMNMX": 158.0,
+     "FADD": 111.0,
+     "BRA": 111.0,
+     "FFMA": 80.0
+    }
+   },
+   "p4_coarse_search": {
+    "inst": 1109.0,
+    "inst_share": 0.0072,
+    "stall_samples": 1.0,
+    "samp_share": 0.011,
+    "expA_cyc_share_kernel": 0.0385,
+    "expA_share_of_p4": 0.0721,
+    "opcode_class": {
+     "int": 570.0,
+     "control": 177.0,
+     "smem_load": 173.0,
+     "move_misc": 87.0,
+     "barrier": 48.0,
+     "smem_store": 20.0,
+     "other": 18.0,
+     "gmem_store": 16.0
+    },
+    "key_ops": {
+     "LDS": 140.0,
+     "BAR": 48.0
+    },
+    "top5": {
+     "IADD3": 288.0,
+     "LDS.128": 140.0,
+     "BSYNC.RECONVERGENT": 66.0,
+     "BRA": 63.0,
+     "IMAD.IADD": 63.0
+    }
+   },
+   "p4_fine": {
+    "inst": 3163.0,
+    "inst_share": 0.0206,
+    "stall_samples": 1.0,
+    "samp_share": 0.011,
+    "expA_cyc_share_kernel": 0.088,
+    "expA_share_of_p4": 0.1646,
+    "opcode_class": {
+     "int": 1018.0,
+     "control": 679.0,
+     "fp": 486.0,
+     "other": 374.0,
+     "smem_load": 201.0,
+     "move_misc": 191.0,
+     "barrier": 96.0,
+     "smem_store": 67.0,
+     "smem_atomic": 35.0,
+     "gmem_store": 16.0
+    },
+    "key_ops": {
+     "LDS": 113.0,
+     "BAR": 96.0
+    },
+    "top5": {
+     "LOP3.LUT": 272.0,
+     "BRA": 244.0,
+     "VIMNMX": 228.0,
+     "BSYNC.RECONVERGENT": 196.0,
+     "BSSY.RECONVERGENT": 143.0
+    }
+   },
+   "p4_scatter": {
+    "inst": 3487.0,
+    "inst_share": 0.0227,
+    "stall_samples": 1.0,
+    "samp_share": 0.011,
+    "expA_cyc_share_kernel": 0.0823,
+    "expA_share_of_p4": 0.1539,
+    "opcode_class": {
+     "int": 1264.0,
+     "control": 873.0,
+     "fp": 342.0,
+     "other": 307.0,
+     "move_misc": 295.0,
+     "smem_load": 188.0,
+     "gmem_store": 109.0,
+     "smem_atomic": 93.0,
+     "barrier": 16.0
+    },
+    "key_ops": {
+     "LDS": 172.0,
+     "VOTEU": 93.0
+    },
+    "top5": {
+     "BRA": 500.0,
+     "VIMNMX": 228.0,
+     "ISETP.GT.AND": 223.0,
+     "BSYNC.RECONVERGENT": 198.0,
+     "S2R": 186.0
+    }
+   },
+   "p4_tail": {
+    "inst": 576.0,
+    "inst_share": 0.0037,
+    "stall_samples": 1.0,
+    "samp_share": 0.011,
+    "expA_cyc_share_kernel": 0.0101,
+    "expA_share_of_p4": 0.0188,
+    "opcode_class": {
+     "int": 208.0,
+     "control": 192.0,
+     "move_misc": 128.0,
+     "smem_load": 16.0,
+     "gmem_store": 16.0,
+     "other": 16.0
+    },
+    "key_ops": {
+     "CS2R": 128.0,
+     "LDS": 16.0,
+     "STG": 16.0
+    },
+    "top5": {
+     "BSYNC": 128.0,
+     "ISETP.NE.AND": 128.0,
+     "CS2R": 128.0,
+     "ISETP.GT.AND": 32.0,
+     "BRA": 32.0
+    }
+   }
+  }
+ },
+ "v32_256k_L34": {
+  "cs": 8,
+  "N": 163775,
+  "K": 2048,
+  "hit": 0.865,
+  "n_stamps": 15,
+  "total_inst": 173740.0,
+  "stalls_kernelwide": {
+   "barrier": 20.306182,
+   "long_scoreboard": 4.158262,
+   "no_instruction": 4.02028,
+   "wait": 2.038153,
+   "membar": 1.298345,
+   "short_scoreboard": 1.075727,
+   "selected": 1.0,
+   "not_selected": 0.590045,
+   "branch_resolving": 0.450236,
+   "math_pipe_throttle": 0.406723
+  },
+  "stages": {
+   "p4_peer_wait": {
+    "inst": 1792.0,
+    "inst_share": 0.0103,
+    "stall_samples": 5.0,
+    "samp_share": 0.0521,
+    "expA_cyc_share_kernel": 0.0684,
+    "expA_share_of_p4": 0.1389,
+    "opcode_class": {
+     "other": 896.0,
+     "control": 512.0,
+     "move_misc": 256.0,
+     "gmem_store": 128.0
+    },
+    "key_ops": {
+     "STG": 128.0,
+     "CS2R": 128.0
+    },
+    "top5": {
+     "BRA.U": 256.0,
+     "BRA": 256.0,
+     "LDCU": 128.0,
+     "STG.E.64": 128.0,
+     "UISETP.EQ.U32.AND": 128.0
+    }
+   },
+   "p4_dsmem_gather": {
+    "inst": 2310.0,
+    "inst_share": 0.0133,
+    "stall_samples": 2.0,
+    "samp_share": 0.0208,
+    "expA_cyc_share_kernel": 0.1707,
+    "expA_share_of_p4": 0.3464,
+    "opcode_class": {
+     "control": 689.0,
+     "int": 642.0,
+     "move_misc": 469.0,
+     "other": 170.0,
+     "gmem_load": 138.0,
+     "gmem_store": 128.0,
+     "smem_store": 42.0,
+     "smem_load": 16.0,
+     "barrier": 16.0
+    },
+    "key_ops": {
+     "STG": 128.0,
+     "STS": 42.0
+    },
+    "top5": {
+     "BRA": 279.0,
+     "MOV": 276.0,
+     "ISETP.GT.AND": 151.0,
+     "IMAD.IADD": 151.0,
+     "ISETP.NE.AND": 144.0
+    }
+   },
+   "p4_minmax": {
+    "inst": 1296.0,
+    "inst_share": 0.0075,
+    "stall_samples": 1.0,
+    "samp_share": 0.0104,
+    "expA_cyc_share_kernel": 0.0206,
+    "expA_share_of_p4": 0.0418,
+    "opcode_class": {
+     "fp": 352.0,
+     "int": 288.0,
+     "smem_load": 224.0,
+     "control": 144.0,
+     "move_misc": 112.0,
+     "other": 96.0,
+     "smem_store": 32.0,
+     "barrier": 32.0,
+     "gmem_store": 16.0
+    },
+    "key_ops": {
+     "LDS": 224.0
+    },
+    "top5": {
+     "FMNMX3": 320.0,
+     "LDS.128": 128.0,
+     "LDS": 96.0,
+     "BRA": 80.0,
+     "ISETP.NE.AND": 48.0
+    }
+   },
+   "p4_coarse_hist": {
+    "inst": 1431.0,
+    "inst_share": 0.0082,
+    "stall_samples": 1.0,
+    "samp_share": 0.0104,
+    "expA_cyc_share_kernel": 0.0269,
+    "expA_share_of_p4": 0.0547,
+    "opcode_class": {
+     "fp": 378.0,
+     "int": 314.0,
+     "other": 250.0,
+     "control": 205.0,
+     "smem_load": 78.0,
+     "smem_atomic": 78.0,
+     "move_misc": 64.0,
+     "barrier": 32.0,
+     "gmem_store": 16.0,
+     "smem_store": 16.0
+    },
+    "key_ops": {
+     "LDS": 78.0,
+     "ATOMS": 78.0,
+     "BAR": 32.0
+    },
+    "top5": {
+     "IMAD": 156.0,
+     "VIMNMX": 156.0,
+     "FADD": 110.0,
+     "BRA": 110.0,
+     "FFMA": 80.0
+    }
+   },
+   "p4_coarse_search": {
+    "inst": 1109.0,
+    "inst_share": 0.0064,
+    "stall_samples": 1.0,
+    "samp_share": 0.0104,
+    "expA_cyc_share_kernel": 0.0347,
+    "expA_share_of_p4": 0.0705,
+    "opcode_class": {
+     "int": 570.0,
+     "control": 177.0,
+     "smem_load": 173.0,
+     "move_misc": 87.0,
+     "barrier": 48.0,
+     "smem_store": 20.0,
+     "other": 18.0,
+     "gmem_store": 16.0
+    },
+    "key_ops": {
+     "LDS": 140.0,
+     "BAR": 48.0
+    },
+    "top5": {
+     "IADD3": 288.0,
+     "LDS.128": 140.0,
+     "BSYNC.RECONVERGENT": 66.0,
+     "BRA": 63.0,
+     "IMAD.IADD": 63.0
+    }
+   },
+   "p4_fine": {
+    "inst": 3193.0,
+    "inst_share": 0.0184,
+    "stall_samples": 1.0,
+    "samp_share": 0.0104,
+    "expA_cyc_share_kernel": 0.0818,
+    "expA_share_of_p4": 0.166,
+    "opcode_class": {
+     "int": 1021.0,
+     "control": 677.0,
+     "fp": 495.0,
+     "other": 383.0,
+     "smem_load": 200.0,
+     "move_misc": 199.0,
+     "barrier": 96.0,
+     "smem_store": 67.0,
+     "smem_atomic": 39.0,
+     "gmem_store": 16.0
+    },
+    "key_ops": {
+     "LDS": 112.0,
+     "BAR": 96.0
+    },
+    "top5": {
+     "LOP3.LUT": 272.0,
+     "BRA": 241.0,
+     "VIMNMX": 234.0,
+     "BSYNC.RECONVERGENT": 199.0,
+     "BSSY.RECONVERGENT": 142.0
+    }
+   },
+   "p4_scatter": {
+    "inst": 3494.0,
+    "inst_share": 0.0201,
+    "stall_samples": 1.0,
+    "samp_share": 0.0104,
+    "expA_cyc_share_kernel": 0.0812,
+    "expA_share_of_p4": 0.1648,
+    "opcode_class": {
+     "int": 1262.0,
+     "control": 869.0,
+     "fp": 351.0,
+     "other": 312.0,
+     "move_misc": 295.0,
+     "smem_load": 187.0,
+     "gmem_store": 109.0,
+     "smem_atomic": 93.0,
+     "barrier": 16.0
+    },
+    "key_ops": {
+     "LDS": 171.0,
+     "VOTEU": 93.0
+    },
+    "top5": {
+     "BRA": 499.0,
+     "VIMNMX": 234.0,
+     "ISETP.GT.AND": 226.0,
+     "BSYNC.RECONVERGENT": 197.0,
+     "S2R": 186.0
+    }
+   },
+   "p4_tail": {
+    "inst": 576.0,
+    "inst_share": 0.0033,
+    "stall_samples": 1.0,
+    "samp_share": 0.0104,
+    "expA_cyc_share_kernel": 0.0073,
+    "expA_share_of_p4": 0.0148,
+    "opcode_class": {
+     "int": 208.0,
+     "control": 192.0,
+     "move_misc": 128.0,
+     "smem_load": 16.0,
+     "gmem_store": 16.0,
+     "other": 16.0
+    },
+    "key_ops": {
+     "CS2R": 128.0,
+     "LDS": 16.0,
+     "STG": 16.0
+    },
+    "top5": {
+     "BSYNC": 128.0,
+     "ISETP.NE.AND": 128.0,
+     "CS2R": 128.0,
+     "ISETP.GT.AND": 32.0,
+     "BRA": 32.0
+    }
+   }
+  }
+ },
+ "v32_32k_L34": {
+  "cs": 1,
+  "N": 32783,
+  "K": 2048,
+  "hit": 0.429,
+  "n_stamps": 15,
+  "total_inst": 40257.0,
+  "stalls_kernelwide": {
+   "no_instruction": 2.637169,
+   "barrier": 2.533827,
+   "long_scoreboard": 2.499988,
+   "wait": 2.176376,
+   "short_scoreboard": 1.645154,
+   "selected": 1.0,
+   "not_selected": 0.600872,
+   "branch_resolving": 0.544855,
+   "math_pipe_throttle": 0.388952,
+   "mio_throttle": 0.163425
+  },
+  "stages": {
+   "p4_peer_wait": {
+    "inst": 32.0,
+    "inst_share": 0.0008,
+    "stall_samples": 0.0,
+    "samp_share": 0.0,
+    "expA_cyc_share_kernel": 0.0009,
+    "expA_share_of_p4": 0.0024,
+    "opcode_class": {
+     "gmem_store": 16.0,
+     "move_misc": 16.0
+    },
+    "key_ops": {
+     "STG": 16.0,
+     "CS2R": 16.0
+    },
+    "top5": {
+     "STG.E.64": 16.0,
+     "CS2R": 16.0
+    }
+   },
+   "p4_dsmem_gather": {
+    "inst": 32.0,
+    "inst_share": 0.0008,
+    "stall_samples": 0.0,
+    "samp_share": 0.0,
+    "expA_cyc_share_kernel": 0.0002,
+    "expA_share_of_p4": 0.0006,
+    "opcode_class": {
+     "gmem_store": 16.0,
+     "move_misc": 16.0
+    },
+    "key_ops": {
+     "STG": 16.0,
+     "CS2R": 16.0
+    },
+    "top5": {
+     "STG.E.64": 16.0,
+     "CS2R": 16.0
+    }
+   },
+   "p4_minmax": {
+    "inst": 1468.0,
+    "inst_share": 0.0365,
+    "stall_samples": 0.0,
+    "samp_share": 0.0,
+    "expA_cyc_share_kernel": 0.0312,
+    "expA_share_of_p4": 0.084,
+    "opcode_class": {
+     "fp": 402.0,
+     "int": 297.0,
+     "smem_load": 274.0,
+     "control": 154.0,
+     "move_misc": 139.0,
+     "other": 122.0,
+     "smem_store": 32.0,
+     "barrier": 32.0,
+     "gmem_store": 16.0
+    },
+    "key_ops": {
+     "LDS": 274.0
+    },
+    "top5": {
+     "FMNMX3": 370.0,
+     "LDS": 146.0,
+     "LDS.128": 128.0,
+     "BRA": 88.0,
+     "VIADD": 49.0
+    }
+   },
+   "p4_coarse_hist": {
+    "inst": 1977.0,
+    "inst_share": 0.0491,
+    "stall_samples": 1.0,
+    "samp_share": 0.125,
+    "expA_cyc_share_kernel": 0.0465,
+    "expA_share_of_p4": 0.125,
+    "opcode_class": {
+     "fp": 504.0,
+     "int": 440.0,
+     "other": 376.0,
+     "control": 289.0,
+     "smem_load": 120.0,
+     "smem_atomic": 120.0,
+     "move_misc": 64.0,
+     "barrier": 32.0,
+     "gmem_store": 16.0,
+     "smem_store": 16.0
+    },
+    "key_ops": {
+     "LDS": 120.0,
+     "ATOMS": 120.0,
+     "BAR": 32.0
+    },
+    "top5": {
+     "IMAD": 240.0,
+     "VIMNMX": 240.0,
+     "FADD": 152.0,
+     "BRA": 152.0,
+     "YIELD": 120.0
+    }
+   },
+   "p4_coarse_search": {
+    "inst": 1109.0,
+    "inst_share": 0.0275,
+    "stall_samples": 0.0,
+    "samp_share": 0.0,
+    "expA_cyc_share_kernel": 0.0422,
+    "expA_share_of_p4": 0.1135,
+    "opcode_class": {
+     "int": 570.0,
+     "control": 177.0,
+     "smem_load": 173.0,
+     "move_misc": 87.0,
+     "barrier": 48.0,
+     "smem_store": 20.0,
+     "other": 18.0,
+     "gmem_store": 16.0
+    },
+    "key_ops": {
+     "LDS": 140.0,
+     "BAR": 48.0
+    },
+    "top5": {
+     "IADD3": 288.0,
+     "LDS.128": 140.0,
+     "BSYNC.RECONVERGENT": 66.0,
+     "BRA": 63.0,
+     "IMAD.IADD": 63.0
+    }
+   },
+   "p4_fine": {
+    "inst": 3885.0,
+    "inst_share": 0.0965,
+    "stall_samples": 1.0,
+    "samp_share": 0.125,
+    "expA_cyc_share_kernel": 0.1058,
+    "expA_share_of_p4": 0.2844,
+    "opcode_class": {
+     "int": 1197.0,
+     "control": 800.0,
+     "fp": 654.0,
+     "other": 542.0,
+     "smem_load": 242.0,
+     "move_misc": 221.0,
+     "barrier": 96.0,
+     "smem_store": 67.0,
+     "smem_atomic": 50.0,
+     "gmem_store": 16.0
+    },
+    "key_ops": {
+     "LDS": 154.0,
+     "BAR": 96.0
+    },
+    "top5": {
+     "VIMNMX": 340.0,
+     "BRA": 331.0,
+     "LOP3.LUT": 272.0,
+     "BSYNC.RECONVERGENT": 269.0,
+     "BSSY.RECONVERGENT": 200.0
+    }
+   },
+   "p4_scatter": {
+    "inst": 5278.0,
+    "inst_share": 0.1311,
+    "stall_samples": 1.0,
+    "samp_share": 0.125,
+    "expA_cyc_share_kernel": 0.1241,
+    "expA_share_of_p4": 0.3338,
+    "opcode_class": {
+     "int": 1993.0,
+     "control": 1201.0,
+     "fp": 510.0,
+     "move_misc": 481.0,
+     "other": 460.0,
+     "smem_load": 291.0,
+     "gmem_store": 171.0,
+     "smem_atomic": 155.0,
+     "barrier": 16.0
+    },
+    "key_ops": {
+     "LDS": 275.0,
+     "VOTEU": 155.0
+    },
+    "top5": {
+     "BRA": 754.0,
+     "ISETP.GT.AND": 341.0,
+     "VIMNMX": 340.0,
+     "BSYNC.RECONVERGENT": 311.0,
+     "S2R": 310.0
+    }
+   },
+   "p4_tail": {
+    "inst": 226.0,
+    "inst_share": 0.0056,
+    "stall_samples": 1.0,
+    "samp_share": 0.125,
+    "expA_cyc_share_kernel": 0.0207,
+    "expA_share_of_p4": 0.0558,
+    "opcode_class": {
+     "int": 96.0,
+     "control": 81.0,
+     "smem_load": 16.0,
+     "gmem_store": 16.0,
+     "other": 16.0,
+     "move_misc": 1.0
+    },
+    "key_ops": {
+     "LDS": 16.0,
+     "STG": 16.0,
+     "CS2R": 1.0
+    },
+    "top5": {
+     "BRA": 49.0,
+     "ISETP.GT.AND": 32.0,
+     "LDS": 16.0,
+     "BSSY.RECONVERGENT": 16.0,
+     "STG.E.64": 16.0
+    }
+   }
+  }
+ },
+ "v32_8k_L33": {
+  "cs": 1,
+  "N": 8207,
+  "K": 2048,
+  "hit": 0.807,
+  "n_stamps": 15,
+  "total_inst": 29684.0,
+  "stalls_kernelwide": {
+   "barrier": 4.529468,
+   "wait": 2.65078,
+   "long_scoreboard": 2.059755,
+   "short_scoreboard": 1.84745,
+   "no_instruction": 1.816474,
+   "selected": 1.0,
+   "branch_resolving": 0.868657,
+   "not_selected": 0.438573,
+   "math_pipe_throttle": 0.240527,
+   "mio_throttle": 0.204307
+  },
+  "stages": {
+   "p4_peer_wait": {
+    "inst": 32.0,
+    "inst_share": 0.0011,
+    "stall_samples": 0.0,
+    "samp_share": 0.0,
+    "expA_cyc_share_kernel": 0.0009,
+    "expA_share_of_p4": 0.002,
+    "opcode_class": {
+     "gmem_store": 16.0,
+     "move_misc": 16.0
+    },
+    "key_ops": {
+     "STG": 16.0,
+     "CS2R": 16.0
+    },
+    "top5": {
+     "STG.E.64": 16.0,
+     "CS2R": 16.0
+    }
+   },
+   "p4_dsmem_gather": {
+    "inst": 32.0,
+    "inst_share": 0.0011,
+    "stall_samples": 0.0,
+    "samp_share": 0.0,
+    "expA_cyc_share_kernel": 0.0011,
+    "expA_share_of_p4": 0.0026,
+    "opcode_class": {
+     "gmem_store": 16.0,
+     "move_misc": 16.0
+    },
+    "key_ops": {
+     "STG": 16.0,
+     "CS2R": 16.0
+    },
+    "top5": {
+     "STG.E.64": 16.0,
+     "CS2R": 16.0
+    }
+   },
+   "p4_minmax": {
+    "inst": 1440.0,
+    "inst_share": 0.0485,
+    "stall_samples": 0.0,
+    "samp_share": 0.0,
+    "expA_cyc_share_kernel": 0.0304,
+    "expA_share_of_p4": 0.0675,
+    "opcode_class": {
+     "fp": 384.0,
+     "int": 288.0,
+     "smem_load": 256.0,
+     "move_misc": 160.0,
+     "control": 144.0,
+     "other": 128.0,
+     "smem_store": 32.0,
+     "barrier": 32.0,
+     "gmem_store": 16.0
+    },
+    "key_ops": {
+     "LDS": 256.0
+    },
+    "top5": {
+     "FMNMX3": 352.0,
+     "LDS": 128.0,
+     "LDS.128": 128.0,
+     "BRA": 80.0,
+     "PLOP3.LUT": 48.0
+    }
+   },
+   "p4_coarse_hist": {
+    "inst": 1782.0,
+    "inst_share": 0.06,
+    "stall_samples": 1.0,
+    "samp_share": 0.1667,
+    "expA_cyc_share_kernel": 0.0456,
+    "expA_share_of_p4": 0.1012,
+    "opcode_class": {
+     "fp": 459.0,
+     "int": 395.0,
+     "other": 331.0,
+     "control": 259.0,
+     "smem_load": 105.0,
+     "smem_atomic": 105.0,
+     "move_misc": 64.0,
+     "barrier": 32.0,
+     "gmem_store": 16.0,
+     "smem_store": 16.0
+    },
+    "key_ops": {
+     "LDS": 105.0,
+     "ATOMS": 105.0,
+     "BAR": 32.0
+    },
+    "top5": {
+     "IMAD": 210.0,
+     "VIMNMX": 210.0,
+     "FADD": 137.0,
+     "BRA": 137.0,
+     "YIELD": 105.0
+    }
+   },
+   "p4_coarse_search": {
+    "inst": 1109.0,
+    "inst_share": 0.0374,
+    "stall_samples": 0.0,
+    "samp_share": 0.0,
+    "expA_cyc_share_kernel": 0.046,
+    "expA_share_of_p4": 0.1022,
+    "opcode_class": {
+     "int": 570.0,
+     "control": 177.0,
+     "smem_load": 173.0,
+     "move_misc": 87.0,
+     "barrier": 48.0,
+     "smem_store": 20.0,
+     "other": 18.0,
+     "gmem_store": 16.0
+    },
+    "key_ops": {
+     "LDS": 140.0,
+     "BAR": 48.0
+    },
+    "top5": {
+     "IADD3": 288.0,
+     "LDS.128": 140.0,
+     "BSYNC.RECONVERGENT": 66.0,
+     "BRA": 63.0,
+     "IMAD.IADD": 63.0
+    }
+   },
+   "p4_fine": {
+    "inst": 3538.0,
+    "inst_share": 0.1192,
+    "stall_samples": 1.0,
+    "samp_share": 0.1667,
+    "expA_cyc_share_kernel": 0.111,
+    "expA_share_of_p4": 0.2462,
+    "opcode_class": {
+     "int": 1115.0,
+     "control": 721.0,
+     "fp": 582.0,
+     "other": 470.0,
+     "smem_load": 227.0,
+     "move_misc": 203.0,
+     "barrier": 96.0,
+     "smem_store": 67.0,
+     "smem_atomic": 41.0,
+     "gmem_store": 16.0
+    },
+    "key_ops": {
+     "LDS": 139.0,
+     "BAR": 96.0
+    },
+    "top5": {
+     "VIMNMX": 292.0,
+     "BRA": 291.0,
+     "LOP3.LUT": 272.0,
+     "BSYNC.RECONVERGENT": 245.0,
+     "BSSY.RECONVERGENT": 185.0
+    }
+   },
+   "p4_scatter": {
+    "inst": 4172.0,
+    "inst_share": 0.1405,
+    "stall_samples": 0.0,
+    "samp_share": 0.0,
+    "expA_cyc_share_kernel": 0.0963,
+    "expA_share_of_p4": 0.2136,
+    "opcode_class": {
+     "int": 1513.0,
+     "control": 1013.0,
+     "fp": 438.0,
+     "other": 397.0,
+     "move_misc": 337.0,
+     "smem_load": 228.0,
+     "gmem_store": 123.0,
+     "smem_atomic": 107.0,
+     "barrier": 16.0
+    },
+    "key_ops": {
+     "LDS": 212.0,
+     "VOTEU": 107.0
+    },
+    "top5": {
+     "BRA": 623.0,
+     "VIMNMX": 292.0,
+     "ISETP.GT.AND": 269.0,
+     "BSYNC.RECONVERGENT": 269.0,
+     "S2R": 214.0
+    }
+   },
+   "p4_tail": {
+    "inst": 2439.0,
+    "inst_share": 0.0822,
+    "stall_samples": 1.0,
+    "samp_share": 0.1667,
+    "expA_cyc_share_kernel": 0.1193,
+    "expA_share_of_p4": 0.2648,
+    "opcode_class": {
+     "control": 722.0,
+     "int": 578.0,
+     "fp": 442.0,
+     "other": 434.0,
+     "smem_load": 126.0,
+     "move_misc": 49.0,
+     "barrier": 48.0,
+     "smem_store": 21.0,
+     "gmem_store": 17.0,
+     "smem_atomic": 2.0
+    },
+    "key_ops": {
+     "LDS": 124.0,
+     "BAR": 48.0,
+     "STS": 21.0
+    },
+    "top5": {
+     "BRA": 372.0,
+     "VIMNMX": 293.0,
+     "BSYNC.RECONVERGENT": 197.0,
+     "ISETP.NE.AND": 182.0,
+     "BSSY.RECONVERGENT": 153.0
+    }
+   }
+  }
+ }
+}
