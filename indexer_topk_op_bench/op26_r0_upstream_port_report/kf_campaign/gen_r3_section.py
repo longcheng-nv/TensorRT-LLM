@@ -423,11 +423,26 @@ agent 自证同一 solution 两次计时差异显著。</span></li>
 → champion baselines supplied as platform-trace per-workload timings; champion source inlined in the prompt instead.<br>
 <span class="cng">平台缺口 D1:baseline-solution 评测不带 assets → 改用第一期平台 trace 逐格时间,源码内联 prompt。</span></li>
 </ul>
-<p style="font-size:0.9em;color:#52514e">Status at injection (07-22): campaign Running (round 3; best internal 1.173 =
-<code>aef33fac</code>, harvested into compB). Platform spend ≈$578 of $800 cap. Final acceptance = fresh full grid of the
-closing champion + borderline adjudication + rival joins, after campaign close.<br>
-<span class="cng">注入时状态(07-22):round 3 运行中(内部最佳 1.173 = aef33fac,已并入 compB);平台花费约 $578/$800;
-终审待战役收口后以收官冠军新鲜全格执行。</span></p>
+<h3>7.6 Final verdict &amp; cost / 终审与成本</h3>
+<div class="card"><b>SHIP: <code>compB</code></b> — all three acceptance bars exceeded on PR#16457 CURRENT head
+(<code>b14ec40e1b</code>), fresh full-grid, clean anchors (med 1.006 / p95 1.063):
+<b>Bar-1</b> geomean <b>{kpi['xPR']:.4f}×</b> ≥ 1.60 ✅ · <b>Bar-2</b> zero regressions, min cell 1.140 — no borderline
+cells, no adjudication needed ✅ · <b>Bar-3</b> 865/865 exact (tie-robust set semantics) ✅.
+Code pushed to <code>github.com/longcheng-nv/TensorRT-LLM</code> branch <b><code>kf/gvr-topk-compB</code></b>
+@9dbd6ee20a (code-only: kernel.cu / main.cpp / README, stacked on the campaign-1 ship branch).
+Campaign cancelled at operator close-out 07-22 (round 4, its best 1.1111 internal below the harvested composite —
+kill-line consistent).<br>
+<span class="cng">终审:三条验收线全部超额 — Bar-1 geomean {kpi['xPR']:.4f}×(门 1.60);Bar-2 零回退(最低格 1.140,
+无边界格,免 60-rep 裁决);Bar-3 865/865 精确。代码已推 fork 分支 kf/gvr-topk-compB @9dbd6ee20a(仅源码,叠在第一期
+ship 分支上)。战役于 07-22 操作员收官(round 4 最佳 1.1111 未超现任组合,kill 线自洽)。</span></div>
+<p><b>Cost accounting / 成本口径:</b> campaign side <b>$764.66</b> (KF platform billing, 4 rounds / 27 agents launched,
+628M input + 4.3M output tokens, ~49% cache; vs campaign-1 $690.81). Orchestrator side = this Claude Code session
+(harness + 7 full-865 verdict grids + 10 probes + barrier-ordering study + 2 engineer composites + report).
+Wall clock: 07-21 13:33Z → 07-22 close-out. <b>Return: +8.1% composite geomean over campaign-1's champion for ~$765</b>
+— and the two structural discoveries (barrier-ordering economics; adaptive fast-tail) are portable to the production
+kernel.<br>
+<span class="cng">成本:平台侧 $764.66(4 轮/27 agent,628M 输入 tokens,缓存 ~49%;第一期 $690.81)。
+产出:对第一期冠军再 +8.1%,两项结构性发现(屏障排序经济学/自适应 fast-tail)可移植回生产 kernel。</span></p>
 {SEC_E}"""
 
     banner = (f'{BAN_S}<div style="background:#e7f6e7;border:1.5px solid #070;border-radius:8px;'

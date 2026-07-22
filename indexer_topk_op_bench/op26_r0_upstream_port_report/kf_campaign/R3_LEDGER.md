@@ -1,5 +1,19 @@
 # R3 campaign ledger — gvr-topk-r3 (beyond-champion)
 
+## CLOSED 2026-07-22 — SHIP: compB
+
+- Campaign cancelled at operator close-out (round 4; its best 1.1111 internal
+  below the harvested composite — kill-line consistent). Final platform cost
+  **$764.66** (4 rounds, 27 agents launched, 628M in / 4.3M out tokens).
+- **Final verdict (fresh full-865, clean anchors med 1.006/p95 1.063):
+  compB = 1.8267× geomean vs PR#16457 current head b14ec40e1b; 0 regressions
+  (min 1.140, NO borderline); 865/865 exact. +8.1% over campaign-1 champion.**
+  Bars: 1.8267 ≥ 1.60 ✅ / zero-reg ✅ / exact ✅.
+- Rivals (PR-arm-normalized): sglang v2 1.215×, radix_cutedsl 1.760×,
+  flashinfer 1.585×.
+- Ship branch: `fork/kf/gvr-topk-compB` @9dbd6ee20a (code-only, stacked on
+  campaign-1 ship branch). Report: KF_PROCESS_LOG.html §7 (gen_r3_section.py).
+
 Campaign id: `e5q1zgrfhs0z57dj6850kc444r` (KF managed B200, effort high,
 6 agents/round: 2×fable-5(high) + 2×gpt-5.6-sol(high) + 2×n3-opus-4.8;
 max_rounds 20, max_duration 8h, max_cost $800, stagnation 4).
