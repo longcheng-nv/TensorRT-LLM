@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<title>compB BS&gt;1 Optimization Campaign — Final Report</title>
+<style>
+body{font-family:-apple-system,'Segoe UI',Roboto,'Noto Sans SC',sans-serif;
+     margin:0;background:#f8fafc;color:#111827;line-height:1.55}
+.wrap{max-width:980px;margin:0 auto;padding:24px 28px 80px}
+h1{font-size:26px;margin:10px 0 2px}h2{font-size:20px;border-bottom:2px solid
+#e5e7eb;padding-bottom:6px;margin-top:36px}h3{font-size:16px;margin:22px 0 8px}
+table{border-collapse:collapse;margin:8px 0 18px;font-size:13.5px;width:100%}
+th,td{border:1px solid #e5e7eb;padding:5px 10px;text-align:right}
+th{background:#f1f5f9;text-align:center}td:nth-child(4){text-align:center}
+tr.miss td{background:#fef2f2}tr.hi td{background:#f0fdf4}
+.cards{display:flex;gap:14px;flex-wrap:wrap;margin:18px 0}
+.card{flex:1 1 150px;background:#fff;border:1px solid #e5e7eb;border-radius:10px;
+padding:14px 16px}.card .v{font-size:26px;font-weight:700}
+.card .t{font-size:12.5px;color:#6b7280;margin-top:2px}
+.pass{color:#15803d}.warn{color:#b45309}
+.note{background:#fffbeb;border-left:4px solid #f59e0b;padding:10px 14px;
+border-radius:6px;font-size:14px}
+.lesson{background:#eff6ff;border-left:4px solid #3b82f6;padding:10px 14px;
+border-radius:6px;font-size:14px;margin:10px 0}
+code{background:#f1f5f9;padding:1px 5px;border-radius:4px;font-size:13px}
+/* CSS-only language toggle */
+.l-zh{display:none}
+#lang-zh:checked ~ .wrap .l-zh{display:inline}
+#lang-zh:checked ~ .wrap .l-en{display:none}
+#lang-zh:checked ~ .wrap div.l-zh,#lang-zh:checked ~ .wrap p.l-zh,
+#lang-zh:checked ~ .wrap li.l-zh{display:block}
+div.l-zh,p.l-zh,li.l-zh{display:none}
+#lang-en:checked ~ .wrap div.l-en,#lang-en:checked ~ .wrap p.l-en{display:block}
+.toggle{position:sticky;top:0;background:#111827;color:#fff;padding:9px 28px;
+z-index:5;font-size:14px}
+.toggle label{cursor:pointer;padding:4px 14px;border:1px solid #4b5563;
+border-radius:6px;margin-right:8px}
+#lang-en:checked ~ .toggle label[for=lang-en],
+#lang-zh:checked ~ .toggle label[for=lang-zh]{background:#2563eb;
+border-color:#2563eb}
+input[name=lang]{display:none}
+</style></head><body>
+<input type="radio" name="lang" id="lang-en" checked>
+<input type="radio" name="lang" id="lang-zh">
+<div class="toggle"><label for="lang-en">English</label>
+<label for="lang-zh">中文</label>
+<span style="opacity:.65">compB BS&gt;1 campaign · umbriel-b200-039 · 2026-07-22</span></div>
+<div class="wrap">
+<h1><span class="l-en">compB BS&gt;1 Optimization Campaign — Final Report</span><span class="l-zh">compB BS&gt;1 优化战役 — 最终报告</span></h1>
+<p style="color:#6b7280;font-size:14px">
+<span class="l-en">Batched exact top-K for the DSv4 indexer (compB lineage) vs PR#16457 head (gvr_pr). nsys cold-L2 kernel-sum, real decode-capture rows, same-GPU paired, all-row tie-robust exactness. Code: branch <code>kf/compb-bs-ext</code> @ longcheng-nv/TensorRT-LLM (3 staged commits).</span><span class="l-zh">DSv4 indexer 批量精确 top-K(compB 谱系)对 PR#16457 head(gvr_pr)。nsys 冷 L2 kernel-sum,真实 decode 捕获数据,同卡配对,全行 tie-鲁棒精确性校验。代码:<code>kf/compb-bs-ext</code> 分支 @ longcheng-nv/TensorRT-LLM(3 个阶段提交)。</span></p>
+
+<div class="cards">
+<div class="card"><div class="v pass">2.083×</div>
+<div class="t"><span class="l-en">geomean vs PR head, target envelope (goal ≥2.0 — PASS)</span><span class="l-zh">目标包络几何均值 vs PR head(目标 ≥2.0 — 达成)</span></div></div>
+<div class="card"><div class="v">1.974×</div>
+<div class="t"><span class="l-en">geomean, all 4 cells pooled (incl. generalization)</span><span class="l-zh">全部 4 cell 池化几何均值(含泛化)</span></div></div>
+<div class="card"><div class="v warn">1.105×</div>
+<div class="t"><span class="l-en">minimum case (goal ≥1.2 — missed at BS=32 only, 4/40 points)</span><span class="l-zh">最小 case(目标 ≥1.2 — 仅 BS=32 未达,4/40 点)</span></div></div>
+<div class="card"><div class="v pass">0/40</div>
+<div class="t"><span class="l-en">regressions vs PR head (goal: none — PASS)</span><span class="l-zh">对 PR head 退化数(目标零退化 — 达成)</span></div></div>
+<div class="card"><div class="v pass">80/80</div>
+<div class="t"><span class="l-en">exact results (all rows, tie-robust)</span><span class="l-zh">精确结果(全行,tie-鲁棒)</span></div></div>
+</div>
+
+<h2><span class="l-en">1 · Speedup vs PR head over BS</span><span class="l-zh">1 · 对 PR head 的加速比随 BS 变化</span></h2>
+<svg viewBox="0 0 860 400" role="img" style="max-width:100%;height:auto;background:#fff"><line x1="60" y1="331.2" x2="840" y2="331.2" stroke="#dc2626" stroke-width="1.4" stroke-dasharray="5 4"/><text x="52" y="335.2" text-anchor="end" font-size="12" fill="#374151">1×</text><line x1="60" y1="291.6" x2="840" y2="291.6" stroke="#b45309" stroke-width="1.4" stroke-dasharray="5 4"/><text x="52" y="295.6" text-anchor="end" font-size="12" fill="#374151">1.2×</text><line x1="60" y1="243.2" x2="840" y2="243.2" stroke="#e5e7eb" stroke-width="1"/><text x="52" y="247.2" text-anchor="end" font-size="12" fill="#374151">1.5×</text><line x1="60" y1="180.9" x2="840" y2="180.9" stroke="#15803d" stroke-width="1.4" stroke-dasharray="5 4"/><text x="52" y="184.9" text-anchor="end" font-size="12" fill="#374151">2×</text><line x1="60" y1="93.0" x2="840" y2="93.0" stroke="#e5e7eb" stroke-width="1"/><text x="52" y="97.0" text-anchor="end" font-size="12" fill="#374151">3×</text><line x1="60" y1="30.6" x2="840" y2="30.6" stroke="#e5e7eb" stroke-width="1"/><text x="52" y="34.6" text-anchor="end" font-size="12" fill="#374151">4×</text><line x1="60.0" y1="20" x2="60.0" y2="354" stroke="#f3f4f6"/><text x="60.0" y="372" text-anchor="middle" font-size="12" fill="#374151">2</text><line x1="146.7" y1="20" x2="146.7" y2="354" stroke="#f3f4f6"/><text x="146.7" y="372" text-anchor="middle" font-size="12" fill="#374151">4</text><line x1="233.3" y1="20" x2="233.3" y2="354" stroke="#f3f4f6"/><text x="233.3" y="372" text-anchor="middle" font-size="12" fill="#374151">8</text><line x1="320.0" y1="20" x2="320.0" y2="354" stroke="#f3f4f6"/><text x="320.0" y="372" text-anchor="middle" font-size="12" fill="#374151">16</text><line x1="406.7" y1="20" x2="406.7" y2="354" stroke="#f3f4f6"/><text x="406.7" y="372" text-anchor="middle" font-size="12" fill="#374151">32</text><line x1="493.3" y1="20" x2="493.3" y2="354" stroke="#f3f4f6"/><text x="493.3" y="372" text-anchor="middle" font-size="12" fill="#374151">64</text><line x1="580.0" y1="20" x2="580.0" y2="354" stroke="#f3f4f6"/><text x="580.0" y="372" text-anchor="middle" font-size="12" fill="#374151">128</text><line x1="666.7" y1="20" x2="666.7" y2="354" stroke="#f3f4f6"/><text x="666.7" y="372" text-anchor="middle" font-size="12" fill="#374151">256</text><line x1="753.3" y1="20" x2="753.3" y2="354" stroke="#f3f4f6"/><text x="753.3" y="372" text-anchor="middle" font-size="12" fill="#374151">512</text><line x1="840.0" y1="20" x2="840.0" y2="354" stroke="#f3f4f6"/><text x="840.0" y="372" text-anchor="middle" font-size="12" fill="#374151">1024</text><text x="450.0" y="392" text-anchor="middle" font-size="13" fill="#111">BS (batch size)</text><polyline points="60.0,220.2 146.7,225.6 233.3,232.9 320.0,254.5 406.7,294.0 493.3,215.7 580.0,178.2 666.7,88.0 753.3,37.4 840.0,56.5" fill="none" stroke="#059669" stroke-width="2.4" stroke-dasharray="7 4"/><circle cx="60.0" cy="220.2" r="3.4" fill="#059669"/><circle cx="146.7" cy="225.6" r="3.4" fill="#059669"/><circle cx="233.3" cy="232.9" r="3.4" fill="#059669"/><circle cx="320.0" cy="254.5" r="3.4" fill="#059669"/><circle cx="406.7" cy="294.0" r="3.4" fill="#059669"/><circle cx="493.3" cy="215.7" r="3.4" fill="#059669"/><circle cx="580.0" cy="178.2" r="3.4" fill="#059669"/><circle cx="666.7" cy="88.0" r="3.4" fill="#059669"/><circle cx="753.3" cy="37.4" r="3.4" fill="#059669"/><circle cx="840.0" cy="56.5" r="3.4" fill="#059669"/><polyline points="60.0,169.4 146.7,192.3 233.3,270.3 320.0,289.0 406.7,303.2 493.3,230.9 580.0,190.3 666.7,168.9 753.3,134.4 840.0,154.5" fill="none" stroke="#7c3aed" stroke-width="2.4" stroke-dasharray="7 4"/><circle cx="60.0" cy="169.4" r="3.4" fill="#7c3aed"/><circle cx="146.7" cy="192.3" r="3.4" fill="#7c3aed"/><circle cx="233.3" cy="270.3" r="3.4" fill="#7c3aed"/><circle cx="320.0" cy="289.0" r="3.4" fill="#7c3aed"/><circle cx="406.7" cy="303.2" r="3.4" fill="#7c3aed"/><circle cx="493.3" cy="230.9" r="3.4" fill="#7c3aed"/><circle cx="580.0" cy="190.3" r="3.4" fill="#7c3aed"/><circle cx="666.7" cy="168.9" r="3.4" fill="#7c3aed"/><circle cx="753.3" cy="134.4" r="3.4" fill="#7c3aed"/><circle cx="840.0" cy="154.5" r="3.4" fill="#7c3aed"/><polyline points="60.0,129.3 146.7,141.3 233.3,161.9 320.0,249.3 406.7,309.5 493.3,219.1 580.0,138.3 666.7,96.8 753.3,51.9 840.0,75.0" fill="none" stroke="#2563eb" stroke-width="2.4"/><circle cx="60.0" cy="129.3" r="3.4" fill="#2563eb"/><circle cx="146.7" cy="141.3" r="3.4" fill="#2563eb"/><circle cx="233.3" cy="161.9" r="3.4" fill="#2563eb"/><circle cx="320.0" cy="249.3" r="3.4" fill="#2563eb"/><circle cx="406.7" cy="309.5" r="3.4" fill="#2563eb"/><circle cx="493.3" cy="219.1" r="3.4" fill="#2563eb"/><circle cx="580.0" cy="138.3" r="3.4" fill="#2563eb"/><circle cx="666.7" cy="96.8" r="3.4" fill="#2563eb"/><circle cx="753.3" cy="51.9" r="3.4" fill="#2563eb"/><circle cx="840.0" cy="75.0" r="3.4" fill="#2563eb"/><polyline points="60.0,201.6 146.7,214.8 233.3,229.9 320.0,264.6 406.7,303.6 493.3,231.8 580.0,154.4 666.7,98.8 753.3,70.3 840.0,98.0" fill="none" stroke="#d97706" stroke-width="2.4"/><circle cx="60.0" cy="201.6" r="3.4" fill="#d97706"/><circle cx="146.7" cy="214.8" r="3.4" fill="#d97706"/><circle cx="233.3" cy="229.9" r="3.4" fill="#d97706"/><circle cx="320.0" cy="264.6" r="3.4" fill="#d97706"/><circle cx="406.7" cy="303.6" r="3.4" fill="#d97706"/><circle cx="493.3" cy="231.8" r="3.4" fill="#d97706"/><circle cx="580.0" cy="154.4" r="3.4" fill="#d97706"/><circle cx="666.7" cy="98.8" r="3.4" fill="#d97706"/><circle cx="753.3" cy="70.3" r="3.4" fill="#d97706"/><circle cx="840.0" cy="98.0" r="3.4" fill="#d97706"/><rect x="70" y="25" width="18" height="4" fill="#059669"/><text x="94" y="34" font-size="12" fill="#111">flash_256k N=65538 K=512 (gen)</text><rect x="70" y="43" width="18" height="4" fill="#7c3aed"/><text x="94" y="52" font-size="12" fill="#111">pro_1024k N=262127 K=1024 (gen)</text><rect x="70" y="61" width="18" height="4" fill="#2563eb"/><text x="94" y="70" font-size="12" fill="#111">flash_512k N=131075 K=512</text><rect x="70" y="79" width="18" height="4" fill="#d97706"/><text x="94" y="88" font-size="12" fill="#111">pro_512k N=131075 K=1024</text></svg>
+<p class="l-en">Dashed horizontal lines: 1.0× (no-regression floor), 1.2× (min-case goal),
+2.0× (average goal). Solid series = target envelope (N=131075); dashed series =
+generalization cells (N=65538 / N=262127).</p>
+<p class="l-zh">水平虚线:1.0×(零退化底线)、1.2×(最小 case 目标)、2.0×(平均目标)。
+实线 = 目标包络(N=131075);虚线 = 泛化 cell(N=65538 / N=262127)。</p>
+
+<h2><span class="l-en">2 · The kernel portfolio and dispatch</span><span class="l-zh">2 · 内核组合与派发</span></h2>
+<table>
+<tr><th><span class="l-en">zone</span><span class="l-zh">区间</span></th><th><span class="l-en">arm</span><span class="l-zh">臂</span></th>
+<th><span class="l-en">design</span><span class="l-zh">设计</span></th><th><span class="l-en">typical speedup</span><span class="l-zh">典型加速</span></th></tr>
+<tr><td>BS ≤ rows_per_wave (~4-9)</td><td>ext_v4</td>
+<td><span class="l-en">register-resident row teams, one co-resident wave, launch_bounds(512,4) diet</span><span class="l-zh">寄存器驻留 row team,单一 co-resident 波,launch_bounds(512,4) 瘦身</span></td><td>1.57–2.54×</td></tr>
+<tr><td><span class="l-en">mid BS, slice fits smem</span><span class="l-zh">中段 BS,slice 装进 smem</span></td><td>tp4</td>
+<td><span class="l-en">fused exact-hist 2-pass: hist → barrier → direct emit; smem row cache makes pass 2 mostly smem-resident</span><span class="l-zh">融合精确直方图双遍:hist → 屏障 → 直写输出;smem 行缓存让第二遍基本走 smem</span></td><td>1.11–1.70×</td></tr>
+<tr><td><span class="l-en">high-mid BS</span><span class="l-zh">中高段 BS</span></td><td>tp3</td>
+<td><span class="l-en">fused sampled single-pass: 1/16 sample → budget b_safe → candidate collect → CTA0 finish; smem-staged candidates</span><span class="l-zh">融合采样单遍:1/16 采样 → 预算 b_safe → 候选收集 → CTA0 finish;候选 smem staging</span></td><td>1.14–3.88×</td></tr>
+<tr><td>BS &gt; <span class="l-en">one wave</span><span class="l-zh">单波</span> (~592)</td><td>tp2</td>
+<td><span class="l-en">3-kernel sampled single-pass (launch boundaries as sync)</span><span class="l-zh">三内核采样单遍(发射边界即同步)</span></td><td>2.26–3.55×</td></tr>
+</table>
+
+<h2><span class="l-en">3 · Per-cell results</span><span class="l-zh">3 · 分 cell 结果</span></h2>
+<h3>flash_512k — N=131075, K=512 (<span class="l-en">target envelope</span><span class="l-zh">目标包络</span>)</h3><table><tr><th>BS</th><th>gvr_pr (µs)</th><th>auto (µs)</th><th><span class="l-en">arm</span><span class="l-zh">臂</span></th><th><span class="l-en">speedup</span><span class="l-zh">加速比</span></th></tr><tr class="hi"><td>2</td><td>24.19</td><td>9.53</td><td>v4</td><td><b>2.537×</b></td></tr><tr class="hi"><td>4</td><td>24.15</td><td>10.06</td><td>v4</td><td><b>2.401×</b></td></tr><tr class="hi"><td>8</td><td>24.58</td><td>11.26</td><td>v4</td><td><b>2.183×</b></td></tr><tr><td>16</td><td>25.35</td><td>17.38</td><td>tp4</td><td><b>1.459×</b></td></tr><tr class="miss"><td>32</td><td>27.32</td><td>24.72</td><td>tp4</td><td><b>1.105×</b></td></tr><tr><td>64</td><td>51.64</td><td>30.80</td><td>tp3</td><td><b>1.676×</b></td></tr><tr class="hi"><td>128</td><td>100.46</td><td>41.28</td><td>tp3</td><td><b>2.434×</b></td></tr><tr class="hi"><td>256</td><td>195.42</td><td>66.30</td><td>tp3</td><td><b>2.948×</b></td></tr><tr class="hi"><td>512</td><td>376.84</td><td>103.94</td><td>tp3</td><td><b>3.626×</b></td></tr><tr class="hi"><td>1024</td><td>734.07</td><td>225.20</td><td>tp2</td><td><b>3.260×</b></td></tr></table>
+<h3>pro_512k — N=131075, K=1024 (<span class="l-en">target envelope</span><span class="l-zh">目标包络</span>)</h3><table><tr><th>BS</th><th>gvr_pr (µs)</th><th>auto (µs)</th><th><span class="l-en">arm</span><span class="l-zh">臂</span></th><th><span class="l-en">speedup</span><span class="l-zh">加速比</span></th></tr><tr><td>2</td><td>17.45</td><td>9.60</td><td>v4</td><td><b>1.818×</b></td></tr><tr><td>4</td><td>17.42</td><td>10.18</td><td>v4</td><td><b>1.710×</b></td></tr><tr><td>8</td><td>18.04</td><td>11.31</td><td>v4</td><td><b>1.595×</b></td></tr><tr><td>16</td><td>18.66</td><td>13.73</td><td>tp4</td><td><b>1.359×</b></td></tr><tr class="miss"><td>32</td><td>20.14</td><td>17.73</td><td>tp4</td><td><b>1.136×</b></td></tr><tr><td>64</td><td>37.82</td><td>23.92</td><td>tp3</td><td><b>1.581×</b></td></tr><tr class="hi"><td>128</td><td>73.73</td><td>32.63</td><td>tp3</td><td><b>2.259×</b></td></tr><tr class="hi"><td>256</td><td>142.24</td><td>48.71</td><td>tp3</td><td><b>2.920×</b></td></tr><tr class="hi"><td>512</td><td>272.84</td><td>81.91</td><td>tp3</td><td><b>3.331×</b></td></tr><tr class="hi"><td>1024</td><td>522.57</td><td>178.26</td><td>tp2</td><td><b>2.931×</b></td></tr></table>
+<h3>flash_256k — N=65538, K=512 (<span class="l-en">generalization</span><span class="l-zh">泛化检验</span>)</h3><table><tr><th>BS</th><th>gvr_pr (µs)</th><th>auto (µs)</th><th><span class="l-en">arm</span><span class="l-zh">臂</span></th><th><span class="l-en">speedup</span><span class="l-zh">加速比</span></th></tr><tr><td>2</td><td>15.27</td><td>9.15</td><td>v4</td><td><b>1.668×</b></td></tr><tr><td>4</td><td>15.19</td><td>9.33</td><td>v4</td><td><b>1.627×</b></td></tr><tr><td>8</td><td>15.55</td><td>9.88</td><td>v4</td><td><b>1.573×</b></td></tr><tr><td>16</td><td>15.80</td><td>11.09</td><td>v4</td><td><b>1.424×</b></td></tr><tr class="miss"><td>32</td><td>16.92</td><td>14.25</td><td>tp4</td><td><b>1.187×</b></td></tr><tr><td>64</td><td>31.23</td><td>18.33</td><td>tp4</td><td><b>1.703×</b></td></tr><tr class="hi"><td>128</td><td>59.60</td><td>29.44</td><td>tp3</td><td><b>2.025×</b></td></tr><tr class="hi"><td>256</td><td>116.66</td><td>38.01</td><td>tp3</td><td><b>3.069×</b></td></tr><tr class="hi"><td>512</td><td>227.57</td><td>58.70</td><td>tp3</td><td><b>3.877×</b></td></tr><tr class="hi"><td>1024</td><td>443.63</td><td>124.99</td><td>tp2</td><td><b>3.549×</b></td></tr></table>
+<h3>pro_1024k — N=262127, K=1024 (<span class="l-en">generalization</span><span class="l-zh">泛化检验</span>)</h3><table><tr><th>BS</th><th>gvr_pr (µs)</th><th>auto (µs)</th><th><span class="l-en">arm</span><span class="l-zh">臂</span></th><th><span class="l-en">speedup</span><span class="l-zh">加速比</span></th></tr><tr class="hi"><td>2</td><td>21.60</td><td>10.24</td><td>v4</td><td><b>2.109×</b></td></tr><tr><td>4</td><td>21.75</td><td>11.47</td><td>v4</td><td><b>1.897×</b></td></tr><tr><td>8</td><td>22.31</td><td>16.85</td><td>tp3</td><td><b>1.324×</b></td></tr><tr><td>16</td><td>22.99</td><td>18.93</td><td>tp3</td><td><b>1.215×</b></td></tr><tr class="miss"><td>32</td><td>26.14</td><td>22.97</td><td>tp3</td><td><b>1.138×</b></td></tr><tr><td>64</td><td>50.02</td><td>31.50</td><td>tp3</td><td><b>1.588×</b></td></tr><tr><td>128</td><td>96.79</td><td>50.55</td><td>tp3</td><td><b>1.915×</b></td></tr><tr class="hi"><td>256</td><td>182.83</td><td>86.49</td><td>tp3</td><td><b>2.114×</b></td></tr><tr class="hi"><td>512</td><td>345.69</td><td>139.53</td><td>tp3</td><td><b>2.478×</b></td></tr><tr class="hi"><td>1024</td><td>664.57</td><td>294.21</td><td>tp2</td><td><b>2.259×</b></td></tr></table>
+
+<h2><span class="l-en">4 · What shipped (staged commits on kf/compb-bs-ext)</span><span class="l-zh">4 · 交付内容(kf/compb-bs-ext 分阶段提交)</span></h2>
+<ul>
+<li class="l-en"><b>dd9cd928ef</b> baseline: validated D1+D2 state (best-arm gm 1.597× over BS 8–1024).</li>
+<li class="l-zh"><b>dd9cd928ef</b> 基线:已验证的 D1+D2 状态(BS 8–1024 best-arm gm 1.597×)。</li>
+<li class="l-en"><b>f102594ba0</b> tp3 fused single-kernel arm + <b>smem-staged collect</b> — the same-address
+per-row candidate-counter atomics (~5K serialized L2 RMWs) were BOTH the mid-BS valley and the flash@1024 anomaly;
+one bulk reservation per CTA fixed both.</li>
+<li class="l-zh"><b>f102594ba0</b> tp3 融合单核 + <b>smem staging collect</b> —— per-row 候选计数器的同地址原子
+(~5K 次串行 L2 RMW)同时是中段 BS 谷与 flash@1024 反常的根因;每 CTA 一次批量占位同时修复两者。</li>
+<li class="l-en"><b>4daeefed1f</b> tp4 exact-hist fused 2-pass arm (smem row cache) + measured (N,BS) dispatch
+table + the restored <b>consumer-fence contract</b>.</li>
+<li class="l-zh"><b>4daeefed1f</b> tp4 精确直方图融合双遍臂(smem 行缓存)+ 实测 (N,BS) 派发表 + 恢复的
+<b>消费者 fence 契约</b>。</li>
+</ul>
+
+<h2><span class="l-en">5 · Correctness contracts (hard rules learned)</span><span class="l-zh">5 · 正确性契约(用 bug 换来的硬规则)</span></h2>
+<div class="lesson"><span class="l-en"><b>Fence-less barrier data contract:</b> any data produced on one CTA and consumed by another across the relaxed spinning barrier must be written with <code>atomicExch</code> AND read after a consumer <code>fence.acq_rel.gpu</code> — compB's own tail refine does exactly this. Plain stores intermittently miss in-flight entries (~2 wrong tie members per bad row, stochastic, found via randn adversarial rows).</span><span class="l-zh"><b>fence-less 屏障数据契约:</b>跨 relaxed 自旋屏障由一个 CTA 生产、另一个 CTA 消费的数据,必须用 <code>atomicExch</code> 写并在消费侧先执行 <code>fence.acq_rel.gpu</code> —— compB 自己的 tail refine 正是这样做的。plain store 会间歇性丢失 in-flight 条目(每坏行约错 2 个 tie 成员,随机;由 randn 对抗行捕获)。</span></div>
+<div class="lesson"><span class="l-en"><b>Load-then-rezero needs a barrier:</b> a kernel that plain-loads a shared global value and then zeroes the same buffer must put <code>__syncthreads()</code> between them (hit twice this campaign; stochastic single-row corruption at high BS).</span><span class="l-zh"><b>load 后清零必须夹栅栏:</b>同一内核先 plain-load 共享全局值、再清零同一缓冲,两者之间必须有 <code>__syncthreads()</code>(本战役踩中两次;高 BS 下随机单行损坏)。</span></div>
+<div class="lesson"><span class="l-en"><b>All exactness gates:</b> adversarial rows (const / 3-level quantized / randn, forcing every fallback path), real-capture rows with ALL-row tie-robust value-set checks, and 40× stress repeats at racy batch sizes.</span><span class="l-zh"><b>精确性门:</b>对抗行(常数 / 3-level 量化 / randn,强制覆盖所有兜底路径)+ 真实捕获行全行 tie-鲁棒值集校验 + 易竞态 BS 的 40× 压力重复。</span></div>
+
+<h2><span class="l-en">6 · Falsified on the way (measured cold, reverted)</span><span class="l-zh">6 · 途中证伪并回退的方案(全部冷判决)</span></h2>
+<ul>
+<li class="l-en">Parallel finish emit (3rd barrier + global tie round trip cost more than the saved single-CTA scan).</li>
+<li class="l-zh">并行 finish emit(第三道屏障 + 全局 tie 往返比省下的单 CTA 扫描更贵)。</li>
+<li class="l-en">Dropping the gt staging arena for a bigger row cache (per-hit gt cursor atomics regressed BS=32 by 7–15%).</li>
+<li class="l-zh">砍 gt staging arena 换更大行缓存(gt 逐命中游标原子使 BS=32 回退 7–15%)。</li>
+<li class="l-en">Warp-aggregated candidate atomics — the per-element ballot tax, learned three times now.</li>
+<li class="l-zh">候选原子 warp 聚合 —— 逐元素 ballot 税,本战役已三次验证。</li>
+<li class="l-en">(Earlier, same day) B' persistent work-queue: chases the ≤2% launch-gap while paying a ≥5% in-kernel sync floor.</li>
+<li class="l-zh">(同日更早)B' persistent 工作队列:追 ≤2% 发射间隙却付 ≥5% 核内同步地板。</li>
+</ul>
+
+<h2><span class="l-en">7 · The BS=32 residual</span><span class="l-zh">7 · BS=32 残余分析</span></h2>
+<p class="note l-en"><b>Why BS=32 resists:</b> gvr_pr's latency-flat plateau ends exactly there
+(gvr@64 ≈ 2× gvr@32) — at BS=32 the PR arm is at its best operating point, while every exact
+full-read arm still pays ≥1 full pass + 2 team barriers + a tail. Best arms land 1–9% short of the
+1.2× bar (14.3–24.7µs vs needed 14.1–22.8µs). Identified next lever (out of scope):
+a hint-assisted arm consuming prev-step <code>preIdx</code> — the same legitimate inference-time input
+gvr itself uses — to skip the histogram pass in the high-hit regime.</p>
+<p class="note l-zh"><b>为什么 BS=32 难啃:</b>gvr_pr 的延迟平台恰好在此结束(gvr@64 ≈ 2× gvr@32)——
+BS=32 是 PR 臂的最佳工作点,而所有精确全读臂仍要付 ≥1 遍全读 + 2 道 team 屏障 + 尾部。最优臂距 1.2× 线差
+1–9%(14.3–24.7µs vs 需要 14.1–22.8µs)。已识别的下一杠杆(超出本战役范围):
+消费上一步 <code>preIdx</code> 的 hint 辅助臂 —— 与 gvr 使用同一合法推理时输入 —— 在高命中区跳过直方图遍。</p>
+
+<h2><span class="l-en">8 · Methodology</span><span class="l-zh">8 · 方法学</span></h2>
+<ul>
+<li class="l-en">Timing: nsys cold-L2 kernel-sum (20 cold reps, 512MB L2 evict outside the NVTX range), one GPU per cell, arms paired back-to-back. Warm event timing was used ONLY for iteration, never for verdicts (at mid BS the whole batch fits B200's 126MB L2 and warm numbers mislead).</li>
+<li class="l-zh">计时:nsys 冷 L2 kernel-sum(20 次冷重复,NVTX 区间外 512MB L2 驱逐),每 cell 独占一卡、臂背靠背配对。warm 事件计时只用于迭代、从不作判决(中段 BS 整批装进 B200 的 126MB L2,warm 数字有系统性误导)。</li>
+<li class="l-en">Data: real DSv4 decode captures (V4-Flash K=512, V4-Pro K=1024), row replicated across the batch (§7.8 protocol).</li>
+<li class="l-zh">数据:真实 DSv4 decode 捕获(V4-Flash K=512、V4-Pro K=1024),行复制成批(§7.8 协议)。</li>
+<li class="l-en">Full provenance: kf_bs_scaling/ext/ (RESULTS.md, final_bs.csv, per-stage CSVs); ledger: kf_campaign/R3_LEDGER.md.</li>
+<li class="l-zh">完整溯源:kf_bs_scaling/ext/(RESULTS.md、final_bs.csv、各阶段 CSV);台账:kf_campaign/R3_LEDGER.md。</li>
+</ul>
+</div></body></html>
