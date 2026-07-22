@@ -49,6 +49,56 @@ span/kernel tax measured <=1.04. Net: the collapse is the designed
 whole-GPU-per-row latency trade, structural, not fixable in-harness ->
 BS==1 dispatch gate is the correct (and only) production remedy.
 
+## BS>1 extension design analysis (2026-07-22, unimplemented proposal)
+
+Premise: BS=1 large-n is latency-bound (NCU DRAM <1%, issue ~15%, barrier
+stall ~48% of runtime) -> huge free parallelism at low BS. High-BS limit is
+the DRAM roofline (BS*n*4 B, compB is already single-pass-read) -> goal is
+win at BS 2..~64 and TIE rivals at saturation, not beat them everywhere.
+Hard constraint: topk_fast register-caches the whole row (float4+tail per
+thread, 2048 elts/CTA), so each row needs EXACTLY ceil(n/2048) CTAs.
+
+Layered plan:
+- (A) small/mid-n tiers (n<=16896): single-CTA scratch-free kernels ->
+  trivial batching grid.x=BS (row per blockIdx.x). Near-linear, zero risk;
+  expected to beat all rivals immediately (148 SMs, one row per SM).
+- (B) large-n single-wave: while BS*ceil(n/2048) <= co-residency cap
+  (~active*148), launch all row-teams in ONE co-resident grid; per-row
+  scratch slices (~52KB/row) + PER-TEAM barrier (fewer participants =>
+  shorter stall, and teams hide each other's spin). Per-row efficiency may
+  even exceed BS=1. E.g. n=131072: 64 CTA/row, BS<=9 fits one wave ->
+  expect ~1.8x where today is 0.238x (BS=8).
+- (B') multi-wave: persistent team array (grid<=cap) + atomic row work-queue,
+  single launch consumes the whole batch. Also removes the back-to-back
+  launch pattern that triggered the observed spin-barrier livelock.
+- (C) CORRECTNESS RISK (the one new hazard): fence-less safety leg (2) "L1
+  invalidated at launch boundary" DIES when a persistent team reuses its
+  scratch slice for row i+1 within one launch (stale hist lines in L1).
+  Remedies, cheap->dear: slice double-buffer rotation + sense token widened
+  from gen*8+pass to (row_iter,pass); post-barrier hist/count reads via
+  ld.global.cg (L2-only, expected << the measured -11% threadfence tax);
+  fallback per-row __threadfence (multi-wave only).
+- (D) ragged batch (production: per-row n = per-request KV len): host-side
+  bucketing by existing dispatch tier, one batched launch per bucket;
+  largest-first queue order in the large-n bucket to shrink the tail wave.
+- (E) dispatch gate replaces BS==1 hard gate: BS==1 -> current compB
+  (verdict preserved); small-n -> (A); large-n one-wave -> (B); multi-wave
+  -> (B'); beyond measured crossover -> fall back to batched arm (fuse).
+
+Validation order: (A) first (1 day); then fixed-grid single-wave (B) at
+n=131072 BS in {2,4,8} local-paired vs rivals — this alone
+falsifies/confirms the core "team parallelism is free" hypothesis before
+investing in the persistent queue. Gates: 865-grid + BS-sweep dual
+exactness, nsys cold-L2, per-batch p95 anchors, GVR arm local-retest rule
+(cross-node drift med 1.09). Watch: L2 set-conflicts across BS hist slices;
+spin threads stealing issue slots under full SM load (nanosleep backoff).
+
+One-line thesis: the collapse is a misallocated parallelism axis, not an
+algorithm loss — reallocate the co-residency budget from "1 row x whole GPU"
+to "BS rows x ceil(n/2048)-CTA teams"; the barrier demotes to team scope
+(cheaper), and the only new correctness work is re-proving fence-less
+safety under intra-launch scratch reuse (ld.global.cg + wider token).
+
 ## Decisions
 
 - **D4 (skeleton adjudication, USER, 2026-07-22): Bar-first, loose-skeleton
