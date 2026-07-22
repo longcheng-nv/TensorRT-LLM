@@ -213,3 +213,9 @@ Updated 2026-07-22 (会话暂停：用户要求迁移到另一台机器)。
 - **r3_7d8272b7 收割**(`r3_v11` MERGE: barrier 折叠 + per-(tier,K)
   AR6/AR8 实测梯子, 内部 1.3556): 28-cell 探针 **cold gm 1.7835,
   0 回退, 28/28 exact** — 新高。全格 r4r3bg 已发 GPU1-3。
+- **r3_v11 全格 865(r4r3bg, GPU1-3)**: **geomean 1.6315(新高), 865/865
+  exact, 回退 1**(pro_64k_L38)。60-rep 裁定 L38 = 0.963 cold — ~4% 真实,
+  窗外。**本地 champion = r3_v11**: Bar-1 ✅ 1.6315 / Bar-2 差 L38 一格 /
+  Bar-3 ✅。L38 = hit 0.269 全带最低,寄存器驻留把它从 v14 时代 -17% 压到
+  -4%,秒差 ~0.4µs,机理 = 低 hint 下 secant 轮数多(合规修复只剩 kernel 内
+  admission 逃逸;或收口后 fork steering)。

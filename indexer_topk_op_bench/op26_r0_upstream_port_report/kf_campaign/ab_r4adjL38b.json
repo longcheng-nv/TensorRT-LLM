@@ -1,0 +1,12 @@
+[
+ {
+  "uuid": "pro_64k_L38",
+  "pr_cold": 11.69,
+  "cand_cold": 12.136166666666666,
+  "speedup_cold": 0.9632366068363157,
+  "pr_warm": 10.11185,
+  "cand_warm": 11.6304,
+  "speedup_warm": 0.8694326936304857,
+  "cand_exact": true
+ }
+]
