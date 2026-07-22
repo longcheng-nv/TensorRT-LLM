@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>P4 Optimization Proposal / P4 阶段优化方案 (grounded on REPORT §9e/§9f)</title>
+<style>
+:root{--bg:#0f1116;--panel:#161a22;--ink:#dde3ee;--mut:#8b93a7;--acc:#6ea8fe;--good:#4ade80;--bad:#f87171;--warn:#fbbf24;--line:#272c36}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font:14px/1.62 "Segoe UI",system-ui,"PingFang SC","Microsoft YaHei",sans-serif;margin:0;padding:0 0 80px}
+.wrap{max-width:1080px;margin:0 auto;padding:24px 28px}
+h1{font-size:23px;margin:18px 0 4px}
+h2{font-size:18px;margin:34px 0 10px;padding:8px 12px;background:var(--panel);border-left:4px solid var(--acc);border-radius:4px}
+h3{font-size:15.5px;margin:22px 0 8px;color:var(--acc)}
+p{margin:8px 0}
+code{background:#1d2330;padding:1px 5px;border-radius:4px;font-size:12.5px;color:#a5c8ff}
+table{border-collapse:collapse;width:100%;margin:10px 0;font-size:12.8px}
+th,td{border:1px solid var(--line);padding:5px 8px;text-align:left;vertical-align:top}
+th{background:#1a2030;color:#b9c4dc}
+tr:nth-child(even) td{background:#141822}
+.mut{color:var(--mut)}
+.good{color:var(--good);font-weight:600}
+.bad{color:var(--bad);font-weight:600}
+.warn{color:var(--warn);font-weight:600}
+.kpi{display:inline-block;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 16px;margin:6px 8px 6px 0}
+.kpi b{display:block;font-size:19px;color:var(--acc)}
+.box{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 16px;margin:12px 0}
+.risk{border-left:4px solid var(--bad)}
+.go{border-left:4px solid var(--good)}
+.hold{border-left:4px solid var(--warn)}
+.langsw{position:sticky;top:0;z-index:9;background:var(--bg);padding:10px 28px;border-bottom:1px solid var(--line)}
+.langsw label{cursor:pointer;padding:5px 18px;border:1px solid var(--line);border-radius:16px;margin-right:8px;color:var(--mut);user-select:none}
+#l-en:checked ~ .langsw label[for=l-en],
+#l-zh:checked ~ .langsw label[for=l-zh]{background:var(--acc);color:#0b0e14;border-color:var(--acc);font-weight:700}
+input[name=lang]{display:none}
+.lang-en,.lang-zh{display:none}
+#l-en:checked ~ .wrap .lang-en{display:block}
+#l-zh:checked ~ .wrap .lang-zh{display:block}
+</style>
+</head>
+<body>
+<input type="radio" name="lang" id="l-zh" checked>
+<input type="radio" name="lang" id="l-en">
+<div class="langsw">
+  <label for="l-zh">中文</label>
+  <label for="l-en">English</label>
+  <span class="mut" style="font-size:12px">P4 Optimization Proposal · 2026-07-22 · anchor data: op26 REPORT §9e/§9f (865-cell phase + sub-P4 breakdown, 13-cell NCU, umbriel-b200-037/093), op35 round-2 ledger, falsification history</span>
+</div>
+<div class="wrap">
+
+<!-- ================================================================ ZH -->
+<div class="lang-zh">
+<h1>P4 阶段优化方案(基于 §9e/§9f 耗时归因,kf PR#16457 head)</h1>
+<p class="mut">依据:§9e(P4 占 kernel 中位 44%,827/865 格最大相)+ §9f(P4 内部 8 子相全格定价 + 13 格 NCU 指令归账)。所有提案均已对照证伪史(12+ 条负结果、op35 round-2 台账)查重;天花板参照 op35 的松弛对照(清零全部 P4blk 的理论上界 geomean 1.578,现实堆叠上限 ~1.10–1.25)。</p>
+
+<div>
+<span class="kpi"><b>4.7 µs</b>cs=8 cluster 税 (wait+gather) = P4 的 47% = kernel 的 24%</span>
+<span class="kpi"><b>491/865</b>fine 递归为最大 P4 子相的格数 (1.5–1.8 µs, latency-bound)</span>
+<span class="kpi"><b>4.3–5.0 µs</b>核心选择 (minmax→scatter) 跨 rung 不变 → cluster 端膨胀 = 纯 wait+gather</span>
+<span class="kpi"><b>26×</b>K512 exact-tail 指令爆炸 (p4tt 门洞, flash_128k_L42)</span>
+</div>
+
+<h2>0 · 归因结论 → 靶点(一张表)</h2>
+<table>
+<tr><th>rung (格数)</th><th>P4 中位</th><th>子相构成(µs / 占 P4)</th><th>靶点</th></tr>
+<tr><td>cs1-small (320)</td><td>4.48 µs</td><td>fine 1.53/34% · scatter 0.83/18% · coarse-search 0.84/19% · minmax 0.44/9% · hist 0.52/11% · tail 0.32/7%</td><td>D2 (fine/search barrier)</td></tr>
+<tr><td>cs1-mid (218)</td><td>4.85 µs</td><td>fine 1.56/31% · scatter 1.21/25% · coarse-search 0.73/15%</td><td>D2</td></tr>
+<tr><td>cs4 (109)</td><td>8.27 µs</td><td><b>wait 1.34/14% + gather 1.78/21%</b> · fine 1.72/21% · scatter 1.44/17%</td><td>D1 + D2</td></tr>
+<tr><td>cs8 (218)</td><td>9.64 µs</td><td><b>wait 1.41/14% + gather 3.11/33%</b> · fine 1.75/17% · scatter 1.35/14%</td><td><b>D1</b> + D2</td></tr>
+</table>
+<p>NCU 佐证:cs≥4 kernel 级 stall 以 <b>barrier 23–24 cyc/issue</b> 居首;gather 段是 leader 单 CTA 的串行 generic-load 循环(LD.E 远端 SMEM);fine 段指令份额远低于周期份额(3 个 CTA barrier)→ <b>砍 barrier/串行段赢,砍 pass 输</b>(与证伪史 06-11 教训一致)。</p>
+
+<h2>1 · D1 distP4:分布式 P4(cs≥4,最大杠杆)</h2>
+<p><b>问题形态:</b>handoff#2 之后,leader 单 CTA 先串行拉取 各 peer 的候选 (值+索引 各 ~kC 条,LD.E 远端逐元素),再在合并缓冲上独自跑完整选择流水线;peers 全程空转陪跑(epilogue barrier 保活)。§9f 证明核心选择成本跨 rung 不变 → cluster P4 的全部增量 = 这段串行机制。</p>
+
+<h3>D1a · peer-push gather(第一步,小 diff,先行实验)</h3>
+<div class="box go">
+<p><b>设计:</b>方向反转——不让 leader 拉(1 CTA 串行),让每个 peer 在自己 collect 结束后立刻把自己的 (keys, vals) 段 <b>push</b> 到 leader SMEM 的预分配偏移区(<code>st.shared::cluster</code>,写侧需 release 语义:<code>cluster_arrive()</code> 而非 relaxed —— 见 DSMEM 竞态教训)。偏移 = 各 CTA 的 slice 前缀(collect 计数已在 handoff#1 交换过,或加一轮 4 字节计数交换)。leader 只等一个 barrier,gather 段消失。</p>
+<p><b>预期:</b>gather 3.11 µs → ~0.3–0.5 µs(32 线程 × cs 个 CTA 并行写,且与最慢 peer 的收尾天然重叠);peer_wait 部分被吸收(push 完即 arrive)。cs8 kernel ≈ −13–18%,cs4 ≈ −6–9%;全格(cluster 327/865)geomean 估 <b>+5–7%</b>。</p>
+<p><b>风险:</b>① DSMEM 写→读可见性(必须 release+acquire 对;历史上已翻过一次车,330/330 假绿);② 前缀偏移需要早一步可用(计数交换提前到 handoff#1);③ SMEM 容量不变(仍是同一块合并缓冲)。</p>
+</div>
+
+<h3>D1b · 分布式 rank + scatter(全量设计,D1a 之后)</h3>
+<div class="box hold">
+<p><b>设计:</b>候选根本不搬。① 各 CTA 在<b>本地</b>候选上并行建粗直方图(bin 定义共享:min/max 先做一轮 cluster 归约);② 直方图(512×4B)经 DSMEM 归约合并到 leader(或每 CTA 归约自己负责的 bin 段);③ leader(或 warp0)在合并直方图上找 b*/rank_above,细层同样分布式(各 CTA 只重扫自己的 bin-b* 候选);④ 各 CTA 用「全局 bin 前缀 + 本 CTA 段内前缀」直接把自己的候选 scatter 写到输出 GMEM——rank-scatter 的位置正确性由两级前缀保证,tie 类走既有 exact-tail(罕见,可回退 leader-only)。</p>
+<p><b>预期:</b>再吃掉核心选择的大头(4.8 µs 串行 → 本地扫描 cand/cs + 2–3 个 cluster barrier + 直方图合并);cs8 P4 有望 9.6 → ~4 µs,kernel ≈ −25%;全格 geomean 估 <b>+8–12%</b>(与 D1a 部分重叠,非线性叠加)。</p>
+<p><b>风险/边界:</b>① barrier 数增加(cluster 归约 ×2–3)——P4 恰是 barrier-bound,必须 nsys 净值判定;② min/max 与直方图 bin 参数需先行 cluster 归约(多一轮握手);③ exact-tail/p4tt 在分布式布局下的 tie 收集要重新推导(建议 v1 先回退 leader-only tail);④ op34 教训设界:多 CTA collect-only 的 oracle 上界 ≈ sglang 持平——不要以「反超 sglang」为验收目标。</p>
+</div>
+
+<h2>2 · D2 fine/coarse-search barrier 减负(全 rung,cs=1 主杠杆)</h2>
+<h3>D2a · 搜索段 warp0 化(op35 已点名,§9f 定价)</h3>
+<div class="box go">
+<p><b>设计:</b>粗搜索与细搜索的「per-warp 部分和 → barrier → thread0 选 warp → barrier → 目标 warp lane0 串行走」三步结构,每段花 2 个 CTA barrier + 2 段串行走。改为 <b>warp0 单 warp 完成</b>:512/256 个 bin 由 warp0 的 32 lane 每人 8–16 个 bin 做 warp 内反向前缀(<code>shfl</code> 扫描,无 CTA barrier),其余 warp 直接去等下一个必要 barrier。粗+细两段合计省 ~4 个 barrier + 2 段串行走。</p>
+<p><b>预期:</b>coarse-search 0.7–0.84 µs + fine 内搜索部分,估每格 −0.3–0.6 µs → 全格 geomean <b>+3–5%</b>(cs=1 收益最大,cluster 端同样适用)。</p>
+<p><b>风险:</b>低——纯 CTA 内重排,不碰跨 CTA 语义;对照证伪史无冲突(它砍 barrier,不加 pass)。</p>
+</div>
+
+<h3>D2b · 条件跳过细层(先探针,后实现)</h3>
+<div class="box hold">
+<p><b>设计:</b>当 <code>cnt[b*] ≤ K − rank_above</code>(骑跨 bin 全取)或 <code>cnt[b*]</code> 极小(直接 thread0 精选,类似 p4tt)时,细层的 re-zero+build+search 整段可跳过——省 1.5–1.8 µs 的整个 scan #3。证伪史注明该 fast-path 从未实现。<b>第 0 步是 10 分钟探针</b>:在 gvrpkgp4t 孪生上顺手 dump (cnt[b*], K−rank_above) 的 865 格分布,先量触发频率再决定做不做(触发率 &lt;10% 就放弃)。</p>
+<p><b>注意:</b>这是「砍 pass」类操作,但零协调成本(一个标量比较),不属于被证伪的「加协调换 pass」家族。</p>
+</div>
+
+<h2>3 · D3 p4tt 下探 K&lt;1024(tail 封顶,搭车在途 p4tt 战役)</h2>
+<div class="box go">
+<p><b>设计:</b>p4tt(小 tie 类 collect + thread0 精选)当前门 <code>top_k ≥ 1024</code>;K=512 触发 exact-tail 时只能走 4 级 radix 重写 → flash_128k_L42 付 5823 条 tail 指令(26×)、其 P4 的 41.6%。把 p4tt 门降到全 K(tie 类 ≤128 时),K512 的逃逸被封顶。改动量小(门条件 + 既有代码路径),与在途的 p4tt 快路径战役(RESUME_P4TT)同一改动面,应合并执行。</p>
+<p><b>预期:</b>中位无感(tail 中位仅 5–6%),尾部格 +5–40%(当前 2 个 K512 格 &gt;15%,34 个 v32 格 &gt;15% 已走 p4tt);本质是<b>鲁棒性/最差格</b>修复,符合 ship rule 的 worst-cell 约束。</p>
+</div>
+
+<h2>4 · 明确不做(证伪史 + §9f 双重排除)</h2>
+<table>
+<tr><th>路径</th><th>排除依据</th></tr>
+<tr><td>P4 内重播种/插值种子/二级直方图提前</td><td>06-11 双负结果:P4 snap/rank 对 reseeding 敌对;加协调 &gt; 省 pass</td></tr>
+<tr><td>scatter 与 fine-build 融合、hist 融合进 P3</td><td>op35 p4_fused_hist 已证伪(P3 扫描环污染 −15%);scatter 同址原子已证 wash(SM100 流水化)</td></tr>
+<tr><td>粗直方图 bin 瘦身/共享清零</td><td>kb512 已上线(K2048 bins=512);§9f 修正:成本跟候选量,不跟 bin 数</td></tr>
+<tr><td>P2/P3 端(admission、collect 量)</td><td>不在本提案范围;§9e 已单列(P2 refine 税 = secant/fb_fix 杠杆;kFTarget 缩 P3 过采仍开放但属 P3 战役)</td></tr>
+<tr><td>近似路径(跳细层不验证、approx rank-scatter)</td><td>production 精确性契约;§7b 865/865 exact 是 ship 基线</td></tr>
+</table>
+
+<h2>5 · 堆叠预期与实验计划</h2>
+<table>
+<tr><th>#</th><th>方案</th><th>范围</th><th>单项预期(格内)</th><th>全格 geomean 估计</th><th>风险</th><th>顺序</th></tr>
+<tr><td>D1a</td><td>peer-push gather</td><td>cs≥4 (327 格)</td><td>cs8 −13–18%, cs4 −6–9%</td><td class="good">+5–7%</td><td>中(DSMEM release 纪律)</td><td>①</td></tr>
+<tr><td>D2a</td><td>warp0 化搜索</td><td>全 865 格</td><td>−0.3–0.6 µs/格</td><td class="good">+3–5%</td><td>低</td><td>①(与 D1a 并行开发)</td></tr>
+<tr><td>D2b</td><td>条件跳细层</td><td>触发子集</td><td>−1.5–1.8 µs(触发格)</td><td class="mut">探针后定</td><td>低</td><td>0(先 10 分钟探针)</td></tr>
+<tr><td>D3</td><td>p4tt 全 K</td><td>tail 尾部格</td><td>尾部 +5–40%</td><td class="mut">中位无感,worst 修复</td><td>低</td><td>②(并入 p4tt 在途)</td></tr>
+<tr><td>D1b</td><td>分布式 rank+scatter</td><td>cs≥4</td><td>cs8 P4 减半</td><td class="good">+8–12%(与 D1a 重叠)</td><td class="warn">高(tie/前缀/barrier 净值)</td><td>③(D1a 数据决定 go/no-go)</td></tr>
+</table>
+<p><b>堆叠上限自检:</b>D1a+D2a+D3 ≈ +8–12%,加 D1b 后 ~+12–18%——落在 op35 松弛对照给出的现实区间(≤1.25),不与「清零全部 P4blk 才 1.578」矛盾。</p>
+<div class="box risk">
+<p><b>验证纪律(不可妥协):</b>① 每步先在 gvrpkgp4t 孪生上复测子相差分(改了什么就应该只有那段变);② ship 判定 = 3 轴 [worst, real, best] + 单卡背靠背配对 nsys cold-L2,≤2 并发 nsys、空闲节点;③ 865/865 exact + worst-cell ≥0.975 规则;④ 任何 cluster 语义改动过一遍 DSMEM release/acquire 检查单 + 强制命中路径的 forced-hit 精确性用例;⑤ 分派不得引入 hit-rate 条件(推理时不可知)。目的地 = 独立 follow-up PR(不进 #16457,沿 op35 先例)。</p>
+</div>
+</div>
+
+<!-- ================================================================ EN -->
+<div class="lang-en">
+<h1>P4 Optimization Proposal (grounded on the §9e/§9f attribution, kf PR#16457 head)</h1>
+<p class="mut">Basis: §9e (P4 = med 44% of kernel, largest phase in 827/865 cells) + §9f (8 sub-stage full-grid pricing + 13-cell NCU instruction accounting). Every proposal is checked against the falsification ledger (12+ negatives, op35 round-2). Ceiling context: op35's relaxed control — zeroing ALL of P4blk is only geomean 1.578; realistic stacks top out ~1.10–1.25.</p>
+
+<div>
+<span class="kpi"><b>4.7 µs</b>cs=8 cluster tax (wait+gather) = 47% of P4 = 24% of kernel</span>
+<span class="kpi"><b>491/865</b>cells where fine recursion is the largest P4 stage (1.5–1.8 µs, latency-bound)</span>
+<span class="kpi"><b>4.3–5.0 µs</b>core select (minmax→scatter) rung-invariant → cluster ballooning = pure wait+gather</span>
+<span class="kpi"><b>26×</b>K512 exact-tail instruction blow-up (p4tt gate hole, flash_128k_L42)</span>
+</div>
+
+<h2>0 · Attribution → targets (one table)</h2>
+<table>
+<tr><th>rung (cells)</th><th>P4 med</th><th>composition (µs / share of P4)</th><th>target</th></tr>
+<tr><td>cs1-small (320)</td><td>4.48 µs</td><td>fine 1.53/34% · scatter 0.83/18% · coarse-search 0.84/19% · minmax 0.44/9% · hist 0.52/11% · tail 0.32/7%</td><td>D2</td></tr>
+<tr><td>cs1-mid (218)</td><td>4.85 µs</td><td>fine 1.56/31% · scatter 1.21/25% · coarse-search 0.73/15%</td><td>D2</td></tr>
+<tr><td>cs4 (109)</td><td>8.27 µs</td><td><b>wait 1.34/14% + gather 1.78/21%</b> · fine 1.72/21% · scatter 1.44/17%</td><td>D1 + D2</td></tr>
+<tr><td>cs8 (218)</td><td>9.64 µs</td><td><b>wait 1.41/14% + gather 3.11/33%</b> · fine 1.75/17% · scatter 1.35/14%</td><td><b>D1</b> + D2</td></tr>
+</table>
+<p>NCU corroboration: at cs≥4 kernel-wide stalls are led by <b>barrier (23–24 cyc/issue)</b>; the gather segment is the leader's serial generic-load loop over remote SMEM; fine's instruction share is far below its cycle share (3 CTA barriers) → <b>cutting barriers/serial sections wins, cutting passes loses</b> (consistent with the 06-11 ledger lesson).</p>
+
+<h2>1 · D1 distP4: distribute P4 across cluster CTAs (cs≥4, biggest lever)</h2>
+<p><b>Shape of the problem:</b> after handoff #2 the leader serially pulls every peer's candidates (keys+vals, ~kC each, element-wise remote loads), then runs the whole select pipeline alone while peers idle at the epilogue barrier. §9f shows the core select cost is rung-invariant → the entire cluster-side P4 increment is this serial machinery.</p>
+
+<h3>D1a · peer-push gather (first experiment, small diff)</h3>
+<div class="box go">
+<p><b>Design:</b> invert the direction — each peer, right after its collect, <b>pushes</b> its (keys, vals) chunk into the leader's SMEM at a precomputed prefix offset (<code>st.shared::cluster</code>; writer needs release semantics — <code>cluster_arrive()</code>, not relaxed, per the DSMEM race lesson). Offsets come from the counts already exchanged at handoff #1 (or one extra 4-byte count exchange). The leader waits on one barrier; the gather segment disappears.</p>
+<p><b>Expected:</b> gather 3.11 µs → ~0.3–0.5 µs (32 threads × cs CTAs writing in parallel, naturally overlapped with the slowest peer's tail); part of peer-wait is absorbed. cs8 kernel ≈ −13–18%, cs4 ≈ −6–9%; grid geomean est. <b>+5–7%</b>.</p>
+<p><b>Risks:</b> DSMEM write→read visibility (release+acquire pair; we shipped this bug once before — 330/330 false-green), earlier availability of prefix offsets, no SMEM growth (same merged buffer).</p>
+</div>
+
+<h3>D1b · distributed rank + scatter (full design, after D1a)</h3>
+<div class="box hold">
+<p><b>Design:</b> never move candidates. ① each CTA builds a local coarse histogram over its own candidates (shared bin params via one cluster min/max reduction); ② histograms (512×4B) merge via DSMEM reduction; ③ b*/rank_above found on the merged histogram (warp0), fine level equally distributed (each CTA rescans only its own bin-b* candidates); ④ each CTA scatters its own candidates straight to output GMEM using global-bin-prefix + per-CTA-segment-prefix — rank contiguity guaranteed by the two-level prefix; ties fall back to leader-only exact-tail in v1.</p>
+<p><b>Expected:</b> also eats the leader-only core select (4.8 µs serial → cand/cs local scans + 2–3 cluster barriers + histogram merge); cs8 P4 9.6 → ~4 µs, kernel ≈ −25%; grid est. <b>+8–12%</b> (overlaps D1a, not additive).</p>
+<p><b>Risks/bounds:</b> extra cluster barriers in a barrier-bound phase (nsys net verdict mandatory); bin-param pre-reduction handshake; distributed tie collection deferred to v1-fallback; and the op34 bound — the multi-CTA collect-only oracle ≈ sglang parity, so "beat sglang" must not be the acceptance bar.</p>
+</div>
+
+<h2>2 · D2 fine/coarse-search barrier diet (all rungs, main cs=1 lever)</h2>
+<h3>D2a · warp0-ized searches (named by op35, now priced by §9f)</h3>
+<div class="box go">
+<p><b>Design:</b> both 3-step searches (per-warp partial sums → barrier → thread0 picks warp → barrier → target-warp lane0 serial walk) become a single-warp job: warp0's 32 lanes cover 512/256 bins at 8–16 bins/lane with a warp-local reverse prefix (<code>shfl</code> scan, no CTA barriers). Saves ~4 barriers + 2 serial walks across coarse+fine.</p>
+<p><b>Expected:</b> −0.3–0.6 µs/cell → grid <b>+3–5%</b> (largest at cs=1, applies everywhere). Risk low: CTA-internal only; cuts barriers, adds no pass — no ledger conflict.</p>
+</div>
+
+<h3>D2b · conditional fine-level skip (probe first)</h3>
+<div class="box hold">
+<p><b>Design:</b> when <code>cnt[b*] ≤ K − rank_above</code> (whole straddling bin taken) or cnt[b*] tiny (thread0 direct select, p4tt-style), skip the fine re-zero+build+search entirely — saves the whole 1.5–1.8 µs scan #3. The ledger notes this fast-path was never implemented. <b>Step 0 is a 10-minute probe</b>: dump (cnt[b*], K−rank_above) across the 865 grid on the gvrpkgp4t twin; drop the idea if trigger rate &lt;10%. This cuts a pass at zero coordination cost (one scalar compare) — not in the falsified add-coordination family.</p>
+</div>
+
+<h2>3 · D3 p4tt below K=1024 (tail cap; merge into the in-flight p4tt campaign)</h2>
+<div class="box go">
+<p><b>Design:</b> p4tt currently gates on <code>top_k ≥ 1024</code>; K=512 exact-tail firings run the 4-level radix (flash_128k_L42: 5823 tail inst, 26×, 41.6% of its P4). Lower the gate to all K (tie class ≤128). Small diff on the same surface as the in-flight p4tt fast-path work (RESUME_P4TT) — execute together. Median-invisible (tail med 5–6%), tail cells +5–40%; a worst-cell robustness fix aligned with the ship rule.</p>
+</div>
+
+<h2>4 · Explicit non-goals (double-excluded by ledger + §9f)</h2>
+<table>
+<tr><th>path</th><th>exclusion basis</th></tr>
+<tr><td>P4-internal reseeding / interp seed / early fine hist</td><td>06-11 double negative: P4 walk is hostile to reseeding; coordination &gt; saved passes</td></tr>
+<tr><td>scatter+fine-build fusion, hist fused into P3</td><td>op35 p4_fused_hist falsified (P3 loop pollution −15%); same-address atomics = wash on SM100</td></tr>
+<tr><td>coarse-hist bin dieting / shared zeroing</td><td>kb512 already shipped; §9f correction: cost tracks candidate volume, not bins</td></tr>
+<tr><td>P2/P3 side (admission, collect volume)</td><td>out of scope; §9e covers it (P2 refine tax = secant/fb_fix levers; kFTarget for P3 over-collect stays a P3 campaign)</td></tr>
+<tr><td>approximate paths</td><td>production exactness contract; 865/865 exact is the ship baseline</td></tr>
+</table>
+
+<h2>5 · Stack estimate & experiment plan</h2>
+<table>
+<tr><th>#</th><th>lever</th><th>scope</th><th>per-cell expectation</th><th>grid geomean est.</th><th>risk</th><th>order</th></tr>
+<tr><td>D1a</td><td>peer-push gather</td><td>cs≥4 (327 cells)</td><td>cs8 −13–18%, cs4 −6–9%</td><td class="good">+5–7%</td><td>medium (DSMEM release discipline)</td><td>①</td></tr>
+<tr><td>D2a</td><td>warp0-ized searches</td><td>all 865</td><td>−0.3–0.6 µs/cell</td><td class="good">+3–5%</td><td>low</td><td>① (parallel to D1a)</td></tr>
+<tr><td>D2b</td><td>conditional fine skip</td><td>triggering subset</td><td>−1.5–1.8 µs (when firing)</td><td class="mut">decide after probe</td><td>low</td><td>0 (10-min probe first)</td></tr>
+<tr><td>D3</td><td>p4tt all-K</td><td>tail cells</td><td>tail +5–40%</td><td class="mut">median-invisible; worst-cell fix</td><td>low</td><td>② (merge w/ p4tt in-flight)</td></tr>
+<tr><td>D1b</td><td>distributed rank+scatter</td><td>cs≥4</td><td>cs8 P4 halved</td><td class="good">+8–12% (overlaps D1a)</td><td class="warn">high (ties/prefix/barrier net)</td><td>③ (go/no-go on D1a data)</td></tr>
+</table>
+<p><b>Self-check vs ceiling:</b> D1a+D2a+D3 ≈ +8–12%; with D1b ~+12–18% — inside op35's realistic band (≤1.25), consistent with "zeroing all P4blk is only 1.578".</p>
+<div class="box risk">
+<p><b>Verification discipline (non-negotiable):</b> ① re-measure sub-stage deltas on the gvrpkgp4t twin after each step (only the touched stage should move); ② ship verdicts = 3 axes [worst, real, best] + same-GPU back-to-back paired nsys cold-L2, ≤2 concurrent nsys on an idle node; ③ 865/865 exact + worst-cell ≥0.975 rule; ④ any cluster-semantics change passes the DSMEM release/acquire checklist + a forced-hit exactness fixture; ⑤ no hit-rate dispatch (unknowable at inference). Destination = separate follow-up PR (not #16457, per the op35 precedent).</p>
+</div>
+</div>
+
+</div>
+</body>
+</html>

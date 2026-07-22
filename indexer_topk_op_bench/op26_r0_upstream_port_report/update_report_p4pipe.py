@@ -112,9 +112,10 @@ flash_128k_L42 (hit 0.86) pays <b>5823 tail instructions (26&times; the non-firi
 exact-tail cell. Across the grid the tail is benign at the median (5&ndash;6% of P4) but 34 v32
 (K=2048) cells and 2 K=512 cells exceed 15%; extending p4tt below K=1024 (or seeding its collect
 with the fine-bin count) caps the K=512 escape.</li>
-<li><b>coarse-hist prices the kNumBins=K zeroing.</b> Its cost steps with K: med 0.37 / 0.50 /
-0.60&thinsp;µs for K=512/1024/2048 — the re-zero + scatter-add over K bins; a shared-zero or
-smaller first-level histogram is worth ~0.2&thinsp;µs on v32 only.</li>
+<li><b>coarse-hist cost tracks candidate volume, not bin count.</b> The measured head already
+ships kb512 (kNumBins=512 at K=2048, 1024 at K=512), yet coarse-hist still steps med 0.37 / 0.50 /
+0.60&thinsp;µs for K=512/1024/2048 — the step follows the candidate-buffer build scan (kC &prop; K),
+not the zeroing. Bin-count dieting has no remaining headroom here.</li>
 <li><b>Degenerate copy-out exists at the same 3 tiny-N cells as §9e</b> (flash_4k_L06,
 pro_4k_L02/L16): cand==K collapses the pipeline; P4 falls to a 0.2&ndash;0.5&thinsp;µs copy.</li>
 <li><b>Stall-reason profile agrees: clusters wait, single CTAs starve on icache.</b> Kernel-wide
@@ -155,8 +156,9 @@ K=512 一旦触发 exact-tail 只能走 4 级 radix 重写:flash_128k_L42(hit 0.
 "+10% 插桩税异常格"实为 exact-tail 格。全网格看 tail 中位无害(P4 的 5&ndash;6%),但 34 个 v32
 (K=2048)格与 2 个 K=512 格超过 15%;把 p4tt 下探到 K&lt;1024(或用细 bin 计数种子其 collect)
 可封死 K=512 逃逸。</li>
-<li><b>粗直方图定价了 kNumBins=K 的清零。</b>成本随 K 阶梯:K=512/1024/2048 中位 0.37 / 0.50 /
-0.60&thinsp;µs——K 个 bin 的重清零 + scatter-add;共享清零或更小的一级直方图只在 v32 上值 ~0.2&thinsp;µs。</li>
+<li><b>粗直方图成本跟随候选量,而非 bin 数。</b>测量 head 已含 kb512(K=2048 时 kNumBins=512,
+K=512 时 1024),但粗直方图仍按 K=512/1024/2048 阶梯到中位 0.37 / 0.50 / 0.60&thinsp;µs——阶梯来自
+候选缓冲(kC &prop; K)的 build 扫描,不是清零;bin 数瘦身已无剩余空间。</li>
 <li><b>退化 copy-out 与 §9e 完全同 3 个极小 N 格</b>(flash_4k_L06、pro_4k_L02/L16):cand==K 使
 流水线塌缩;P4 降为 0.2&ndash;0.5&thinsp;µs 的拷贝。</li>
 <li><b>stall 原因画像独立吻合:cluster 在等,单 CTA 在饿指令。</b>NCU kernel 级 stall 排名从
@@ -365,16 +367,18 @@ if(window.Plotly) pqDrawAll(); else window.addEventListener('load',pqDrawAll);
 <div class="lang-en">{FINDINGS_EN}</div>
 <div class="lang-zh">{FINDINGS_ZH}</div>
 {bi(
-"<b>Lever map (ordered by ceiling on this grid).</b> ① distP4 — parallelize/overlap the leader-only "
-"DSMEM gather and absorb the peer wait: up to ~4.7&thinsp;µs/cell at cs=8, ~3.0 at cs=4 (24%/17% of "
-"kernel). ② fine-recursion barrier diet / build+search fusion: 1.5&ndash;1.8&thinsp;µs everywhere, "
-"latency not work. ③ p4tt below K=1024: caps the 26&times; tail escapes (2 K=512 cells today, but "
-"the class is input-dependent). ④ coarse-hist zero sharing at K=2048: ~0.2&thinsp;µs, v32 only.",
-"<b>杠杆图(按本网格上限排序)。</b>① distP4——并行化/重叠 leader 独占的 DSMEM gather 并吸收 "
-"peer 等待:cs=8 每格最多 ~4.7&thinsp;µs,cs=4 ~3.0(kernel 的 24%/17%)。② 细递归 barrier 减负 / "
-"build+search 融合:各处 1.5&ndash;1.8&thinsp;µs,砍延迟不砍工作量。③ p4tt 下探 K&lt;1024:封顶 "
-"26&times; 的 tail 逃逸(当前 2 个 K=512 格,但该类随输入漂移)。④ K=2048 粗直方图共享清零:"
-"~0.2&thinsp;µs,仅 v32。")}
+"<b>Lever map (ordered by ceiling on this grid; see PROPOSAL_P4_OPT.html for designs).</b> "
+"① distP4 — parallelize/overlap the leader-only DSMEM gather and absorb the peer wait: up to "
+"~4.7&thinsp;µs/cell at cs=8, ~3.0 at cs=4 (24%/17% of kernel). ② fine-recursion barrier diet "
+"(warp0-ized searches, conditional fine skip): 1.5&ndash;1.8&thinsp;µs everywhere, latency not "
+"work. ③ p4tt below K=1024: caps the 26&times; tail escapes (2 K=512 cells today, but the class "
+"is input-dependent). Coarse-hist bin dieting is DEAD (kb512 already shipped; cost is "
+"candidate-volume).",
+"<b>杠杆图(按本网格上限排序;设计见 PROPOSAL_P4_OPT.html)。</b>① distP4——并行化/重叠 leader "
+"独占的 DSMEM gather 并吸收 peer 等待:cs=8 每格最多 ~4.7&thinsp;µs,cs=4 ~3.0(kernel 的 "
+"24%/17%)。② 细递归 barrier 减负(搜索 warp0 化、条件跳过细层):各处 1.5&ndash;1.8&thinsp;µs,"
+"砍延迟不砍工作量。③ p4tt 下探 K&lt;1024:封顶 26&times; 的 tail 逃逸(当前 2 个 K=512 格,"
+"但该类随输入漂移)。粗直方图 bin 瘦身已死(kb512 已上线;成本来自候选量)。")}
 <details><summary class="mut"><span class="lang-en">per (model, ISL) P4 sub-stage share table — median across layers</span><span class="lang-zh">逐 (model, ISL) P4 子相份额表——跨 layer 中位</span></summary>
 {mi_table()}
 </details>
