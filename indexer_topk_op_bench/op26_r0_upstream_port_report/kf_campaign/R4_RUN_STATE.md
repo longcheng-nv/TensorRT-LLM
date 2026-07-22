@@ -90,3 +90,7 @@ Updated 2026-07-22 (会话暂停：用户要求迁移到另一台机器)。
   (清场后仍 66-85% util / 56-74GB 常驻)→ 分母 grid 限 GPU4-7。
 - r4pr2 重跑 IN-FLIGHT: 4 shards,GPU4-7,launch 后 pgrep 核对 = 恰好
   4 nsys + 4 python,单 driver 洁净。
+- **T3 DONE (r4pr2)**: 865 格 pinned-head 分母 grid,GPU4-7 单 driver,
+  **865/865 exact**;grid_r4pr2.csv(pr_cold/pr_warm)。同节点锚:与
+  parity04a0 28 格重叠 gm=1.0079(0.8%,±尾 0.881/1.092 为小 N 冷噪声);
+  跨节点 R3 锚不可用(既有教训)。此 grid 即本节点后续所有 rung 锚基准。
