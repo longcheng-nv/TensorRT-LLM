@@ -190,6 +190,22 @@ fix). Next levers to close 1.6x: D2 sampled-estimate single-pass collect
 (~40% byte cut), K2+K3 fusion for whole-bucket rows, C shape at BS 32-64.
 ext/RESULTS.md final section.
 
+**D2 sampled-estimate single-pass DONE (2026-07-22): 1.6x target
+effectively met — best-arm gm BS 8-1024 = 1.597x vs PR head (D1 1.489).**
+tp2 = whole-row uniform 1/16 sample -> budget-driven b_safe (deepest bucket
+with expected cand <= CAP2/2; no delta hyperparameter) -> single full-read
+candidate collect -> exact candidate-set finish; cand>=k superset invariant
++ count-check fallback (adversarial rows fall back, stay exact). 48/48
+exact, fb=0 on real cells. tp2/gvr pooled 2.37x @BS256 / 2.67x @BS1024;
+per-arm winner: v4 @8, tp @16, tp2 @32-256 (+fl1024=tp). Residual valley
+BS 16-32 only (0.88-1.17 — gvr latency-flat denominator). Lessons: (i)
+sampling MUST be spatially uniform — slice-based block sampling biased the
+estimate on real positionally-structured rows (pro 100% fallback; host-sim
+diagnosis); (ii) ballot-aggregation tax lesson now learned TWICE (1-4% hit
+rate => plain atomics). Known issue: flash@1024 tp2_collect +50us on equal
+bytes (bursty same-address atomics suspected) — best-arm dispatch covers.
+ext/RESULTS.md D2 section; tp2_bs.csv.
+
 One-line thesis: the collapse is a misallocated parallelism axis, not an
 algorithm loss — reallocate the co-residency budget from "1 row x whole GPU"
 to "BS rows x ceil(n/2048)-CTA teams"; the barrier demotes to team scope

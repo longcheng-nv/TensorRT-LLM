@@ -164,3 +164,44 @@ floor. Next levers (D2 iteration): sampled-estimate single-pass collect
 (cuts ~40% of tp bytes), K2+K3 fusion for whole-bucket rows, C shape tuning
 at BS 32-64. Estimated to close the 1.6x gap; out of minimal-validation
 scope.
+
+## D2 sampled-estimate single-pass — DONE: target effectively met
+## (best-arm gm 1.597x vs 1.6 goal over BS 8-1024)
+
+Pipeline (apply_d2_edits.py + 2 in-experiment fixes): tp2_sample (whole-row
+uniform 1/16 block sampling, one CTA/row, sampled-total recorded for robust
+scaling) -> tp2_collect (ONE full read; b_safe = budget-driven boundary =
+deepest bucket with expected candidates <= CAP2/2=4096 from the sampled
+suffix — NO delta hyperparameter; (key,idx) hits -> candbuf, plain per-hit
+atomics) -> tp2_finish (exact top-k among <= 8192 candidates via MSB hist +
+arena refine; count checks route pathologies to a full in-CTA fallback).
+Invariant: cand_count >= k <=> top-k subset of candidates; adversarial rows
+(const / 3-level, forced ladder) all fall back and stay exact.
+
+In-experiment iterations (both diagnosed, not guessed):
+1. v1 (delta=2, slice-based sampling) -> pro fell back 100%: block sampling
+   inherited K1's slicing and only covered the FIRST HALF of each slice at
+   C=32 — real rows have strong POSITIONAL structure, so the sampled hist
+   was spatially biased (host-side unbiased sim showed cand=1153, fine).
+   Fix: whole-row uniform sampling, slice-independent.
+2. Warp-aggregated candbuf atomics re-introduced the per-element ballot tax
+   (lesson learned TWICE now): hits are 1-4% -> plain atomics. Reverted.
+
+nsys cold-L2 verdict (tp2_bs.csv, 48/48 exact, fb=0 on all real cells):
+
+| BS | tp2/gvr (fl/pro) | best arm | best/gvr pooled (was D1) |
+|---|---|---|---|
+| 8 | 1.32 / 1.17 | ext_v4 | 1.88 (1.88) |
+| 16 | 1.13 / 0.99 | tp | 1.17 (1.19) |
+| 32 | 0.92 / 0.84 | tp2 | 0.88 (0.85) |
+| 64 | 1.32 / 1.25 | tp2 | 1.29 (1.12) |
+| 256 | 2.40 / 2.33 | tp2 | 2.37 (1.97) |
+| 1024 | 2.79 / 2.56 | tp(fl)/tp2(pro) | 2.81 (2.60) |
+
+**OVERALL best-arm gm BS 8-1024 = 1.597x vs PR head (target 1.6, D1 was
+1.489).** Residual valley = BS 16-32 only (gvr's latency-flat denominator).
+Known issue: flash@BS1024 tp2_collect runs ~+50us over tp_collect on equal
+bytes (suspected bursty same-address candidate atomics from spatially
+clustered winners); pro unaffected; best-arm dispatch covers it (tp wins
+that point). Expected-bytes model validated: pro tp2 @BS256 61us vs tp 82us
+(1.35x from the saved pass).
