@@ -81,3 +81,12 @@ Updated 2026-07-22 (会话暂停：用户要求迁移到另一台机器)。
   GPU0-3(62-82% util,19-75GB,R3 D3 同款)→ 新驱动
   drive_grid_pr_gpulist.sh 只用安静 GPU4-7,4 shards。
 - 监控:monitor_campaign.sh 后台轮询(round advance / +0.02 / terminal 退出)。
+- **事故记录(r4pr 作废)**: 第一次 8-shard 启动被误判为失败(tail 时序竞态,
+  grid_logs 实为 R3 遗留已存在,setsid 作业实际已跑起来占满 GPU0-7);
+  其 GPU0-3 负载被误读为"外来作业",随即又叠发 4-shard gpulist 同 tag 同
+  rep 文件 → 双 driver + last-writer 混写,r4pr 全部作废并隔离至
+  nsys_reps/INVALID_r4pr/。教训:relaunch 前必须 pgrep+GPU util 双确认
+  上一发真死;同 tag 严禁二次发射。另确认 GPU0/2/3 确有真实外来负载
+  (清场后仍 66-85% util / 56-74GB 常驻)→ 分母 grid 限 GPU4-7。
+- r4pr2 重跑 IN-FLIGHT: 4 shards,GPU4-7,launch 后 pgrep 核对 = 恰好
+  4 nsys + 4 python,单 driver 洁净。
