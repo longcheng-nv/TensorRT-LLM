@@ -118,3 +118,12 @@ Updated 2026-07-22 (会话暂停：用户要求迁移到另一台机器)。
   锚检查: 25 rung 中 4 个 med 漂移 3.4-7.3%(跨 GPU 集合可解释;配对比值
   不受影响;ship 级判决需漂移补测)。vs Bar: Bar-3 PASS / Bar-1 1.295<1.60 /
   Bar-2 FAIL(78)。round 1 仍在演进,继续监控。
+- **r1_bbe9b903 收割**(`gvr_topk_cuda_v10_tbtier`, 内部 1.0727): TB 模板化 +
+  npad≤kC 加 1024 线程单 CTA 档(独立重发现第一期 sb17 方向)。28-cell 探针:
+  **cold gm 1.3771, 28/28 exact, 1 边界**(flash_32k_L16 0.985)。v32_4k 大幅
+  改善(1.151→1.463)。8-16K 弱带 dispatch 未动,预计仍在。
+- 环境: 外来 ~168GB 常驻显存已扩散至 GPU4/6/7(util 0%,纯 parked);
+  GPU5 唯一全净。v10 探针在 GPU6 带 parked 内存下跑,pr 臂读数与干净跑
+  一致(噪声内),结果采信但注记。
+- 策略: round 内每个新 best 仅探针;全格判决留 round 收口/平台期
+  (全格 ~30min,round 内 best 每 ~30min 在涨,逐一全格浪费)。
