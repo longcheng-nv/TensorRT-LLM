@@ -38,3 +38,9 @@ FIX 1 (correctness): overflow predicate must be true_n > n_stored (single-chunk 
 FIX 2 (v3): K0 = min-hint + position-unbiased STRIDED row sample (S<=8192), t = max(hint, sample quantile @ ~2K target) -> rescue now rare (K2 1.3us), all cells exact.
 Status after v3b (T=2K, 2-level sample select, adaptive S): loss band event-axis 0.24-0.71 vs pr — threshold machinery tax ~3.5x over the oracle bound (gm 1.37 nsys). K0 ~12us + K1 ~29us at pro_64k BS16 vs oracle-K1 ~9us.
 Next levers: (a) K0 -> <=3us: parallel suffix scan, fold hint+sample single pass, cut serial 256-loops; (b) K1 reduce single-level 2048-bucket for n~2K; (c) consider K0-into-K1 fusion or persistent cooperative launch; then nsys re-screen + full-envelope sweep.
+
+## iter 5 — 2026-07-23 — GO (threshold-tax reduction, in progress)
+Warp-parallel suffix search (replaces thread0 serial bucket scan in both reducer and K0 sampler; the serial scan was ~12us exposed at low-BS reducers) + fixed-point sample stride + T=2K target + 2-level sample select + adaptive S.
+nsys split pro_64k BS16: K0 8.9->6.1us, K1 20.9->17.5us, K2 1.35us (rescue quiet). Event-axis loss band now 0.28-0.75 (from 0.18-0.71 pre-warp-scan; was 0.02-0.05 at iter4 v1).
+Gap to oracle bound (fused 9.2us nsys at this cell): K1 +8us (2x candidates from T=2K + 4-level reduce exposure), K0 6.1us should be <=2.
+Named next levers: (a) K1 reduce single-level 2048-bucket (11-bit) for n~2K; (b) K0: S=2048, fuse hint+sample phases, skip sample when npad<=CAP; (c) re-screen nsys 8-cell battleground w/ production thresholds vs oracle f1; (d) win-band check: pro_1024k BS256 event 148 vs oracle event 76 — verify rescue/threshold behavior on low-hit L46 big cells; (e) dispatch: arm only where it wins + op38 v3 elsewhere, then full-envelope sweep + [worst,real,best].

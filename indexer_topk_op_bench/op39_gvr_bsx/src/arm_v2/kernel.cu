@@ -62,21 +62,31 @@ __device__ void sample_kth_key(const float* sv, int n, int need0,
       if (!lane) S.wsum[warp] = v;
     }
     __syncthreads();
-    if (threadIdx.x == 0) {
-      unsigned cum = 0;
-      int g = 7;
-      for (; g > 0; --g) {
-        if (cum + S.wsum[g] >= (unsigned)need) break;
-        cum += S.wsum[g];
+    if (threadIdx.x < 32) {
+      // warp-parallel suffix search: lane l holds wsum[7-l] (l<8), suffix-scan
+      unsigned wv = (lane < 8) ? S.wsum[7 - lane] : 0u;
+      unsigned ws = wv;
+      for (int o = 1; o < 8; o <<= 1) {
+        unsigned p = __shfl_up_sync(0xffffffffu, ws, o);
+        if (lane >= o) ws += p;
       }
-      unsigned tb = g * 32;
-      for (int b = g * 32 + 31; b >= g * 32; --b) {
-        unsigned c = S.hist[b];
-        if (cum + c >= (unsigned)need) { tb = b; break; }
-        cum += c;
+      unsigned gm = __ballot_sync(0xffffffffu, lane < 8 && ws >= (unsigned)need);
+      int gl = __ffs(gm) - 1;
+      int g = 7 - gl;
+      unsigned above_g = __shfl_sync(0xffffffffu, ws - wv, gl);
+      unsigned hv = S.hist[g * 32 + 31 - lane];
+      unsigned hs = hv;
+      for (int o = 1; o < 32; o <<= 1) {
+        unsigned p = __shfl_up_sync(0xffffffffu, hs, o);
+        if (lane >= o) hs += p;
       }
-      S.thr_bucket = tb;
-      S.ocur = (int)cum;
+      unsigned bm = __ballot_sync(0xffffffffu, above_g + hs >= (unsigned)need);
+      int bl = __ffs(bm) - 1;
+      unsigned hs_b = __shfl_sync(0xffffffffu, hs - hv, bl);
+      if (lane == 0) {
+        S.thr_bucket = g * 32 + 31 - bl;
+        S.ocur = (int)(above_g + hs_b);
+      }
     }
     __syncthreads();
     need -= S.ocur;
@@ -122,8 +132,9 @@ thresh_kernel(const float* __restrict__ logits, const int* __restrict__ pre_idx,
     __shared__ float sv[S_MAX];
     __shared__ RedSmemT SS;
     __shared__ unsigned skey;
+    const unsigned step = ((unsigned)npad << 12) / S_N;  // fixed-point 20.12
     for (int j = threadIdx.x; j < S_N; j += blockDim.x)
-      sv[j] = lg[(size_t)j * npad / S_N];
+      sv[j] = lg[((unsigned)j * step) >> 12];
     __syncthreads();
     long r = (long)S_N * (2 * K) / npad;   // target ~2K candidates
     int rk = (int)max(1L, min((long)S_N, r));
@@ -172,21 +183,31 @@ __device__ void exact_topk_from(const float* __restrict__ src_val,
       if (!lane) S.wsum[warp] = v;
     }
     __syncthreads();
-    if (threadIdx.x == 0) {
-      unsigned cum = 0;
-      int g = 7;
-      for (; g > 0; --g) {
-        if (cum + S.wsum[g] >= (unsigned)need) break;
-        cum += S.wsum[g];
+    if (threadIdx.x < 32) {
+      // warp-parallel suffix search: lane l holds wsum[7-l] (l<8), suffix-scan
+      unsigned wv = (lane < 8) ? S.wsum[7 - lane] : 0u;
+      unsigned ws = wv;
+      for (int o = 1; o < 8; o <<= 1) {
+        unsigned p = __shfl_up_sync(0xffffffffu, ws, o);
+        if (lane >= o) ws += p;
       }
-      unsigned tb = g * 32;
-      for (int b = g * 32 + 31; b >= g * 32; --b) {
-        unsigned c = S.hist[b];
-        if (cum + c >= (unsigned)need) { tb = b; break; }
-        cum += c;
+      unsigned gm = __ballot_sync(0xffffffffu, lane < 8 && ws >= (unsigned)need);
+      int gl = __ffs(gm) - 1;
+      int g = 7 - gl;
+      unsigned above_g = __shfl_sync(0xffffffffu, ws - wv, gl);
+      unsigned hv = S.hist[g * 32 + 31 - lane];
+      unsigned hs = hv;
+      for (int o = 1; o < 32; o <<= 1) {
+        unsigned p = __shfl_up_sync(0xffffffffu, hs, o);
+        if (lane >= o) hs += p;
       }
-      S.thr_bucket = tb;
-      S.ocur = (int)cum;  // strictly-above count at this level
+      unsigned bm = __ballot_sync(0xffffffffu, above_g + hs >= (unsigned)need);
+      int bl = __ffs(bm) - 1;
+      unsigned hs_b = __shfl_sync(0xffffffffu, hs - hv, bl);
+      if (lane == 0) {
+        S.thr_bucket = g * 32 + 31 - bl;
+        S.ocur = (int)(above_g + hs_b);
+      }
     }
     __syncthreads();
     unsigned tb = S.thr_bucket;
