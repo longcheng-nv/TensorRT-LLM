@@ -1,0 +1,2002 @@
+{
+ "flash_1024k_L10_bs2|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_1024k_L10_bs2|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_1024k_L10_bs16|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_1024k_L10_bs16|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_1024k_L10_bs128|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_1024k_L10_bs128|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_1024k_L10_bs1024|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_1024k_L10_bs1024|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_1024k_L22_bs8|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_1024k_L22_bs8|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_1024k_L22_bs64|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_1024k_L22_bs64|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_1024k_L22_bs512|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_1024k_L22_bs512|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_1024k_L34_bs4|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_1024k_L34_bs4|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_1024k_L34_bs32|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_1024k_L34_bs32|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_1024k_L34_bs256|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_1024k_L34_bs256|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_128k_L10_bs2|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_128k_L10_bs2|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_128k_L10_bs16|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_128k_L10_bs16|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_128k_L10_bs128|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_128k_L10_bs128|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_128k_L10_bs1024|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_128k_L10_bs1024|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_128k_L22_bs8|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_128k_L22_bs8|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_128k_L22_bs64|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_128k_L22_bs64|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_128k_L22_bs512|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_128k_L22_bs512|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_128k_L34_bs4|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_128k_L34_bs4|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_128k_L34_bs32|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_128k_L34_bs32|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_128k_L34_bs256|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_128k_L34_bs256|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_16k_L10_bs2|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_16k_L10_bs2|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_16k_L10_bs16|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_16k_L10_bs16|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_16k_L10_bs128|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_16k_L10_bs128|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_16k_L10_bs1024|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_16k_L10_bs1024|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_16k_L22_bs8|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_16k_L22_bs8|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_16k_L22_bs64|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_16k_L22_bs64|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_16k_L22_bs512|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_16k_L22_bs512|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_16k_L34_bs4|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_16k_L34_bs4|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_16k_L34_bs32|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_16k_L34_bs32|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_16k_L34_bs256|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_16k_L34_bs256|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_256k_L10_bs2|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_256k_L10_bs2|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_256k_L10_bs16|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_256k_L10_bs16|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_256k_L10_bs128|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_256k_L10_bs128|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_256k_L10_bs1024|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_256k_L10_bs1024|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_256k_L22_bs8|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_256k_L22_bs8|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_256k_L22_bs64|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_256k_L22_bs64|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_256k_L22_bs512|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_256k_L22_bs512|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_256k_L34_bs4|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_256k_L34_bs4|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_256k_L34_bs32|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_256k_L34_bs32|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_256k_L34_bs256|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_256k_L34_bs256|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_32k_L10_bs2|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_32k_L10_bs2|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_32k_L10_bs16|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_32k_L10_bs16|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_32k_L10_bs128|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_32k_L10_bs128|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_32k_L10_bs1024|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_32k_L10_bs1024|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_32k_L22_bs8|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_32k_L22_bs8|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_32k_L22_bs64|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_32k_L22_bs64|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_32k_L22_bs512|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_32k_L22_bs512|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_32k_L34_bs4|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_32k_L34_bs4|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_32k_L34_bs32|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_32k_L34_bs32|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_32k_L34_bs256|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_32k_L34_bs256|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_4k_L10_bs2|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_4k_L10_bs2|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_4k_L10_bs16|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_4k_L10_bs16|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_4k_L10_bs128|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_4k_L10_bs128|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_4k_L10_bs1024|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_4k_L10_bs1024|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_4k_L22_bs8|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_4k_L22_bs8|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_4k_L22_bs64|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_4k_L22_bs64|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_4k_L22_bs512|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_4k_L22_bs512|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_4k_L34_bs4|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_4k_L34_bs4|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_4k_L34_bs32|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_4k_L34_bs32|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_4k_L34_bs256|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_4k_L34_bs256|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_512k_L10_bs2|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_512k_L10_bs2|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_512k_L10_bs16|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_512k_L10_bs16|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_512k_L10_bs128|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_512k_L10_bs128|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_512k_L10_bs1024|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_512k_L10_bs1024|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_512k_L22_bs8|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_512k_L22_bs8|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_512k_L22_bs64|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_512k_L22_bs64|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_512k_L22_bs512|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_512k_L22_bs512|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_512k_L34_bs4|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_512k_L34_bs4|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_512k_L34_bs32|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_512k_L34_bs32|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_512k_L34_bs256|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_512k_L34_bs256|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_64k_L10_bs2|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_64k_L10_bs2|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_64k_L10_bs16|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_64k_L10_bs16|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_64k_L10_bs128|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_64k_L10_bs128|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_64k_L10_bs1024|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_64k_L10_bs1024|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_64k_L22_bs8|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_64k_L22_bs8|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_64k_L22_bs64|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_64k_L22_bs64|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_64k_L22_bs512|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_64k_L22_bs512|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_64k_L34_bs4|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_64k_L34_bs4|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_64k_L34_bs32|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_64k_L34_bs32|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_64k_L34_bs256|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_64k_L34_bs256|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_8k_L10_bs2|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_8k_L10_bs2|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_8k_L10_bs16|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_8k_L10_bs16|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_8k_L10_bs128|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_8k_L10_bs128|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_8k_L10_bs1024|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_8k_L10_bs1024|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_8k_L22_bs8|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_8k_L22_bs8|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_8k_L22_bs64|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_8k_L22_bs64|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_8k_L22_bs512|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_8k_L22_bs512|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_8k_L34_bs4|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_8k_L34_bs4|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_8k_L34_bs32|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_8k_L34_bs32|kf_cand": [
+  true,
+  ""
+ ],
+ "flash_8k_L34_bs256|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_8k_L34_bs256|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_1024k_L14_bs2|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_1024k_L14_bs2|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_1024k_L14_bs16|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_1024k_L14_bs16|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_1024k_L14_bs128|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_1024k_L14_bs128|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_1024k_L14_bs1024|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_1024k_L14_bs1024|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_1024k_L30_bs8|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_1024k_L30_bs8|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_1024k_L30_bs64|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_1024k_L30_bs64|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_1024k_L30_bs512|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_1024k_L30_bs512|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_1024k_L46_bs4|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_1024k_L46_bs4|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_1024k_L46_bs32|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_1024k_L46_bs32|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_1024k_L46_bs256|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_1024k_L46_bs256|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_128k_L14_bs2|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_128k_L14_bs2|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_128k_L14_bs16|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_128k_L14_bs16|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_128k_L14_bs128|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_128k_L14_bs128|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_128k_L14_bs1024|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_128k_L14_bs1024|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_128k_L30_bs8|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_128k_L30_bs8|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_128k_L30_bs64|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_128k_L30_bs64|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_128k_L30_bs512|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_128k_L30_bs512|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_128k_L46_bs4|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_128k_L46_bs4|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_128k_L46_bs32|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_128k_L46_bs32|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_128k_L46_bs256|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_128k_L46_bs256|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_16k_L14_bs2|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_16k_L14_bs2|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_16k_L14_bs16|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_16k_L14_bs16|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_16k_L14_bs128|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_16k_L14_bs128|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_16k_L14_bs1024|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_16k_L14_bs1024|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_16k_L30_bs8|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_16k_L30_bs8|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_16k_L30_bs64|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_16k_L30_bs64|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_16k_L30_bs512|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_16k_L30_bs512|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_16k_L46_bs4|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_16k_L46_bs4|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_16k_L46_bs32|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_16k_L46_bs32|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_16k_L46_bs256|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_16k_L46_bs256|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_256k_L14_bs2|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_256k_L14_bs2|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_256k_L14_bs16|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_256k_L14_bs16|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_256k_L14_bs128|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_256k_L14_bs128|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_256k_L14_bs1024|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_256k_L14_bs1024|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_256k_L30_bs8|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_256k_L30_bs8|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_256k_L30_bs64|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_256k_L30_bs64|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_256k_L30_bs512|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_256k_L30_bs512|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_256k_L46_bs4|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_256k_L46_bs4|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_256k_L46_bs32|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_256k_L46_bs32|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_256k_L46_bs256|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_256k_L46_bs256|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_32k_L14_bs2|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_32k_L14_bs2|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_32k_L14_bs16|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_32k_L14_bs16|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_32k_L14_bs128|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_32k_L14_bs128|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_32k_L14_bs1024|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_32k_L14_bs1024|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_32k_L30_bs8|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_32k_L30_bs8|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_32k_L30_bs64|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_32k_L30_bs64|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_32k_L30_bs512|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_32k_L30_bs512|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_32k_L46_bs4|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_32k_L46_bs4|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_32k_L46_bs32|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_32k_L46_bs32|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_32k_L46_bs256|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_32k_L46_bs256|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_4k_L14_bs2|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_4k_L14_bs2|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_4k_L14_bs16|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_4k_L14_bs16|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_4k_L14_bs128|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_4k_L14_bs128|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_4k_L14_bs1024|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_4k_L14_bs1024|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_4k_L30_bs8|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_4k_L30_bs8|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_4k_L30_bs64|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_4k_L30_bs64|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_4k_L30_bs512|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_4k_L30_bs512|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_4k_L46_bs4|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_4k_L46_bs4|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_4k_L46_bs32|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_4k_L46_bs32|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_4k_L46_bs256|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_4k_L46_bs256|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_512k_L14_bs2|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_512k_L14_bs2|kf_cand": [
+  false,
+  "row0: vdiff=2.773e-03"
+ ],
+ "pro_512k_L14_bs16|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_512k_L14_bs16|kf_cand": [
+  false,
+  "row0: vdiff=2.456e-02"
+ ],
+ "pro_512k_L14_bs128|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_512k_L14_bs128|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_512k_L14_bs1024|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_512k_L14_bs1024|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_512k_L30_bs8|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_512k_L30_bs8|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_512k_L30_bs64|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_512k_L30_bs64|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_512k_L30_bs512|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_512k_L30_bs512|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_512k_L46_bs4|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_512k_L46_bs4|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_512k_L46_bs32|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_512k_L46_bs32|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_512k_L46_bs256|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_512k_L46_bs256|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_64k_L14_bs2|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_64k_L14_bs2|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_64k_L14_bs16|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_64k_L14_bs16|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_64k_L14_bs128|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_64k_L14_bs128|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_64k_L14_bs1024|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_64k_L14_bs1024|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_64k_L30_bs8|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_64k_L30_bs8|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_64k_L30_bs64|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_64k_L30_bs64|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_64k_L30_bs512|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_64k_L30_bs512|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_64k_L46_bs4|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_64k_L46_bs4|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_64k_L46_bs32|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_64k_L46_bs32|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_64k_L46_bs256|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_64k_L46_bs256|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_8k_L14_bs2|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_8k_L14_bs2|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_8k_L14_bs16|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_8k_L14_bs16|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_8k_L14_bs128|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_8k_L14_bs128|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_8k_L14_bs1024|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_8k_L14_bs1024|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_8k_L30_bs8|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_8k_L30_bs8|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_8k_L30_bs64|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_8k_L30_bs64|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_8k_L30_bs512|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_8k_L30_bs512|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_8k_L46_bs4|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_8k_L46_bs4|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_8k_L46_bs32|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_8k_L46_bs32|kf_cand": [
+  true,
+  ""
+ ],
+ "pro_8k_L46_bs256|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_8k_L46_bs256|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_128k_L14_bs2|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_128k_L14_bs2|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_128k_L14_bs16|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_128k_L14_bs16|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_128k_L14_bs128|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_128k_L14_bs128|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_128k_L14_bs1024|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_128k_L14_bs1024|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_128k_L34_bs8|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_128k_L34_bs8|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_128k_L34_bs64|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_128k_L34_bs64|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_128k_L34_bs512|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_128k_L34_bs512|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_128k_L54_bs4|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_128k_L54_bs4|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_128k_L54_bs32|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_128k_L54_bs32|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_128k_L54_bs256|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_128k_L54_bs256|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_16k_L14_bs2|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_16k_L14_bs2|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_16k_L14_bs16|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_16k_L14_bs16|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_16k_L14_bs128|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_16k_L14_bs128|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_16k_L14_bs1024|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_16k_L14_bs1024|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_16k_L34_bs8|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_16k_L34_bs8|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_16k_L34_bs64|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_16k_L34_bs64|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_16k_L34_bs512|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_16k_L34_bs512|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_16k_L54_bs4|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_16k_L54_bs4|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_16k_L54_bs32|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_16k_L54_bs32|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_16k_L54_bs256|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_16k_L54_bs256|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_256k_L14_bs2|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_256k_L14_bs2|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_256k_L14_bs16|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_256k_L14_bs16|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_256k_L14_bs128|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_256k_L14_bs128|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_256k_L14_bs1024|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_256k_L14_bs1024|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_256k_L34_bs8|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_256k_L34_bs8|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_256k_L34_bs64|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_256k_L34_bs64|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_256k_L34_bs512|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_256k_L34_bs512|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_256k_L54_bs4|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_256k_L54_bs4|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_256k_L54_bs32|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_256k_L54_bs32|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_256k_L54_bs256|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_256k_L54_bs256|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_32k_L14_bs2|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_32k_L14_bs2|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_32k_L14_bs16|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_32k_L14_bs16|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_32k_L14_bs128|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_32k_L14_bs128|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_32k_L14_bs1024|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_32k_L14_bs1024|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_32k_L34_bs8|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_32k_L34_bs8|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_32k_L34_bs64|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_32k_L34_bs64|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_32k_L34_bs512|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_32k_L34_bs512|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_32k_L54_bs4|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_32k_L54_bs4|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_32k_L54_bs32|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_32k_L54_bs32|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_32k_L54_bs256|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_32k_L54_bs256|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_4k_L14_bs2|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_4k_L14_bs2|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_4k_L14_bs16|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_4k_L14_bs16|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_4k_L14_bs128|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_4k_L14_bs128|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_4k_L14_bs1024|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_4k_L14_bs1024|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_4k_L34_bs8|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_4k_L34_bs8|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_4k_L34_bs64|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_4k_L34_bs64|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_4k_L34_bs512|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_4k_L34_bs512|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_4k_L54_bs4|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_4k_L54_bs4|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_4k_L54_bs32|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_4k_L54_bs32|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_4k_L54_bs256|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_4k_L54_bs256|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_64k_L14_bs2|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_64k_L14_bs2|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_64k_L14_bs16|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_64k_L14_bs16|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_64k_L14_bs128|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_64k_L14_bs128|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_64k_L14_bs1024|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_64k_L14_bs1024|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_64k_L34_bs8|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_64k_L34_bs8|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_64k_L34_bs64|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_64k_L34_bs64|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_64k_L34_bs512|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_64k_L34_bs512|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_64k_L54_bs4|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_64k_L54_bs4|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_64k_L54_bs32|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_64k_L54_bs32|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_64k_L54_bs256|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_64k_L54_bs256|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_8k_L14_bs2|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_8k_L14_bs2|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_8k_L14_bs16|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_8k_L14_bs16|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_8k_L14_bs128|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_8k_L14_bs128|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_8k_L14_bs1024|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_8k_L14_bs1024|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_8k_L34_bs8|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_8k_L34_bs8|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_8k_L34_bs64|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_8k_L34_bs64|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_8k_L34_bs512|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_8k_L34_bs512|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_8k_L54_bs4|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_8k_L54_bs4|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_8k_L54_bs32|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_8k_L54_bs32|kf_cand": [
+  true,
+  ""
+ ],
+ "v32_8k_L54_bs256|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_8k_L54_bs256|kf_cand": [
+  true,
+  ""
+ ]
+}
