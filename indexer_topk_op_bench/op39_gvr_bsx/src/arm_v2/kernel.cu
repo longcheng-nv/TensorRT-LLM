@@ -15,8 +15,10 @@
 // K2 arm<true>: rows with rescue flag only (near-zero cost otherwise):
 //   re-collect at t2 and reduce; if even that overflows (massive value ties),
 //   final resort = single-CTA full-row exact reduce. Counters self-clean.
+#include <cuda_pipeline.h>
 #include <cuda_runtime.h>
 #include <cstdint>
+#include <cstdlib>
 
 #ifndef CAP
 #define CAP 8192
@@ -411,7 +413,7 @@ arm_small_kernel(const float* __restrict__ logits, const int* __restrict__ pre_i
   }
 }
 
-template <bool RESCUE, int ILP>
+template <bool RESCUE, int ILP, bool TA>
 __global__ void __launch_bounds__(512, 5)
 arm_kernel(const float* __restrict__ logits, float* __restrict__ thr,
            float* __restrict__ cand_val, int* __restrict__ cand_idx,
@@ -435,6 +437,40 @@ arm_kernel(const float* __restrict__ logits, float* __restrict__ thr,
   __syncthreads();
   int i = beg + threadIdx.x;
   const int bd = blockDim.x;
+  if constexpr (TA) {
+    // iter13b: __ldcs evict-first streaming loads, ILP-4 (cp.async
+    // double-buffer variant FALSIFIED: 0.93-0.98 on 24/24 big-N cells —
+    // smem round-trip + 5->4 occupancy beat the latency-hiding gain).
+    for (; i + 3 * bd < end; i += 4 * bd) {
+      float4 a[4];
+      #pragma unroll
+      for (int q = 0; q < 4; ++q) a[q] = __ldcs(&lg4[i + q * bd]);
+      #pragma unroll
+      for (int q = 0; q < 4; ++q) {
+        float4 v = a[q];
+        int base = (i + q * bd) * 4;
+        #pragma unroll
+        for (int c = 0; c < 4; ++c) {
+          float x = (c == 0) ? v.x : (c == 1) ? v.y : (c == 2) ? v.z : v.w;
+          if (x >= t) {
+            int p = atomicAdd(&s_cnt, 1);
+            if (p < STAGE) { s_val[p] = x; s_idx[p] = base + c; }
+          }
+        }
+      }
+    }
+    for (; i < end; i += bd) {
+      float4 a = __ldcs(&lg4[i]);
+      #pragma unroll
+      for (int c = 0; c < 4; ++c) {
+        float x = (c == 0) ? a.x : (c == 1) ? a.y : (c == 2) ? a.z : a.w;
+        if (x >= t) {
+          int p = atomicAdd(&s_cnt, 1);
+          if (p < STAGE) { s_val[p] = x; s_idx[p] = i * 4 + c; }
+        }
+      }
+    }
+  } else {
   // batch loop width: ILP-8 wins at BS<=256, ILP-4 at BS>=512 (e2/e3/e4)
   for (; i + (ILP - 1) * bd < end; i += ILP * bd) {
     float4 a[ILP];
@@ -482,6 +518,7 @@ arm_kernel(const float* __restrict__ logits, float* __restrict__ thr,
       }
     }
   }
+  }  // !TA
   __syncthreads();
   int local_n = s_cnt;
   int store_n = min(local_n, STAGE);
@@ -562,15 +599,24 @@ extern "C" void arm_v2_launch(const float* logits, const int* pre_idx, float* th
     return;
   }
   thresh_kernel<<<BS, 512, 0, stream>>>(logits, pre_idx, thr, npad, K);
-  if (BS >= 512) {  // ILP-8 regresses ~2-9.5% at BS>=512 (e2 vs e3 envelope)
-    arm_kernel<false, 4><<<dim3(chunks, BS), 512, 0, stream>>>(
+  // ARM39_TA: 0 = off, 1 = force on, unset/2 = auto (DRAM-resident rows only)
+  const char* e = getenv("ARM39_TA");  // re-read: setenv A/B within a process
+  const int ta_env = e ? atoi(e) : 2;
+  const bool ta = (ta_env == 1) || (ta_env == 2 && npad >= 262144);
+  if (ta) {  // iter13 cp.async double-buffer collect (big-N DRAM band)
+    arm_kernel<false, 4, true><<<dim3(chunks, BS), 512, 0, stream>>>(
         logits, thr, cand_val, cand_idx, cnt, done, ovf, rescue, out, npad, K, BS);
-    arm_kernel<true, 4><<<dim3(chunks, BS), 512, 0, stream>>>(
+    arm_kernel<true, 4, true><<<dim3(chunks, BS), 512, 0, stream>>>(
+        logits, thr, cand_val, cand_idx, cnt, done, ovf, rescue, out, npad, K, BS);
+  } else if (BS >= 512) {  // ILP-8 regresses ~2-9.5% at BS>=512 (e2 vs e3)
+    arm_kernel<false, 4, false><<<dim3(chunks, BS), 512, 0, stream>>>(
+        logits, thr, cand_val, cand_idx, cnt, done, ovf, rescue, out, npad, K, BS);
+    arm_kernel<true, 4, false><<<dim3(chunks, BS), 512, 0, stream>>>(
         logits, thr, cand_val, cand_idx, cnt, done, ovf, rescue, out, npad, K, BS);
   } else {
-    arm_kernel<false, 8><<<dim3(chunks, BS), 512, 0, stream>>>(
+    arm_kernel<false, 8, false><<<dim3(chunks, BS), 512, 0, stream>>>(
         logits, thr, cand_val, cand_idx, cnt, done, ovf, rescue, out, npad, K, BS);
-    arm_kernel<true, 8><<<dim3(chunks, BS), 512, 0, stream>>>(
+    arm_kernel<true, 8, false><<<dim3(chunks, BS), 512, 0, stream>>>(
         logits, thr, cand_val, cand_idx, cnt, done, ovf, rescue, out, npad, K, BS);
   }
 }

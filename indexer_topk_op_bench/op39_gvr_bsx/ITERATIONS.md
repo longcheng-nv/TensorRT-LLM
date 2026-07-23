@@ -114,3 +114,20 @@ NCU (results/ncu_bignt.txt, flash_512k BS1024 chunks=2): collect 75.4% DRAM /
 kernel latency-bound 6.1us (issue 0.13). Next named levers unchanged: collect
 BW push (async-bulk/TMA) toward the 2.47 cap; K2 empty launch; BS16-64
 reducer exposure.
+
+## iter 13 — 2026-07-23 — TA falsified, __ldcs GO (big-N collect BW push)
+FALSIFIED: (cp.async per-thread double-buffer collect; domain: DRAM-band
+npad>=262144; evidence: paired event A/B ab_ta_iter13.log) — 0.93-0.98 on
+23/24 cells, 1 wash. smem round-trip + 5->4 occupancy (extra 16KB) beat the
+latency-hiding gain; the 25-reg/5-occ collect is already near the practical
+streaming ceiling.
+iter13b GO: __ldcs evict-first streaming loads on the TA path (ILP-4), zero
+occupancy/register cost. Paired A/B: +2-9.5% on 22/24 big-N cells (peaks
+flash/pro 1024k BS256 1.095), wash 2. Auto gate npad>=262144 (ARM39_TA env
+override). Gate 0/225 + adversarial OK.
+e6 envelope: combined gm 1.3179 / mean 1.3564 / min 0.7665, 0/750 inexact,
+wins 53 (e5: 1.3150/1.3532/52). Big-N >=256k BS>=256 arm +2.0% gm vs e5;
+flash_1024k BS1024 2.12->2.24. Residual to the 2.47 cap now mostly the cap's
+own optimism (assumed 7 TB/s; pr itself achieves ~5.8): collect ldcs puts the
+arm at parity-or-better streaming efficiency vs pr.
+Named next: K2 empty-launch (1.3us x all cells), BS16-64 reducer exposure.
