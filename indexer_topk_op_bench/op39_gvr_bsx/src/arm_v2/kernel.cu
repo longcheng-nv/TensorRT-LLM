@@ -435,14 +435,13 @@ arm_kernel(const float* __restrict__ logits, float* __restrict__ thr,
   __syncthreads();
   int i = beg + threadIdx.x;
   const int bd = blockDim.x;
-  for (; i + 3 * bd < end; i += 4 * bd) {
-    float4 a0 = lg4[i];
-    float4 a1 = lg4[i + bd];
-    float4 a2 = lg4[i + 2 * bd];
-    float4 a3 = lg4[i + 3 * bd];
+  for (; i + 7 * bd < end; i += 8 * bd) {
+    float4 a[8];
     #pragma unroll
-    for (int q = 0; q < 4; ++q) {
-      float4 v = (q == 0) ? a0 : (q == 1) ? a1 : (q == 2) ? a2 : a3;
+    for (int q = 0; q < 8; ++q) a[q] = lg4[i + q * bd];
+    #pragma unroll
+    for (int q = 0; q < 8; ++q) {
+      float4 v = a[q];
       int base = (i + q * bd) * 4;
       #pragma unroll
       for (int c = 0; c < 4; ++c) {
