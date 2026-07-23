@@ -84,3 +84,8 @@ different shape or a bounded verdict (double-lock rules apply).
 f2 ORACLE BOUND (roofline collect): gm 1.4349 / mean 1.4570 / min 0.955, 1/56 <1.0 (was 1.37/0.967/2). Roofline lever real but bounded.
 a4 production: gm 0.583 — REGRESSION vs a3 (0.590) at K=2048: STAGE 6144->4096 with T=2K=4096 == STAGE trips chunk clips -> rescue storms on v32 (BS1024 0.672->0.594). Fix for relay: K-aware STAGE (template: 4096/5-occ for K<=1024, 6144/3-occ for K=2048) or T=1.5K for K=2048.
 LOCK 1 (arm-family bound vs the 1.8 bar): even with FREE thresholds this collect shape measures gm 1.43 on the battleground — the mean>=1.8 envelope bar cannot be met by threshold engineering alone. Remaining candidate shapes within GVR framework before double-lock: (a) multi-row-per-CTA small-cell amortization (sub-L2 band cap is chain latency, oracle 1.2-1.5 there), (b) collect BW push beyond 4x-ILP (async copy / TMA bulk), (c) relaxed-constraint control (unlimited passes / no exactness) to complete the double lock if (a)/(b) stall.
+
+## iter 9b/10 — 2026-07-23 — CLOSE-OUT (double lock complete)
+a6 (post ledger-revert): production gm 0.6297 (best), min 0.378, no storms.
+LOCK 1: oracle bound gm 1.4349 (f2). LOCK 2: envelope UB w/ measured constants (2.47 DRAM cap x 51 + per-band oracle MAX) = mean 1.738 < 1.8, feasibility-favoring.
+VERDICT: 1.8-mean double-locked infeasible for this arm family; zero-regression exactness met (750/750); combined dispatch harvest = gm 1.3049/mean 1.3428. Full verdict: RESULTS.md.
