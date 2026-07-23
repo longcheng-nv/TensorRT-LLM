@@ -60,3 +60,22 @@ Strategy note: combined dispatch (op38 v3 for small-npad/low-BS + arm for large-
 ## iter 5e — 2026-07-23 — checkpoint (a3 screen of v3f)
 a3: gm 0.5902 / mean 0.6317 / min 0.352, <1.0 50/56 — robust now (no resort storms; all exact; rescue cheap) but dual-quantile K0 costs ~1-2us everywhere: win band trimmed slightly (pro_1024k BS1024 1.455->1.425, BS512 1.293; flash_512k BS512+ 1.03-1.14; v32_128k BS1024 1.08).
 Band structure: large-npad BS>=256 = arm win band; everything else pr-dominated pending threshold-tax removal.
+
+## iter 6 — 2026-07-23 — WASH (survivor-compaction reduce)
+Level-0 boundary-bucket survivors compacted to smem ping-pong; levels 1-3 scan survivors only. Event-axis: pro_64k BS16 41.4 (was 39.7), v32_64k BS16 60.6 (worse) — reduce depth was NOT the dominant sub-L2 cost; combined-pass ballot overhead offsets the savings. Kept (correct, helps FROM_ROW final-resort), but not a tax lever.
+
+## STRATEGIC NOTE (iter6) — oracle bound vs the 1.8 bar
+The arm's own oracle bound (perfect thresholds) measured gm 1.37 / mean ~1.39
+on the battleground sample — BELOW the campaign's mean>=1.8 bar. Even a
+zero-tax production threshold cannot reach 1.8 with the CURRENT collect shape:
+- big-N band: collect at ~2.6 TB/s vs ~6-7 achievable -> up to ~2x more there
+  (pro_1024k BS1024 1.9 -> ~2.5+) IF the scan reaches roofline (occupancy/ILP:
+  currently 3 CTA/SM x 512thr, 50KB smem);
+- sub-L2 band: any 3-phase chain has a ~6-10us latency floor vs pr 9-15us ->
+  per-cell cap ~1.3-1.7; the 1.8 MEAN therefore requires the big/mid bands to
+  overshoot well beyond 1.8 to average out.
+Next session MUST first: (1) push collect toward roofline (2xTB/s lever, wide
+loads/occupancy variants) and re-run the ORACLE screen — if the oracle bound
+itself cannot clear ~1.9-2.0 gm on the battleground, the 1.8 envelope mean is
+structurally out of reach for this arm family and the campaign needs either a
+different shape or a bounded verdict (double-lock rules apply).

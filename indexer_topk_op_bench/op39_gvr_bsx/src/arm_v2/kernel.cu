@@ -172,27 +172,40 @@ struct RedSmem {
   int ocur, tcur;
 };
 
-// Exact top-K (EMIT) or exact-kth-key search (!EMIT) over a candidate list or
-// the full row, via 4-level 8-bit bucket refinement on the monotonic key.
+// Exact top-K (EMIT) or exact-kth-key search (!EMIT) via 4-level 8-bit bucket
+// refinement. Level 0 scans the full source; boundary-bucket survivors are
+// compacted into smem ping-pong buffers so levels 1-3 touch only survivors
+// (typically <<n). If survivors exceed the buffer, falls back to full scans.
 // Whole CTA participates. Tie-exact in the value-multiset sense.
+#define SURV 3072
 template <bool FROM_ROW, bool EMIT>
 __device__ void exact_topk_from(const float* __restrict__ src_val,
                                 const int* __restrict__ src_idx,
                                 const float* __restrict__ lg, int n, int K,
                                 int* __restrict__ orow, RedSmem& S,
-                                unsigned* kth_key_out) {
+                                unsigned* kth_key_out,
+                                float* sbufv, int* sbufi) {
   const int lane = threadIdx.x & 31;
   unsigned prefix = 0;
   int need = K;
   int emitted = 0;
+  // survivor buffers: two halves of (sbufv,sbufi); level l>=1 reads cur, writes nxt
+  int cur = -1;              // -1 = reading from the original source
+  int n_cur = n;
+  bool spill = (sbufv == nullptr);  // no buffer -> always full scans
   for (int lvl = 0; lvl < 4; ++lvl) {
     const int shift = 24 - lvl * 8;
     for (int j = threadIdx.x; j < 256; j += blockDim.x) S.hist[j] = 0;
+    if (threadIdx.x == 0) S.tcur = 0;
     __syncthreads();
-    for (int j = threadIdx.x; j < n; j += blockDim.x) {
-      float x = FROM_ROW ? lg[j] : src_val[j];
+    const bool from_buf = (cur >= 0) && !spill;
+    const float* bv = sbufv + cur * SURV;
+    const int* bi = sbufi + cur * SURV;
+    int nn = from_buf ? n_cur : n;
+    for (int j = threadIdx.x; j < nn; j += blockDim.x) {
+      float x = from_buf ? bv[j] : (FROM_ROW ? lg[j] : src_val[j]);
       unsigned k = mono_key(x);
-      if (lvl == 0 || (k >> (shift + 8)) == prefix)
+      if (from_buf || lvl == 0 || (k >> (shift + 8)) == prefix)
         atomicAdd(&S.hist[(k >> shift) & 0xffu], 1u);
     }
     __syncthreads();
@@ -204,7 +217,6 @@ __device__ void exact_topk_from(const float* __restrict__ src_val,
     }
     __syncthreads();
     if (threadIdx.x < 32) {
-      // warp-parallel suffix search: lane l holds wsum[7-l] (l<8), suffix-scan
       unsigned wv = (lane < 8) ? S.wsum[7 - lane] : 0u;
       unsigned ws = wv;
       for (int o = 1; o < 8; o <<= 1) {
@@ -232,75 +244,99 @@ __device__ void exact_topk_from(const float* __restrict__ src_val,
     __syncthreads();
     unsigned tb = S.thr_bucket;
     int above = S.ocur;
-    if (EMIT) {
-      if (threadIdx.x == 0) S.tcur = 0;
-      __syncthreads();
-      int npadded = (n + blockDim.x - 1) / blockDim.x * blockDim.x;
-      for (int j = threadIdx.x; j < npadded; j += blockDim.x) {
-        bool hit = false;
-        int idx = 0;
-        if (j < n) {
-          float x = FROM_ROW ? lg[j] : src_val[j];
-          unsigned k = mono_key(x);
-          if (lvl == 0 || (k >> (shift + 8)) == prefix)
-            hit = ((k >> shift) & 0xffu) > tb;
-          idx = FROM_ROW ? j : src_idx[j];
-        }
-        unsigned m = __ballot_sync(0xffffffffu, hit);
+    int nxt = (cur == 0) ? 1 : 0;
+    float* nv = sbufv + nxt * SURV;
+    int* ni = sbufi + nxt * SURV;
+    __shared__ int scur;
+    if (threadIdx.x == 0) scur = 0;
+    __syncthreads();
+    // combined emit(+survivor-compact) pass
+    int npadded = (nn + blockDim.x - 1) / blockDim.x * blockDim.x;
+    for (int j = threadIdx.x; j < npadded; j += blockDim.x) {
+      bool inset = false;
+      unsigned k = 0;
+      float x = 0.f;
+      int idx = 0;
+      if (j < nn) {
+        x = from_buf ? bv[j] : (FROM_ROW ? lg[j] : src_val[j]);
+        k = mono_key(x);
+        inset = from_buf || lvl == 0 || (k >> (shift + 8)) == prefix;
+        idx = from_buf ? bi[j] : (FROM_ROW ? j : src_idx[j]);
+      }
+      bool hi = inset && ((k >> shift) & 0xffu) > tb;
+      bool bd = inset && ((k >> shift) & 0xffu) == tb;
+      if (EMIT) {
+        unsigned m = __ballot_sync(0xffffffffu, hi);
         if (m) {
           int pos = 0;
           int leader = __ffs(m) - 1;
           if (lane == leader) pos = atomicAdd(&S.tcur, __popc(m));
           pos = __shfl_sync(0xffffffffu, pos, leader);
-          if (hit) orow[emitted + pos + __popc(m & ((1u << lane) - 1))] = idx;
+          if (hi) orow[emitted + pos + __popc(m & ((1u << lane) - 1))] = idx;
         }
       }
-      __syncthreads();
-      emitted += above;
-      need -= above;
-      __syncthreads();
-      if (need <= 0) return;
-    } else {
-      need -= above;
-      __syncthreads();
-      if (need <= 0) {
-        // boundary fell strictly between buckets at this level: kth key is
-        // the lowest key of the bucket above the threshold path
-        if (threadIdx.x == 0 && kth_key_out)
-          *kth_key_out = ((lvl == 0 ? 0u : prefix << 8) | (tb + 1)) << shift;
-        return;
+      if (!spill && lvl < 3) {
+        unsigned mb = __ballot_sync(0xffffffffu, bd);
+        if (mb) {
+          int pos = 0;
+          int leader = __ffs(mb) - 1;
+          if (lane == leader) pos = atomicAdd(&scur, __popc(mb));
+          pos = __shfl_sync(0xffffffffu, pos, leader);
+          if (bd) {
+            int p = pos + __popc(mb & ((1u << lane) - 1));
+            if (p < SURV) { nv[p] = x; ni[p] = idx; }
+          }
+        }
       }
     }
+    __syncthreads();
+    emitted += above;
+    need -= above;
+    if (need <= 0) return;   // boundary fell between buckets (EMIT emitted all)
     prefix = (lvl == 0 ? tb : (prefix << 8) | tb);
-    if (lvl == 3) {
-      if (EMIT) {
-        if (threadIdx.x == 0) S.tcur = 0;
-        __syncthreads();
-        int npadded2 = (n + blockDim.x - 1) / blockDim.x * blockDim.x;
-        for (int j = threadIdx.x; j < npadded2; j += blockDim.x) {
-          bool hit = false;
-          int idx = 0;
-          if (j < n) {
-            float x = FROM_ROW ? lg[j] : src_val[j];
-            hit = (mono_key(x) == prefix);
-            idx = FROM_ROW ? j : src_idx[j];
-          }
-          unsigned m = __ballot_sync(0xffffffffu, hit);
-          if (m) {
-            int pos = 0;
-            int leader = __ffs(m) - 1;
-            if (lane == leader) pos = atomicAdd(&S.tcur, __popc(m));
-            pos = __shfl_sync(0xffffffffu, pos, leader);
-            int p = pos + __popc(m & ((1u << lane) - 1));
-            if (hit && p < need) orow[emitted + p] = idx;
-          }
-        }
-        __syncthreads();
+    if (lvl == 3) break;
+    // adopt survivors if they fit; else continue with full scans
+    if (!spill) {
+      if (scur <= SURV) {
+        cur = nxt;
+        n_cur = scur;
       } else {
-        if (threadIdx.x == 0 && kth_key_out) *kth_key_out = prefix;
+        spill = true;
+        cur = -1;
       }
-      return;
     }
+    __syncthreads();
+  }
+  // lvl == 3 exit: prefix = exact key of the kth element
+  if (EMIT) {
+    if (threadIdx.x == 0) S.tcur = 0;
+    __syncthreads();
+    const bool from_buf = (cur >= 0) && !spill;
+    const float* bv = sbufv + (cur < 0 ? 0 : cur) * SURV;
+    const int* bi = sbufi + (cur < 0 ? 0 : cur) * SURV;
+    int nn = from_buf ? n_cur : n;
+    int npadded2 = (nn + blockDim.x - 1) / blockDim.x * blockDim.x;
+    for (int j = threadIdx.x; j < npadded2; j += blockDim.x) {
+      bool hit = false;
+      int idx = 0;
+      if (j < nn) {
+        float x = from_buf ? bv[j] : (FROM_ROW ? lg[j] : src_val[j]);
+        hit = (mono_key(x) == prefix);
+        idx = from_buf ? bi[j] : (FROM_ROW ? j : src_idx[j]);
+      }
+      unsigned m = __ballot_sync(0xffffffffu, hit);
+      if (m) {
+        int pos = 0;
+        int leader = __ffs(m) - 1;
+        if (lane == leader) pos = atomicAdd(&S.tcur, __popc(m));
+        pos = __shfl_sync(0xffffffffu, pos, leader);
+        int p = pos + __popc(m & ((1u << lane) - 1));
+        if (hit && p < need) orow[emitted + p] = idx;
+      }
+    }
+    __syncthreads();
+  } else {
+    if (threadIdx.x == 0 && kth_key_out) *kth_key_out = prefix;
   }
 }
 
@@ -388,7 +424,7 @@ arm_kernel(const float* __restrict__ logits, float* __restrict__ thr,
   __shared__ unsigned kth_key;
   int* orow = out + (size_t)row * K;
   if (!overflow && n_stored >= K) {
-    exact_topk_from<false, true>(cv, ci, lg, n_stored, K, orow, S, nullptr);
+    exact_topk_from<false, true>(cv, ci, lg, n_stored, K, orow, S, nullptr, s_val, s_idx);
     if (RESCUE) {
       __syncthreads();
       if (threadIdx.x == 0) rescue[row] = 0;
@@ -400,7 +436,8 @@ arm_kernel(const float* __restrict__ logits, float* __restrict__ thr,
     // (5*CAP/8 = 5120 > K for all K <= 2048); 8K-sample noise is ~70 << margin.
     long r = (long)(5 * CAP / 8) * n_stored / max(true_n, 1);
     int rk = (int)min((long)n_stored, max((long)1, r));
-    exact_topk_from<false, false>(cv, ci, lg, n_stored, rk, orow, S, &kth_key);
+    exact_topk_from<false, false>(cv, ci, lg, n_stored, rk, orow, S, &kth_key,
+                                  s_val, s_idx);
     __syncthreads();
     if (threadIdx.x == 0) {
       thr[row] = inv_mono(kth_key);
@@ -415,7 +452,7 @@ arm_kernel(const float* __restrict__ logits, float* __restrict__ thr,
     }
   } else {
     // final resort (rescue-level overflow/undershoot or degenerate hints)
-    exact_topk_from<true, true>(nullptr, nullptr, lg, npad, K, orow, S, nullptr);
+    exact_topk_from<true, true>(nullptr, nullptr, lg, npad, K, orow, S, nullptr, s_val, s_idx);
     if (RESCUE) {
       __syncthreads();
       if (threadIdx.x == 0) rescue[row] = 0;
