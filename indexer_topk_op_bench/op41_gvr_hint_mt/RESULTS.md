@@ -1,5 +1,12 @@
-# op41 verdict: hint-multithreshold brief is ALREADY SATURATED on this envelope
+# op41 verdict (SUPERSEDED then SHIPPED — see bottom)
 (2026-07-23, umb-b200-045)
+
+> **UPDATE (same day): the saturation verdict below held only for the
+> replicated-row envelope. User-directed BS>1 heterogeneous-row verification
+> REOPENED the campaign (8.4% rows need extra secant passes; straggler tax
+> up to 1.35x) and it closed with a SHIP — v3mt per-K rung fractions.
+> Full chain in ITERATIONS.md phases 2-3; ship verdict at the end of this
+> file.**
 
 ## Brief (user, 2026-07-23)
 Keep the GVR skeleton (preIdx heuristics -> multi-threshold estimate ->
@@ -53,3 +60,27 @@ gm 1.3179 / mean 1.3564, 0/750 inexact).
   per-row convergence variance matters), re-run v3_pass_probe first — a
   nonzero pass histogram would re-open this campaign with a ready design
   (order-stat rungs replacing value-quantile rungs, one-line P1 change).
+
+---
+
+## SHIP verdict (phase 3, @bce921d0b1): v3mt per-K rung fractions
+
+Change (src/v3mt, constants only, zero P2 cost, skeleton untouched):
+- AR4 quantile fracs: K2048 -> {55, 88} (gated npad<49152 || >98304;
+  measured exception npad~65600), K1024 -> {35, 70}, K512 -> stock {25, 65}.
+- AR6 fracs: K2048 -> {25, 50, 75, 92}, else stock {15, 40, 70, 92}.
+Basis: per-row P2 convergence is a LAYER property; optimal rung placement
+tracks K (model-family hit-rate distribution). No global set dominates
+(falsified). Dispatch-exact simulation -> focused wall-clock scans.
+
+Verdict (ab_v3mt_v2, paired event axis, stock v3 baseline):
+- Exactness: 0 fails (75 cells x BS{2,16,256} replicated + hetero per-row).
+- Hetero-batch axis (production-realistic): 32/32 cells >= 1.00 —
+  v32_256k 1.10-1.18, v32_16k 1.10-1.16, pro_512k 1.13-1.15,
+  pro_256k 1.18 @BS256, pro_1024k 1.07 @BS1024, flash ~1.00 (its lone
+  straggler L10 is a kC-window straddle — no ladder fixes it).
+- Replicated axis: no cell < 0.97; positive outliers to 1.20 (pro_64k).
+
+Follow-up options: swap v3mt into the op39 combined dispatch + envelope
+re-run; port the per-K fracs upstream (production GVR uses the same
+skeleton and serves hetero batches ALWAYS).
