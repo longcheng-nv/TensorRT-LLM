@@ -32,6 +32,25 @@ for bs in BSL:
 allv = [sp[(c, b)] for c in cells for b in BSL]
 pooled = math.exp(sum(map(math.log, allv)) / len(allv))
 
+RIVAL = os.path.join(HERE, '..', 'rival_bs_layers.csv')
+CELL_L = {('flash', '256k', 65538, 512): '22', ('flash', '512k', 131075, 512): '22',
+          ('pro', '512k', 131075, 1024): '30', ('pro', '1024k', 262127, 1024): '30'}
+rrows = list(csv.DictReader(open(RIVAL)))
+rd = collections.defaultdict(dict)
+for r in rrows:
+    rd[(r['model'], r['isl'], r['L'], int(r['BS']))][r['op']] = float(r['us'])
+rsp = {}   # (arm, cell, BS) -> speedup vs gvr_pr (within-REPORT b200-027 ratio)
+rgm = {}   # (arm, BS) -> pooled geomean
+for arm in ['sglang_v2', 'flashinfer_topk']:
+    for bs in BSL:
+        vals = []
+        for c, L in CELL_L.items():
+            k = (c[0], c[1], L, bs)
+            s = rd[k]['gvr_pr'] / rd[k][arm]
+            rsp[(arm, c, bs)] = s
+            vals.append(s)
+        rgm[(arm, bs)] = math.exp(sum(map(math.log, vals)) / len(vals))
+
 CELL_LBL = {('flash', '256k', 65538, 512): 'flash 256k · N=65538 · K512',
             ('flash', '512k', 131075, 512): 'flash 512k · N=131075 · K512',
             ('pro', '512k', 131075, 1024): 'pro 512k · N=131075 · K1024',
@@ -41,33 +60,73 @@ CELL_COLOR = {('flash', '256k', 65538, 512): '#7fb3e8',
               ('pro', '512k', 131075, 1024): '#f0a8c0',
               ('pro', '1024k', 262127, 1024): '#e87ba4'}
 
-# ---------------- SVG curve ----------------
-W, H, ML, MR, MT, MB = 760, 320, 52, 14, 18, 40
+# ---------------- interactive SVG curve (CSS-checkbox toggles, no JS) ------
+W, H, ML, MR, MT, MB = 760, 340, 52, 14, 18, 40
 PW, PH = W - ML - MR, H - MT - MB
 YMAX = 4.2
 def X(bs): return ML + PW * (math.log2(bs) - 1) / 9.0
-def Y(v):  return MT + PH * (1 - v / YMAX)
+def Y(v):  return MT + PH * (1 - min(v, YMAX) / YMAX)
+
+ARMS = [  # (key, css-class, color, bold-line-label, pooled getter, per-cell getter)
+    ('AUTO', '#0b0b0b', 'ours run_batch_auto (local b200-039)',
+     lambda b: gm_bs[b], lambda c, b: sp[(c, b)]),
+    ('SGL', '#008300', 'sglang v2 (REPORT b200-027)',
+     lambda b: rgm[('sglang_v2', b)], lambda c, b: rsp[('sglang_v2', c, b)]),
+    ('FI', '#eda100', 'flashinfer top-K (REPORT b200-027)',
+     lambda b: rgm[('flashinfer_topk', b)], lambda c, b: rsp[('flashinfer_topk', c, b)]),
+]
 svg = [f'<svg viewBox="0 0 {W} {H}" style="width:100%;max-width:{W}px;background:#fcfcfb;border:1px solid #e4e3df;border-radius:6px">']
-for g in [1, 2, 3, 4]:
+for g in [0.5, 1, 2, 3, 4]:
+    lbl = f'{g:.1f}×'
     svg.append(f'<line x1="{ML}" y1="{Y(g):.1f}" x2="{W-MR}" y2="{Y(g):.1f}" stroke="#e4e3df"/>'
-               f'<text x="{ML-6}" y="{Y(g)+4:.1f}" text-anchor="end" font-size="11" fill="#52514e">{g}.0×</text>')
+               f'<text x="{ML-6}" y="{Y(g)+4:.1f}" text-anchor="end" font-size="11" fill="#52514e">{lbl}</text>')
 for lv, lbl, col in [(2.0, 'target avg 2.0×', '#070'), (1.2, 'floor 1.2×', '#b26a00'), (1.0, 'parity', '#8b8a85')]:
     svg.append(f'<line x1="{ML}" y1="{Y(lv):.1f}" x2="{W-MR}" y2="{Y(lv):.1f}" stroke="{col}" stroke-dasharray="5 4" stroke-width="1.2"/>'
                f'<text x="{W-MR-4}" y="{Y(lv)-4:.1f}" text-anchor="end" font-size="10.5" fill="{col}">{lbl}</text>')
 for bs in BSL:
     svg.append(f'<text x="{X(bs):.1f}" y="{H-MB+16}" text-anchor="middle" font-size="11" fill="#52514e">{bs}</text>')
 svg.append(f'<text x="{ML+PW/2:.0f}" y="{H-6}" text-anchor="middle" font-size="11.5" fill="#0b0b0b">BS (log2)</text>')
-for c in cells:
-    pts = ' '.join(f'{X(b):.1f},{Y(min(sp[(c,b)],YMAX)):.1f}' for b in BSL)
-    svg.append(f'<polyline points="{pts}" fill="none" stroke="{CELL_COLOR[c]}" stroke-width="1.4" opacity="0.75"/>')
-pts = ' '.join(f'{X(b):.1f},{Y(gm_bs[b]):.1f}' for b in BSL)
-svg.append(f'<polyline points="{pts}" fill="none" stroke="#0b0b0b" stroke-width="2.6"/>')
-for b in BSL:
-    svg.append(f'<circle cx="{X(b):.1f}" cy="{Y(gm_bs[b]):.1f}" r="3.4" fill="#0b0b0b"/>'
-               f'<text x="{X(b):.1f}" y="{Y(gm_bs[b])-8:.1f}" text-anchor="middle" font-size="10" fill="#0b0b0b">{gm_bs[b]:.2f}</text>')
+# thin per-cell lines (gated by both the arm chip and the cells chip)
+for key, col, _lbl, _gmf, cellf in ARMS:
+    for c in cells:
+        pts = ' '.join(f'{X(b):.1f},{Y(cellf(c, b)):.1f}' for b in BSL)
+        svg.append(f'<g class="s{key} cl"><polyline points="{pts}" fill="none" stroke="{col}" '
+                   f'stroke-width="1.3" opacity="0.42"><title>{CELL_LBL[c]}</title></polyline>')
+        for b in BSL:
+            v = cellf(c, b)
+            svg.append(f'<circle cx="{X(b):.1f}" cy="{Y(v):.1f}" r="2.6" fill="{col}" opacity="0.42">'
+                       f'<title>{CELL_LBL[c]} · BS={b}: {v:.3f}×</title></circle>')
+        svg.append('</g>')
+# bold pooled lines
+for key, col, lbl, gmf, _cellf in ARMS:
+    pts = ' '.join(f'{X(b):.1f},{Y(gmf(b)):.1f}' for b in BSL)
+    svg.append(f'<g class="s{key}"><polyline points="{pts}" fill="none" stroke="{col}" stroke-width="2.6"/>')
+    for b in BSL:
+        v = gmf(b)
+        dy = -8 if key == 'AUTO' else (14 if key == 'SGL' else -8)
+        svg.append(f'<circle cx="{X(b):.1f}" cy="{Y(v):.1f}" r="3.4" fill="{col}">'
+                   f'<title>{lbl} · BS={b}: pooled gm {v:.3f}×</title></circle>')
+        if key == 'AUTO':
+            svg.append(f'<text x="{X(b):.1f}" y="{Y(v)+dy:.1f}" text-anchor="middle" font-size="10" fill="{col}">{v:.2f}</text>')
+    svg.append('</g>')
 svg.append('</svg>')
-SVG = ''.join(svg)
-legend = ' &nbsp; '.join(f'<span style="color:{CELL_COLOR[c]}">━ {CELL_LBL[c]}</span>' for c in cells)
+chips_css = ''.join(
+    f'#fx-{k}:not(:checked) ~ * .s{k}{{display:none}}'
+    f'#fx-{k}:checked ~ .chips label[for=fx-{k}]{{border-color:{col};color:#0b0b0b;box-shadow:inset 0 0 0 1px {col}}}'
+    for k, col, _l, _g, _c in ARMS) + (
+    '#fx-CL:not(:checked) ~ * .cl{display:none}'
+    '#fx-CL:checked ~ .chips label[for=fx-CL]{border-color:#555;color:#0b0b0b;box-shadow:inset 0 0 0 1px #555}')
+chips = ''.join(f'<input type="checkbox" id="fx-{k}" checked>'
+                for k, _c, _l, _g, _cf in ARMS) + '<input type="checkbox" id="fx-CL">'
+chip_labels = ('<div class="chips">series ▸ ' + ''.join(
+    f'<label for="fx-{k}"><i style="background:{col}"></i>{lbl}</label>'
+    for k, col, lbl, _g, _c in ARMS) +
+    '<label for="fx-CL"><i style="background:#999"></i>per-cell thin lines / 分 cell 细线</label></div>')
+SVG = (f'<div class="fbsx"><style>.fbsx{{position:relative}}.fbsx .chips{{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0;'
+       f'font-size:0.85em;color:#52514e;align-items:center}}.fbsx .chips label{{border:1.5px solid #c9c8c2;border-radius:16px;'
+       f'padding:3px 12px;cursor:pointer;user-select:none}}.fbsx .chips label i{{display:inline-block;width:10px;height:10px;'
+       f'border-radius:5px;margin-right:6px}}.fbsx>input{{position:absolute;opacity:0;pointer-events:none}}'
+       f'{chips_css}</style>{chips}{chip_labels}' + ''.join(svg) + '</div>')
 
 # ---------------- table ----------------
 def cellfmt(v):
@@ -113,7 +172,8 @@ Envelope = 4 real capture cells (flash 256k/512k, pro 512k/1024k) × BS {{2…10
 <p></p>{TBL}
 <p style="font-size:0.85em;color:#52514e">Speedup vs gvr_pr per cell × BS. Green ≥2.0×, amber &lt;1.2× (the BS=32 residual), red would be &lt;1.0× (none). 绿 ≥2.0×,橙 &lt;1.2×(BS=32 残余),无红格(零回退)。</p>
 {SVG}
-<p style="font-size:0.85em;color:#52514e">Fig. BSX — speedup vs gvr_pr over BS. Bold = pooled geomean (labels), thin = per cell: {legend}. Dashed = 2.0× target / 1.2× floor / parity. 粗线=池化几何均值,细线=分 cell。</p>
+<p style="font-size:0.85em;color:#52514e">Fig. BSX — speedup vs gvr_pr over BS, toggle series with the chips; hover any point for its value; the per-cell chip reveals the 4 thin per-cell lines (flash 256k/512k K512, pro 512k/1024k K1024). Bold = pooled geomean (labels on ours). Dashed = 2.0× target / 1.2× floor / parity. <b>Caveat:</b> sglang v2 / flashinfer curves are within-REPORT ratios (numerator and denominator both measured on b200-027, real-capture BS-scaling sweep <code>rival_bs_layers.csv</code>); ours is a local b200-039 pair — the cuteDSL gvr arm drifts ~9% (med) across these nodes (§7.8), so cross-arm gaps carry that uncertainty; the vs-PR verdict itself is same-node paired.
+/ 图 BSX — chips 勾选切换系列,悬停任意点看数值,"分 cell 细线"chip 展开 4 条 cell 曲线;粗线=池化几何均值。注意:sglang v2 / flashinfer 为 REPORT(b200-027)节点内比值,我方为本机(b200-039)配对;跨节点 gvr 臂漂移 ~9%(§7.8),跨臂对比含此不确定度,vs-PR 终判本身为同节点配对不受影响。</p>
 
 <p><b>BS=32 residual / 残余谷(结构性).</b> gvr_pr&rsquo;s latency-flat plateau ends exactly at BS 32–64 (gvr@64 ≈ 2×gvr@32): BS=32 is the PR arm&rsquo;s best operating point, while any exact full-read arm still pays ≥1 full pass + 2 barriers + tail; deficit 1–9%. Identified next lever (out of scope): a preIdx-hint arm (the same legitimate input gvr consumes) skipping the histogram pass in the high-hit regime. / gvr 延迟平台恰在 BS 32–64 结束;差距 1–9%;下一杠杆 = preIdx hint 臂高命中区跳直方图遍。</p>
 
