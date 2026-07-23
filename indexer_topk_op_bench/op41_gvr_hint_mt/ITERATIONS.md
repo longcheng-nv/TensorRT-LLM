@@ -62,3 +62,24 @@ Harvest curve: e1 1.3049 -> e2 1.3136 -> e5 1.3150 -> e6 1.3179 -> 1.3279.
 Triple-dispatch projection (arm+v3+v3mt) 1.3336 — rejected as ship shape
 (two v3 variants for +0.4%; the 36 v3mt<v3 cases are frac-tuning residue).
 Remaining named lever: per-case chase of those 36 cells (diminishing).
+
+## phase 5 — 2026-07-23 — option-2 (upstream port): NO-PORT verdict + one gated candidate
+Target = production cuteDSL kernel (PR#16457 e612 baseline via op40 gvrpkg40b;
+PR branch is read-only from this machine). Its r0_qfracs ARE per-K CCDF-rank
+fractions (same semantics as v3's qt) — K2048 default (0.6,0.35)+vseed already
+recalibrated 2026-07-19 in the same direction op41 found.
+PHASE A (upstream_hetero_probe): production kernel largely ABSORBS row
+heterogeneity — BS>=64 tax 0.94-1.03 (vseed adaptive rung + cheap falsi pass;
+hetero often FASTER than replicated mean); pockets only at BS16 (flash_256k
+1.23, v32_64k 1.16-1.18, pro_256k 1.16).
+PHASE B/C (qfrac sweeps, paired, per-row exact):
+FALSIFIED: (K512 (0.65,0.25) M=2 port; domain: flash all-npad; evidence:
+flash_256k clean win was a pocket — 128k 0.91-0.94, 1024k 0.93, 512k mixed).
+FALSIFIED: (K1024 any move; m1lo wash 0.98-1.00, M=2 v3port 0.95 loses the
+count column). K2048 (0.9,0.6): NOT Pareto as default (v32_32k BS>=64 -3-5%)
+BUT clean at BS16: 5/5 v32 groups 1.04-1.21, zero losers.
+VERDICT: no unconditional default change ships — upstream vseed already does
+per-row distribution adaptation (the thing v3 lacked). ONE candidate remains:
+K2048 && BS<=16 gated qfracs (0.9,0.6) via the pick_config surface (+4-21%);
+needs user approval + PR#16457 merge first (one-concern-per-PR; the branch is
+another session's). Evidence: results/upstream_{hetero,qfrac_sweep,qfrac_ext}.csv.
