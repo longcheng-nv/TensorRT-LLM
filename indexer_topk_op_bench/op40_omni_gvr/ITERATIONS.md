@@ -204,3 +204,14 @@ convergence assessment). v7 = running best: gm 1.1250, 0 reg, gate green.
 ## probe: enable_smem_cache — 2026-07-23 — IN PROGRESS, already DISQUALIFIED
 smem_cache=on is INEXACT at flash_1024k cs8 (latent defect in the default-off
 flag; not production-affecting). Lever dead regardless of timing.
+
+## NCU attribution — 2026-07-23 — NEW MECHANISM: icache/fetch-bound
+pro_64k v7 (NCU full): grid=1 CTA/148 SMs (structural), 80 regs, occupancy
+25% of its one SM, DRAM 0.1%, SM 0.09%, IPC 0.68 — and **47.6% of stall
+cycles = instruction-fetch / icache miss** (NCU est. speedup 47.6%). The
+mega-kernel's code size (all phases + R0 + fb + P4 coarse/fine/tail +
+radix fallback inlined) blows the icache on a latency-bound single-CTA
+kernel. Explains: fallback code-presence tax, mt8 backfire, op21's
+"never-executed code still costs".
+iter9 = unroll-reduction probes (v9a mt2 / v9b no-p3unroll / v9c both+no4)
+— counter-intuitive lever: LESS memory-ILP unrolling may net-win.
