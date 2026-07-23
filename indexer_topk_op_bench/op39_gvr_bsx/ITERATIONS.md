@@ -89,3 +89,7 @@ LOCK 1 (arm-family bound vs the 1.8 bar): even with FREE thresholds this collect
 a6 (post ledger-revert): production gm 0.6297 (best), min 0.378, no storms.
 LOCK 1: oracle bound gm 1.4349 (f2). LOCK 2: envelope UB w/ measured constants (2.47 DRAM cap x 51 + per-band oracle MAX) = mean 1.738 < 1.8, feasibility-favoring.
 VERDICT: 1.8-mean double-locked infeasible for this arm family; zero-regression exactness met (750/750); combined dispatch harvest = gm 1.3049/mean 1.3428. Full verdict: RESULTS.md.
+
+## iter 10 — 2026-07-23 — GO (fallback-select skip)
+a7: gm 0.6758 / mean 0.7112 / min 0.412 (a6 0.630/0.666/0.378) — mid-cell K0 second select removed, tax 2.3x -> 2.1x vs oracle 1.435. Named residual: K0 sampling body, K1 2K-candidate diet (blocked by r>=64 line — needs count-feedback, not tighter sampling), K2 empty launch, BS16-64 reducer exposure.
+NOTE: e1 envelope sweep used FIXED chunks=592//bs; screens use a per-case mini-ladder — e1 understates the arm. e2 rerun with ladder queued.

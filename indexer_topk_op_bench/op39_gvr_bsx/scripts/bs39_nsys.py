@@ -51,7 +51,18 @@ def main():
         for bs in BS_LIST:
             lg, pre = make_batch(b, bs)
             bb = bufs(bs, K)
-            chunks = max(1, 592 // bs)
+            from probe import timeit as _t
+            best = None
+            for ch in sorted({1, 2, 4, max(1, 296 // bs), max(1, 592 // bs)}):
+                arm.run(lg, pre, bb["thr"], bb["cv"], bb["ci"], bb["cnt"],
+                        bb["done"], bb["ovf"], bb["resc"], bb["out"], ch)
+                torch.cuda.synchronize()
+                us = _t(lambda: arm.run(lg, pre, bb["thr"], bb["cv"], bb["ci"],
+                                        bb["cnt"], bb["done"], bb["ovf"],
+                                        bb["resc"], bb["out"], ch), reps=5)
+                if best is None or us < best[0]:
+                    best = (us, ch)
+            chunks = best[1]
             arm.run(lg, pre, bb["thr"], bb["cv"], bb["ci"], bb["cnt"],
                     bb["done"], bb["ovf"], bb["resc"], bb["out"], chunks)
             torch.cuda.synchronize()
