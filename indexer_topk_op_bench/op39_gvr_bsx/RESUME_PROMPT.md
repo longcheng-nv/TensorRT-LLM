@@ -24,14 +24,24 @@ Small cells BS<=256 pending nsys axis (event launch tax masks truth).
 - IN FLIGHT: results/nsys/f1 screen (scripts/mb_nsys.py, 8 cells x 7 BS,
   oracle thr) -> parse with scripts/mb_verdict.py.
 
-## Next
-1. Parse f1 nsys verdict: small-cell BS16-256 truth; identify residual losses.
-2. Production arm: threshold-from-hint (preIdx gather -> conservative t_lo),
-   undershoot fallback (count<K -> re-scan with lowered t or escape to v3
-   dispatch), tie-exact tail (reuse GVR P4 machinery on candidate set; the
-   mb reduce's bucket-tie fill is NOT tie-exact yet).
-3. Wire as arm into op38 kernel_bs dispatch (BS>=16 keys only), full-envelope
-   sharded nsys sweep (drive_v2_sweep.sh pattern) + verdict.py.
+## Next (iter5 relay — production arm v2/v3c in src/arm_v2)
+State: oracle bound (results/f1_verdict.txt) = gm 1.37/min 0.967 nsys over the
+8-cell battleground. Production arm (K0 hint-min + strided-sample quantile ->
+K1 fused collect+reduce -> K2 rescue) is 0/225 exact incl. adversarial, but
+carries a ~2.5x threshold tax on sub-L2 cells: nsys split pro_64k BS16 =
+K0 6.1 + K1 17.5 + K2 1.35 vs oracle-fused 9.2 vs pr 10.7.
+1. K1 reduce: single-level 2048-bucket (11-bit) select for n~2K candidates
+   (current 4-level x 256 costs the exposed low-BS reducers).
+2. K0: S=2048 samples, fuse hint+sample phases (one sync chain), skip sample
+   when npad <= CAP; target <= 2us.
+3. Verify win band with production thresholds: pro_1024k BS256 event 148us vs
+   oracle 76us — suspect threshold/rescue behavior on low-hit L46; nsys split.
+4. Re-screen: scripts/mb_nsys-style run with arm_v2 (write arm_nsys.py), then
+   full-envelope sharded sweep + [worst,real,best] axes + zero-regression
+   dispatch vs op38 v3 (arm only where it wins).
+Falsified this campaign (do NOT re-propose): min-hint-only threshold (31/75
+overflow); t2 = K-th of stored subset (positional bias, real data);
+per-component ballot collect (0.2-0.6x); thread0 serial bucket scan.
 
 ## Gotchas
 - exact gate must be tie-aware multiset (probe.exact_rows) + real captures
