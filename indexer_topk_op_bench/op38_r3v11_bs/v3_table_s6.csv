@@ -1,0 +1,2 @@
+model,npad,BS,cfg,min_gain,gm_gain,n_layers
+pro,131136,32,"1024,4,9,6,2",1.068,1.188,3

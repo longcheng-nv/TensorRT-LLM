@@ -1,0 +1,2 @@
+model,npad,BS,cfg,min_gain,gm_gain,n_layers
+flash,65600,128,"1024,1,0,4,2",1.053,1.056,3
