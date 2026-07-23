@@ -58,3 +58,13 @@ fine skip) + d1a (cluster peer-push) onto e612 rank_scatter as ctor flags,
 default-off. All three splices landed with exact anchors (gvrpkg40v1).
 Probe: rung-2 equivalent (primitives pre-verified) -> straight to gate + A/B.
 Gate base,v1 running.
+
+## iter 0b — 2026-07-23 — FINDING (baseline nondeterminism, neartie cs=8)
+gate run 1 (base only): neartie_K2048_N262144 PASS. gate run 2 (base,v1 same
+GPU, identical deterministic input): FAIL on BOTH arms including base.
+=> e612 baseline is NONDETERMINISTIC on near-tie data at cs=8 (cluster path).
+Suspect class: DSMEM visibility race (ledger: cluster_arrive_relaxed has no
+release; reading a just-written scalar via DSMEM can see stale data; symptom
+clusters wrong picks by CTA slice). v1 adds no new failures (failure set
+identical to base). Flake probe (probe_neartie_flake.py, 100 reps x cs sweep)
+queued to run AFTER ab_v1 grid finishes (no probes during timing runs).
