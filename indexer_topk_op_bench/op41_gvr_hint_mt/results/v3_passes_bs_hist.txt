@@ -1,0 +1,5 @@
+
+== TOTAL per-row pass histogram (hint-path groups, all BS) ==
+  passes=0: 18695
+  passes=1: 1599
+  passes=2: 106

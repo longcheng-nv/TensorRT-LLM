@@ -1,0 +1,6 @@
+
+== one-pass coverage over ALL hint-path layers ==
+  ladder6 ok=False: 4
+  ladder6 ok=True: 541
+  ladder8 ok=False: 3
+  ladder8 ok=True: 542

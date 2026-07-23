@@ -1,0 +1,8 @@
+
+== one-pass coverage ==
+  s2_hs1 ok=0: 1
+  s2_hs1 ok=1: 544
+  s3_hs1 ok=0: 1
+  s3_hs1 ok=1: 544
+  s3_hs2 ok=0: 2
+  s3_hs2 ok=1: 543
