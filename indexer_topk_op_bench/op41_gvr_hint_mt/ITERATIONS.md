@@ -51,3 +51,14 @@ Tradeoff logged: npad gate reverts v32_64k BS>=256 replicated-L54 win (1.22)
 to protect the hetero mixture — hetero is the production-realistic axis.
 Follow-up (optional): swap v3mt into the op39 combined dispatch and re-run
 the 750-cell envelope (expect small positive drift; bench layers mostly p0).
+
+## phase 4 — 2026-07-23 — option-1 executed: v3mt into the op39 combined dispatch
+750-cell envelope re-run (bs41_nsys 8-GPU sharded, op38 protocol verbatim,
+0/750 inexact): v3mt alone gm 1.3064 / min 0.8367 / 104 losers (v3 record:
+1.2928 / 0.6525 / 115) — the worst-case floor rises 28% (straggler bench
+layers fixed). NEW COMBINED RECORD: BEST(arm_e6, v3mt) = gm 1.3279 /
+mean 1.3655 / min 0.8367 / <1.0 82 (e6 record 1.3179 / 1.3564 / 0.7665 / 90).
+Harvest curve: e1 1.3049 -> e2 1.3136 -> e5 1.3150 -> e6 1.3179 -> 1.3279.
+Triple-dispatch projection (arm+v3+v3mt) 1.3336 — rejected as ship shape
+(two v3 variants for +0.4%; the 36 v3mt<v3 cases are frac-tuning residue).
+Remaining named lever: per-case chase of those 36 cells (diminishing).
