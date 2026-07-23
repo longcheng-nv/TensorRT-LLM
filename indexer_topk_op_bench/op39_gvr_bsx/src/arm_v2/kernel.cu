@@ -411,7 +411,7 @@ arm_small_kernel(const float* __restrict__ logits, const int* __restrict__ pre_i
   }
 }
 
-template <bool RESCUE>
+template <bool RESCUE, int ILP>
 __global__ void __launch_bounds__(512, 5)
 arm_kernel(const float* __restrict__ logits, float* __restrict__ thr,
            float* __restrict__ cand_val, int* __restrict__ cand_idx,
@@ -435,12 +435,13 @@ arm_kernel(const float* __restrict__ logits, float* __restrict__ thr,
   __syncthreads();
   int i = beg + threadIdx.x;
   const int bd = blockDim.x;
-  for (; i + 7 * bd < end; i += 8 * bd) {
-    float4 a[8];
+  // batch loop width: ILP-8 wins at BS<=256, ILP-4 at BS>=512 (e2/e3/e4)
+  for (; i + (ILP - 1) * bd < end; i += ILP * bd) {
+    float4 a[ILP];
     #pragma unroll
-    for (int q = 0; q < 8; ++q) a[q] = lg4[i + q * bd];
+    for (int q = 0; q < ILP; ++q) a[q] = lg4[i + q * bd];
     #pragma unroll
-    for (int q = 0; q < 8; ++q) {
+    for (int q = 0; q < ILP; ++q) {
       float4 v = a[q];
       int base = (i + q * bd) * 4;
       #pragma unroll
@@ -561,8 +562,15 @@ extern "C" void arm_v2_launch(const float* logits, const int* pre_idx, float* th
     return;
   }
   thresh_kernel<<<BS, 512, 0, stream>>>(logits, pre_idx, thr, npad, K);
-  arm_kernel<false><<<dim3(chunks, BS), 512, 0, stream>>>(
-      logits, thr, cand_val, cand_idx, cnt, done, ovf, rescue, out, npad, K, BS);
-  arm_kernel<true><<<dim3(chunks, BS), 512, 0, stream>>>(
-      logits, thr, cand_val, cand_idx, cnt, done, ovf, rescue, out, npad, K, BS);
+  if (BS >= 512) {  // ILP-8 regresses ~2-9.5% at BS>=512 (e2 vs e3 envelope)
+    arm_kernel<false, 4><<<dim3(chunks, BS), 512, 0, stream>>>(
+        logits, thr, cand_val, cand_idx, cnt, done, ovf, rescue, out, npad, K, BS);
+    arm_kernel<true, 4><<<dim3(chunks, BS), 512, 0, stream>>>(
+        logits, thr, cand_val, cand_idx, cnt, done, ovf, rescue, out, npad, K, BS);
+  } else {
+    arm_kernel<false, 8><<<dim3(chunks, BS), 512, 0, stream>>>(
+        logits, thr, cand_val, cand_idx, cnt, done, ovf, rescue, out, npad, K, BS);
+    arm_kernel<true, 8><<<dim3(chunks, BS), 512, 0, stream>>>(
+        logits, thr, cand_val, cand_idx, cnt, done, ovf, rescue, out, npad, K, BS);
+  }
 }

@@ -93,3 +93,24 @@ VERDICT: 1.8-mean double-locked infeasible for this arm family; zero-regression 
 ## iter 10 — 2026-07-23 — GO (fallback-select skip)
 a7: gm 0.6758 / mean 0.7112 / min 0.412 (a6 0.630/0.666/0.378) — mid-cell K0 second select removed, tax 2.3x -> 2.1x vs oracle 1.435. Named residual: K0 sampling body, K1 2K-candidate diet (blocked by r>=64 line — needs count-feedback, not tighter sampling), K2 empty launch, BS16-64 reducer exposure.
 NOTE: e1 envelope sweep used FIXED chunks=592//bs; screens use a per-case mini-ladder — e1 understates the arm. e2 rerun with ladder queued.
+
+## iter 12 — 2026-07-23 — GO (BS-dispatched ILP: 8 for BS<512, 4 for BS>=512)
+e3 (post-iter11 envelope rerun) EXPOSED iter11: ILP-8's event-axis +5-6% did
+NOT transfer — nsys envelope BS1024 arm times +9.5% gm (12/12 big-N cells
++3.6..13%, pr anchors fixed so no drift), BS512 +2%, BS2-256 wash. FALSIFIED:
+(uniform ILP-8 collect; domain: BS>=512; evidence: e2-vs-e3 paired envelope).
+Root: e2 baseline batch loop was ILP-4 (iter11 replaced 4->8 wholesale).
+Missteps logged: (a) e4 first tried ILP=2 fallback (fell into the slow 2-wide
+tail loop, BS>=512 still +7% vs e2); (b) `setsid` in a bg wrapper returns
+immediately — poll shard logs, don't trust the wrapper exit.
+Final shape: `arm_kernel<RESCUE, ILP>` generic batch loop; launch dispatch
+BS>=512 -> ILP4, else ILP8. Gate 0/225 + adversarial OK (twice).
+e5 verdict: combined gm 1.3150 / mean 1.3532 / min 0.7665, 0/750 inexact,
+arm-beats-v3 wins 52 (e2 51, e3 44). BS1024 arm gm 0.846 / BS512 0.749 (best);
+e5/e2 per-BS: BS>=512 parity 0.997-0.998, BS64-256 keep ILP-8 ~1%.
+flash_512k BS1024 2.56x / BS512 2.21x; flash_1024k BS1024 2.12x.
+NCU (results/ncu_bignt.txt, flash_512k BS1024 chunks=2): collect 75.4% DRAM /
+45% SM / issue 0.49 — still ~25% from the 2.47-cap DRAM roofline; reducer
+kernel latency-bound 6.1us (issue 0.13). Next named levers unchanged: collect
+BW push (async-bulk/TMA) toward the 2.47 cap; K2 empty launch; BS16-64
+reducer exposure.

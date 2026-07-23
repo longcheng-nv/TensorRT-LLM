@@ -1,4 +1,4 @@
-# op39 campaign verdict (2026-07-23, umb-b200-045, iter0-9b)
+# op39 campaign verdict (2026-07-23, umb-b200-045, iter0-12)
 
 Goal (user /goal-locked): vs PR head on the §7b fp32 envelope (75 cells x
 BS 2-1024 = 750 cases), **mean >= 1.8x AND zero regressions**, within the GVR
@@ -32,10 +32,16 @@ methodology.
   **750/750 tie-aware exact on real captures + adversarial (const/near-tie)
   green** across the envelope; robust (no resort storms; a6 screen gm 0.630,
   min 0.378).
-- Envelope verdict e1 (750 cases, nsys): arm alone gm 0.555;
-  **BEST(arm, op38-v3) combined dispatch: gm 1.3049 / mean 1.3428 /
-  min 0.7665, 0 inexact** — vs op38 v3 alone 1.293/1.332. Arm's win band:
-  large-npad x BS >= 256 (up to 1.43 production, 2.0 oracle-event).
+- Envelope verdict e5 (750 cases, nsys, per-case chunks ladder, iter12
+  BS-dispatched ILP 8/4): arm alone gm 0.6395; **BEST(arm, op38-v3) combined
+  dispatch: gm 1.3150 / mean 1.3532 / min 0.7665, 0 inexact** — vs op38 v3
+  alone 1.293/1.332 (e1 fixed-chunks was 1.3049/1.3428; e2 ladder
+  1.3136/1.3517). Arm's win band: large-npad x BS >= 256, 52 cells beat v3;
+  top: flash_512k BS1024 2.56x / BS512 2.21x, flash_1024k BS1024 2.12x.
+- iter11/12 lesson: uniform ILP-8 collect helped the event axis but regressed
+  the nsys envelope at BS>=512 (+9.5% gm at BS1024); final shape dispatches
+  ILP by BS (8 below 512, 4 at/above). NCU at flash_512k BS1024: collect
+  75.4% DRAM — ~25% from the 2.47 cap remains the big-N lever (TMA/async).
 - Production threshold tax vs oracle is ~2.3x; named residual levers in
   RESUME_PROMPT (K0 6->2us fold, K1 candidate diet, K2 conditional launch).
   Closing it raises the combined mean toward ~1.5 but cannot cross 1.8

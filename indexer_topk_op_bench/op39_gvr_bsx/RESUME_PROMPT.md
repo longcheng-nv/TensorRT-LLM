@@ -1,4 +1,15 @@
-# op39 RESUME (updated 2026-07-23, iter2 done, nsys screen in flight)
+# op39 RESUME (updated 2026-07-23, iter12 done — harvest phase)
+
+## CURRENT STATE (iter12)
+Campaign verdict unchanged: 1.8-mean double-locked infeasible (RESULTS.md).
+Harvest best = e5: combined gm 1.3150 / mean 1.3532 / min 0.7665, 0/750
+inexact, 52 arm-beats-v3 cells. Kernel: arm_kernel<RESCUE, ILP> with BS
+dispatch (ILP8 < BS512, ILP4 >= 512) — uniform ILP-8 falsified at BS>=512
+(e2-vs-e3). Verdict scripts: verdict_e5.py; data results/e5_data.csv.
+Next named levers: collect BW toward 2.47 cap (TMA/async-bulk; NCU 75.4%
+DRAM at flash_512k BS1024), K2 empty-launch, BS16-64 reducer exposure.
+
+## Older header (iter2 era, kept for context)
 
 ## 1-minute context
 User /goal-locked: vs PR head (bs_real_layers.csv nsys anchors), §7b fp32
