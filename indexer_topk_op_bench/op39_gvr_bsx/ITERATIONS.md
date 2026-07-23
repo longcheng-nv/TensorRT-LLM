@@ -23,3 +23,10 @@ Fused last-CTA-per-row reduce + self-clean (no memset launch) + 2xfloat4 ILP + w
 Result (event-axis vs nsys report pr, i.e. pessimistic): pro_1024k 1.18/1.13/1.44/1.84 @BS16/64/256/1024; v32_64k 1.15/1.06/1.07/1.34; flash_256k 0.93-1.24; small cells (pro_64k, flash_16k) 0.66-0.70 at BS<=256 (event launch tax ~5-8us of a 13-22us reading), 1.0-1.2 at BS1024.
 Diagnosis: structure GO everywhere at BS>=256 large-N; small-cell low-BS truth requires nsys axis.
 Next: nsys-axis screen; then production arm = threshold-from-hint + undershoot fallback + tie-exact tail (reuse GVR P4 machinery on candidate set).
+
+## iter 3 — 2026-07-23 — GO (nsys-axis screen, oracle thr)
+8-cell battleground x BS16-1024 (56 cases): gm 1.3697, mean 1.3887, min 0.9667, <1.0: 2/56 (pro_64k_L30 BS128/256 = 0.967/0.990 parity band). Event-axis pessimism confirmed (~2x on small cells: flash_16k BS16 event 0.69 -> nsys 1.34).
+Shape: BS16-32 strong (1.3-1.9), BS64-128 dip (1.07-1.5), BS512-1024 high (1.4-1.9); pro_1024k BS1024 1.90 ~= realistic pass-cut UB.
+Caveats: oracle threshold (production needs hint->t_lo estimation + undershoot/overflow fallback + tie-exact tail); dip band + pro_64k parity are the residual battlegrounds; fused still at ~2.6TB/s vs 7 roofline at big cells.
+Next (iter4): production arm v1 — pre-kernel hint-quantile t_lo (bucket hist on gathered hint values), reducer-CTA fallback rescan on undershoot/overflow, exact tie tail.
+Data: results/f1_verdict.txt.
