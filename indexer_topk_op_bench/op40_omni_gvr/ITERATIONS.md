@@ -77,3 +77,14 @@ Reproduces op37's 1.1284 on the newer e612 head — levers independent of the
 head refresh (p4tt/p4wr absorption did not eat them).
 Cumulative vs goal: 1.126 of 1.60 (remaining x1.421).
 Next: iter2 target selection from cs-level residual map.
+
+## iter 0b CORRECTION — 2026-07-23
+Pre-draw sweep (100 seeds x cs {1,4,8}): neartie_K2048_N262144 fails on 54/100
+pre-draws with IDENTICAL failing seed sets across cs => deterministic,
+cs-INDEPENDENT, data-dependent defect (not a DSMEM race). Earlier
+"nondeterminism" was my gate's own seeding bug: hash(str) is
+PYTHONHASHSEED-salted across processes (fixed: crc32). Defect class = P4
+boundary tie handling on 1-2 ULP-spaced near-tie bands (same family as the
+plateau duplicate-index defect). Baseline real-data green stands.
+Consequence: P4 tail redesign is now correctness-obligated AND the perf
+lever (H1) — one redesign serves both.

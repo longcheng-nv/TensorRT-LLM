@@ -15,6 +15,7 @@ Track 3 adversarial: plateau (giant tie class), narrow (few coarse bins),
 import argparse
 import struct
 import sys
+import zlib
 from pathlib import Path
 
 import torch
@@ -88,7 +89,7 @@ def synth_cases():
 def run_case(arms, name, K, cr, logits, pre, results):
     N = logits.shape[1]
     if pre is None:
-        g = torch.Generator(device=DEV).manual_seed(hash((name, 7)) % (2**31))
+        g = torch.Generator(device=DEV).manual_seed(zlib.crc32(name.encode()) % (2**31))
         noisy = logits[0] + 0.5 * torch.randn(N, generator=g, device=DEV)
         pre = torch.topk(noisy, K).indices.to(torch.int32).reshape(1, K).contiguous()
     sl = torch.full((1,), N * cr, dtype=torch.int32, device=DEV)

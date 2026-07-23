@@ -40,28 +40,27 @@ def make_case():
     eps = (torch.tensor([0.0, 1.0, -1.0], device=DEV)[band]
            * 1.2e-7 * max(abs(kth), 1e-3))
     nt[0, idx] = kth + eps
-    gg = torch.Generator(device=DEV).manual_seed(
-        hash((f"neartie_K{K}_N{N}", 7)) % (2**31))
-    noisy = nt[0] + 0.5 * torch.randn(N, generator=gg, device=DEV)
-    pre = torch.topk(noisy, K).indices.to(torch.int32).reshape(1, K).contiguous()
-    return nt, pre
+    return nt
 
 
 def main():
-    logits, pre = make_case()
+    logits = make_case()
     sl = torch.full((1,), N * cr, dtype=torch.int32, device=DEV)
-    for cs in (1, 4, 8, 16):
+    for cs in (8, 4, 1):
         cfg = launch_cfg(logits, N)
         cfg["cluster_size"] = cs
         fn = compile_arm("base", K, cr, cfg)
-        fails = 0
-        for i in range(REPS):
+        bad = []
+        for ps in range(REPS):
+            gg = torch.Generator(device=DEV).manual_seed(90000 + ps)
+            noisy = logits[0] + 0.5 * torch.randn(N, generator=gg, device=DEV)
+            pre = torch.topk(noisy, K).indices.to(torch.int32).reshape(1, K).contiguous()
             oi = torch.full((1, K), -7, dtype=torch.int32, device=DEV)
             fn(logits, pre, sl, None, oi, None)
             torch.cuda.synchronize()
             if not exact_set(oi, logits[0], K, N):
-                fails += 1
-        print(f"cs={cs:2d}: {fails}/{REPS} launches inexact", flush=True)
+                bad.append(ps)
+        print(f"cs={cs:2d}: {len(bad)}/{REPS} pre-draws inexact; seeds {bad[:10]}", flush=True)
 
 
 if __name__ == "__main__":
