@@ -8,3 +8,12 @@ Probe rung 0 x2 (NCU, pro_1024k BS512 + pro_64k BS256):
 Verdict: GO — arm design = tile-parallel single-pass collect (grid ~2xSM, (row,chunk) tiles, hint->conservative t_lo -> atomic append -> small exact top-K), unified for BS>=16; also cuts the 2nd pass for the DRAM-bound 51.
 Ledger: none violated (new shape, not the falsified (TB,CS,MAXV,AR,HS) family).
 Next: rung-2 microbench — oracle-threshold collect structure speed on pro_64k BS256 + pro_1024k BS512.
+
+## iter 1 — 2026-07-23 — GO (rung-2 structure microbench)
+Hypothesis: tile-parallel 1-pass collect (oracle thr) beats per-row-serial shape.
+Probe: mb_collect v1 (ballot-aggregated append) FAILED structure (0.2-0.6x) — per-component ballot_sync tax + divergent-tail UB. v2 smem staging (CTA-local smem atomics, 1 global atomic/CTA, coalesced writeout):
+- pro_1024k (DRAM-bound): 1.04/1.03/1.34/1.56x @BS16/64/256/1024 vs report pr — pass-cut lever CONFIRMED on silicon (event-axis, i.e. pessimistic vs nsys pr).
+- flash_256k/v32_64k: 0.78-1.04 — parity band, handicapped by ~10-12us event-axis fixed tax (2 launches + memset).
+- small cells (flash_16k/pro_64k): k1 flat ~12.5us at any BS<=256 -> fixed-overhead floor, NOT bandwidth.
+Diagnosis: structure sound; k1 at 2.4TB/s (3x off 7TB/s roofline) needs ILP; K2 costs 5-40us (serial bucket scan + smem atomic contention); 2-launch+memset tax dominates small cells.
+Next (iter2): fused single kernel — last-CTA-per-row reduce (drop 2nd launch+memset), 2xfloat4 ILP scan, parallel bucket suffix-scan; then nsys-axis screen.
