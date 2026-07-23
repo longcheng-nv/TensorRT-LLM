@@ -39,7 +39,7 @@ def build_arm2():
 
 
 def bufs(bs, K):
-    return dict(thr=torch.empty(bs, dtype=torch.float32, device="cuda"),
+    return dict(thr=torch.empty(2 * bs, dtype=torch.float32, device="cuda"),
                 cv=torch.empty(bs, CAP, dtype=torch.float32, device="cuda"),
                 ci=torch.empty(bs, CAP, dtype=torch.int32, device="cuda"),
                 cnt=torch.zeros(bs, dtype=torch.int32, device="cuda"),

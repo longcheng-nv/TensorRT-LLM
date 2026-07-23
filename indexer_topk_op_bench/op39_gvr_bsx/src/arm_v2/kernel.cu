@@ -146,13 +146,21 @@ thresh_kernel(const float* __restrict__ logits, const int* __restrict__ pre_idx,
       sv[j * 4 + 2] = v.z; sv[j * 4 + 3] = v.w;
     }
     __syncthreads();
-    long r = (long)S_N * (K + K / 4) / npad;  // target ~1.25K candidates:
-                                              // rescue is cheap (empty K2
-                                              // ~1.3us), so bias tight
+    long r = (long)S_N * (2 * K) / npad;      // primary target ~2K candidates
     int rk = (int)max(1L, min((long)S_N, r));
     sample_kth_key(sv, S_N, rk, SS, &skey);
     __syncthreads();
     t = fmaxf(t, inv_mono(skey));
+    // fallback quantile at ~6K target: used by the undershoot rescue instead
+    // of a full-row final resort (6x margin over K absorbs cluster noise)
+    long rf = (long)S_N * (6 * K) / npad;
+    int rkf = (int)max((long)rk + 1, min((long)S_N, rf));
+    __syncthreads();
+    sample_kth_key(sv, S_N, rkf, SS, &skey);
+    __syncthreads();
+    if (threadIdx.x == 0) thr[gridDim.x + row] = fminf(inv_mono(skey), s_min);
+  } else if (threadIdx.x == 0) {
+    thr[gridDim.x + row] = t;  // small rows: fallback == primary (min-hint)
   }
   if (threadIdx.x == 0) thr[row] = t;
 }
@@ -398,8 +406,15 @@ arm_kernel(const float* __restrict__ logits, float* __restrict__ thr,
       thr[row] = inv_mono(kth_key);
       rescue[row] = 1;
     }
+  } else if (!RESCUE && true_n < K) {
+    // undershoot: rescue at the deep fallback quantile (cheap re-collect),
+    // not the full-row single-CTA path
+    if (threadIdx.x == 0) {
+      thr[row] = thr[BS + row];
+      rescue[row] = 1;
+    }
   } else {
-    // final resort (rescue overflow or degenerate hints): full-row exact
+    // final resort (rescue-level overflow/undershoot or degenerate hints)
     exact_topk_from<true, true>(nullptr, nullptr, lg, npad, K, orow, S, nullptr);
     if (RESCUE) {
       __syncthreads();

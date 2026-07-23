@@ -49,3 +49,10 @@ Named next levers: (a) K1 reduce single-level 2048-bucket (11-bit) for n~2K; (b)
 FALSIFIED: (flat-stride sampling at stride == cache line; domain: any DRAM-resident row; evidence: nsys) — touches every DRAM line of the row, K0 = 46us at pro_1024k BS256 (a full extra pass).
 Fix: 256 probes x 32 consecutive values (1 line per probe, 1/32 of lines): pro_1024k BS256 event 148 -> 112-116us (x0.96-0.99 vs pr, nsys likely >1.0); pro_1024k BS16 x0.58-0.59. Sub-L2 cells unchanged (0.27-0.55 event) — K1 reduce + K0 fixed cost still the battleground there.
 All exact. Next: K1 single-level 2048-bucket reduce; K0 <=2us; arm_nsys.py 8-cell production screen; envelope sweep + dispatch-vs-op38v3.
+
+## iter 5c/5d — 2026-07-23 — partial (production screens a1/a2 + undershoot rescue)
+a1 (T=2K): nsys gm 0.621/min 0.347, wins only large-npad x BS>=256 (pro_1024k BS512-1024 1.34-1.46, flash_512k 1.10-1.22, v32_128k BS1024 1.16).
+FALSIFIED: (T=1.25K tight target; domain: large npad >=262144, clustered sampling; evidence: nsys a2) — tail rank r=40 under cluster variance -> undershoot -> full-row resort storms (pro_1024k 1-7ms, gm 0.45). Tight-T is only safe with a cheap undershoot rescue.
+v3f: T back to 2K + K0 dual quantile (primary 2K, fallback 6K in thr[BS+row]) + undershoot rescue at fallback (no more full-row for undershoot). Gate 0/225 + adversarial OK; pro_1024k healthy again (BS256 0.96 event).
+Residual truth: sub-L2 cells (npad<=16K) 0.26-0.41 — 3-launch + reducer exposure vs pr's efficient single-kernel serial shape; large-npad BS16-128 0.55-0.97.
+Strategy note: combined dispatch (op38 v3 for small-npad/low-BS + arm for large-npad) is the realistic ship shape; threshold tax (K0 6us, K2 1.3us, reduce depth) remains the named battleground to unlock the oracle bound (gm 1.37) beyond BS>=256.
