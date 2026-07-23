@@ -111,3 +111,11 @@ v2c (p1b_cache fp32 K512/1024): WASH vs v2lad (delta < 1%).
 Ledger write-back: FALSIFIED.md entry (ladder widening, K512/K1024, real fp32
 BS=1, nsys, complexity-backfire); K2048 ladder harvested into v3k.
 Next: iter3 = v3 distributed radix P4 (smoke 5/5 exact incl cs4/8) — gate.
+
+## iter 3 probe update — 2026-07-23 — neartie root cause RELOCATED to P2
+v3 (fully rewritten radix P4) fails neartie with the IDENTICAL 54/100 seed
+set as base => defect is NOT in P4. Root cause: P2 admission fail-soft —
+near-tie bands need ULP-level bracket resolution; fb log-falsi caps at 8
+iters -> undershoot (count < K) -> pad/dup. Same class as plateau. One fix
+covers both: p2_radix_fallback (full-row distributed radix select on
+fail-soft, exact by bit-level digits). Promoted to the iter5 keystone.
