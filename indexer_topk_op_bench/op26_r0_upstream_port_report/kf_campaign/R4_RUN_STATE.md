@@ -306,3 +306,12 @@ Updated 2026-07-22 (会话暂停：用户要求迁移到另一台机器)。
   round-4 增量小,跳过全格;终局判决与收口在 campaign terminal 后执行:
   最终 best 全格 + exactness → 若 cs8@512k bug 仍在则 engineer graft
   (b>1&&cs>1→安全档)→ graft 后全格复验 + BS=1 865 守门 → 报告/交付。
+
+## R5 收口(2026-07-23)
+
+- v3 terminal @round5, 终局 champion 156ab438(`gvr-topk-r5-combined`,内部 1.0756)。
+- 终审: 750 格 **全 exact**(cs8 竞态末轮修复)但 gm **0.9862**/391 回退;
+  BS=1 865 守门 1.2233 vs head、= R4 champ 的 0.743 → **目标 +100% 未达成**(如实)。
+- 交付: R5_CLOSEOUT.md(判决/分域图/结构性结论/部署建议 = (b,npad,K) 静态
+  三路分派: b=1→R4 champ, b≤8/小N→R5 champ, 其余→head)+
+  fork 分支 kf/r5-champion-bs-combined @3e04d248 + COST_LEDGER 终账 $2435.93。

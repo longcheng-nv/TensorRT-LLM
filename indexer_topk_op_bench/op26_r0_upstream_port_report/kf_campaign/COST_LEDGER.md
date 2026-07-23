@@ -10,8 +10,8 @@
 | R4 gvr-topk-cold60 (BS=1 冷启动) | pra6srbd7h4… | Cancelled(预算截断) | ✅ champion 28dc11f6, gm 1.6531, 三 Bar 全达成 | **$1110.62** |
 | R5 gvr-topk-bs2x (v1) | rngnxv95cx5… | Cancelled(平台 custom_inputs 0% 故障,止损) | 无产出(平台缺口复证) | **$9.38** |
 | R5 gvr-topk-bs2x-v2 | vk9m3tetqh1… | Cancelled(lineage exactness DQ → fork) | r1/r2: 内部 0.98;全格 0.93-0.94 + 8 例盲区 inexact | **$719.02** |
-| R5 gvr-topk-bs2x-v3 (fork, rounds 3-5) | befh5fh2595… | **Running**(cap $400) | 内部 1.0056(进行中) | **$25.21**(截至本刻) |
-| **KF 小计(本会话)** | | | | **$1864.23 + v3 增量** |
+| R5 gvr-topk-bs2x-v3 (fork, rounds 3-5) | befh5fh2595… | Cancelled(rounds 3-5 完成) | champion 156ab438: 全 exact;750 格 gm 0.986(目标未达) | **$596.91**(终) |
+| **KF 小计(本会话)** | | | | **$2435.93(终)** |
 
 参考(既往 lineage,非本会话花费): 第一期 gvr-topk-bs1-real ≈$690(→1.68×);
 R3 gvr-topk-r3 $761(→compB 1.8267)。
