@@ -24,21 +24,7 @@ Small cells BS<=256 pending nsys axis (event launch tax masks truth).
 - IN FLIGHT: results/nsys/f1 screen (scripts/mb_nsys.py, 8 cells x 7 BS,
   oracle thr) -> parse with scripts/mb_verdict.py.
 
-## Next (iter7 relay — READ THIS FIRST)
-Screens: f2 = oracle bound w/ roofline collect gm 1.4349 (results/nsys/f2,
-parse: mb_verdict.py --rep .../f2.nsys-rep); a4 = production gm 0.583.
-1. FIX K=2048 STAGE regression (a4): K-aware STAGE template (4096/5-occ for
-   K<=1024, 6144/3-occ for K=2048) or T=1.5K at K=2048; re-gate + re-screen.
-2. Decisive for the 1.8 bar (LOCK 1 in place: oracle gm 1.43 < 1.9):
-   (a) multi-row-per-CTA shape for sub-L2 cells (chain-latency cap there),
-   (b) TMA/async-bulk collect BW push at big cells,
-   (c) if (a)+(b) stall: relaxed-constraint control run -> double-lock verdict,
-       then harvest = combined dispatch (op38 v3 + arm win band large-npad
-       BS>=256 at 1.16-1.43) and a bounded close-out per AUTONOMY.md.
-3. Production threshold tax levers still open: K0 6->2us (fold hint+sample,
-   single select), K2 empty-launch 1.3us.
-
-## Older context (iter5 relay — production arm v2/v3c in src/arm_v2)
+## Next (iter5 relay — production arm v2/v3c in src/arm_v2)
 State: oracle bound (results/f1_verdict.txt) = gm 1.37/min 0.967 nsys over the
 8-cell battleground. Production arm (K0 hint-min + strided-sample quantile ->
 K1 fused collect+reduce -> K2 rescue) is 0/225 exact incl. adversarial, but
