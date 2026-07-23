@@ -88,3 +88,13 @@ boundary tie handling on 1-2 ULP-spaced near-tie bands (same family as the
 plateau duplicate-index defect). Baseline real-data green stands.
 Consequence: P4 tail redesign is now correctness-obligated AND the perf
 lever (H1) — one redesign serves both.
+
+## probe: cluster-P4 gather split — 2026-07-23 — T1 QUANTIFIED
+t5-relocation twin (gvrpkg40v1g) vs v1t differential on 9 cs>=4 cells:
+cluster P4 = DSMEM gather+straggler-wait 2.4-4.4us + leader-only P4 compute
+2.8-6.1us (both WITH d1a peer-push ON). Worst: v32_64k cs4 = 4.35 + 6.14.
+=> iter4 design "distributed P4": per-CTA local coarse hist during P3, DSMEM
+hist-reduce (256 ints instead of bulk candidates), redundant k-th-bin on all
+CTAs, distributed global-atomic scatter, only straddle class crosses to
+leader for exact tail. Expected: gather -> ~0.5-1us, compute parallelized.
+Raw: results/phase_v1g_40.{log,json}.
