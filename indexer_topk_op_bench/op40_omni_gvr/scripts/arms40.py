@@ -33,6 +33,17 @@ ARMS = {
     "v3": ("gvrpkg40v3.top_k.gvr_topk_decode",
            dict(p4_rs_rw_search=True, p4_fine_skip=True, p4_peer_push=True,
                 p4_radix_dist=True, p4_radix_cs1=True)),
+    # iter3 composite: v3 radix P4 + the harvested K2048-only ladder
+    "v3k": ("gvrpkg40v3.top_k.gvr_topk_decode",
+            dict(p4_rs_rw_search=True, p4_fine_skip=True, p4_peer_push=True,
+                 p4_radix_dist=True, p4_radix_cs1=True,
+                 per_k={2048: dict(r0_qfracs=(0.8, 0.6, 0.4, 0.25))})),
+    # iter5: v3k + exact full-row radix fallback on P2 fail-soft (fixes the
+    # plateau/neartie baseline defect class)
+    "v4": ("gvrpkg40v3.top_k.gvr_topk_decode",
+           dict(p4_rs_rw_search=True, p4_fine_skip=True, p4_peer_push=True,
+                p4_radix_dist=True, p4_radix_cs1=True, p2_radix_fallback=True,
+                per_k={2048: dict(r0_qfracs=(0.8, 0.6, 0.4, 0.25))})),
 }
 
 

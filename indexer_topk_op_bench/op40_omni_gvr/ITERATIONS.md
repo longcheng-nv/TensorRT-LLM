@@ -119,3 +119,12 @@ near-tie bands need ULP-level bracket resolution; fb log-falsi caps at 8
 iters -> undershoot (count < K) -> pad/dup. Same class as plateau. One fix
 covers both: p2_radix_fallback (full-row distributed radix select on
 fail-soft, exact by bit-level digits). Promoted to the iter5 keystone.
+
+## iter 5 (keystone, implemented ahead of iter3 verdict) — 2026-07-23 — smoke GREEN
+v4 = v3k + p2_radix_fallback: exact full-row distributed radix select
+(radix_select_row) replaces the P2 fail-soft undershoot; P3/handoffs/P4
+skipped via s_iscalars[1]==4 sentinel when the fallback emitted.
+Smoke: plateau 3/3 FIXED (base/v1/v3 all fail these), neartie 0/20 pre-draws
+inexact at cs1 AND cs8 (base ~54%). Full gate + grid pending iter3 grid end.
+This is the first arm that passes every adversarial track — baseline defect
+class (P2 fail-soft under-fill) closed with a bit-exact bounded-cost path.

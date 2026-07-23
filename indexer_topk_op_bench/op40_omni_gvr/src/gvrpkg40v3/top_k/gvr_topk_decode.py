@@ -319,6 +319,7 @@ class GvrTopKKernel:
         p2_warp_redundant: bool = True,
         p4_radix_dist: bool = False,  # [v3] distributed radix-select P4, cs>1
         p4_radix_cs1: bool = False,  # [v3] radix-select P4 on the cs=1 path
+        p2_radix_fallback: bool = False,  # [v4] exact full-row radix on P2 fail-soft
     ):
         # [v3] phase4_radix_select: MSB-first 256-digit radix select over the
         # u32 order keys of the collected candidates. Candidates never move
@@ -334,6 +335,13 @@ class GvrTopKKernel:
         # where float-width bins cannot separate 1-ULP neighbours.
         self.p4_radix_dist = bool(p4_radix_dist)
         self.p4_radix_cs1 = bool(p4_radix_cs1)
+        # [v4] p2_radix_fallback: when the R0-miss log-falsi refine exhausts
+        # without an admissible threshold (tie-plateau / near-tie bands that
+        # need sub-ULP bracket resolution), run an EXACT full-row distributed
+        # radix select instead of the undershoot fail-soft (which emits
+        # < top_k valid entries -> duplicate/garbage indices). Pathological
+        # rows only; continuous real captures never take this branch.
+        self.p2_radix_fallback = bool(p2_radix_fallback)
         # Redundant-warp sync reduction: every warp replays the block
         # reduce + decision from the same staged SMEM partials in the
         # same fp32 order, so results are bit-identical across warps and
@@ -3513,6 +3521,176 @@ class GvrTopKKernel:
                 i11 = i11 + cutlass.Int32(num_threads)
 
 
+
+    # ------------------------------------------------------------------
+    # [v4] Exact full-row distributed radix select — the P2 fail-soft
+    # replacement. Same digit machinery as phase4_radix_select but sources
+    # the ROW SLICE directly (no candidate SMEM): per level each CTA
+    # re-scans its slice, histograms the in-class elements, exchanges
+    # histograms (cs>1), picks the crossing digit redundantly and scatters
+    # matching elements' GLOBAL positions to the output at deterministic
+    # offsets. <=4 slice scans on pathological rows only. total >= N > K
+    # here (degenerate rows never reach P2), so no undershoot branch.
+    # ------------------------------------------------------------------
+    @cute.jit
+    def radix_select_row(
+        self,
+        input_row,
+        slice_start,
+        slice_end,
+        smem_hist,
+        smem_ptcnt,
+        smem_hxc,
+        s_iscalars,
+        output_values_row,
+        output_indices_row,
+        do_cluster_sync,
+        cta_in_cluster,
+        tidx,
+        warp_id,
+        lane,
+    ):
+        kK = cutlass.const_expr(self.top_k)
+        num_threads = cutlass.const_expr(self.num_threads)
+        cs = cutlass.const_expr(self.cluster_size)
+        SEG = cutlass.const_expr(8)
+
+        done = cutlass.Int32(0)
+        base_rank = cutlass.Int32(0)
+        need_rem = cutlass.Int32(kK)
+        sel_hi = cutlass.Int32(0)
+
+        for level in cutlass.range_constexpr(4):
+            shift = cutlass.const_expr(24 - 8 * level)
+            pmask = cutlass.const_expr((1 << (8 * level)) - 1)
+            if done == cutlass.Int32(0):
+                jz = tidx
+                while jz < cutlass.Int32(256):
+                    smem_hist[jz] = cutlass.Int32(0)
+                    smem_ptcnt[jz] = cutlass.Int32(0)
+                    smem_ptcnt[jz + cutlass.Int32(256)] = cutlass.Int32(0)
+                    jz = jz + cutlass.Int32(num_threads)
+                cute.arch.barrier()
+                ic = slice_start + tidx
+                while ic < slice_end:
+                    k32 = f32_order_key(cutlass.Float32(input_row[ic]))
+                    inclass = cutlass.Int32(1)
+                    if cutlass.const_expr(level > 0):
+                        hi = (k32 >> cutlass.Int32(shift + 8)) & cutlass.Int32(pmask)
+                        if hi != sel_hi:
+                            inclass = cutlass.Int32(0)
+                    if inclass == cutlass.Int32(1):
+                        d = (k32 >> cutlass.Int32(shift)) & cutlass.Int32(255)
+                        atomicAdd(smem_hist.iterator + d, cutlass.Int32(1))
+                    ic = ic + cutlass.Int32(num_threads)
+                cute.arch.barrier()
+                if cutlass.const_expr(cs > 1):
+                    if do_cluster_sync:
+                        jp = tidx
+                        while jp < cutlass.Int32(256):
+                            hxaddr = mapa_shared_cluster(
+                                smem_hxc.iterator
+                                + (cta_in_cluster * cutlass.Int32(256) + jp),
+                                cutlass.Int32(0),
+                            )
+                            st_shared_cluster_i32(hxaddr, smem_hist[jp])
+                            jp = jp + cutlass.Int32(num_threads)
+                        cute.arch.cluster_arrive()
+                        cute.arch.cluster_wait()
+                        jr = tidx
+                        while jr < cutlass.Int32(256):
+                            tot = cutlass.Int32(0)
+                            pfx = cutlass.Int32(0)
+                            for cpi in cutlass.range_constexpr(cs):
+                                a2 = mapa_shared_cluster(
+                                    smem_hxc.iterator
+                                    + (cutlass.Int32(cpi) * cutlass.Int32(256) + jr),
+                                    cutlass.Int32(0),
+                                )
+                                hv = ld_shared_cluster_i32(a2)
+                                tot = tot + hv
+                                if cutlass.Int32(cpi) < cta_in_cluster:
+                                    pfx = pfx + hv
+                            smem_hist[jr] = tot
+                            smem_ptcnt[jr] = pfx
+                            jr = jr + cutlass.Int32(num_threads)
+                        cute.arch.cluster_arrive()
+                        cute.arch.cluster_wait()
+                cute.arch.barrier()
+                if warp_id == cutlass.Int32(0):
+                    top = cutlass.Int32(255) - lane * cutlass.Int32(SEG)
+                    seg_frag = cute.make_fragment((SEG,), cutlass.Int32)
+                    part = cutlass.Int32(0)
+                    for j in cutlass.range_constexpr(SEG):
+                        v8 = smem_hist[top - cutlass.Int32(j)]
+                        seg_frag[j] = v8
+                        part = part + v8
+                    tp = part
+                    for off_i in cutlass.range_constexpr(5):
+                        off_v = cutlass.const_expr(1 << off_i)
+                        other = cute.arch.shuffle_sync_up(tp, off_v, mask_and_clamp=0)
+                        if lane >= cutlass.Int32(off_v):
+                            tp = tp + other
+                    excl = tp - part
+                    run = cutlass.Int32(0)
+                    for j in cutlass.range_constexpr(SEG):
+                        db = top - cutlass.Int32(j)
+                        cb = excl + run
+                        run = run + seg_frag[j]
+                        ca = excl + run
+                        smem_hist[db] = cb
+                        if cb < need_rem and ca >= need_rem:
+                            s_iscalars[2] = db
+                            s_iscalars[3] = cb
+                            s_iscalars[4] = seg_frag[j]
+                cute.arch.barrier()
+                d_star = s_iscalars[2]
+                cum_above = s_iscalars[3]
+                class_sz = s_iscalars[4]
+                exact_fit = cutlass.Int32(0)
+                if class_sz == (need_rem - cum_above):
+                    exact_fit = cutlass.Int32(1)
+                isc2 = slice_start + tidx
+                while isc2 < slice_end:
+                    k32b = f32_order_key(cutlass.Float32(input_row[isc2]))
+                    inc2 = cutlass.Int32(1)
+                    if cutlass.const_expr(level > 0):
+                        hi2 = (k32b >> cutlass.Int32(shift + 8)) & cutlass.Int32(pmask)
+                        if hi2 != sel_hi:
+                            inc2 = cutlass.Int32(0)
+                    if inc2 == cutlass.Int32(1):
+                        d2 = (k32b >> cutlass.Int32(shift)) & cutlass.Int32(255)
+                        emit = cutlass.Int32(0)
+                        if d2 > d_star:
+                            emit = cutlass.Int32(1)
+                        if d2 == d_star:
+                            if exact_fit == cutlass.Int32(1):
+                                emit = cutlass.Int32(1)
+                            if cutlass.const_expr(shift == 0):
+                                emit = cutlass.Int32(1)
+                        if emit == cutlass.Int32(1):
+                            arr = atomicAdd(
+                                smem_ptcnt.iterator + (cutlass.Int32(256) + d2),
+                                cutlass.Int32(1),
+                            )
+                            slot = base_rank + smem_hist[d2] + smem_ptcnt[d2] + arr
+                            if slot < cutlass.Int32(kK):
+                                if cutlass.const_expr(self.return_output_values):
+                                    output_values_row[slot] = self.dtype(
+                                        cutlass.Float32(input_row[isc2])
+                                    )
+                                output_indices_row[slot] = isc2
+                    isc2 = isc2 + cutlass.Int32(num_threads)
+                cute.arch.barrier()
+                if exact_fit == cutlass.Int32(1):
+                    done = cutlass.Int32(1)
+                if cutlass.const_expr(shift == 0):
+                    done = cutlass.Int32(1)
+                if done == cutlass.Int32(0):
+                    base_rank = base_rank + cum_above
+                    need_rem = need_rem - cum_above
+                    sel_hi = (sel_hi << cutlass.Int32(8)) | d_star
+
     # ------------------------------------------------------------------
     # [v3] Phase 4 (alt): distributed MSB-first radix select.
     #
@@ -4572,7 +4750,8 @@ class GvrTopKKernel:
         # cluster_size x 256 int32 on every CTA (mapa needs identical
         # offsets); peers push their per-level digit histograms into the
         # LEADER's copy. Only allocated when the distributed path is on.
-        if cutlass.const_expr(self.p4_radix_dist and self.cluster_size > 1):
+        if cutlass.const_expr((self.p4_radix_dist or self.p2_radix_fallback)
+                              and self.cluster_size > 1):
             smem_hxc = smem.allocate_tensor(
                 element_type=cutlass.Int32,
                 layout=cute.make_ordered_layout((self.cluster_size * 256,), order=(0,)),
@@ -5077,28 +5256,50 @@ class GvrTopKKernel:
                             cute.arch.barrier()
                             rs = rs + cutlass.Int32(1)
                         if s_iscalars[1] != cutlass.Int32(1):
-                            # tie-plateau fail-soft: land on the measured
-                            # undershoot side (count <= kC => no overflow).
-                            self.block_count_ge(
-                                input_row,
-                                slice_start,
-                                slice_end,
-                                s_thr[2],
-                                smem_ptcnt,
-                                smem_wcnt,
-                                s_iscalars,
-                                s_cluster_partial,
-                                tidx,
-                                warp_id,
-                                lane,
-                                do_cluster_sync=do_cluster_sync,
-                                smem_input=smem_input,
-                            )
-                            cute.arch.barrier()
-                            if tidx == cutlass.Int32(0):
-                                s_thr[0] = s_thr[2]
-                                s_iscalars[1] = cutlass.Int32(1)
-                            cute.arch.barrier()
+                            # [v4] exact full-row radix fallback replaces the
+                            # undershoot fail-soft (which under-fills the
+                            # output on tie-plateau / near-tie rows).
+                            if cutlass.const_expr(self.p2_radix_fallback):
+                                if tidx == cutlass.Int32(0):
+                                    s_iscalars[1] = cutlass.Int32(4)
+                                cute.arch.barrier()
+                                self.radix_select_row(
+                                    input_row,
+                                    slice_start,
+                                    slice_end,
+                                    smem_hist,
+                                    smem_ptcnt,
+                                    smem_hxc,
+                                    s_iscalars,
+                                    output_values_row,
+                                    output_indices_row,
+                                    do_cluster_sync,
+                                    cta_in_cluster,
+                                    tidx,
+                                    warp_id,
+                                    lane,
+                                )
+                            else:
+                                self.block_count_ge(
+                                    input_row,
+                                    slice_start,
+                                    slice_end,
+                                    s_thr[2],
+                                    smem_ptcnt,
+                                    smem_wcnt,
+                                    s_iscalars,
+                                    s_cluster_partial,
+                                    tidx,
+                                    warp_id,
+                                    lane,
+                                    do_cluster_sync=do_cluster_sync,
+                                    smem_input=smem_input,
+                                )
+                                cute.arch.barrier()
+                                if tidx == cutlass.Int32(0):
+                                    s_thr[0] = s_thr[2]
+                                    s_iscalars[1] = cutlass.Int32(1)
+                                cute.arch.barrier()
                     else:
                         self.phase2_secant_search(
                             input_row,
@@ -5134,111 +5335,95 @@ class GvrTopKKernel:
                     smem_input=smem_input,
                 )
 
-            # Cluster handoff #1 (end of Phase 2). Skipped when
-            # do_cluster_sync is False (cs=1 or short-row degrade).
-            if cutlass.const_expr(cluster_size > 1):
-                if do_cluster_sync:
-                    cute.arch.cluster_arrive_relaxed()
-                    cute.arch.cluster_wait()
+            # [v4] p2_radix_fallback already emitted the full output;
+            # skip collect + handoffs + P4 entirely on that path.
+            if s_iscalars[1] != cutlass.Int32(4):
+                # Cluster handoff #1 (end of Phase 2). Skipped when
+                # do_cluster_sync is False (cs=1 or short-row degrade).
+                if cutlass.const_expr(cluster_size > 1):
+                    if do_cluster_sync:
+                        cute.arch.cluster_arrive_relaxed()
+                        cute.arch.cluster_wait()
 
-            # ---- Phase 3: cluster-parallel candidate collect ----
-            self.phase3_collect_candidates(
-                input_row,
-                N,
-                slice_start,
-                slice_end,
-                smem_keys,
-                smem_vals,
-                smem_ptcnt,
-                smem_wcnt,
-                s_thr,
-                s_iscalars,
-                s_cluster_partial,
-                tidx,
-                warp_id,
-                lane,
-                do_cluster_sync=do_cluster_sync,
-                smem_input=smem_input,
-            )
+                # ---- Phase 3: cluster-parallel candidate collect ----
+                self.phase3_collect_candidates(
+                    input_row,
+                    N,
+                    slice_start,
+                    slice_end,
+                    smem_keys,
+                    smem_vals,
+                    smem_ptcnt,
+                    smem_wcnt,
+                    s_thr,
+                    s_iscalars,
+                    s_cluster_partial,
+                    tidx,
+                    warp_id,
+                    lane,
+                    do_cluster_sync=do_cluster_sync,
+                    smem_input=smem_input,
+                )
 
-            # Cluster handoff #2: leader's DSMEM gather of peer
-            # smem_keys/smem_vals. Skipped at do_cluster_sync=False.
-            # [v3] p4_radix_dist replaces the gather entirely: its per-level
-            # histogram exchange carries its own cluster syncs.
-            if cutlass.const_expr(cluster_size > 1 and not self.p4_radix_dist):
-                if do_cluster_sync:
-                    cute.arch.cluster_arrive()
-                    cute.arch.cluster_wait()
+                # Cluster handoff #2: leader's DSMEM gather of peer
+                # smem_keys/smem_vals. Skipped at do_cluster_sync=False.
+                # [v3] p4_radix_dist replaces the gather entirely: its per-level
+                # histogram exchange carries its own cluster syncs.
+                if cutlass.const_expr(cluster_size > 1 and not self.p4_radix_dist):
+                    if do_cluster_sync:
+                        cute.arch.cluster_arrive()
+                        cute.arch.cluster_wait()
 
-            # [d1a] peer-push: each non-leader CTA writes its collected
-            # (keys, vals) chunk into the LEADER's SMEM at its cluster-rank
-            # prefix offset (remote STs, parallel across CTAs), replacing
-            # the leader's serial remote-LD gather below. One extra cluster
-            # barrier (arrive = RELEASE) publishes the pushed data; the
-            # counts consumed for prefixes were published by handoff #2.
-            if cutlass.const_expr(cluster_size > 1 and self.p4_peer_push
-                                  and not self.p4_radix_dist):
-                if do_cluster_sync:
-                    if cta_in_cluster != cutlass.Int32(0):
-                        pp_isc_ptr = s_iscalars.iterator + cutlass.Int32(5)
-                        # exclusive prefix over ranks < mine; rank-0 term is
-                        # the leader's RAW own count (its chunk stays in
-                        # place), peers are kC-capped — mirrors the pull
-                        # path's base_offset accounting exactly.
-                        pp_addr0 = mapa_shared_cluster(pp_isc_ptr, cutlass.Int32(0))
-                        base_pp = ld_shared_cluster_i32(pp_addr0)
-                        for peer_pp in cutlass.range_constexpr(1, cluster_size):
-                            if cutlass.Int32(peer_pp) < cta_in_cluster:
-                                pp_addr = mapa_shared_cluster(
-                                    pp_isc_ptr, cutlass.Int32(peer_pp)
-                                )
-                                pp_cnt = ld_shared_cluster_i32(pp_addr)
-                                base_pp = base_pp + min(
-                                    pp_cnt, cutlass.Int32(self.kC)
-                                )
-                        my_cnt_pp = min(s_iscalars[5], cutlass.Int32(self.kC))
-                        pp_keys_it = smem_keys.iterator
-                        pp_vals_it = smem_vals.iterator
-                        ipp = tidx
-                        while ipp < my_cnt_pp:
-                            dst_pp = base_pp + ipp
-                            if dst_pp < cutlass.Int32(self.kC):
-                                pp_kaddr = mapa_shared_cluster(
-                                    pp_keys_it + dst_pp, cutlass.Int32(0)
-                                )
-                                pp_vaddr = mapa_shared_cluster(
-                                    pp_vals_it + dst_pp, cutlass.Int32(0)
-                                )
-                                st_shared_cluster_f32(pp_kaddr, smem_keys[ipp])
-                                st_shared_cluster_i32(pp_vaddr, smem_vals[ipp])
-                            ipp = ipp + cutlass.Int32(num_threads)
-                    cute.arch.cluster_arrive()
-                    cute.arch.cluster_wait()
+                # [d1a] peer-push: each non-leader CTA writes its collected
+                # (keys, vals) chunk into the LEADER's SMEM at its cluster-rank
+                # prefix offset (remote STs, parallel across CTAs), replacing
+                # the leader's serial remote-LD gather below. One extra cluster
+                # barrier (arrive = RELEASE) publishes the pushed data; the
+                # counts consumed for prefixes were published by handoff #2.
+                if cutlass.const_expr(cluster_size > 1 and self.p4_peer_push
+                                      and not self.p4_radix_dist):
+                    if do_cluster_sync:
+                        if cta_in_cluster != cutlass.Int32(0):
+                            pp_isc_ptr = s_iscalars.iterator + cutlass.Int32(5)
+                            # exclusive prefix over ranks < mine; rank-0 term is
+                            # the leader's RAW own count (its chunk stays in
+                            # place), peers are kC-capped — mirrors the pull
+                            # path's base_offset accounting exactly.
+                            pp_addr0 = mapa_shared_cluster(pp_isc_ptr, cutlass.Int32(0))
+                            base_pp = ld_shared_cluster_i32(pp_addr0)
+                            for peer_pp in cutlass.range_constexpr(1, cluster_size):
+                                if cutlass.Int32(peer_pp) < cta_in_cluster:
+                                    pp_addr = mapa_shared_cluster(
+                                        pp_isc_ptr, cutlass.Int32(peer_pp)
+                                    )
+                                    pp_cnt = ld_shared_cluster_i32(pp_addr)
+                                    base_pp = base_pp + min(
+                                        pp_cnt, cutlass.Int32(self.kC)
+                                    )
+                            my_cnt_pp = min(s_iscalars[5], cutlass.Int32(self.kC))
+                            pp_keys_it = smem_keys.iterator
+                            pp_vals_it = smem_vals.iterator
+                            ipp = tidx
+                            while ipp < my_cnt_pp:
+                                dst_pp = base_pp + ipp
+                                if dst_pp < cutlass.Int32(self.kC):
+                                    pp_kaddr = mapa_shared_cluster(
+                                        pp_keys_it + dst_pp, cutlass.Int32(0)
+                                    )
+                                    pp_vaddr = mapa_shared_cluster(
+                                        pp_vals_it + dst_pp, cutlass.Int32(0)
+                                    )
+                                    st_shared_cluster_f32(pp_kaddr, smem_keys[ipp])
+                                    st_shared_cluster_i32(pp_vaddr, smem_vals[ipp])
+                                ipp = ipp + cutlass.Int32(num_threads)
+                        cute.arch.cluster_arrive()
+                        cute.arch.cluster_wait()
 
-            # [v3] distributed radix-select P4 (all CTAs participate on the
-            # long-row path; leader solo on short-row degrade / cs=1).
-            if cutlass.const_expr(self.p4_radix_dist and cluster_size > 1):
-                if do_cluster_sync:
-                    cand_loc_rx = min(s_iscalars[5], cutlass.Int32(self.kC))
-                    self.phase4_radix_select(
-                        smem_keys,
-                        smem_vals,
-                        smem_hist,
-                        smem_ptcnt,
-                        smem_hxc,
-                        s_iscalars,
-                        output_values_row,
-                        output_indices_row,
-                        cand_loc_rx,
-                        do_cluster_sync,
-                        cta_in_cluster,
-                        tidx,
-                        warp_id,
-                        lane,
-                    )
-                else:
-                    if is_leader:
-                        cand_loc_rx = min(s_iscalars[0], cutlass.Int32(self.kC))
+                # [v3] distributed radix-select P4 (all CTAs participate on the
+                # long-row path; leader solo on short-row degrade / cs=1).
+                if cutlass.const_expr(self.p4_radix_dist and cluster_size > 1):
+                    if do_cluster_sync:
+                        cand_loc_rx = min(s_iscalars[5], cutlass.Int32(self.kC))
                         self.phase4_radix_select(
                             smem_keys,
                             smem_vals,
@@ -5255,130 +5440,54 @@ class GvrTopKKernel:
                             warp_id,
                             lane,
                         )
+                    else:
+                        if is_leader:
+                            cand_loc_rx = min(s_iscalars[0], cutlass.Int32(self.kC))
+                            self.phase4_radix_select(
+                                smem_keys,
+                                smem_vals,
+                                smem_hist,
+                                smem_ptcnt,
+                                smem_hxc,
+                                s_iscalars,
+                                output_values_row,
+                                output_indices_row,
+                                cand_loc_rx,
+                                do_cluster_sync,
+                                cta_in_cluster,
+                                tidx,
+                                warp_id,
+                                lane,
+                            )
 
-            # Phase 4 runs on the leader only. const_expr (compile-
-            # time eliminated) split from runtime so cs=1 gets a flat
-            # code path with no leader/sync checks.
-            # Pre-init cand_count_p4 so CuTe DSL sees a stable Int32 type
-            # across the runtime ``if is_leader:`` branch in cs>1 mode
-            # (DSL forbids first-assigning a variable inside a dynamic if).
-            cand_count_p4 = cutlass.Int32(0)
-            if cutlass.const_expr(cluster_size == 1):
-                # cs=1: the single CTA per row IS the leader.
-                cand_count_p4 = min(s_iscalars[0], cutlass.Int32(self.kC))
-                if cutlass.const_expr(self.p4_radix_cs1):
-                    self.phase4_radix_select(
-                        smem_keys,
-                        smem_vals,
-                        smem_hist,
-                        smem_ptcnt,
-                        smem_hxc,
-                        s_iscalars,
-                        output_values_row,
-                        output_indices_row,
-                        cand_count_p4,
-                        do_cluster_sync,
-                        cta_in_cluster,
-                        tidx,
-                        warp_id,
-                        lane,
-                    )
-                elif cutlass.const_expr(self.enable_p4_rank_scatter):
-                    self.phase4_rank_scatter(
-                        smem_keys,
-                        smem_vals,
-                        smem_hist,
-                        smem_wcnt,
-                        s_thr,
-                        s_iscalars,
-                        output_values_row,
-                        output_indices_row,
-                        cand_count_p4,
-                        tidx,
-                        warp_id,
-                        lane,
-                    )
-                else:
-                    self.phase4_histogram_snap(
-                        smem_keys,
-                        smem_vals,
-                        smem_hist,
-                        smem_wcnt,
-                        s_thr,
-                        s_iscalars,
-                        output_values_row,
-                        output_indices_row,
-                        cand_count_p4,
-                        tidx,
-                        warp_id,
-                        lane,
-                    )
-            elif cutlass.const_expr(not self.p4_radix_dist):
-                # cs>1: only the leader (CTA 0 in cluster) runs Phase 4.
-                if is_leader:
-                    if do_cluster_sync:
-                        if cutlass.const_expr(self.p4_peer_push):
-                            # [d1a] data already pushed by the peers;
-                            # only sum counts for the cluster-wide
-                            # cand_count (same accounting as the pull).
-                            pp_l_ptr = s_iscalars.iterator + cutlass.Int32(5)
-                            base_offset_pp = s_iscalars[5]
-                            for peer_l in cutlass.range_constexpr(1, cluster_size):
-                                pp_l_addr = mapa_shared_cluster(
-                                    pp_l_ptr, cutlass.Int32(peer_l)
-                                )
-                                pp_l_cnt = ld_shared_cluster_i32(pp_l_addr)
-                                base_offset_pp = base_offset_pp + min(
-                                    pp_l_cnt, cutlass.Int32(self.kC)
-                                )
-                            if tidx == cutlass.Int32(0):
-                                s_iscalars[0] = base_offset_pp
-                            cute.arch.barrier()
-                        else:
-                            # DSMEM-gather peer candidates into the leader's
-                            # smem_keys/smem_vals. Layout: leader's chunk goes
-                            # to [0 .. leader_local_cnt); each peer r's chunk
-                            # appends the next peer_r_local_cnt entries.
-                            local_cnt_self = s_iscalars[5]
-                            local_iscalars_ptr = s_iscalars.iterator + cutlass.Int32(5)
-                            smem_keys_iter = smem_keys.iterator
-                            smem_vals_iter = smem_vals.iterator
-                            base_offset = local_cnt_self
-                            for peer in cutlass.range_constexpr(1, cluster_size):
-                                peer_iscalars_addr = mapa_shared_cluster(
-                                    local_iscalars_ptr, cutlass.Int32(peer)
-                                )
-                                peer_cnt = ld_shared_cluster_i32(peer_iscalars_addr)
-                                # Cap to kC (defense-in-depth vs. the
-                                # done==2 bracket-exhaustion path).
-                                peer_cnt = min(peer_cnt, cutlass.Int32(self.kC))
-                                i_gather = tidx
-                                while i_gather < peer_cnt:
-                                    peer_key_addr = mapa_shared_cluster(
-                                        smem_keys_iter + i_gather, cutlass.Int32(peer)
-                                    )
-                                    peer_val_addr = mapa_shared_cluster(
-                                        smem_vals_iter + i_gather, cutlass.Int32(peer)
-                                    )
-                                    k_val = ld_shared_cluster_f32(peer_key_addr)
-                                    v_val = ld_shared_cluster_i32(peer_val_addr)
-                                    dst = base_offset + i_gather
-                                    if dst < cutlass.Int32(self.kC):
-                                        smem_keys[dst] = k_val
-                                        smem_vals[dst] = v_val
-                                    i_gather = i_gather + cutlass.Int32(num_threads)
-                                base_offset = base_offset + peer_cnt
-                            # Reset s_iscalars[0] to cluster-wide cand_count.
-                            if tidx == cutlass.Int32(0):
-                                s_iscalars[0] = base_offset
-                            cute.arch.barrier()
-                    # else: short-row degrade — leader (CTA 0) already
-                    # holds the full row's candidates in its own
-                    # smem_keys/smem_vals (no peers to gather from).
-
-                    # ---- Phase 4: histogram snap + writeback ----
+                # Phase 4 runs on the leader only. const_expr (compile-
+                # time eliminated) split from runtime so cs=1 gets a flat
+                # code path with no leader/sync checks.
+                # Pre-init cand_count_p4 so CuTe DSL sees a stable Int32 type
+                # across the runtime ``if is_leader:`` branch in cs>1 mode
+                # (DSL forbids first-assigning a variable inside a dynamic if).
+                cand_count_p4 = cutlass.Int32(0)
+                if cutlass.const_expr(cluster_size == 1):
+                    # cs=1: the single CTA per row IS the leader.
                     cand_count_p4 = min(s_iscalars[0], cutlass.Int32(self.kC))
-                    if cutlass.const_expr(self.enable_p4_rank_scatter):
+                    if cutlass.const_expr(self.p4_radix_cs1):
+                        self.phase4_radix_select(
+                            smem_keys,
+                            smem_vals,
+                            smem_hist,
+                            smem_ptcnt,
+                            smem_hxc,
+                            s_iscalars,
+                            output_values_row,
+                            output_indices_row,
+                            cand_count_p4,
+                            do_cluster_sync,
+                            cta_in_cluster,
+                            tidx,
+                            warp_id,
+                            lane,
+                        )
+                    elif cutlass.const_expr(self.enable_p4_rank_scatter):
                         self.phase4_rank_scatter(
                             smem_keys,
                             smem_vals,
@@ -5408,6 +5517,101 @@ class GvrTopKKernel:
                             warp_id,
                             lane,
                         )
+                elif cutlass.const_expr(not self.p4_radix_dist):
+                    # cs>1: only the leader (CTA 0 in cluster) runs Phase 4.
+                    if is_leader:
+                        if do_cluster_sync:
+                            if cutlass.const_expr(self.p4_peer_push):
+                                # [d1a] data already pushed by the peers;
+                                # only sum counts for the cluster-wide
+                                # cand_count (same accounting as the pull).
+                                pp_l_ptr = s_iscalars.iterator + cutlass.Int32(5)
+                                base_offset_pp = s_iscalars[5]
+                                for peer_l in cutlass.range_constexpr(1, cluster_size):
+                                    pp_l_addr = mapa_shared_cluster(
+                                        pp_l_ptr, cutlass.Int32(peer_l)
+                                    )
+                                    pp_l_cnt = ld_shared_cluster_i32(pp_l_addr)
+                                    base_offset_pp = base_offset_pp + min(
+                                        pp_l_cnt, cutlass.Int32(self.kC)
+                                    )
+                                if tidx == cutlass.Int32(0):
+                                    s_iscalars[0] = base_offset_pp
+                                cute.arch.barrier()
+                            else:
+                                # DSMEM-gather peer candidates into the leader's
+                                # smem_keys/smem_vals. Layout: leader's chunk goes
+                                # to [0 .. leader_local_cnt); each peer r's chunk
+                                # appends the next peer_r_local_cnt entries.
+                                local_cnt_self = s_iscalars[5]
+                                local_iscalars_ptr = s_iscalars.iterator + cutlass.Int32(5)
+                                smem_keys_iter = smem_keys.iterator
+                                smem_vals_iter = smem_vals.iterator
+                                base_offset = local_cnt_self
+                                for peer in cutlass.range_constexpr(1, cluster_size):
+                                    peer_iscalars_addr = mapa_shared_cluster(
+                                        local_iscalars_ptr, cutlass.Int32(peer)
+                                    )
+                                    peer_cnt = ld_shared_cluster_i32(peer_iscalars_addr)
+                                    # Cap to kC (defense-in-depth vs. the
+                                    # done==2 bracket-exhaustion path).
+                                    peer_cnt = min(peer_cnt, cutlass.Int32(self.kC))
+                                    i_gather = tidx
+                                    while i_gather < peer_cnt:
+                                        peer_key_addr = mapa_shared_cluster(
+                                            smem_keys_iter + i_gather, cutlass.Int32(peer)
+                                        )
+                                        peer_val_addr = mapa_shared_cluster(
+                                            smem_vals_iter + i_gather, cutlass.Int32(peer)
+                                        )
+                                        k_val = ld_shared_cluster_f32(peer_key_addr)
+                                        v_val = ld_shared_cluster_i32(peer_val_addr)
+                                        dst = base_offset + i_gather
+                                        if dst < cutlass.Int32(self.kC):
+                                            smem_keys[dst] = k_val
+                                            smem_vals[dst] = v_val
+                                        i_gather = i_gather + cutlass.Int32(num_threads)
+                                    base_offset = base_offset + peer_cnt
+                                # Reset s_iscalars[0] to cluster-wide cand_count.
+                                if tidx == cutlass.Int32(0):
+                                    s_iscalars[0] = base_offset
+                                cute.arch.barrier()
+                        # else: short-row degrade — leader (CTA 0) already
+                        # holds the full row's candidates in its own
+                        # smem_keys/smem_vals (no peers to gather from).
+
+                        # ---- Phase 4: histogram snap + writeback ----
+                        cand_count_p4 = min(s_iscalars[0], cutlass.Int32(self.kC))
+                        if cutlass.const_expr(self.enable_p4_rank_scatter):
+                            self.phase4_rank_scatter(
+                                smem_keys,
+                                smem_vals,
+                                smem_hist,
+                                smem_wcnt,
+                                s_thr,
+                                s_iscalars,
+                                output_values_row,
+                                output_indices_row,
+                                cand_count_p4,
+                                tidx,
+                                warp_id,
+                                lane,
+                            )
+                        else:
+                            self.phase4_histogram_snap(
+                                smem_keys,
+                                smem_vals,
+                                smem_hist,
+                                smem_wcnt,
+                                s_thr,
+                                s_iscalars,
+                                output_values_row,
+                                output_indices_row,
+                                cand_count_p4,
+                                tidx,
+                                warp_id,
+                                lane,
+                            )
 
         # Final cluster barrier: keep peer CTAs (and their SMEM) alive
         # until the leader's gather + Phase 4 finish. Skipped at
