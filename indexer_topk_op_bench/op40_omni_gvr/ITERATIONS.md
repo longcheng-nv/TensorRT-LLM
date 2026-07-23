@@ -29,3 +29,32 @@ Goal 1.60x == overall gm ~8.79 us. Observed grid min 5.33 us (flash 4k).
 ANCHORS (expected us, drift >3% => re-baseline): pro_64k_L30=11.78 (cs1),
 pro_256k_L30=15.13 (cs4), v32_128k_L14=18.31 (cs8), flash_128k_L42=17.63 (cs1).
 Raw: results/bl0/cells.csv (committed); nsys reps local-only (gitignored).
+
+## probe: launch floor — 2026-07-23 — PRIOR ESTABLISHED
+nsys floors on b200-239 GPU4 (20 cold reps, median): trivial fill 1.30 us;
+GVR degenerate identity path (prologue+emit, N<=K) 1.68 us; GVR smallest real
+shape (K512, N=1024, 4KB) 8.53 us. => small-N cell time is ~80% ALGORITHM
+latency chain, NOT an immovable launch floor. Overwrites the inherited
+"~10 us structural floor" wall candidate: the floor is ~1.7 us + algorithm.
+WALLS.md updated accordingly.
+
+## characterization — 2026-07-23 — DONE (bottleneck map)
+Phase table (26 cells, clock64 twin, us anchored to bl0): P4 dominant
+everywhere — cs1 3.5-6.2us (40-47%), cs4/8 7.2-12.2us (~50%+, DSMEM
+gather+wait); P2 1.0-4.5us and P3 0.9-3.9us scale with N; P1 gather flat
+1.5-2.3us; P1b 0.4-1.1us (scales with K). Floor probe: true floor 1.7us.
+e612 rank_scatter coarse search still leader-serialized; d2a/d2b/d1a flags
+ABSENT from head (live in draft #16715) => lever pool available.
+Hypothesis queue (ledger-checked): H1 cs1-P4 chain rebuild (d2a/d2b class),
+H2 cluster-P4 peer-push (d1a class), H3 P1+P1b gather fuse, H4 P2 large-N
+count cost, H5 P3+P4 fuse (hist during collect), H6 admission tightening
+(undershoot-guarded), H7 plateau exact tie-fill (correctness).
+Raw: results/phase_base_40.{log,json}, results/floor/.
+
+## iter 1 — 2026-07-23 — IN PROGRESS
+Hypothesis (ledger: none against; op37 primitives silicon-verified on
+predecessor head): re-splice d2a (rw coarse/fine rank search) + d2b (tiny-bin
+fine skip) + d1a (cluster peer-push) onto e612 rank_scatter as ctor flags,
+default-off. All three splices landed with exact anchors (gvrpkg40v1).
+Probe: rung-2 equivalent (primitives pre-verified) -> straight to gate + A/B.
+Gate base,v1 running.

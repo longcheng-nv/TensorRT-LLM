@@ -11,6 +11,9 @@ here. Import side effect free; resolution happens in the harness.
 ARMS = {
     # name: (module, ctor_flags)
     "base": ("gvrpkg40b.top_k.gvr_topk_decode", {}),
+    # iter1: op37 d2a/d2b/d1a P4 levers re-spliced onto e612 (non-KF primitives)
+    "v1": ("gvrpkg40v1.top_k.gvr_topk_decode",
+           dict(p4_rs_rw_search=True, p4_fine_skip=True, p4_peer_push=True)),
 }
 
 
