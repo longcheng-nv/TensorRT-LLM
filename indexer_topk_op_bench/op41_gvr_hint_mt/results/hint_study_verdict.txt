@@ -1,0 +1,14 @@
+
+== Q1 fixed-rank viability: cells with c in [K, CAP] ==
+  m=0.125K: ok 2/75  undershoot 73  overflow 0
+  m=0.250K: ok 5/75  undershoot 70  overflow 0
+  m=0.500K: ok 20/75  undershoot 54  overflow 1
+  m=0.750K: ok 45/75  undershoot 24  overflow 6
+  m=0.875K: ok 54/75  undershoot 9  overflow 12
+  m=1.000K: ok 44/75  undershoot 0  overflow 31
+
+== Q2 2-round ladder: round1 m=K/2; if under -> m=K, if over -> exact t2 from stored (existing machinery) ==
+  round1 ok 20/75; under 54 (min-hint fixes 40); over 1
+
+== h distribution ==
+  min 0.057 p25 0.429 med 0.670 p75 0.810 max 0.998
