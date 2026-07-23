@@ -302,3 +302,7 @@ Updated 2026-07-22 (会话暂停：用户要求迁移到另一台机器)。
   新弱带 0.38-0.50(cs4→streaming 的代价),pro_1024k 高 BS 0.45-0.49 未动。
   评估: 距 2.0× 目标仍远,head 原生批的吞吐摊销是结构性强项;
   rounds 4-5 后如实收口(达成与否按台账)。
+- R5 v3 round 4 收口(终局内部 1.0344, 近平轮 +2.9%)→ round 5 = fork 末轮。
+  round-4 增量小,跳过全格;终局判决与收口在 campaign terminal 后执行:
+  最终 best 全格 + exactness → 若 cs8@512k bug 仍在则 engineer graft
+  (b>1&&cs>1→安全档)→ graft 后全格复验 + BS=1 865 守门 → 报告/交付。
