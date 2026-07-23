@@ -160,3 +160,12 @@ over the picked cs1/cs4. cs2 never wins. Deferred (simplicity criterion).
 ## iter 7 — 2026-07-23 — FALSIFIED (mt_unroll=8)
 v5mt8 vs v5best gm 0.9625 (worst flash 512k/32k 0.86-0.88). Register pressure
 / issue economics beat the extra in-flight loads at T=512/1024. Ledger entry.
+
+## iter 6 — 2026-07-23 — verdict: K2048 ladder DROPPED (ship-rule tail loss)
+v5best vs base gm 1.1312 BUT 24 cells < 0.97 (v32 16-64k, worst 0.9302) —
+and regressions exist even inside the gain bands (v32_128k min 0.8932):
+ladder benefit is cell-content-dependent, not N-dispatchable (hit-rate
+dispatch forbidden). op33 pattern (mean win, tail loss) => DROPPED.
+Fallback code-presence tax measured: flash -0.87% (paired same-rep), pro
++0.1% — accepted for correctness (both baseline defect classes fixed).
+Ship candidates now v7 = v1 + p2_radix_fallback; v8 = v7 + p3_hist_fuse.

@@ -60,6 +60,13 @@ ARMS = {
            dict(p4_rs_rw_search=True, p4_fine_skip=True, p4_peer_push=True,
                 p2_radix_fallback=True, p3_hist_fuse=True,
                 per_k={2048: dict(r0_qfracs=(0.8, 0.6, 0.4, 0.25))})),
+    # ship candidates post-iter6: K2048 ladder DROPPED (mean-win/tail-loss)
+    "v7": ("gvrpkg40v3.top_k.gvr_topk_decode",
+           dict(p4_rs_rw_search=True, p4_fine_skip=True, p4_peer_push=True,
+                p2_radix_fallback=True)),
+    "v8": ("gvrpkg40v3.top_k.gvr_topk_decode",
+           dict(p4_rs_rw_search=True, p4_fine_skip=True, p4_peer_push=True,
+                p2_radix_fallback=True, p3_hist_fuse=True)),
 }
 
 

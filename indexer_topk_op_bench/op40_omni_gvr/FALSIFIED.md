@@ -43,3 +43,6 @@ Key inherited entries (scoped; re-verify domain before applying):
   correctness fallback (pathological rows only) — gate GREEN 69/69 there.
 - (mt_unroll 4->8 in block_count_ge_multi, all models real fp32 BS=1, nsys
   full-865) — FALSIFIED: gm 0.9625 vs v5best; worst flash 0.863.
+- (K2048 4-rung ladder as static config, v32 real fp32 BS=1, nsys full-865) —
+  FALSIFIED under the zero-regression rule: +1.4% v32 gm but 24 cells 0.87-
+  0.97 incl inside gain bands; content-dependent, no admissible dispatch key.
