@@ -14,6 +14,20 @@ ARMS = {
     # iter1: op37 d2a/d2b/d1a P4 levers re-spliced onto e612 (non-KF primitives)
     "v1": ("gvrpkg40v1.top_k.gvr_topk_decode",
            dict(p4_rs_rw_search=True, p4_fine_skip=True, p4_peer_push=True)),
+    # iter2: v1 + per-K R0 ladder recalibration (H8a host-replay winners:
+    # hit% 89/65/21 -> 97/81/54, cand/K 1.90/1.56/1.33 -> 1.48/1.39/1.21)
+    "v2lad": ("gvrpkg40v1.top_k.gvr_topk_decode",
+              dict(p4_rs_rw_search=True, p4_fine_skip=True, p4_peer_push=True,
+                   per_k={512: dict(r0_qfracs=(0.9, 0.6, 0.35)),
+                          1024: dict(r0_qfracs=(0.9, 0.6, 0.35)),
+                          2048: dict(r0_qfracs=(0.8, 0.6, 0.4, 0.25))})),
+    # iter2b: v2lad + p1b_cache for fp32 K512/K1024 (kills the 2nd K-gather;
+    # smem_gath +2/4KB; K2048 excluded pending occupancy check)
+    "v2c": ("gvrpkg40v1.top_k.gvr_topk_decode",
+            dict(p4_rs_rw_search=True, p4_fine_skip=True, p4_peer_push=True,
+                 per_k={512: dict(r0_qfracs=(0.9, 0.6, 0.35), p1b_cache=True),
+                        1024: dict(r0_qfracs=(0.9, 0.6, 0.35), p1b_cache=True),
+                        2048: dict(r0_qfracs=(0.8, 0.6, 0.4, 0.25))})),
 }
 
 

@@ -58,6 +58,7 @@ def compile_arm(arm, K, cr, cfg):
     if c is not None:
         return c
     kls, flags = resolve(arm)
+    flags.update(flags.pop("per_k", {}).get(K, {}))
     kobj = kls(dtype=cutlass.Float32, top_k=K, next_n=1, compress_ratio=cr,
                return_output_values=False, **cfg, **flags)
     nr, nc, nb = cute.sym_int(), cute.sym_int(), cute.sym_int()
