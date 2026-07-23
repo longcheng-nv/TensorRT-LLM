@@ -344,6 +344,66 @@ __device__ void exact_topk_from(const float* __restrict__ src_val,
   }
 }
 
+
+extern "C" __global__ void __launch_bounds__(512, 3)
+arm_small_kernel(const float* __restrict__ logits, const int* __restrict__ pre_idx,
+                 int* __restrict__ out, int npad, int K) {
+  const int row = blockIdx.x;
+  const float* lg = logits + (size_t)row * npad;
+  const int* pre = pre_idx + (size_t)row * K;
+  // inline min-hint threshold (subsampled <=512 gathers)
+  float m = __int_as_float(0x7f800000);
+  const int hstep = (K + 511) / 512;
+  for (int j = threadIdx.x * hstep; j < K; j += blockDim.x * hstep) {
+    int idx = pre[j];
+    if (idx >= 0 && idx < npad) m = fminf(m, lg[idx]);
+  }
+  __shared__ float swr[32];
+  const int lane = threadIdx.x & 31, warp = threadIdx.x >> 5;
+  for (int o = 16; o; o >>= 1) m = fminf(m, __shfl_down_sync(0xffffffffu, m, o));
+  if (!lane) swr[warp] = m;
+  __syncthreads();
+  __shared__ float s_thr;
+  if (!warp) {
+    m = (lane < (int)(blockDim.x >> 5)) ? swr[lane] : __int_as_float(0x7f800000);
+    for (int o = 16; o; o >>= 1) m = fminf(m, __shfl_down_sync(0xffffffffu, m, o));
+    if (!lane) s_thr = m;
+  }
+  __syncthreads();
+  const float t = s_thr;
+  // inline collect to smem
+  __shared__ float s_val[STAGE];
+  __shared__ int s_idx[STAGE];
+  __shared__ int s_cnt;
+  if (threadIdx.x == 0) s_cnt = 0;
+  __syncthreads();
+  const int n4 = npad / 4;
+  const float4* lg4 = reinterpret_cast<const float4*>(lg);
+  for (int i = threadIdx.x; i < n4; i += blockDim.x) {
+    float4 a = lg4[i];
+    #pragma unroll
+    for (int c = 0; c < 4; ++c) {
+      float x = (c == 0) ? a.x : (c == 1) ? a.y : (c == 2) ? a.z : a.w;
+      if (x >= t) {
+        int p = atomicAdd(&s_cnt, 1);
+        if (p < STAGE) { s_val[p] = x; s_idx[p] = i * 4 + c; }
+      }
+    }
+  }
+  __syncthreads();
+  int n = s_cnt;
+  __shared__ RedSmem S;
+  int* orow = out + (size_t)row * K;
+  if (n >= K && n <= STAGE) {
+    // survivor buffers carved from the upper half of the stage (collect done)
+    exact_topk_from<false, true>(s_val, s_idx, lg, n, K, orow, S, nullptr,
+                                 nullptr, nullptr);
+  } else {
+    exact_topk_from<true, true>(nullptr, nullptr, lg, npad, K, orow, S,
+                                nullptr, nullptr, nullptr);
+  }
+}
+
 template <bool RESCUE>
 __global__ void __launch_bounds__(512, 5)
 arm_kernel(const float* __restrict__ logits, float* __restrict__ thr,
@@ -490,6 +550,10 @@ extern "C" void arm_v2_launch(const float* logits, const int* pre_idx, float* th
                               float* cand_val, int* cand_idx, int* cnt, int* done,
                               int* ovf, int* rescue, int* out, int npad, int K,
                               int BS, int chunks, cudaStream_t stream) {
+  if (npad <= 8192) {  // small rows: single launch, inline hint-thresholded
+    arm_small_kernel<<<BS, 512, 0, stream>>>(logits, pre_idx, out, npad, K);
+    return;
+  }
   thresh_kernel<<<BS, 512, 0, stream>>>(logits, pre_idx, thr, npad, K);
   arm_kernel<false><<<dim3(chunks, BS), 512, 0, stream>>>(
       logits, thr, cand_val, cand_idx, cnt, done, ovf, rescue, out, npad, K, BS);
