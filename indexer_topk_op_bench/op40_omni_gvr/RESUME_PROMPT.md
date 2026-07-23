@@ -10,6 +10,14 @@ op37_bs_scaling/, op38_r3v11_bs/, op39_gvr_bsx/. Node umb-b200-239 (8x B200
 healthy). Env: PYTHONNOUSERSITE=1 PYTHONPATH=/tmp/gvrlayers/cutlass450/...
 (rebuild: cp -r NFS nvidia_cutlass_dsl -> /tmp/gvrlayers/cutlass450/).
 
+## STATUS: CONVERGED 2026-07-23 — see REPORT.html (terminal verdict)
+Ship arm v7 (gvrpkg40v3 + 4 flags): gm 1.1250 vs base, 0 regressions,
+865/865 exact + gate 138/138. 1.60 stretch double-locked infeasible
+(phase-floor UB ~1.30-1.35, icache/occupancy walls — WALLS.md).
+Remaining human decisions: (a) whether to port v7 flags as a follow-up PR
+stacked on #16457 (incl p2_radix_fallback defect fix + fixtures);
+(b) upstream defect report for plateau/neartie (repros in scripts/).
+
 ## State (see ITERATIONS.md for full log)
 - bl0 baseline: gm 14.071us, 865/865 exact, anchors pro_64k_L30=11.78us(cs1)
   pro_256k_L30=15.13(cs4) v32_128k_L14=18.31(cs8) flash_128k_L42=17.63(cs1).

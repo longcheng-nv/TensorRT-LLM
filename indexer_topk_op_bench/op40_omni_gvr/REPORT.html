@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>op40 omni-GVR campaign — final report / 终判报告</title>
+<style>
+body{font-family:system-ui,sans-serif;max-width:1080px;margin:24px auto;padding:0 16px;color:#1a1a2e;line-height:1.5}
+h1{font-size:1.5em;border-bottom:3px solid #4361ee;padding-bottom:6px}
+h2{font-size:1.2em;color:#3a0ca3;margin-top:28px}
+table{border-collapse:collapse;margin:10px 0;font-size:.92em}
+th,td{border:1px solid #cbd5e1;padding:4px 10px;text-align:right}
+th{background:#eef2ff}td:first-child,th:first-child{text-align:left}
+.good{color:#0a7d38;font-weight:600}.bad{color:#b02a37;font-weight:600}
+.note{background:#fff8e1;border-left:4px solid #f4a261;padding:8px 12px;margin:8px 0}
+.wall{background:#fde8e8;border-left:4px solid #b02a37;padding:8px 12px;margin:8px 0}
+code{background:#f1f5f9;padding:1px 5px;border-radius:3px}
+.en{color:#475569;font-size:.92em}
+</style>
+</head>
+<body>
+<h1>op40 · omni-kernel GVR campaign — 终判 / Final Verdict</h1>
+<p><b>2026-07-23 · umb-b200-239 (8× B200) · incumbent = PR #16457 head pinned @ <code>e612fc2f38</code></b><br>
+Envelope: §7b real decode captures, 865 cells (V4 Pro K1024 / V4 Flash K512 / V3.2 K2048 × all layers × ISL 4k–1M), BS=1 fp32.
+Verdict axis: paired same-GPU nsys, cold-L2, median of 20 reps. Firewall: KF 产物零引用（对照实验约束）。</p>
+
+<h2>1 · 终判成绩 / Terminal verdict (ship arm v7)</h2>
+<table>
+<tr><th>slice</th><th>n</th><th>gm speedup vs base</th><th>min ratio</th></tr>
+<tr><td><b>ALL 865</b></td><td>865</td><td class="good"><b>1.1250</b></td><td>0.9732</td></tr>
+<tr><td>pro · 32k-1M（优先#1）</td><td>180</td><td class="good">1.1402</td><td>1.0762</td></tr>
+<tr><td>pro · 4k-32k</td><td>90</td><td class="good">1.2012</td><td>0.9732</td></tr>
+<tr><td>flash · 32k-1M</td><td>126</td><td class="good">1.1307</td><td>1.0707</td></tr>
+<tr><td>flash · 4k-32k</td><td>63</td><td class="good">1.1593</td><td>1.0033</td></tr>
+<tr><td>v32 · 32k-1M</td><td>232</td><td class="good">1.1002</td><td>1.0279</td></tr>
+<tr><td>v32 · 4k-32k</td><td>174</td><td class="good">1.0891</td><td>1.0419</td></tr>
+</table>
+<p><b>Ship rule:</b> 回退（&lt;0.97）= <b class="good">0/865</b> · exactness = <b class="good">865/865 real + 138/138 gate（含对抗轨）</b> · 内部 dispatch 新增规则 = 0。
+锚漂 QA：med 1.0011 (p10 0.987 / p90 1.016)。<span class="en">Zero regressions; fully green including adversarial tracks the BASELINE fails.</span></p>
+
+<p><b>v7 组成</b>（全部 ctor-flag 默认关、单一 revert 可回退）：<code>p4_rs_rw_search</code> + <code>p4_fine_skip</code> + <code>p4_peer_push</code>（op37 非 KF primitive 在 e612 上独立重验）+ <code>p2_radix_fallback</code>（本战役新作，正确性兜底）。</p>
+
+<h2>2 · 冲刺目标 1.60× 的判定 / The 1.60× stretch goal</h2>
+<div class="wall"><b>未达成，且已双锁归因（预授权负面结论）。</b>
+<span class="en">Not reached; double-locked attribution below.</span>
+<ul>
+<li><b>锁1 · 相位下界（同族内核实测最小值求和）：</b>小 N 格下界 ~6.1-6.4µs vs v7 ~7.3µs；1M-cs8 ~14.6µs vs ~17µs → 残余空间 ≤1.15-1.20× → 战役 UB ≈ <b>1.30-1.35×</b>，距 1.60 还差 ~20%。</li>
+<li><b>锁2 · NCU 结构墙：</b>BS=1 时 grid=1-8 CTA/148 SM（占用结构性），DRAM 0.1%/SM 0.09%（纯延迟链）；<b>47.6% stall = 取指/icache miss</b>（单体巨核所有相位内联）——unroll 缩减已证伪（iter9），结构修复（拆核/冷路径出线）超出单 kernel cuteDSL GVR 骨架的表达能力。相位串行骨架 + 零回退 + 静态配置三约束下 1.60 不可达；解除骨架约束的外部参照（op28：单遍 8-CTA 重写 1.38-1.77×）说明<b>绑住目标的正是骨架本身</b>。</li>
+</ul></div>
+
+<h2>3 · 基线正确性缺陷（上游可报告）/ Baseline defects found</h2>
+<table>
+<tr><th>defect</th><th>trigger</th><th>symptom</th><th>root cause</th><th>v7 status</th></tr>
+<tr><td>plateau 大平局</td><td>fp32 巨 tie 类横跨 [K,kC]</td><td>输出重复 index（uniq 339/512）</td><td rowspan="2">P2 admission fail-soft undershoot 无 exact fill（log-falsi 8 迭代达不到 ULP 级 bracket）</td><td rowspan="2" class="good">FIXED：<code>p2_radix_fallback</code> 全行分布式 radix（位级精确，仅病理行触发，实测净税 ~0.1%）</td></tr>
+<tr><td>neartie 近平局</td><td>K 边界 1-2 ULP 带</td><td>54% preIdx 抽样确定性失败（cs 无关）</td></tr>
+<tr><td>smem_cache</td><td><code>enable_smem_cache=on</code> @cs8</td><td>不精确</td><td>默认关 flag 潜在缺陷（未深究）</td><td>不使用（记录）</td></tr>
+</table>
+<p class="note">上游单测只用连续 randn（fp32 无平局），这两类缺陷在上游测试域不可见；建议随 follow-up PR 附 fixture。</p>
+
+<h2>4 · 迭代账本摘要 / Iteration ledger (9 iters: 1 SHIP · 6 FALSIFIED · rest WASH)</h2>
+<table>
+<tr><th>iter</th><th>hypothesis</th><th>verdict</th><th>关键数字</th></tr>
+<tr><td>1</td><td>d2a/d2b/d1a P4 levers → e612</td><td class="good">SHIP</td><td>gm 1.1261 / 0 reg</td></tr>
+<tr><td>2</td><td>R0 阶梯加宽</td><td class="bad">FALSIFIED（K512/1024 列税复现）</td><td>vs v1 0.9894</td></tr>
+<tr><td>3</td><td>多层分布式 radix P4（性能路径）</td><td class="bad">FALSIFIED</td><td>vs v1 0.8696（4 层全降为常态）</td></tr>
+<tr><td>5</td><td>p2_radix_fallback（正确性）</td><td class="good">SHIP（并入 v7）</td><td>gate 138/138 首绿</td></tr>
+<tr><td>6</td><td>K2048 阶梯（收割）</td><td class="bad">DROPPED（均值+1.4%/尾损 24 格）</td><td>op33 模式</td></tr>
+<tr><td>7</td><td>mt_unroll=8</td><td class="bad">FALSIFIED</td><td>0.9625</td></tr>
+<tr><td>8</td><td>P3+P4 直方图融合</td><td class="bad">FALSIFIED（各 N 段皆有内容依赖尾损）</td><td>+0.65% 均值/0.92 尾</td></tr>
+<tr><td>9</td><td>unroll 缩减攻 icache 墙</td><td class="bad">FALSIFIED</td><td>0.947-0.999</td></tr>
+</table>
+<p>Probes（WASH/PARKED）：cs 选点已近优、T-sweep 内容依赖、p1b_cache、vseed 投机 P3（接纳占比仅 25-32%）、band-carve（救援率 ~0）。全部入 <code>FALSIFIED.md</code>/<code>WALLS.md</code>（域限定 + 复活条件）。</p>
+
+<h2>5 · 工件 / Artifacts</h2>
+<ul>
+<li>Ship arm: <code>src/gvrpkg40v3</code>（e612 + 4 flags）· baseline 字节冻结 <code>src/gvrpkg40b</code></li>
+<li>终判原始数据: <code>results/ab_iter8/cells.csv</code>（865 格 paired µs + ratio）· 基线 <code>results/bl0/cells.csv</code></li>
+<li>Harness: <code>scripts/{arms40,ab40,gate40,parse_ab40,drive_ab40.sh}</code>（幂等、8 卡分片、批级 marker）</li>
+<li>账本: <code>ITERATIONS.md / FALSIFIED.md / WALLS.md / RESUME_PROMPT.md / COST.md</code></li>
+<li>缺陷复现: <code>scripts/repro_plateau.py / probe_neartie_flake.py</code>（供上游 fixture）</li>
+</ul>
+
+<p class="en" style="margin-top:24px;border-top:1px solid #cbd5e1;padding-top:8px">
+TL;DR: v7 ships gm 1.1250× over the fresh PR#16457 baseline with zero per-cell regressions and strictly-better-than-baseline exactness (two upstream correctness defects fixed en route). The 1.60× stretch goal is double-locked infeasible inside the GVR phase-serial skeleton (phase-floor UB ≈1.30-1.35×; icache/fetch + occupancy structural walls); the binding constraint is the skeleton itself.</p>
+</body>
+</html>
