@@ -79,3 +79,8 @@ loads/occupancy variants) and re-run the ORACLE screen — if the oracle bound
 itself cannot clear ~1.9-2.0 gm on the battleground, the 1.8 envelope mean is
 structurally out of reach for this arm family and the campaign needs either a
 different shape or a bounded verdict (double-lock rules apply).
+
+## iter 7 — 2026-07-23 — verdict update (roofline screens f2/a4)
+f2 ORACLE BOUND (roofline collect): gm 1.4349 / mean 1.4570 / min 0.955, 1/56 <1.0 (was 1.37/0.967/2). Roofline lever real but bounded.
+a4 production: gm 0.583 — REGRESSION vs a3 (0.590) at K=2048: STAGE 6144->4096 with T=2K=4096 == STAGE trips chunk clips -> rescue storms on v32 (BS1024 0.672->0.594). Fix for relay: K-aware STAGE (template: 4096/5-occ for K<=1024, 6144/3-occ for K=2048) or T=1.5K for K=2048.
+LOCK 1 (arm-family bound vs the 1.8 bar): even with FREE thresholds this collect shape measures gm 1.43 on the battleground — the mean>=1.8 envelope bar cannot be met by threshold engineering alone. Remaining candidate shapes within GVR framework before double-lock: (a) multi-row-per-CTA small-cell amortization (sub-L2 band cap is chain latency, oracle 1.2-1.5 there), (b) collect BW push beyond 4x-ILP (async copy / TMA bulk), (c) relaxed-constraint control (unlimited passes / no exactness) to complete the double lock if (a)/(b) stall.
