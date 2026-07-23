@@ -107,7 +107,8 @@ thresh_kernel(const float* __restrict__ logits, const int* __restrict__ pre_idx,
   const float* lg = logits + (size_t)row * npad;
   const int* pre = pre_idx + (size_t)row * K;
   float m = __int_as_float(0x7f800000);
-  for (int j = threadIdx.x; j < K; j += blockDim.x) {
+  const int hstep = (K + 511) / 512;   // subsample hints: <=512 gathers
+  for (int j = threadIdx.x * hstep; j < K; j += blockDim.x * hstep) {
     int idx = pre[j];
     if (idx >= 0 && idx < npad) m = fminf(m, lg[idx]);
   }
@@ -124,7 +125,7 @@ thresh_kernel(const float* __restrict__ logits, const int* __restrict__ pre_idx,
   }
   __syncthreads();
   float t = s_min;
-  if (npad > CAP) {
+  if (npad > 2 * K) {
     // position-unbiased strided sample; select the r-th largest so that the
     // expected candidate count lands near 4608 (in [K, CAP] for all K<=2048)
     // clustered sampling: PROBES cache lines, 32 consecutive values each —
@@ -145,9 +146,9 @@ thresh_kernel(const float* __restrict__ logits, const int* __restrict__ pre_idx,
       sv[j * 4 + 2] = v.z; sv[j * 4 + 3] = v.w;
     }
     __syncthreads();
-    long r = (long)S_N * (2 * K) / npad;   // target ~2K candidates (cluster-
-                                           // sampled; margins [K, CAP] absorb
-                                           // the variance inflation)
+    long r = (long)S_N * (K + K / 4) / npad;  // target ~1.25K candidates:
+                                              // rescue is cheap (empty K2
+                                              // ~1.3us), so bias tight
     int rk = (int)max(1L, min((long)S_N, r));
     sample_kth_key(sv, S_N, rk, SS, &skey);
     __syncthreads();

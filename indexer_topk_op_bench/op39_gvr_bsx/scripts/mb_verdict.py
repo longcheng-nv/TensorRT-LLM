@@ -18,6 +18,7 @@ from parse_nsys_full import parse_rep  # noqa: E402
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--rep", default=str(HERE.parent / "results" / "nsys" / "f1.nsys-rep"))
+    # also works on a1.nsys-rep (production arm ranges c|arm|...)
     args = ap.parse_args()
     kern = parse_rep(args.rep)
     pr = {}
@@ -27,7 +28,7 @@ def main():
     rows = []
     for rng, us in kern.items():
         parts = rng.split("|")
-        if len(parts) != 4 or parts[1] != "fused":
+        if len(parts) != 4 or parts[1] not in ("fused", "arm"):
             continue
         cname, bs = parts[2], int(parts[3][2:])
         p = pr.get((cname, bs))
