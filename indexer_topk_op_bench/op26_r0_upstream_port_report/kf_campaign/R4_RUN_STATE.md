@@ -279,3 +279,11 @@ Updated 2026-07-22 (会话暂停：用户要求迁移到另一台机器)。
   看不见这些错;36 案例探针(v23 1.075)亦高估全格。
   处置: (a) v23 全格复核中(是否同带 bug);(b) round 3 照跑;
   (c) 收口后 fork --append-prompt 注入盲区 exactness/弱区图谱。
+- **v23 全格复核 = 同 8 例 inexact(同 cell 集, 全 row0)** → 整个 r1/r2
+  lineage 正确性 DQ;全格 gm 0.9348/462 回退;bs128×16k 档洞 0.40-0.47。
+  bug 特征: 仅 row0 丢 mandatory(疑跨行竞态/row-base 错),平台盲区不可见。
+- **决策: cancel v2($480 止)→ fork 注入 steering**。
+  fork = `befh5fh2595es8ztpcg0nmq6q8`(gvr-topk-bs2x-v3, rounds 3-5,
+  max $400, 继承 44 candidates/42 insights + 2.7KB append-prompt:
+  exactness bug 图谱 + 自测清单(bs{2..96}×npad 扫描)+ bs128 洞 +
+  K1024 大N 吞吐方向(rows-per-CTA/persistent CTA)+ 保强区提醒)。
