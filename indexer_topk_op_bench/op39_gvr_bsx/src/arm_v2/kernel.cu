@@ -146,14 +146,18 @@ thresh_kernel(const float* __restrict__ logits, const int* __restrict__ pre_idx,
       sv[j * 4 + 2] = v.z; sv[j * 4 + 3] = v.w;
     }
     __syncthreads();
-    long r = (long)S_N * (2 * K) / npad;      // primary target ~2K candidates
+    // primary target: 2K candidates, but K=2048 must stay clear of STAGE
+    // (T == STAGE trips per-chunk clips -> rescue storms, a4 regression)
+    const int T_pri = (K >= 2048) ? (K + K / 2) : (2 * K);
+    long r = (long)S_N * T_pri / npad;
     int rk = (int)max(1L, min((long)S_N, r));
     sample_kth_key(sv, S_N, rk, SS, &skey);
     __syncthreads();
     t = fmaxf(t, inv_mono(skey));
     // fallback quantile at ~6K target: used by the undershoot rescue instead
     // of a full-row final resort (6x margin over K absorbs cluster noise)
-    long rf = (long)S_N * (6 * K) / npad;
+    const int T_fb = min(6 * K, 3 * CAP / 4);  // fallback must fit CAP
+    long rf = (long)S_N * T_fb / npad;
     int rkf = (int)max((long)rk + 1, min((long)S_N, rf));
     __syncthreads();
     sample_kth_key(sv, S_N, rkf, SS, &skey);
