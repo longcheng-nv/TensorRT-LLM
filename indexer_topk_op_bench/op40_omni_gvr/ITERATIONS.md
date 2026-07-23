@@ -68,3 +68,12 @@ release; reading a just-written scalar via DSMEM can see stale data; symptom
 clusters wrong picks by CTA slice). v1 adds no new failures (failure set
 identical to base). Flake probe (probe_neartie_flake.py, 100 reps x cs sweep)
 queued to run AFTER ab_v1 grid finishes (no probes during timing runs).
+
+## iter 1 — 2026-07-23 — SHIP (arm v1 = campaign running best)
+Result: full-865 paired nsys (8-GPU cell-sharded, pairs same-GPU): gm 1.1261,
+0 regressions (<0.97), worst 0.9892 @ pro_4k_L16, 865/865 real exact.
+flash 1.1497 / pro 1.1588 / v32 1.0942; 32k-1M 1.1220 / 4k-32k 1.1328.
+Reproduces op37's 1.1284 on the newer e612 head — levers independent of the
+head refresh (p4tt/p4wr absorption did not eat them).
+Cumulative vs goal: 1.126 of 1.60 (remaining x1.421).
+Next: iter2 target selection from cs-level residual map.

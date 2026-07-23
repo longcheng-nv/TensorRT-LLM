@@ -1,0 +1,10 @@
+{
+ "n": 865,
+ "gm": 1.1260674950998888,
+ "regressions": 0,
+ "worst": {
+  "uuid": "pro_4k_L16",
+  "ratio": 0.9892
+ },
+ "inexact": []
+}
