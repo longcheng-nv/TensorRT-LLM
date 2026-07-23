@@ -200,3 +200,7 @@ Ledger: FALSIFIED (p3_hist_fuse as static or N-gated config, real fp32 BS=1);
 revival: tighter hi-bound estimation or top-bin split — parked.
 STALL PROTOCOL: >=3 flat iters since v1 -> meta-analysis (UB bounding,
 convergence assessment). v7 = running best: gm 1.1250, 0 reg, gate green.
+
+## probe: enable_smem_cache — 2026-07-23 — IN PROGRESS, already DISQUALIFIED
+smem_cache=on is INEXACT at flash_1024k cs8 (latent defect in the default-off
+flag; not production-affecting). Lever dead regardless of timing.
