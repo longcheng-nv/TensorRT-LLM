@@ -21,7 +21,7 @@
 #ifndef CAP
 #define CAP 8192
 #endif
-#define STAGE 6144
+#define STAGE 4096
 
 __device__ __forceinline__ unsigned mono_key(float x) {
   unsigned k = __float_as_uint(x);
@@ -177,7 +177,7 @@ struct RedSmem {
 // compacted into smem ping-pong buffers so levels 1-3 touch only survivors
 // (typically <<n). If survivors exceed the buffer, falls back to full scans.
 // Whole CTA participates. Tie-exact in the value-multiset sense.
-#define SURV 3072
+#define SURV 2048
 template <bool FROM_ROW, bool EMIT>
 __device__ void exact_topk_from(const float* __restrict__ src_val,
                                 const int* __restrict__ src_idx,
@@ -341,7 +341,7 @@ __device__ void exact_topk_from(const float* __restrict__ src_val,
 }
 
 template <bool RESCUE>
-__global__ void __launch_bounds__(512, 3)
+__global__ void __launch_bounds__(512, 5)
 arm_kernel(const float* __restrict__ logits, float* __restrict__ thr,
            float* __restrict__ cand_val, int* __restrict__ cand_idx,
            int* __restrict__ cnt, int* __restrict__ done, int* __restrict__ ovf,
@@ -363,6 +363,26 @@ arm_kernel(const float* __restrict__ logits, float* __restrict__ thr,
   if (threadIdx.x == 0) s_cnt = 0;
   __syncthreads();
   int i = beg + threadIdx.x;
+  const int bd = blockDim.x;
+  for (; i + 3 * bd < end; i += 4 * bd) {
+    float4 a0 = lg4[i];
+    float4 a1 = lg4[i + bd];
+    float4 a2 = lg4[i + 2 * bd];
+    float4 a3 = lg4[i + 3 * bd];
+    #pragma unroll
+    for (int q = 0; q < 4; ++q) {
+      float4 v = (q == 0) ? a0 : (q == 1) ? a1 : (q == 2) ? a2 : a3;
+      int base = (i + q * bd) * 4;
+      #pragma unroll
+      for (int c = 0; c < 4; ++c) {
+        float x = (c == 0) ? v.x : (c == 1) ? v.y : (c == 2) ? v.z : v.w;
+        if (x >= t) {
+          int p = atomicAdd(&s_cnt, 1);
+          if (p < STAGE) { s_val[p] = x; s_idx[p] = base + c; }
+        }
+      }
+    }
+  }
   for (; i + (int)blockDim.x < end; i += 2 * blockDim.x) {
     float4 a = lg4[i];
     float4 b = lg4[i + blockDim.x];
