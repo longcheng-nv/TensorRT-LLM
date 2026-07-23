@@ -30,3 +30,11 @@ Shape: BS16-32 strong (1.3-1.9), BS64-128 dip (1.07-1.5), BS512-1024 high (1.4-1
 Caveats: oracle threshold (production needs hint->t_lo estimation + undershoot/overflow fallback + tie-exact tail); dip band + pro_64k parity are the residual battlegrounds; fused still at ~2.6TB/s vs 7 roofline at big cells.
 Next (iter4): production arm v1 — pre-kernel hint-quantile t_lo (bucket hist on gathered hint values), reducer-CTA fallback rescan on undershoot/overflow, exact tie tail.
 Data: results/f1_verdict.txt.
+
+## iter 4 — 2026-07-23 — GO w/ falsifications (production arm v1->v2->v3)
+v1 (t_lo = min hint): gate 0/225 EXACT (incl. adversarial const/near-tie) but 31/75 cells OVERFLOW (min-hint depth up to 189K cand) -> full-row fallback = perf collapse (gm 0.25 L1).
+FALSIFIED: (t2 = K-th of stored subset; domain: real captures w/ positional structure; evidence: nsys+trace) — stored = first-flushed CHUNK slices (positionally concentrated), rank transfer wildly biased; rescue re-overflowed -> 285us final resorts. Root class: measurement... no — real-data structural bias (synthetic-uniform would have masked it).
+FIX 1 (correctness): overflow predicate must be true_n > n_stored (single-chunk STAGE clip w/ true_n<=CAP was a silent exactness hole).
+FIX 2 (v3): K0 = min-hint + position-unbiased STRIDED row sample (S<=8192), t = max(hint, sample quantile @ ~2K target) -> rescue now rare (K2 1.3us), all cells exact.
+Status after v3b (T=2K, 2-level sample select, adaptive S): loss band event-axis 0.24-0.71 vs pr — threshold machinery tax ~3.5x over the oracle bound (gm 1.37 nsys). K0 ~12us + K1 ~29us at pro_64k BS16 vs oracle-K1 ~9us.
+Next levers: (a) K0 -> <=3us: parallel suffix scan, fold hint+sample single pass, cut serial 256-loops; (b) K1 reduce single-level 2048-bucket for n~2K; (c) consider K0-into-K1 fusion or persistent cooperative launch; then nsys re-screen + full-envelope sweep.

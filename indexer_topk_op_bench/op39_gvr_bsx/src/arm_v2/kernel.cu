@@ -2,18 +2,19 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
-// op39 iter4 production arm v1: hint-thresholded fused 1-pass collect top-K.
+// op39 iter4.5 production arm v2: hint-thresholded fused 1-pass collect top-K
+// with a SECOND-CHANCE rescue pass for deep-hint overflow rows.
 //
-// K0 thresh_kernel: t_lo[row] = min over hint values lg[pre[row][0..K)].
-//    With hit-rate < 1 at least one hint lies below the true kth value, so
-//    count(x >= t_lo) >= K (no undershoot); h == 1 gives count == K exactly.
-// K1 fused_kernel: tile-parallel scan (grid (chunks, BS)); candidates >= t_lo
-//    staged in smem, flushed once per CTA; last CTA of the row reduces:
-//    exact top-K via up-to-4-level 8-bit bucket refinement (tie-exact in the
-//    value-multiset sense), warp-aggregated emit.
-//    Fallback (rare): candidate overflow (cnt > CAP, deep-hint rows at low
-//    hit rate) -> the reducer CTA re-scans the WHOLE row with the same bucket
-//    machinery (slow for that row only, still exact).
+// K0 thresh: t_lo[row] = min hint value (count >= K guaranteed at h < 1).
+// K1 arm<false>: tile collect >= t_lo; last CTA per row:
+//   - fast path (stored candidates complete): exact 4-level bucket top-K.
+//   - overflow (clipped stage/CAP): t2 = exact K-th value of the STORED
+//     subset (kth(stored) >= kth(row) and the K stored top values are >= t2,
+//     so a rescan at t2 yields C in [K, K+ties] candidates containing the
+//     true top-K); write thr[row] = t2, set rescue[row] = 1.
+// K2 arm<true>: rows with rescue flag only (near-zero cost otherwise):
+//   re-collect at t2 and reduce; if even that overflows (massive value ties),
+//   final resort = single-CTA full-row exact reduce. Counters self-clean.
 #include <cuda_runtime.h>
 #include <cstdint>
 
@@ -26,69 +27,34 @@ __device__ __forceinline__ unsigned mono_key(float x) {
   unsigned k = __float_as_uint(x);
   return (k & 0x80000000u) ? ~k : (k | 0x80000000u);
 }
-
-// ---------------- K0: per-row threshold from hints -------------------------
-extern "C" __global__ void thresh_kernel(const float* __restrict__ logits,
-                                         const int* __restrict__ pre_idx,
-                                         float* __restrict__ thr, int npad, int K) {
-  const int row = blockIdx.x;
-  const float* lg = logits + (size_t)row * npad;
-  const int* pre = pre_idx + (size_t)row * K;
-  float m = __int_as_float(0x7f800000);  // +inf
-  for (int j = threadIdx.x; j < K; j += blockDim.x) {
-    int idx = pre[j];
-    if (idx >= 0 && idx < npad) m = fminf(m, lg[idx]);
-  }
-  __shared__ float s[32];
-  const int lane = threadIdx.x & 31, warp = threadIdx.x >> 5;
-  for (int o = 16; o; o >>= 1) m = fminf(m, __shfl_down_sync(0xffffffffu, m, o));
-  if (!lane) s[warp] = m;
-  __syncthreads();
-  if (!warp) {
-    m = (lane < (int)(blockDim.x >> 5)) ? s[lane] : __int_as_float(0x7f800000);
-    for (int o = 16; o; o >>= 1) m = fminf(m, __shfl_down_sync(0xffffffffu, m, o));
-    if (!lane) thr[row] = m;
-  }
+__device__ __forceinline__ float inv_mono(unsigned k) {
+  unsigned r = (k & 0x80000000u) ? (k & 0x7fffffffu) : ~k;
+  return __uint_as_float(r);
 }
 
-// ---------------- reduce helpers (run by one CTA) ---------------------------
-// Exact top-K from a candidate list (global mem) via multi-level 8-bit bucket
-// refinement on the monotonic key. Returns nothing; writes out[row*K..].
-// src_val/src_idx may be the staged candidates OR (fallback) recomputed from
-// the full row. All threads of the CTA participate.
-struct RedSmem {
+struct RedSmemT {
   unsigned hist[256];
   unsigned wsum[16];
-  unsigned thr_bucket, prefix_lo;  // key prefix of the threshold path
-  int ocur, tcur, level_n;
+  unsigned thr_bucket;
+  int ocur, tcur;
 };
 
-// count/emit pass over candidates with a key filter: elements whose key
-// matches `prefix` on the top `lvl*8` bits participate at this level.
-template <bool FROM_ROW>
-__device__ void exact_topk_from(const float* __restrict__ src_val,
-                                const int* __restrict__ src_idx,
-                                const float* __restrict__ lg, int n, int K,
-                                int* __restrict__ orow, RedSmem& S) {
+// r-th largest key of a smem sample array (whole CTA); 4-level 8-bit descent.
+__device__ void sample_kth_key(const float* sv, int n, int need0,
+                               RedSmemT& S, unsigned* key_out) {
   const int lane = threadIdx.x & 31;
-  // level loop: at each level we know (prefix, remaining K') and restrict to
-  // elements with key top-bits == prefix of the threshold bucket chain.
-  unsigned prefix = 0;      // matched high bits so far (value)
-  int need = K;             // how many still to take from the prefix subtree
-  int emitted = 0;
+  unsigned prefix = 0;
+  int need = need0;
   for (int lvl = 0; lvl < 4; ++lvl) {
     const int shift = 24 - lvl * 8;
-    // histogram of this level among elements matching prefix
     for (int j = threadIdx.x; j < 256; j += blockDim.x) S.hist[j] = 0;
     __syncthreads();
     for (int j = threadIdx.x; j < n; j += blockDim.x) {
-      float x = FROM_ROW ? lg[j] : src_val[j];
-      unsigned k = mono_key(x);
+      unsigned k = mono_key(sv[j]);
       if (lvl == 0 || (k >> (shift + 8)) == prefix)
         atomicAdd(&S.hist[(k >> shift) & 0xffu], 1u);
     }
     __syncthreads();
-    // suffix search for the bucket where cumulative reaches `need`
     const int warp = threadIdx.x >> 5;
     if (warp < 8) {
       unsigned v = S.hist[warp * 32 + lane];
@@ -110,52 +76,133 @@ __device__ void exact_topk_from(const float* __restrict__ src_val,
         cum += c;
       }
       S.thr_bucket = tb;
-      S.prefix_lo = cum;  // taken from buckets above tb at this level
-      S.ocur = 0;
+      S.ocur = (int)cum;
+    }
+    __syncthreads();
+    need -= S.ocur;
+    __syncthreads();
+    prefix = (lvl == 0 ? S.thr_bucket : (prefix << 8) | S.thr_bucket);
+    if (lvl == 1) {  // 16-bit precision suffices for a sampling threshold;
+                     // pad with zeros = bucket lower bound (conservative)
+      if (threadIdx.x == 0) *key_out = prefix << 16;
+      return;
+    }
+  }
+}
+
+extern "C" __global__ void __launch_bounds__(512)
+thresh_kernel(const float* __restrict__ logits, const int* __restrict__ pre_idx,
+              float* __restrict__ thr, int npad, int K) {
+  const int row = blockIdx.x;
+  const float* lg = logits + (size_t)row * npad;
+  const int* pre = pre_idx + (size_t)row * K;
+  float m = __int_as_float(0x7f800000);
+  for (int j = threadIdx.x; j < K; j += blockDim.x) {
+    int idx = pre[j];
+    if (idx >= 0 && idx < npad) m = fminf(m, lg[idx]);
+  }
+  __shared__ float s[32];
+  const int lane = threadIdx.x & 31, warp = threadIdx.x >> 5;
+  for (int o = 16; o; o >>= 1) m = fminf(m, __shfl_down_sync(0xffffffffu, m, o));
+  if (!lane) s[warp] = m;
+  __syncthreads();
+  __shared__ float s_min;
+  if (!warp) {
+    m = (lane < (int)(blockDim.x >> 5)) ? s[lane] : __int_as_float(0x7f800000);
+    for (int o = 16; o; o >>= 1) m = fminf(m, __shfl_down_sync(0xffffffffu, m, o));
+    if (!lane) s_min = m;
+  }
+  __syncthreads();
+  float t = s_min;
+  if (npad > CAP) {
+    // position-unbiased strided sample; select the r-th largest so that the
+    // expected candidate count lands near 4608 (in [K, CAP] for all K<=2048)
+    const int S_MAX = 8192;
+    int S_N = min(S_MAX, max(2048, npad / 4));
+    __shared__ float sv[S_MAX];
+    __shared__ RedSmemT SS;
+    __shared__ unsigned skey;
+    for (int j = threadIdx.x; j < S_N; j += blockDim.x)
+      sv[j] = lg[(size_t)j * npad / S_N];
+    __syncthreads();
+    long r = (long)S_N * (2 * K) / npad;   // target ~2K candidates
+    int rk = (int)max(1L, min((long)S_N, r));
+    sample_kth_key(sv, S_N, rk, SS, &skey);
+    __syncthreads();
+    t = fmaxf(t, inv_mono(skey));
+  }
+  if (threadIdx.x == 0) thr[row] = t;
+}
+
+struct RedSmem {
+  unsigned hist[256];
+  unsigned wsum[16];
+  unsigned thr_bucket;
+  int ocur, tcur;
+};
+
+// Exact top-K (EMIT) or exact-kth-key search (!EMIT) over a candidate list or
+// the full row, via 4-level 8-bit bucket refinement on the monotonic key.
+// Whole CTA participates. Tie-exact in the value-multiset sense.
+template <bool FROM_ROW, bool EMIT>
+__device__ void exact_topk_from(const float* __restrict__ src_val,
+                                const int* __restrict__ src_idx,
+                                const float* __restrict__ lg, int n, int K,
+                                int* __restrict__ orow, RedSmem& S,
+                                unsigned* kth_key_out) {
+  const int lane = threadIdx.x & 31;
+  unsigned prefix = 0;
+  int need = K;
+  int emitted = 0;
+  for (int lvl = 0; lvl < 4; ++lvl) {
+    const int shift = 24 - lvl * 8;
+    for (int j = threadIdx.x; j < 256; j += blockDim.x) S.hist[j] = 0;
+    __syncthreads();
+    for (int j = threadIdx.x; j < n; j += blockDim.x) {
+      float x = FROM_ROW ? lg[j] : src_val[j];
+      unsigned k = mono_key(x);
+      if (lvl == 0 || (k >> (shift + 8)) == prefix)
+        atomicAdd(&S.hist[(k >> shift) & 0xffu], 1u);
+    }
+    __syncthreads();
+    const int warp = threadIdx.x >> 5;
+    if (warp < 8) {
+      unsigned v = S.hist[warp * 32 + lane];
+      for (int o = 16; o; o >>= 1) v += __shfl_down_sync(0xffffffffu, v, o);
+      if (!lane) S.wsum[warp] = v;
+    }
+    __syncthreads();
+    if (threadIdx.x == 0) {
+      unsigned cum = 0;
+      int g = 7;
+      for (; g > 0; --g) {
+        if (cum + S.wsum[g] >= (unsigned)need) break;
+        cum += S.wsum[g];
+      }
+      unsigned tb = g * 32;
+      for (int b = g * 32 + 31; b >= g * 32; --b) {
+        unsigned c = S.hist[b];
+        if (cum + c >= (unsigned)need) { tb = b; break; }
+        cum += c;
+      }
+      S.thr_bucket = tb;
+      S.ocur = (int)cum;  // strictly-above count at this level
     }
     __syncthreads();
     unsigned tb = S.thr_bucket;
-    // emit everything strictly above the threshold bucket at this level
-    int npadded = (n + blockDim.x - 1) / blockDim.x * blockDim.x;
-    for (int j = threadIdx.x; j < npadded; j += blockDim.x) {
-      bool hit = false;
-      int idx = 0;
-      if (j < n) {
-        float x = FROM_ROW ? lg[j] : src_val[j];
-        unsigned k = mono_key(x);
-        if (lvl == 0 || (k >> (shift + 8)) == prefix) {
-          unsigned b = (k >> shift) & 0xffu;
-          hit = b > tb;
-        }
-        idx = FROM_ROW ? j : src_idx[j];
-      }
-      unsigned m = __ballot_sync(0xffffffffu, hit);
-      if (m) {
-        int pos = 0;
-        int leader = __ffs(m) - 1;
-        if (lane == leader) pos = atomicAdd(&S.ocur, __popc(m));
-        pos = __shfl_sync(0xffffffffu, pos, leader);
-        if (hit) orow[emitted + pos + __popc(m & ((1u << lane) - 1))] = idx;
-      }
-    }
-    __syncthreads();
-    emitted += S.ocur;
-    need -= S.ocur;
-    __syncthreads();
-    if (need <= 0) return;  // exact boundary fell between buckets
-    prefix = (lvl == 0 ? 0 : prefix << 8) | tb;
-    if (lvl == 3) {
-      // full 32-bit prefix: remaining `need` slots are exact value ties —
-      // any `need` of them are multiset-correct.
+    int above = S.ocur;
+    if (EMIT) {
       if (threadIdx.x == 0) S.tcur = 0;
       __syncthreads();
-      int npadded2 = (n + blockDim.x - 1) / blockDim.x * blockDim.x;
-      for (int j = threadIdx.x; j < npadded2; j += blockDim.x) {
+      int npadded = (n + blockDim.x - 1) / blockDim.x * blockDim.x;
+      for (int j = threadIdx.x; j < npadded; j += blockDim.x) {
         bool hit = false;
         int idx = 0;
         if (j < n) {
           float x = FROM_ROW ? lg[j] : src_val[j];
-          hit = (mono_key(x) == prefix);
+          unsigned k = mono_key(x);
+          if (lvl == 0 || (k >> (shift + 8)) == prefix)
+            hit = ((k >> shift) & 0xffu) > tb;
           idx = FROM_ROW ? j : src_idx[j];
         }
         unsigned m = __ballot_sync(0xffffffffu, hit);
@@ -164,24 +211,68 @@ __device__ void exact_topk_from(const float* __restrict__ src_val,
           int leader = __ffs(m) - 1;
           if (lane == leader) pos = atomicAdd(&S.tcur, __popc(m));
           pos = __shfl_sync(0xffffffffu, pos, leader);
-          int p = pos + __popc(m & ((1u << lane) - 1));
-          if (hit && p < need) orow[emitted + p] = idx;
+          if (hit) orow[emitted + pos + __popc(m & ((1u << lane) - 1))] = idx;
         }
       }
       __syncthreads();
+      emitted += above;
+      need -= above;
+      __syncthreads();
+      if (need <= 0) return;
+    } else {
+      need -= above;
+      __syncthreads();
+      if (need <= 0) {
+        // boundary fell strictly between buckets at this level: kth key is
+        // the lowest key of the bucket above the threshold path
+        if (threadIdx.x == 0 && kth_key_out)
+          *kth_key_out = ((lvl == 0 ? 0u : prefix << 8) | (tb + 1)) << shift;
+        return;
+      }
+    }
+    prefix = (lvl == 0 ? tb : (prefix << 8) | tb);
+    if (lvl == 3) {
+      if (EMIT) {
+        if (threadIdx.x == 0) S.tcur = 0;
+        __syncthreads();
+        int npadded2 = (n + blockDim.x - 1) / blockDim.x * blockDim.x;
+        for (int j = threadIdx.x; j < npadded2; j += blockDim.x) {
+          bool hit = false;
+          int idx = 0;
+          if (j < n) {
+            float x = FROM_ROW ? lg[j] : src_val[j];
+            hit = (mono_key(x) == prefix);
+            idx = FROM_ROW ? j : src_idx[j];
+          }
+          unsigned m = __ballot_sync(0xffffffffu, hit);
+          if (m) {
+            int pos = 0;
+            int leader = __ffs(m) - 1;
+            if (lane == leader) pos = atomicAdd(&S.tcur, __popc(m));
+            pos = __shfl_sync(0xffffffffu, pos, leader);
+            int p = pos + __popc(m & ((1u << lane) - 1));
+            if (hit && p < need) orow[emitted + p] = idx;
+          }
+        }
+        __syncthreads();
+      } else {
+        if (threadIdx.x == 0 && kth_key_out) *kth_key_out = prefix;
+      }
       return;
     }
   }
 }
 
-// ---------------- K1: fused collect + last-CTA exact reduce ----------------
-extern "C" __global__ void __launch_bounds__(512, 3)
-arm_kernel(const float* __restrict__ logits, const float* __restrict__ thr,
+template <bool RESCUE>
+__global__ void __launch_bounds__(512, 3)
+arm_kernel(const float* __restrict__ logits, float* __restrict__ thr,
            float* __restrict__ cand_val, int* __restrict__ cand_idx,
-           int* __restrict__ cnt, int* __restrict__ done, int* __restrict__ out,
+           int* __restrict__ cnt, int* __restrict__ done, int* __restrict__ ovf,
+           int* __restrict__ rescue, int* __restrict__ out,
            int npad, int K, int BS) {
-  const int nchunk = gridDim.x;
   const int row = blockIdx.y;
+  if (RESCUE && rescue[row] == 0) return;  // near-free when nothing to rescue
+  const int nchunk = gridDim.x;
   const float t = thr[row];
   const float* lg = logits + (size_t)row * npad;
   const int n4 = npad / 4;
@@ -224,11 +315,12 @@ arm_kernel(const float* __restrict__ logits, const float* __restrict__ thr,
     }
   }
   __syncthreads();
-  int local_n = s_cnt;                    // true count in this chunk
-  int store_n = min(local_n, STAGE);      // what we actually staged
-  // a clipped chunk force-trips the reducer's overflow predicate (cnt > CAP)
-  if (threadIdx.x == 0)
-    s_base = atomicAdd(cnt + row, local_n > STAGE ? local_n + CAP + 1 : local_n);
+  int local_n = s_cnt;
+  int store_n = min(local_n, STAGE);
+  if (threadIdx.x == 0) {
+    s_base = atomicAdd(cnt + row, store_n);  // stored entries stay CONTIGUOUS
+    atomicAdd(ovf + row, local_n);           // ovf doubles as the TRUE count
+  }
   __syncthreads();
   int gb = s_base;
   float* cv = cand_val + (size_t)row * CAP;
@@ -243,29 +335,55 @@ arm_kernel(const float* __restrict__ logits, const float* __restrict__ thr,
   __syncthreads();
   if (s_arr != nchunk - 1) return;
   __threadfence();
-  // ---- last CTA reduces ----
-  int n = cnt[row];
+  // ---- last CTA of the row ----
+  int true_n = ovf[row];
+  int n_stored = min(cnt[row], CAP);
+  bool overflow = (true_n > n_stored);
+#ifdef DBG_TRACE
+  if (RESCUE && threadIdx.x == 0)
+    done[row + BS] = (overflow ? 1000000000 : 0) + true_n;  // caller sizes done as 2*BS
+#endif
   __shared__ RedSmem S;
+  __shared__ unsigned kth_key;
   int* orow = out + (size_t)row * K;
-  bool overflow = (n > CAP) || (n < K);
-  // n > CAP covers cross-chunk overflow AND clipped chunks (they add CAP+1);
-  // n < K is degenerate-hint insurance (e.g. all hints invalid -> t = +inf)
-  if (!overflow) {
-    exact_topk_from<false>(cv, ci, lg, n, K, orow, S);
+  if (!overflow && n_stored >= K) {
+    exact_topk_from<false, true>(cv, ci, lg, n_stored, K, orow, S, nullptr);
+    if (RESCUE) {
+      __syncthreads();
+      if (threadIdx.x == 0) rescue[row] = 0;
+    }
+  } else if (!RESCUE && n_stored >= K) {
+    // second chance: t2 = r-th value of the stored subset, r scaled so the
+    // rescan count lands near (5/8)*CAP in expectation: row_rank(t2) ~=
+    // r * true_n / n_stored. r >= K*stored/true_n ensures count >= K
+    // (5*CAP/8 = 5120 > K for all K <= 2048); 8K-sample noise is ~70 << margin.
+    long r = (long)(5 * CAP / 8) * n_stored / max(true_n, 1);
+    int rk = (int)min((long)n_stored, max((long)1, r));
+    exact_topk_from<false, false>(cv, ci, lg, n_stored, rk, orow, S, &kth_key);
+    __syncthreads();
+    if (threadIdx.x == 0) {
+      thr[row] = inv_mono(kth_key);
+      rescue[row] = 1;
+    }
   } else {
-    // fallback: exact top-K over the whole row (reads npad scalars; pad
-    // values are -inf-like lows and cannot enter the top-K)
-    exact_topk_from<true>(nullptr, nullptr, lg, npad, K, orow, S);
+    // final resort (rescue overflow or degenerate hints): full-row exact
+    exact_topk_from<true, true>(nullptr, nullptr, lg, npad, K, orow, S, nullptr);
+    if (RESCUE) {
+      __syncthreads();
+      if (threadIdx.x == 0) rescue[row] = 0;
+    }
   }
   __syncthreads();
-  if (threadIdx.x == 0) { cnt[row] = 0; done[row] = 0; }
+  if (threadIdx.x == 0) { cnt[row] = 0; done[row] = 0; ovf[row] = 0; }
 }
 
-extern "C" void arm_v1_launch(const float* logits, const int* pre_idx, float* thr,
+extern "C" void arm_v2_launch(const float* logits, const int* pre_idx, float* thr,
                               float* cand_val, int* cand_idx, int* cnt, int* done,
-                              int* out, int npad, int K, int BS, int chunks,
-                              cudaStream_t stream) {
-  thresh_kernel<<<BS, 256, 0, stream>>>(logits, pre_idx, thr, npad, K);
-  arm_kernel<<<dim3(chunks, BS), 512, 0, stream>>>(logits, thr, cand_val, cand_idx,
-                                                   cnt, done, out, npad, K, BS);
+                              int* ovf, int* rescue, int* out, int npad, int K,
+                              int BS, int chunks, cudaStream_t stream) {
+  thresh_kernel<<<BS, 512, 0, stream>>>(logits, pre_idx, thr, npad, K);
+  arm_kernel<false><<<dim3(chunks, BS), 512, 0, stream>>>(
+      logits, thr, cand_val, cand_idx, cnt, done, ovf, rescue, out, npad, K, BS);
+  arm_kernel<true><<<dim3(chunks, BS), 512, 0, stream>>>(
+      logits, thr, cand_val, cand_idx, cnt, done, ovf, rescue, out, npad, K, BS);
 }
