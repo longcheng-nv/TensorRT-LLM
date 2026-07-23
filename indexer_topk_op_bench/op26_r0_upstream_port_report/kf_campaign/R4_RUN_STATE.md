@@ -287,3 +287,12 @@ Updated 2026-07-22 (会话暂停：用户要求迁移到另一台机器)。
   max $400, 继承 44 candidates/42 insights + 2.7KB append-prompt:
   exactness bug 图谱 + 自测清单(bs{2..96}×npad 扫描)+ bs128 洞 +
   K1024 大N 吞吐方向(rows-per-CTA/persistent CTA)+ 保强区提醒)。
+- **R5 v3 首收割 bc0de1e3(r3-a003-v5, 内部 1.0013 — fork 后首过 1.0)**:
+  盲区 exactness 复测 = **同 8 例仍 inexact**(vdiff 数值与 v23/v39 逐位同,
+  且 bs2/bs16 间会互换 → 竞态)。cand 单臂复现,排除双臂交互;
+  exclude_bottom3 非元凶(仅 n-K==3 触发)。**定位: 失败形状全落
+  cs>1 多 CTA cluster 寄存器驻留档 × b>1**(131072→cs8, 32832×bs64→cs4)
+  — cluster DSMEM 交换的行基址/rank 在 batch 网格下混用。
+  fork 种子共享代码 ⇒ bug 全 lineage 遗传;agents 无失败行资产,不可复现。
+  **保底方案(收口时 engineer graft)**: dispatch 把 (b>1 && cs>1) 形状
+  路由到 cs=1 档,外科修复后本地全格复验。

@@ -1,0 +1,10 @@
+{
+ "pro_512k_L14_bs2|kf_cand": [
+  false,
+  "row0: vdiff=2.773e-03"
+ ],
+ "pro_512k_L14_bs16|kf_cand": [
+  false,
+  "row0: vdiff=2.456e-02"
+ ]
+}
