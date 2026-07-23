@@ -169,3 +169,8 @@ dispatch forbidden). op33 pattern (mean win, tail loss) => DROPPED.
 Fallback code-presence tax measured: flash -0.87% (paired same-rep), pro
 +0.1% — accepted for correctness (both baseline defect classes fixed).
 Ship candidates now v7 = v1 + p2_radix_fallback; v8 = v7 + p3_hist_fuse.
+
+## probe: T-sweep 512 vs 1024 — 2026-07-23 — WASH (content-dependent)
+Mid-N cs1 cells: T1024 helps v32_32k +5.3% / pro_128k +3.3%, hurts
+flash_64k -7% / pro_32k -5.2%. Content/K-dependent, small aggregate; deferred
+(simplicity). Raw results/tsweep/.

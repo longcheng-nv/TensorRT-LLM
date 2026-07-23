@@ -72,16 +72,18 @@ def replay(model, isl, L):
         thrs.append(pmin + bidx * width)
     thrs.append(pmean)  # vseed column
     counts = [int((row >= t).sum()) for t in thrs]
-    adm = [c for c in counts if K <= c <= kc]
+    adm = [(c, i) for i, c in enumerate(counts) if K <= c <= kc]
     hit = bool(adm)
-    cand = min(adm) if adm else None
+    cand, col = min(adm) if adm else (None, None)
+    vseed_col = len(thrs) - 1
     return dict(uuid=f"{model}_{isl}_L{L:02d}", model=model, N=N, K=K, kc=kc,
                 hit=int(hit), cand=cand, ratio=(cand / K if cand else None),
-                counts=counts)
+                counts=counts, admit_is_vseed=int(col == vseed_col) if hit else None,
+                vseed_admissible=int(K <= counts[vseed_col] <= kc))
 
 
 def main():
-    print("uuid,model,N,K,kc,hit,cand,ratio")
+    print("uuid,model,N,K,kc,hit,cand,ratio,admit_is_vseed,vseed_admissible")
     stats = []
     for m in ("flash", "pro", "v32"):
         for isl in REAL_ISLS[m]:
@@ -91,7 +93,7 @@ def main():
                     continue
                 stats.append(r)
                 print(f"{r['uuid']},{r['model']},{r['N']},{r['K']},{r['kc']},"
-                      f"{r['hit']},{r['cand']},{r['ratio']}")
+                      f"{r['hit']},{r['cand']},{r['ratio']},{r['admit_is_vseed']},{r['vseed_admissible']}")
             RV4._bundle_cache.clear()
             RV32._bundle_cache.clear()
     import statistics as st
@@ -105,8 +107,11 @@ def main():
         rk = sorted(s["ratio"] for s in hits if s["K"] == K)
         hk = [s for s in stats if s["K"] == K]
         if rk:
+            va = sum(1 for s in stats if s["K"] == K and s["vseed_admissible"])
+            av = sum(1 for s in hits if s["K"] == K and s["admit_is_vseed"])
             sys.stderr.write(f"K={K}: hit {len(rk)}/{len(hk)} med cand/K "
-                             f"{st.median(rk):.2f} p90 {rk[int(0.9*len(rk))]:.2f}\n")
+                             f"{st.median(rk):.2f} p90 {rk[int(0.9*len(rk))]:.2f} "
+                             f"vseed_admissible {va}/{len(hk)} admit_is_vseed {av}/{len(rk)}\n")
 
 
 if __name__ == "__main__":
