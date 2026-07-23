@@ -46,3 +46,7 @@ Key inherited entries (scoped; re-verify domain before applying):
 - (K2048 4-rung ladder as static config, v32 real fp32 BS=1, nsys full-865) —
   FALSIFIED under the zero-regression rule: +1.4% v32 gm but 24 cells 0.87-
   0.97 incl inside gain bands; content-dependent, no admissible dispatch key.
+- (p3_hist_fuse static or N-gated, real fp32 BS=1, nsys full-865) —
+  FALSIFIED: mean +0.65% vs v7 but content-dependent sub-0.97 tails in every
+  N band (range-skew mechanism). Revival: better upper-bound estimate for
+  the fused bin range, or top-bin split repair.

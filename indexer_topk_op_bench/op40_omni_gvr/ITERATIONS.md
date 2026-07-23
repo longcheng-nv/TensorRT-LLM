@@ -190,3 +190,13 @@ Full-865 4-arm grid, exactness green:
   the 4k-32k band, -8% cells across 128k (range-skew: values above pmax crowd
   the top bin -> fine recursion tax). N-band analysis running to decide an
   N-gated fusion (dispatch budget has room: 0 rules used so far).
+
+## iter 8b — 2026-07-23 — v8 FALSIFIED (fusion tails, no admissible gate)
+N-band v8/v7: gm +3.4-4.6% at N<=8k BUT content-dependent losers inside
+every band incl N<=2k (pro_4k_L16 0.9287 vs base); 128k band -1.4% gm with
+0.92 cells (pmax range-skew -> top-bin crowding -> fine recursion tax).
+No static N-gate clears the 0.97 rule. Mean +0.65% not worth tail risk.
+Ledger: FALSIFIED (p3_hist_fuse as static or N-gated config, real fp32 BS=1);
+revival: tighter hi-bound estimation or top-bin split — parked.
+STALL PROTOCOL: >=3 flat iters since v1 -> meta-analysis (UB bounding,
+convergence assessment). v7 = running best: gm 1.1250, 0 reg, gate green.
