@@ -131,7 +131,7 @@ thresh_kernel(const float* __restrict__ logits, const int* __restrict__ pre_idx,
     // clustered sampling: PROBES cache lines, 32 consecutive values each —
     // touches 1/32 of the row's DRAM lines (a flat stride equal to the line
     // size read the ENTIRE row's lines: 46us at BS256 1M-npad, falsified)
-    const int PROBES = (npad <= 65600) ? 128 : 256;
+    const int PROBES = (npad <= 32832) ? 128 : 256;
     const int S_N = PROBES * 32;
     __shared__ float sv[256 * 32];
     __shared__ RedSmemT SS;
@@ -146,11 +146,10 @@ thresh_kernel(const float* __restrict__ logits, const int* __restrict__ pre_idx,
       sv[j * 4 + 2] = v.z; sv[j * 4 + 3] = v.w;
     }
     __syncthreads();
-    // primary target: npad-adaptive — as tight as 1.5K when the sample rank
-    // resolution allows, floored at rank>=48 for tail precision; always clear
-    // of STAGE (T==STAGE trips per-chunk clips -> rescue storms)
-    int T_pri = max(K + K / 2, (int)((long)48 * npad / S_N));
-    T_pri = min(T_pri, min(STAGE - 256, 3 * CAP / 4));
+    // primary target 2K (1.5K at K=2048 to stay clear of STAGE). LEDGER:
+    // sample rank r < ~64 under cluster variance undershoots (falsified twice:
+    // a2 r=40, a5 r=48) — do NOT tighten T below the r>=64 line.
+    const int T_pri = (K >= 2048) ? (K + K / 2) : (2 * K);
     long r = (long)S_N * T_pri / npad;
     int rk = (int)max(1L, min((long)S_N, r));
     sample_kth_key(sv, S_N, rk, SS, &skey);
