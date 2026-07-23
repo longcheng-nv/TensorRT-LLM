@@ -128,3 +128,8 @@ Smoke: plateau 3/3 FIXED (base/v1/v3 all fail these), neartie 0/20 pre-draws
 inexact at cs1 AND cs8 (base ~54%). Full gate + grid pending iter3 grid end.
 This is the first arm that passes every adversarial track — baseline defect
 class (P2 fail-soft under-fill) closed with a bit-exact bounded-cost path.
+
+## iter 5 gate — 2026-07-23 — GATE GREEN 69/69 (first fully-green arm)
+v4 passes all three tracks including plateau + neartie adversarials that the
+e612 baseline fails. Exactness obligation of the ship rule now satisfiable
+strictly ABOVE baseline correctness.
