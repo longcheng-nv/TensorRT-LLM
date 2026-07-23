@@ -156,3 +156,7 @@ single-level float-bin distributed hist + class-only gather (cs>1).
 v5best-class arm, 11 large-N cells, cs {1,2,4,8} paired nsys: pick_config's
 choices are best or within noise everywhere; only v32 32-64k shows cs8 +2-3%
 over the picked cs1/cs4. cs2 never wins. Deferred (simplicity criterion).
+
+## iter 7 — 2026-07-23 — FALSIFIED (mt_unroll=8)
+v5mt8 vs v5best gm 0.9625 (worst flash 512k/32k 0.86-0.88). Register pressure
+/ issue economics beat the extra in-flight loads at T=512/1024. Ledger entry.

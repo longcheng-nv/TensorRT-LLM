@@ -41,3 +41,5 @@ Key inherited entries (scoped; re-verify domain before applying):
   barriers + 8 candidate scans >> 1 gather + coarse/fine. Revival: hybrid
   (1 distributed level + tiny-class handoff). Radix retained as v4's
   correctness fallback (pathological rows only) — gate GREEN 69/69 there.
+- (mt_unroll 4->8 in block_count_ge_multi, all models real fp32 BS=1, nsys
+  full-865) — FALSIFIED: gm 0.9625 vs v5best; worst flash 0.863.
