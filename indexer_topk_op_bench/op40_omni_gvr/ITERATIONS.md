@@ -174,3 +174,9 @@ Ship candidates now v7 = v1 + p2_radix_fallback; v8 = v7 + p3_hist_fuse.
 Mid-N cs1 cells: T1024 helps v32_32k +5.3% / pro_128k +3.3%, hurts
 flash_64k -7% / pro_32k -5.2%. Content/K-dependent, small aggregate; deferred
 (simplicity). Raw results/tsweep/.
+
+## probe: H9 speculative-P3 stats — 2026-07-23 — PARKED (EV insufficient)
+Admission-column replay: vseed admits only 25-32% of R0 hits (15% of cells);
+q-rung speculation ~50-65% hit but requires conditional stores inside the
+latency-sensitive multicount loop (mt8 falsification shows sensitivity).
+Parked; revival = if P3 remains the top residual after v8.
