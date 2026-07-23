@@ -84,3 +84,14 @@ Verdict (ab_v3mt_v2, paired event axis, stock v3 baseline):
 Follow-up options: swap v3mt into the op39 combined dispatch + envelope
 re-run; port the per-K fracs upstream (production GVR uses the same
 skeleton and serves hetero batches ALWAYS).
+
+## Option-1 executed (phase 4, @009b20ff9c): NEW combined record
+
+750-cell envelope re-run with v3mt as the v3 arm (protocol identical to
+op38/op39, 0/750 inexact):
+- v3mt alone: gm 1.3064 / min 0.8367 / 104 losers (v3: 1.2928 / 0.6525 / 115)
+- **COMBINED BEST(arm_e6, v3mt): gm 1.3279 / mean 1.3655 / min 0.8367**
+  (previous record e6: 1.3179 / 1.3564 / 0.7665)
+Harvest curve: 1.3049 -> 1.3136 -> 1.3150 -> 1.3179 -> **1.3279**.
+Remaining: 36 cells where v3mt < v3 by >2% (frac-tuning residue; triple
+dispatch would add +0.4% gm at the cost of shipping two v3 variants — no).
