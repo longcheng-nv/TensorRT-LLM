@@ -50,3 +50,6 @@ Key inherited entries (scoped; re-verify domain before applying):
   FALSIFIED: mean +0.65% vs v7 but content-dependent sub-0.97 tails in every
   N band (range-skew mechanism). Revival: better upper-bound estimate for
   the fused bin range, or top-bin split repair.
+- (global unroll reduction to relieve the icache/fetch wall, real fp32 BS=1,
+  nsys 10-cell paired) — FALSIFIED: gm 0.947-0.999 vs v7; small-N gains
+  swamped by scan-band losses. Wall stands (see WALLS.md).

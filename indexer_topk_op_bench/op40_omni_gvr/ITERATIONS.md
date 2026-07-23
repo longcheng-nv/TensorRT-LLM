@@ -215,3 +215,13 @@ kernel. Explains: fallback code-presence tax, mt8 backfire, op21's
 "never-executed code still costs".
 iter9 = unroll-reduction probes (v9a mt2 / v9b no-p3unroll / v9c both+no4)
 — counter-intuitive lever: LESS memory-ILP unrolling may net-win.
+
+## iter 9 — 2026-07-23 — FALSIFIED (unroll reduction vs icache wall)
+v9a (mt2) gm 0.9821 / v9b (no-p3unroll) 0.9985 / v9c (all-off) 0.9472 vs v7.
+Small-N gains (+3-6% flash_4k/pro_8k) swamped by mid/large-N scan losses —
+memory-ILP unrolling earns its icache cost where scans dominate. The 47.6%
+fetch-stall wall stands: structural fix = splitting the mega-kernel, not
+expressible in the single-kernel cuteDSL GVR structure. -> WALLS.md.
+CONVERGENCE: lever pool exhausted (9 iters: 1 SHIP, 6 FALSIFIED, rest WASH/
+PARKED). v7 = final arm. ab_iter8 grid = terminal L2 verdict (gm 1.1250,
+0 regressions, 865/865 exact, all-adversarial gate green).
