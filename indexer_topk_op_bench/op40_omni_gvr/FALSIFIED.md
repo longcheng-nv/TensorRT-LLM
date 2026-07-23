@@ -35,3 +35,9 @@ Key inherited entries (scoped; re-verify domain before applying):
   real-only envelope. DOMAIN: K2048 is the exception — 4-rung ladder wins
   (+1.8% vs v1 on v32); harvested.
 - (p1b_cache=True for fp32 K512/K1024, real fp32 BS=1, nsys) — WASH (<1%).
+- (multi-level distributed radix-select as the P4 PERF path, all cs, real
+  fp32 BS=1, nsys full-865) — FALSIFIED, complexity-backfire: v3 vs v1 gm
+  0.8696; 4-level descent is the common case on continuous keys; 8 cluster
+  barriers + 8 candidate scans >> 1 gather + coarse/fine. Revival: hybrid
+  (1 distributed level + tiny-class handoff). Radix retained as v4's
+  correctness fallback (pathological rows only) — gate GREEN 69/69 there.

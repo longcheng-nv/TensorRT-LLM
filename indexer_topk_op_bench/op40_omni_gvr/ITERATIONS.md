@@ -133,3 +133,21 @@ class (P2 fail-soft under-fill) closed with a bit-exact bounded-cost path.
 v4 passes all three tracks including plateau + neartie adversarials that the
 e612 baseline fails. Exactness obligation of the ship rule now satisfiable
 strictly ABOVE baseline correctness.
+
+## iter 3 — 2026-07-23 — FALSIFIED (distributed radix P4 as the perf path)
+Result: full-865 4-arm grid. v3 vs v1 gm 0.8696 (flash 0.8979 / pro 0.8773 /
+v32 0.8517); v3k vs base 0.9893. Losses worst at cs8 (v32_128k 0.64) but
+cs1 also -10%.
+Diagnosis: real fp32 keys almost never exact-fit -> full 4-level descent is
+the common path; per level = 2 cluster barriers + 2 candidate scans; total
+8 cluster barriers + 8 scans vs the old 1 gather + coarse+fine. Pass-count
+economics beat DSMEM-traffic economics here (echo of op14's lesson, now on
+the SMEM/barrier axis).
+Ledger write-back: FALSIFIED (multi-level distributed radix as P4 perf path,
+all cs, real fp32 BS=1, nsys) — complexity-backfire; revival condition:
+hybrid with <=1 distributed level + small-class handoff. RADIX MACHINERY
+RETAINED as the exactness fallback (v4) where it is unconditionally correct
+and cost-bounded to pathological rows.
+Next: iter6 = P1+P1b register fusion (kill the 2nd gather + a barrier on ALL
+cells, ~0.4-0.7us each); iter7 = T2 scan-ILP microbench probe; iter8 = v3b
+single-level float-bin distributed hist + class-only gather (cs>1).
