@@ -1370,16 +1370,30 @@ static void launch_bs(const float* logits, const int* pre_idx, int* out, int npa
     return;
   }
   if (npad <= 98304) {
-    if (BS <= 8)
+    if (BS <= 8) {
       // vpc = ceil(npad/4/8): MAXV4 only holds to npad 65536 (original tiers)
       if (npad <= 65536)
         launch_reg<8, 512, 4>(logits, pre_idx, out, npad, K, kC, BS, stream);
       else
         launch_reg<8, 512, 8>(logits, pre_idx, out, npad, K, kC, BS, stream);
-    else if (BS <= 64)
+    } else if (BS <= 16 && K <= 512) {
+      // v3 confirm probe (65600 BS16, all-layer min 1.045): 4-CTA streaming
+      launch_gvr<4, 1024>(logits, pre_idx, out, npad, K, kC, BS, stream);
+    } else if (BS > 16 && BS <= 32 && K == 1024) {
+      // v3 confirm probe (65600 BS32, all-layer min 1.045)
+      launch_gvr<4, 1024>(logits, pre_idx, out, npad, K, kC, BS, stream);
+    } else if (BS <= 64) {
       launch_gvr<2, 1024, 6, 4>(logits, pre_idx, out, npad, K, kC, BS, stream);
-    else
+    } else if (BS <= 128) {
+      // v3 confirm probe BS128 (all-layer min: flash 1.053 / pro 1.043 /
+      // v32 1.059): TB1024 streaming with short AR ladder
+      if (K <= 1024)
+        launch_gvr<1, 1024, 4, 2>(logits, pre_idx, out, npad, K, kC, BS, stream);
+      else
+        launch_gvr<1, 1024, 6, 4>(logits, pre_idx, out, npad, K, kC, BS, stream);
+    } else {
       launch_gvr<1, 512, 4, 2>(logits, pre_idx, out, npad, K, kC, BS, stream);
+    }
     return;
   }
   if (npad <= 131072) {
@@ -1400,7 +1414,22 @@ static void launch_bs(const float* logits, const int* pre_idx, int* out, int npa
       else
         launch_reg<16, 512, 5>(logits, pre_idx, out, npad, K, kC, BS, stream);
     } else if (BS <= 16) {
-      launch_reg<8, 512, 10, 6, 4>(logits, pre_idx, out, npad, K, kC, BS, stream);
+      if (BS > 8 && npad <= 131136) {
+        // v3 confirm probe (131136 BS16, all-layer min: flash 1.066 /
+        // pro 1.133 / v32 1.145): 4-CTA cluster reg with AR6 ladder
+        if (K <= 512)
+          launch_reg<4, 1024, 9, 6, 1>(logits, pre_idx, out, npad, K, kC, BS, stream);
+        else
+          launch_reg<4, 1024, 9, 6, 2>(logits, pre_idx, out, npad, K, kC, BS, stream);
+      } else {
+        launch_reg<8, 512, 10, 6, 4>(logits, pre_idx, out, npad, K, kC, BS, stream);
+      }
+    } else if (BS <= 32) {
+      // v3 confirm probe BS32 (131136: min 1.068-1.123; 163776 v32: min 1.047)
+      if (npad <= 131136)
+        launch_reg<4, 1024, 9, 6, 2>(logits, pre_idx, out, npad, K, kC, BS, stream);
+      else
+        launch_gvr<4, 1024>(logits, pre_idx, out, npad, K, kC, BS, stream);
     } else if (BS <= 64) {
       launch_gvr<2, 1024, 4, 2>(logits, pre_idx, out, npad, K, kC, BS, stream);
     } else {
@@ -1419,11 +1448,17 @@ static void launch_bs(const float* logits, const int* pre_idx, int* out, int npa
         launch_reg<8, 1024, 8, 4, 2>(logits, pre_idx, out, npad, K, kC, BS, stream);
       else
         launch_reg<8, 1024, 8, 6, 2>(logits, pre_idx, out, npad, K, kC, BS, stream);
+    } else if (BS <= 32) {
+      // v3 confirm probe (262144 BS32, all-layer min: flash 1.094 / pro 1.212)
+      launch_gvr<4, 1024>(logits, pre_idx, out, npad, K, kC, BS, stream);
     } else if (BS <= 64) {
       if (K <= 512)
         launch_gvr<2, 1024, 4, 2>(logits, pre_idx, out, npad, K, kC, BS, stream);
       else
         launch_gvr<2, 1024, 6, 4>(logits, pre_idx, out, npad, K, kC, BS, stream);
+    } else if (BS > 256 && BS <= 512 && K <= 512) {
+      // v3 confirm probe (flash 262144 BS512, all-layer min 1.046): 2-CTA
+      launch_gvr<2, 1024, 4, 2>(logits, pre_idx, out, npad, K, kC, BS, stream);
     } else {
       if (K <= 512)
         launch_gvr<1, 1024, 4, 2>(logits, pre_idx, out, npad, K, kC, BS, stream);
