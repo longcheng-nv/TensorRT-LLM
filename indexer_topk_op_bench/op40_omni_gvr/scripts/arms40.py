@@ -44,6 +44,17 @@ ARMS = {
            dict(p4_rs_rw_search=True, p4_fine_skip=True, p4_peer_push=True,
                 p4_radix_dist=True, p4_radix_cs1=True, p2_radix_fallback=True,
                 per_k={2048: dict(r0_qfracs=(0.8, 0.6, 0.4, 0.25))})),
+    # iter6: ship-integrity composite — v1 levers + K2048 ladder + exact
+    # fallback; radix PERF paths OFF (falsified iter3)
+    "v5best": ("gvrpkg40v3.top_k.gvr_topk_decode",
+               dict(p4_rs_rw_search=True, p4_fine_skip=True, p4_peer_push=True,
+                    p2_radix_fallback=True,
+                    per_k={2048: dict(r0_qfracs=(0.8, 0.6, 0.4, 0.25))})),
+    # iter7 probe: T2 scan ILP via mt_unroll=8 (config-only)
+    "v5mt8": ("gvrpkg40v3.top_k.gvr_topk_decode",
+              dict(p4_rs_rw_search=True, p4_fine_skip=True, p4_peer_push=True,
+                   p2_radix_fallback=True, mt_unroll=8,
+                   per_k={2048: dict(r0_qfracs=(0.8, 0.6, 0.4, 0.25))})),
 }
 
 
