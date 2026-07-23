@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<title>KF R4 Champion BS=1 Report</title>
+<style>
+body { font: 14px/1.55 -apple-system, "Segoe UI", Roboto, "Noto Sans CJK SC", sans-serif;
+       max-width: 1080px; margin: 24px auto; padding: 0 16px; color: #1a2233; }
+h1 { font-size: 22px; } h2 { font-size: 17px; margin-top: 28px; }
+code { background: #f0f3f8; padding: 1px 5px; border-radius: 4px; }
+.meta { color: #55627a; }
+table { border-collapse: collapse; margin: 10px 0; }
+th, td { border: 1px solid #d6dde8; padding: 5px 10px; text-align: right; font-variant-numeric: tabular-nums; }
+th { background: #f0f3f8; text-align: center; }
+td.hi { background: #e7f5ec; font-weight: 600; }
+td.lo { background: #fdf3e3; }
+.kpis { display: flex; flex-wrap: wrap; gap: 10px; margin: 16px 0; }
+.kpi { background: #f0f3f8; border: 1px solid #d6dde8; border-radius: 8px;
+        padding: 10px 14px; min-width: 150px; }
+.kpi b { display: block; font-size: 19px; } .kpi span { color: #55627a; font-size: 12px; }
+.langbar { position: sticky; top: 0; background: #fff; padding: 8px 0; border-bottom: 1px solid #d6dde8; }
+.langbar label { cursor: pointer; padding: 4px 14px; border: 1px solid #b9c4d6; border-radius: 6px; margin-right: 8px; }
+#lang-en, #lang-zh { display: none; }
+#pane-en, #pane-zh { display: none; }
+#lang-en:checked ~ #pane-en { display: block; }
+#lang-zh:checked ~ #pane-zh { display: block; }
+#lang-en:checked ~ .langbar label[for=lang-en],
+#lang-zh:checked ~ .langbar label[for=lang-zh] { background: #1a2233; color: #fff; }
+</style></head><body>
+<input type="radio" name="lang" id="lang-en" checked>
+<input type="radio" name="lang" id="lang-zh">
+<div class="langbar"><label for="lang-en">English</label><label for="lang-zh">中文</label></div>
+<div id="pane-en">
+<h1>KF R4 Champion — BS=1 Performance vs GVR PR Head</h1>
+<p class="meta">Champion <code>gvr_topk_r3_perK_dispatch</code> (kernel <code>28dc11f6…</code>,
+campaign <code>gvr-topk-cold60</code> round 3) vs TensorRT-LLM
+<a href="https://github.com/NVIDIA/TensorRT-LLM/pull/16457">PR#16457</a> pinned head
+<code>04a0900ff7</code> (in-tree CuTe DSL GVR). Measurement: nsys cold-L2 (512 MB evict)
+pure kernel time, same-GPU paired arms, B200 (umbriel-b200-027), 865 real decode-capture
+cells (BS=1 fp32, all GVR-active layers × ISL 4K–1M). All three acceptance bars met.
+Source: fork branch <code>kf/r4-champion-final-bs1</code>; data <code>grid_r4r3cg.csv</code>.</p>
+
+<div class="kpis">
+<div class="kpi"><b>1.6531×</b><span>geomean speedup (865 real cells)</span></div>
+<div class="kpi"><b>865/865</b><span>tie-robust exact</span></div>
+<div class="kpi"><b>0</b><span>real regressions (worst cell 1.013 @60-rep)</span></div>
+<div class="kpi"><b>1.617× / 1.220× / 2.479×</b><span>median / p5 / p95</span></div>
+<div class="kpi"><b>553 / 151</b><span>cells ≥1.5× / ≥2.0×</span></div>
+<div class="kpi"><b>3.516×</b><span>best cell</span></div>
+</div>
+<h2>Geomean speedup by model × ISL</h2>
+<table><tr><th></th><th>4k</th><th>8k</th><th>16k</th><th>32k</th><th>64k</th><th>128k</th><th>256k</th><th>512k</th><th>1024k</th></tr>
+<tr><th>V4-Flash (K=512)</th><td class="hi">2.069</td><td class="hi">1.901</td><td class="hi">1.628</td><td>1.320</td><td>1.285</td><td class="hi">1.586</td><td>1.444</td><td class="hi">1.735</td><td class="hi">1.846</td></tr>
+<tr><th>V4-Pro (K=1024)</th><td class="hi">2.653</td><td class="hi">2.060</td><td class="hi">1.700</td><td>1.357</td><td>1.279</td><td class="hi">1.568</td><td>1.476</td><td class="hi">1.808</td><td class="hi">1.974</td></tr>
+<tr><th>V3.2 (K=2048)</th><td class="hi">1.935</td><td>1.465</td><td>1.292</td><td>1.474</td><td class="hi">1.530</td><td class="hi">1.794</td><td class="hi">1.982</td><td>—</td><td>—</td></tr>
+</table>
+<p>Shape: strong at both ends — small ISL rides the direct single-CTA×1024 path
+(Pro 4k up to 2.65×), large ISL rides register-resident 16-CTA clusters with
+per-(tier,K) AR6/AR8 measured rung ladders (Pro 1M 1.94×). The thinnest band is
+ISL 32–64k (N≈8–16K), healed to ≥1.0 by the KCMAX-8448 direct window + barrier folds.</p>
+<h2>Worst 8 cells (after 60-rep adjudication, none are real regressions)</h2>
+<table><tr><th>cell</th><th>N</th><th>K</th><th>hit</th><th>×</th></tr>
+<tr><td>pro_64k_L38</td><td>16387</td><td>1024</td><td>0.269</td><td>0.991</td></tr>
+<tr><td>v32_16k_L30</td><td>16399</td><td>2048</td><td>0.496</td><td>1.050</td></tr>
+<tr><td>pro_32k_L20</td><td>8195</td><td>1024</td><td>0.835</td><td>1.069</td></tr>
+<tr><td>v32_16k_L40</td><td>16399</td><td>2048</td><td>0.712</td><td>1.133</td></tr>
+<tr><td>v32_16k_L39</td><td>16399</td><td>2048</td><td>0.713</td><td>1.133</td></tr>
+<tr><td>v32_8k_L11</td><td>8207</td><td>2048</td><td>0.775</td><td>1.146</td></tr>
+<tr><td>v32_16k_L29</td><td>16399</td><td>2048</td><td>0.529</td><td>1.149</td></tr>
+<tr><td>flash_64k_L02</td><td>16387</td><td>512</td><td>0.715</td><td>1.152</td></tr>
+</table>
+<h2>Best 8 cells</h2>
+<table><tr><th>cell</th><th>N</th><th>K</th><th>hit</th><th>×</th></tr>
+<tr><td>pro_4k_L60</td><td>1027</td><td>1024</td><td>0.998</td><td>3.516</td></tr>
+<tr><td>pro_4k_L56</td><td>1027</td><td>1024</td><td>0.999</td><td>3.416</td></tr>
+<tr><td>pro_4k_L24</td><td>1027</td><td>1024</td><td>0.997</td><td>2.860</td></tr>
+<tr><td>pro_4k_L48</td><td>1027</td><td>1024</td><td>0.998</td><td>2.801</td></tr>
+<tr><td>pro_4k_L30</td><td>1027</td><td>1024</td><td>0.998</td><td>2.793</td></tr>
+<tr><td>pro_4k_L18</td><td>1027</td><td>1024</td><td>0.997</td><td>2.783</td></tr>
+<tr><td>pro_4k_L42</td><td>1027</td><td>1024</td><td>0.998</td><td>2.783</td></tr>
+<tr><td>pro_4k_L20</td><td>1027</td><td>1024</td><td>0.997</td><td>2.774</td></tr>
+</table>
+<h2>Cross-checks</h2>
+<ul>
+<li>vs sglang_v2 (PR-arm normalized): geomean 1.099, win 567/865 (weak zone N=8195, gm 0.80)</li>
+<li>vs radix_cutedsl: geomean 1.593, win 845/865</li>
+<li>vs first-lineage compB (reference, slightly different head snapshot): 1.6531 &lt; 1.8267 —
+coldstart + hard skeleton lock, 3 rounds, as expected in the handoff.</li>
+<li>Verdict chain: v5 1.295 (78 regs) → v14 1.343 (24) → r2_wd 1.441 (19) → v25 1.521 (2)
+→ v27 1.582 (2) → r3_a003 1.618 (1) → <b>28dc11f6 1.6531 (0)</b>.</li>
+</ul>
+</div>
+<div id="pane-zh">
+<h1>KF R4 冠军算子 — BS=1 相对 GVR PR head 的性能</h1>
+<p class="meta">冠军 <code>gvr_topk_r3_perK_dispatch</code>(kernel <code>28dc11f6…</code>,
+campaign <code>gvr-topk-cold60</code> 第 3 轮)对比 TensorRT-LLM
+<a href="https://github.com/NVIDIA/TensorRT-LLM/pull/16457">PR#16457</a> 锁定 head
+<code>04a0900ff7</code>(in-tree CuTe DSL GVR)。测量口径:nsys cold-L2(512 MB 逐出)
+纯 kernel 时间,同 GPU 配对双臂,B200(umbriel-b200-027),865 个真实 decode 采集
+cell(BS=1 fp32,全部 GVR-active 层 × ISL 4K–1M)。三条验收 Bar 全部达成。
+源码:fork 分支 <code>kf/r4-champion-final-bs1</code>;数据 <code>grid_r4r3cg.csv</code>。</p>
+
+<div class="kpis">
+<div class="kpi"><b>1.6531×</b><span>geomean 加速(865 个真实 cell)</span></div>
+<div class="kpi"><b>865/865</b><span>tie-robust 精确</span></div>
+<div class="kpi"><b>0</b><span>真实回退(最差格 60-rep 复测 1.013)</span></div>
+<div class="kpi"><b>1.617× / 1.220× / 2.479×</b><span>中位 / p5 / p95</span></div>
+<div class="kpi"><b>553 / 151</b><span>≥1.5× / ≥2.0× 的格数</span></div>
+<div class="kpi"><b>3.516×</b><span>最佳格</span></div>
+</div>
+<h2>分组 geomean 加速(模型 × ISL)</h2>
+<table><tr><th></th><th>4k</th><th>8k</th><th>16k</th><th>32k</th><th>64k</th><th>128k</th><th>256k</th><th>512k</th><th>1024k</th></tr>
+<tr><th>V4-Flash (K=512)</th><td class="hi">2.069</td><td class="hi">1.901</td><td class="hi">1.628</td><td>1.320</td><td>1.285</td><td class="hi">1.586</td><td>1.444</td><td class="hi">1.735</td><td class="hi">1.846</td></tr>
+<tr><th>V4-Pro (K=1024)</th><td class="hi">2.653</td><td class="hi">2.060</td><td class="hi">1.700</td><td>1.357</td><td>1.279</td><td class="hi">1.568</td><td>1.476</td><td class="hi">1.808</td><td class="hi">1.974</td></tr>
+<tr><th>V3.2 (K=2048)</th><td class="hi">1.935</td><td>1.465</td><td>1.292</td><td>1.474</td><td class="hi">1.530</td><td class="hi">1.794</td><td class="hi">1.982</td><td>—</td><td>—</td></tr>
+</table>
+<p>形态:两端强 —— 小 ISL 走 direct 单 CTA×1024 直通道(Pro 4k 最高 2.65×),
+大 ISL 走寄存器驻留 16-CTA cluster + 逐 (tier,K) 实测 AR6/AR8 阈值梯(Pro 1M 1.94×)。
+最薄带为 ISL 32–64k(N≈8–16K),已由 KCMAX-8448 直通窗 + barrier 折叠修复到 ≥1.0。</p>
+<h2>最差 8 格(60-rep 裁定后,均非真实回退)</h2>
+<table><tr><th>cell</th><th>N</th><th>K</th><th>hit</th><th>×</th></tr>
+<tr><td>pro_64k_L38</td><td>16387</td><td>1024</td><td>0.269</td><td>0.991</td></tr>
+<tr><td>v32_16k_L30</td><td>16399</td><td>2048</td><td>0.496</td><td>1.050</td></tr>
+<tr><td>pro_32k_L20</td><td>8195</td><td>1024</td><td>0.835</td><td>1.069</td></tr>
+<tr><td>v32_16k_L40</td><td>16399</td><td>2048</td><td>0.712</td><td>1.133</td></tr>
+<tr><td>v32_16k_L39</td><td>16399</td><td>2048</td><td>0.713</td><td>1.133</td></tr>
+<tr><td>v32_8k_L11</td><td>8207</td><td>2048</td><td>0.775</td><td>1.146</td></tr>
+<tr><td>v32_16k_L29</td><td>16399</td><td>2048</td><td>0.529</td><td>1.149</td></tr>
+<tr><td>flash_64k_L02</td><td>16387</td><td>512</td><td>0.715</td><td>1.152</td></tr>
+</table>
+<h2>最佳 8 格</h2>
+<table><tr><th>cell</th><th>N</th><th>K</th><th>hit</th><th>×</th></tr>
+<tr><td>pro_4k_L60</td><td>1027</td><td>1024</td><td>0.998</td><td>3.516</td></tr>
+<tr><td>pro_4k_L56</td><td>1027</td><td>1024</td><td>0.999</td><td>3.416</td></tr>
+<tr><td>pro_4k_L24</td><td>1027</td><td>1024</td><td>0.997</td><td>2.860</td></tr>
+<tr><td>pro_4k_L48</td><td>1027</td><td>1024</td><td>0.998</td><td>2.801</td></tr>
+<tr><td>pro_4k_L30</td><td>1027</td><td>1024</td><td>0.998</td><td>2.793</td></tr>
+<tr><td>pro_4k_L18</td><td>1027</td><td>1024</td><td>0.997</td><td>2.783</td></tr>
+<tr><td>pro_4k_L42</td><td>1027</td><td>1024</td><td>0.998</td><td>2.783</td></tr>
+<tr><td>pro_4k_L20</td><td>1027</td><td>1024</td><td>0.997</td><td>2.774</td></tr>
+</table>
+<h2>横向对照</h2>
+<ul>
+<li>vs sglang_v2(PR 臂归一):geomean 1.099,胜 567/865(弱区 N=8195,gm 0.80)</li>
+<li>vs radix_cutedsl:geomean 1.593,胜 845/865</li>
+<li>vs 第一 lineage compB(参考,head 快照略异):1.6531 &lt; 1.8267 ——
+冷启动 + 骨架硬锁 3 轮所得,符合 handoff 预期管理。</li>
+<li>判决链:v5 1.295(78 回退)→ v14 1.343(24)→ r2_wd 1.441(19)→ v25 1.521(2)
+→ v27 1.582(2)→ r3_a003 1.618(1)→ <b>28dc11f6 1.6531(0)</b>。</li>
+</ul>
+</div>
+</body></html>
