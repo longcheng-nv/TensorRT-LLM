@@ -180,3 +180,13 @@ Admission-column replay: vseed admits only 25-32% of R0 hits (15% of cells);
 q-rung speculation ~50-65% hit but requires conditional stores inside the
 latency-sensitive multicount loop (mt8 falsification shows sensitivity).
 Parked; revival = if P3 remains the top residual after v8.
+
+## iter 8 — 2026-07-23 — v7 SHIP (running best) / v8 fusion N-profile pending
+Full-865 4-arm grid, exactness green:
+- v7 (v1 + p2_radix_fallback) vs base: gm 1.1250, ZERO regressions (<0.97),
+  worst 0.9732. Fallback net tax ~0.1% vs v1's 1.1261. SHIP candidate: only
+  arm that is regression-free AND green on every adversarial track.
+- v8 (+p3_hist_fuse) vs base gm 1.1323 but 3 cells < 0.97; vs v7: +3.3% on
+  the 4k-32k band, -8% cells across 128k (range-skew: values above pmax crowd
+  the top bin -> fine recursion tax). N-band analysis running to decide an
+  N-gated fusion (dispatch budget has room: 0 rules used so far).
