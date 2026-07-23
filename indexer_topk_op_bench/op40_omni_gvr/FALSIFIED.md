@@ -29,3 +29,9 @@ Key inherited entries (scoped; re-verify domain before applying):
   nsys mandatory (op32, multiple).
 
 ## Campaign entries (append below)
+- (R0 ladder widening beats its count-column tax, K512/K1024 real fp32 BS=1,
+  nsys full-865) — FALSIFIED, complexity-backfire: v2lad vs v1 gm 0.9894
+  (flash 0.9617/pro 0.9669); reproduces the upstream 2026-07-16 audit on the
+  real-only envelope. DOMAIN: K2048 is the exception — 4-rung ladder wins
+  (+1.8% vs v1 on v32); harvested.
+- (p1b_cache=True for fp32 K512/K1024, real fp32 BS=1, nsys) — WASH (<1%).

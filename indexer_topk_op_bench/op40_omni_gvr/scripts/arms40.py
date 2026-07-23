@@ -28,6 +28,11 @@ ARMS = {
                  per_k={512: dict(r0_qfracs=(0.9, 0.6, 0.35), p1b_cache=True),
                         1024: dict(r0_qfracs=(0.9, 0.6, 0.35), p1b_cache=True),
                         2048: dict(r0_qfracs=(0.8, 0.6, 0.4, 0.25))})),
+    # iter3: distributed MSB-radix-select P4 (v3 pkg), both cs paths, on top
+    # of the v1 flag set (d2a/d2b/d1a inert where radix replaces them)
+    "v3": ("gvrpkg40v3.top_k.gvr_topk_decode",
+           dict(p4_rs_rw_search=True, p4_fine_skip=True, p4_peer_push=True,
+                p4_radix_dist=True, p4_radix_cs1=True)),
 }
 
 

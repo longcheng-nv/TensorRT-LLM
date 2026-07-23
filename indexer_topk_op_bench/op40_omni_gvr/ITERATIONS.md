@@ -98,3 +98,16 @@ hist-reduce (256 ints instead of bulk candidates), redundant k-th-bin on all
 CTAs, distributed global-atomic scatter, only straddle class crosses to
 leader for exact tail. Expected: gather -> ~0.5-1us, compute parallelized.
 Raw: results/phase_v1g_40.{log,json}.
+
+## iter 2 — 2026-07-23 — FALSIFIED (K512/K1024 domain) / partial harvest (K2048)
+Hypothesis (ledger hit acknowledged: upstream audit "extra count column costs
+3-7%", revival tried on real-865-only envelope): wider R0 ladders raise hit
+rate enough to beat the column tax.
+Result: full-865 4-arm paired nsys, exactness green. v2lad vs base gm 1.1136
+(< v1's 1.1261); vs v1 gm 0.9894 — flash 0.9617 / pro 0.9669 / v32 1.0180.
+The upstream audit verdict REPRODUCES on the real envelope for K512/K1024.
+K2048 4-rung ladder (0.8,0.6,0.4,0.25) is a keeper: +1.8% over v1 on v32.
+v2c (p1b_cache fp32 K512/1024): WASH vs v2lad (delta < 1%).
+Ledger write-back: FALSIFIED.md entry (ladder widening, K512/K1024, real fp32
+BS=1, nsys, complexity-backfire); K2048 ladder harvested into v3k.
+Next: iter3 = v3 distributed radix P4 (smoke 5/5 exact incl cs4/8) — gate.
