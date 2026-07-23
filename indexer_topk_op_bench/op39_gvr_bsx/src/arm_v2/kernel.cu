@@ -127,16 +127,27 @@ thresh_kernel(const float* __restrict__ logits, const int* __restrict__ pre_idx,
   if (npad > CAP) {
     // position-unbiased strided sample; select the r-th largest so that the
     // expected candidate count lands near 4608 (in [K, CAP] for all K<=2048)
-    const int S_MAX = 8192;
-    int S_N = min(S_MAX, max(2048, npad / 4));
-    __shared__ float sv[S_MAX];
+    // clustered sampling: PROBES cache lines, 32 consecutive values each —
+    // touches 1/32 of the row's DRAM lines (a flat stride equal to the line
+    // size read the ENTIRE row's lines: 46us at BS256 1M-npad, falsified)
+    const int PROBES = 256;
+    const int S_N = PROBES * 32;
+    __shared__ float sv[S_N];
     __shared__ RedSmemT SS;
     __shared__ unsigned skey;
-    const unsigned step = ((unsigned)npad << 12) / S_N;  // fixed-point 20.12
-    for (int j = threadIdx.x; j < S_N; j += blockDim.x)
-      sv[j] = lg[((unsigned)j * step) >> 12];
+    const float4* lg4s = reinterpret_cast<const float4*>(lg);
+    const int n4s = npad / 4;
+    const unsigned pstep = ((unsigned)(n4s - 8) << 8) / PROBES;  // fp 24.8, float4 units
+    for (int j = threadIdx.x; j < PROBES * 8; j += blockDim.x) {
+      int probe = j >> 3, off = j & 7;
+      float4 v = lg4s[(((unsigned)probe * pstep) >> 8) + off];
+      sv[j * 4 + 0] = v.x; sv[j * 4 + 1] = v.y;
+      sv[j * 4 + 2] = v.z; sv[j * 4 + 3] = v.w;
+    }
     __syncthreads();
-    long r = (long)S_N * (2 * K) / npad;   // target ~2K candidates
+    long r = (long)S_N * (2 * K) / npad;   // target ~2K candidates (cluster-
+                                           // sampled; margins [K, CAP] absorb
+                                           // the variance inflation)
     int rk = (int)max(1L, min((long)S_N, r));
     sample_kth_key(sv, S_N, rk, SS, &skey);
     __syncthreads();

@@ -44,3 +44,8 @@ Warp-parallel suffix search (replaces thread0 serial bucket scan in both reducer
 nsys split pro_64k BS16: K0 8.9->6.1us, K1 20.9->17.5us, K2 1.35us (rescue quiet). Event-axis loss band now 0.28-0.75 (from 0.18-0.71 pre-warp-scan; was 0.02-0.05 at iter4 v1).
 Gap to oracle bound (fused 9.2us nsys at this cell): K1 +8us (2x candidates from T=2K + 4-level reduce exposure), K0 6.1us should be <=2.
 Named next levers: (a) K1 reduce single-level 2048-bucket (11-bit) for n~2K; (b) K0: S=2048, fuse hint+sample phases, skip sample when npad<=CAP; (c) re-screen nsys 8-cell battleground w/ production thresholds vs oracle f1; (d) win-band check: pro_1024k BS256 event 148 vs oracle event 76 — verify rescue/threshold behavior on low-hit L46 big cells; (e) dispatch: arm only where it wins + op38 v3 elsewhere, then full-envelope sweep + [worst,real,best].
+
+## iter 5b — 2026-07-23 — GO (clustered sampling)
+FALSIFIED: (flat-stride sampling at stride == cache line; domain: any DRAM-resident row; evidence: nsys) — touches every DRAM line of the row, K0 = 46us at pro_1024k BS256 (a full extra pass).
+Fix: 256 probes x 32 consecutive values (1 line per probe, 1/32 of lines): pro_1024k BS256 event 148 -> 112-116us (x0.96-0.99 vs pr, nsys likely >1.0); pro_1024k BS16 x0.58-0.59. Sub-L2 cells unchanged (0.27-0.55 event) — K1 reduce + K0 fixed cost still the battleground there.
+All exact. Next: K1 single-level 2048-bucket reduce; K0 <=2us; arm_nsys.py 8-cell production screen; envelope sweep + dispatch-vs-op38v3.
