@@ -17,3 +17,9 @@ Probe: mb_collect v1 (ballot-aggregated append) FAILED structure (0.2-0.6x) — 
 - small cells (flash_16k/pro_64k): k1 flat ~12.5us at any BS<=256 -> fixed-overhead floor, NOT bandwidth.
 Diagnosis: structure sound; k1 at 2.4TB/s (3x off 7TB/s roofline) needs ILP; K2 costs 5-40us (serial bucket scan + smem atomic contention); 2-launch+memset tax dominates small cells.
 Next (iter2): fused single kernel — last-CTA-per-row reduce (drop 2nd launch+memset), 2xfloat4 ILP scan, parallel bucket suffix-scan; then nsys-axis screen.
+
+## iter 2 — 2026-07-23 — GO (fused single kernel, event-axis)
+Fused last-CTA-per-row reduce + self-clean (no memset launch) + 2xfloat4 ILP + warp-aggregated emit; chunks ladder swept.
+Result (event-axis vs nsys report pr, i.e. pessimistic): pro_1024k 1.18/1.13/1.44/1.84 @BS16/64/256/1024; v32_64k 1.15/1.06/1.07/1.34; flash_256k 0.93-1.24; small cells (pro_64k, flash_16k) 0.66-0.70 at BS<=256 (event launch tax ~5-8us of a 13-22us reading), 1.0-1.2 at BS1024.
+Diagnosis: structure GO everywhere at BS>=256 large-N; small-cell low-BS truth requires nsys axis.
+Next: nsys-axis screen; then production arm = threshold-from-hint + undershoot fallback + tie-exact tail (reuse GVR P4 machinery on candidate set).
