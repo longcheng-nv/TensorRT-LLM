@@ -56,3 +56,7 @@ FALSIFIED: (T=1.25K tight target; domain: large npad >=262144, clustered samplin
 v3f: T back to 2K + K0 dual quantile (primary 2K, fallback 6K in thr[BS+row]) + undershoot rescue at fallback (no more full-row for undershoot). Gate 0/225 + adversarial OK; pro_1024k healthy again (BS256 0.96 event).
 Residual truth: sub-L2 cells (npad<=16K) 0.26-0.41 — 3-launch + reducer exposure vs pr's efficient single-kernel serial shape; large-npad BS16-128 0.55-0.97.
 Strategy note: combined dispatch (op38 v3 for small-npad/low-BS + arm for large-npad) is the realistic ship shape; threshold tax (K0 6us, K2 1.3us, reduce depth) remains the named battleground to unlock the oracle bound (gm 1.37) beyond BS>=256.
+
+## iter 5e — 2026-07-23 — checkpoint (a3 screen of v3f)
+a3: gm 0.5902 / mean 0.6317 / min 0.352, <1.0 50/56 — robust now (no resort storms; all exact; rescue cheap) but dual-quantile K0 costs ~1-2us everywhere: win band trimmed slightly (pro_1024k BS1024 1.455->1.425, BS512 1.293; flash_512k BS512+ 1.03-1.14; v32_128k BS1024 1.08).
+Band structure: large-npad BS>=256 = arm win band; everything else pr-dominated pending threshold-tax removal.
