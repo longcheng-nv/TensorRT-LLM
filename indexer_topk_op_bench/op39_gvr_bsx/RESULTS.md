@@ -40,8 +40,18 @@ methodology.
   top: flash_512k BS1024 2.56x / BS512 2.21x, flash_1024k BS1024 2.12x.
 - iter11/12 lesson: uniform ILP-8 collect helped the event axis but regressed
   the nsys envelope at BS>=512 (+9.5% gm at BS1024); final shape dispatches
-  ILP by BS (8 below 512, 4 at/above). NCU at flash_512k BS1024: collect
-  75.4% DRAM — ~25% from the 2.47 cap remains the big-N lever (TMA/async).
+  ILP by BS (8 below 512, 4 at/above).
+- iter13: cp.async double-buffer falsified (0.93-0.98, smem round-trip cost);
+  __ldcs streaming loads GO at npad>=262144 (+2-9.5% big-N). Collect streaming
+  efficiency now >= pr's own (~5.8/7.7 TB/s); residual to the 2.47 cap is the
+  cap's optimism, not kernel slack.
+- iter14 (HARVEST COMPLETE): K2 empty-launch tax bounded +1.6-5.7% (K2-free)
+  but CDP2 tail-launch falsified (-rdc costs 15-20% globally: device-runtime
+  register reserve on a 25-reg kernel); BS16-64 reducer lever closed by
+  arithmetic (arm ~40% behind v3 there; even arm+5% everywhere = combined gm
+  +0.005). Ledger correction: __launch_bounds__(512,5) minnctapersm was always
+  ignored (2560 > 2048 threads/SM) — true occupancy cap is 4 CTA/SM.
+  Named-lever list exhausted; e6 is the final envelope of record.
 - Production threshold tax vs oracle is ~2.3x; named residual levers in
   RESUME_PROMPT (K0 6->2us fold, K1 candidate diet, K2 conditional launch).
   Closing it raises the combined mean toward ~1.5 but cannot cross 1.8

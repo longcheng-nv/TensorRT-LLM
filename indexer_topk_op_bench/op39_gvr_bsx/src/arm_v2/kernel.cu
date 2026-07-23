@@ -25,6 +25,14 @@
 #endif
 #define STAGE 4096
 
+// iter14: CDP2 tail-launch guard — first K1 last-CTA that flags a rescue
+// enqueues K2 device-side (runs after the WHOLE K1 grid, tail semantics);
+// empty case pays zero launch. Single-stream harness contract (one in-flight
+// arm_v2_launch per device at a time).
+#ifdef ARM39_CDP
+__device__ int g_k2_flag = 0;
+#endif
+
 __device__ __forceinline__ unsigned mono_key(float x) {
   unsigned k = __float_as_uint(x);
   return (k & 0x80000000u) ? ~k : (k | 0x80000000u);
@@ -419,8 +427,12 @@ arm_kernel(const float* __restrict__ logits, float* __restrict__ thr,
            float* __restrict__ cand_val, int* __restrict__ cand_idx,
            int* __restrict__ cnt, int* __restrict__ done, int* __restrict__ ovf,
            int* __restrict__ rescue, int* __restrict__ out,
-           int npad, int K, int BS) {
+           int npad, int K, int BS, int dev_k2) {
   const int row = blockIdx.y;
+#ifdef ARM39_CDP
+  if (RESCUE && blockIdx.x == 0 && blockIdx.y == 0 && threadIdx.x == 0)
+    g_k2_flag = 0;  // self-clean for the next call (before any early exit)
+#endif
   if (RESCUE && rescue[row] == 0) return;  // near-free when nothing to rescue
   const int nchunk = gridDim.x;
   const float t = thr[row];
@@ -570,6 +582,13 @@ arm_kernel(const float* __restrict__ logits, float* __restrict__ thr,
     if (threadIdx.x == 0) {
       thr[row] = inv_mono(kth_key);
       rescue[row] = 1;
+#ifdef ARM39_CDP
+      if (dev_k2 && atomicExch(&g_k2_flag, 1) == 0)
+        arm_kernel<true, ILP, TA>
+            <<<dim3(gridDim.x, gridDim.y), 512, 0, cudaStreamTailLaunch>>>(
+                logits, thr, cand_val, cand_idx, cnt, done, ovf, rescue, out,
+                npad, K, BS, 0);
+#endif
     }
   } else if (!RESCUE && true_n < K) {
     // undershoot: rescue at the deep fallback quantile (cheap re-collect),
@@ -577,6 +596,13 @@ arm_kernel(const float* __restrict__ logits, float* __restrict__ thr,
     if (threadIdx.x == 0) {
       thr[row] = thr[BS + row];
       rescue[row] = 1;
+#ifdef ARM39_CDP
+      if (dev_k2 && atomicExch(&g_k2_flag, 1) == 0)
+        arm_kernel<true, ILP, TA>
+            <<<dim3(gridDim.x, gridDim.y), 512, 0, cudaStreamTailLaunch>>>(
+                logits, thr, cand_val, cand_idx, cnt, done, ovf, rescue, out,
+                npad, K, BS, 0);
+#endif
     }
   } else {
     // final resort (rescue-level overflow/undershoot or degenerate hints)
@@ -603,20 +629,37 @@ extern "C" void arm_v2_launch(const float* logits, const int* pre_idx, float* th
   const char* e = getenv("ARM39_TA");  // re-read: setenv A/B within a process
   const int ta_env = e ? atoi(e) : 2;
   const bool ta = (ta_env == 1) || (ta_env == 2 && npad >= 262144);
-  if (ta) {  // iter13 cp.async double-buffer collect (big-N DRAM band)
+  // K2 dispatch (iter14): default = CDP2 tail-launch from K1 (empty case pays
+  // zero). ARM39_HOSTK2=1 restores the host-side unconditional K2 launch
+  // (A/B + fallback). ARM39_NOK2=1: MEASUREMENT ONLY — no K2 at all (breaks
+  // exactness on rescue rows; never in production).
+  const char* nk = getenv("ARM39_NOK2");
+  const bool no_k2 = nk && atoi(nk) == 1;
+#ifdef ARM39_CDP
+  const char* hk = getenv("ARM39_HOSTK2");
+  const bool host_k2 = !no_k2 && hk && atoi(hk) == 1;
+  const int dev_k2 = (no_k2 || host_k2) ? 0 : 1;
+#else
+  const bool host_k2 = !no_k2;  // no CDP in this build: K2 must come from host
+  const int dev_k2 = 0;
+#endif
+  if (ta) {  // iter13 __ldcs streaming collect (big-N DRAM band)
     arm_kernel<false, 4, true><<<dim3(chunks, BS), 512, 0, stream>>>(
-        logits, thr, cand_val, cand_idx, cnt, done, ovf, rescue, out, npad, K, BS);
+        logits, thr, cand_val, cand_idx, cnt, done, ovf, rescue, out, npad, K, BS, dev_k2);
+    if (host_k2)
     arm_kernel<true, 4, true><<<dim3(chunks, BS), 512, 0, stream>>>(
-        logits, thr, cand_val, cand_idx, cnt, done, ovf, rescue, out, npad, K, BS);
+        logits, thr, cand_val, cand_idx, cnt, done, ovf, rescue, out, npad, K, BS, 0);
   } else if (BS >= 512) {  // ILP-8 regresses ~2-9.5% at BS>=512 (e2 vs e3)
     arm_kernel<false, 4, false><<<dim3(chunks, BS), 512, 0, stream>>>(
-        logits, thr, cand_val, cand_idx, cnt, done, ovf, rescue, out, npad, K, BS);
+        logits, thr, cand_val, cand_idx, cnt, done, ovf, rescue, out, npad, K, BS, dev_k2);
+    if (host_k2)
     arm_kernel<true, 4, false><<<dim3(chunks, BS), 512, 0, stream>>>(
-        logits, thr, cand_val, cand_idx, cnt, done, ovf, rescue, out, npad, K, BS);
+        logits, thr, cand_val, cand_idx, cnt, done, ovf, rescue, out, npad, K, BS, 0);
   } else {
     arm_kernel<false, 8, false><<<dim3(chunks, BS), 512, 0, stream>>>(
-        logits, thr, cand_val, cand_idx, cnt, done, ovf, rescue, out, npad, K, BS);
+        logits, thr, cand_val, cand_idx, cnt, done, ovf, rescue, out, npad, K, BS, dev_k2);
+    if (host_k2)
     arm_kernel<true, 8, false><<<dim3(chunks, BS), 512, 0, stream>>>(
-        logits, thr, cand_val, cand_idx, cnt, done, ovf, rescue, out, npad, K, BS);
+        logits, thr, cand_val, cand_idx, cnt, done, ovf, rescue, out, npad, K, BS, 0);
   }
 }

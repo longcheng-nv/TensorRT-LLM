@@ -27,14 +27,42 @@ CAP = 8192
 
 
 def build_arm2():
+    # Two-step build (iter14): kernel.cu needs -rdc=true for the CDP2 K2
+    # tail-launch, and torch's JIT load() does no device-link step — so nvcc
+    # builds the pure-CUDA kernel into its own .so (device link happens
+    # automatically when nvcc emits a shared lib), and torch only compiles
+    # the binding, linking against it.
+    import hashlib
+    import subprocess
     from torch.utils.cpp_extension import load
     kdir = HERE.parent / "src" / "arm_v2"
-    (kdir / "build_pt").mkdir(exist_ok=True)
+    build = kdir / "build_pt"
+    build.mkdir(exist_ok=True)
+    src = kdir / "kernel.cu"
+    lib = build / "libarm39k.so"
+    stamp = build / "kernel.hash"
+    # ARM39_BUILD_CDP=1 adds -rdc + the CDP2 tail-launch path. Default OFF:
+    # -rdc costs ~15-20% on this reg-starved kernel (device runtime reserve).
+    import os
+    cdp = os.environ.get("ARM39_BUILD_CDP", "0") == "1"
+    cmd = ["/usr/local/cuda/bin/nvcc", "-shared", "-Xcompiler", "-fPIC",
+           "-O3", "-gencode", "arch=compute_100a,code=sm_100a", str(src)]
+    if cdp:
+        cmd[5:5] = ["-rdc=true", "-DARM39_CDP"]
+        cmd += ["-lcudadevrt"]
+    cmd += ["-o", str(lib)]
+    h = hashlib.sha256(src.read_bytes() + str(cdp).encode()).hexdigest()
+    if not lib.exists() or not stamp.exists() or stamp.read_text() != h:
+        subprocess.run(cmd, check=True)
+        stamp.write_text(h)
     return load(name="op39_arm_v2",
-                sources=[str(kdir / "kernel.cu"), str(kdir / "main.cpp")],
-                build_directory=str(kdir / "build_pt"),
-                extra_cuda_cflags=["-O3", "-gencode",
-                                   "arch=compute_100a,code=sm_100a"],
+                sources=[str(kdir / "main.cpp")],
+                build_directory=str(build),
+                extra_include_paths=["/usr/local/cuda/include"],
+                extra_ldflags=[f"-L{build}", "-larm39k",
+                               f"-Wl,-rpath,{build}",
+                               "-L/usr/local/cuda/lib64", "-lcudart"],
+                with_cuda=True,
                 verbose=False)
 
 

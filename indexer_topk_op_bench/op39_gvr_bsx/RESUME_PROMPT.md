@@ -1,13 +1,16 @@
 # op39 RESUME (updated 2026-07-23, iter12 done — harvest phase)
 
-## CURRENT STATE (iter12)
+## CURRENT STATE (iter14 — HARVEST COMPLETE, campaign fully closed)
 Campaign verdict unchanged: 1.8-mean double-locked infeasible (RESULTS.md).
-Harvest best = e5: combined gm 1.3150 / mean 1.3532 / min 0.7665, 0/750
-inexact, 52 arm-beats-v3 cells. Kernel: arm_kernel<RESCUE, ILP> with BS
-dispatch (ILP8 < BS512, ILP4 >= 512) — uniform ILP-8 falsified at BS>=512
-(e2-vs-e3). Verdict scripts: verdict_e5.py; data results/e5_data.csv.
-Next named levers: collect BW toward 2.47 cap (TMA/async-bulk; NCU 75.4%
-DRAM at flash_512k BS1024), K2 empty-launch, BS16-64 reducer exposure.
+FINAL envelope = e6: combined gm 1.3179 / mean 1.3564 / min 0.7665, 0/750
+inexact, 53 arm-beats-v3 cells (data results/e6_data.csv, verdict_e6.py).
+Kernel final shape: arm_kernel<RESCUE, ILP, TA> — ILP BS-dispatch (8 <BS512,
+4 >=512), __ldcs streaming at npad>=262144 (ARM39_TA override), host K2
+(CDP2 tail-launch FALSIFIED: -rdc taxes 15-20% globally; code kept behind
+-DARM39_CDP, build flag ARM39_BUILD_CDP=1). Two-step build in arm2_gate.py
+(nvcc .so + torch binding). ARM39_NOK2=1 = measurement-only K2 skip.
+Named-lever list EXHAUSTED (ITERATIONS iter10-14). Re-opening this campaign
+requires a new algorithm family, not more tuning of this arm.
 
 ## Older header (iter2 era, kept for context)
 

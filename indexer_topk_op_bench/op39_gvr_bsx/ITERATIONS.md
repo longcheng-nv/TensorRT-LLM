@@ -131,3 +131,30 @@ flash_1024k BS1024 2.12->2.24. Residual to the 2.47 cap now mostly the cap's
 own optimism (assumed 7 TB/s; pr itself achieves ~5.8): collect ldcs puts the
 arm at parity-or-better streaming efficiency vs pr.
 Named next: K2 empty-launch (1.3us x all cells), BS16-64 reducer exposure.
+
+## iter 14 — 2026-07-23 — K2 + reducer levers CLOSED with numbers (no ship)
+Lever value bound first: combined-dispatch math shows even arm +5% EVERYWHERE
+moves combined gm only 1.3179 -> 1.3226; BS16-64 reducer exposure lever value
+~= 0 (arm is ~40% behind v3 there — no flip possible) — CLOSED by arithmetic.
+K2 empty-launch tax measured (ARM39_NOK2 measurement flag, ab_nok2 probe):
++1.6-5.7% if K2 were free (35/35 cells positive, ~1.5-2.5us; biggest at
+BS64-128 mid npad) — larger than the old 1.3us estimate, worth an attempt.
+FALSIFIED: (CDP2 tail-launch K2 — device-side conditional launch; domain:
+this reg-starved collect kernel; evidence: ab_tailk2 paired A/B + no-rdc
+control) — tail beat host-K2 by 2.5-12.9% *within the rdc build*, but
+-rdc=true itself cost 15-20% globally (device-runtime register reserve;
+flash_512k BS1024 166 -> 196-204us). No-rdc control build restores baseline
+exactly (0.996-1.006). Net vs e6: LOSS. K2 lever CLOSED — unreachable without
+CDP; K2 grid-diet (1 CTA/row grid-stride rescue) rejected: rescue-storm cells
+would regress chunks-fold (ledger: storms are real on low-hit big-N).
+BYPRODUCT (ledger correction): ptxas warns minnctapersm 512x5=2560 > 2048
+threads/SM — the "5-occ" in __launch_bounds__(512,5) was ALWAYS silently
+ignored; true occupancy cap is 4 CTA/SM (threads). iter13's cp.async loss
+attribution "5->4 occupancy tax" is corrected to: pure smem round-trip cost
+(occupancy was 4 either way; 48KB smem also gives 4).
+Build system now two-step (nvcc kernel .so + torch binding link), CDP code
+behind -DARM39_CDP (default OFF). Production shape == e6 behavior (parity
+0.996-1.006 on probe cells); e6 stays the envelope of record.
+HARVEST PHASE COMPLETE: named-lever list exhausted (collect BW ldcs GO,
+cp.async falsified, ILP dispatched, fallback-select skipped, K2/reducer
+closed). Final: combined gm 1.3179 / mean 1.3564 / 0-750 inexact / wins 53.
