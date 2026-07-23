@@ -156,14 +156,20 @@ thresh_kernel(const float* __restrict__ logits, const int* __restrict__ pre_idx,
     __syncthreads();
     t = fmaxf(t, inv_mono(skey));
     // fallback quantile at ~6K target: used by the undershoot rescue instead
-    // of a full-row final resort (6x margin over K absorbs cluster noise)
-    const int T_fb = min(6 * K, 3 * CAP / 4);  // fallback must fit CAP
-    long rf = (long)S_N * T_fb / npad;
-    int rkf = (int)max((long)rk + 1, min((long)S_N, rf));
-    __syncthreads();
-    sample_kth_key(sv, S_N, rkf, SS, &skey);
-    __syncthreads();
-    if (threadIdx.x == 0) thr[gridDim.x + row] = fminf(inv_mono(skey), s_min);
+    // of a full-row final resort. Only needed where undershoot is possible:
+    // npad <= 131136 has primary rank r >= 128 (>= the r>=64 hard line), so
+    // min-hint suffices as fallback and the second select is skipped.
+    if (npad > 131136) {
+      const int T_fb = min(6 * K, 3 * CAP / 4);  // fallback must fit CAP
+      long rf = (long)S_N * T_fb / npad;
+      int rkf = (int)max((long)rk + 1, min((long)S_N, rf));
+      __syncthreads();
+      sample_kth_key(sv, S_N, rkf, SS, &skey);
+      __syncthreads();
+      if (threadIdx.x == 0) thr[gridDim.x + row] = fminf(inv_mono(skey), s_min);
+    } else if (threadIdx.x == 0) {
+      thr[gridDim.x + row] = s_min;
+    }
   } else if (threadIdx.x == 0) {
     thr[gridDim.x + row] = t;  // small rows: fallback == primary (min-hint)
   }
