@@ -79,6 +79,37 @@ C = [  # (anchor, id, name, status, rounds, internal, local, start, end, cost, o
 ]
 
 
+PROMPTS = {  # anchor -> [(label, path)]
+    "c1": [("campaign prompt(v1, 开跑原文)", "prompt.md"),
+           ("prompt v2(round-2 前更新)", "prompt_v2.md")],
+    "r3": [("campaign prompt(含 champion 源码内联)", "gvr-topk-r3/prompt.md")],
+    "r4": [("campaign prompt(§B v3-coldstart + 19.9KB 源码 digest)", "gvr-topk-cold60/prompt.md")],
+    "r5a": [("campaign prompt(v1-bs)", "gvr-topk-bs2x/prompt.md")],
+    "r5b": [("campaign prompt(v2, 物化 safetensors 版)", "gvr-topk-bs2x-v2/prompt.md")],
+    "r5c": [("继承 v2 prompt(不变)", "gvr-topk-bs2x-v2/prompt.md"),
+            ("fork --append-prompt(steering 追加段)", "r5_bs/fork_steering.md")],
+}
+
+
+def prompt_block(anchor):
+    import html as _h
+    ent = PROMPTS.get(anchor)
+    if not ent:
+        return ('<tr><th>发出 prompt</th><td class="dim">无(prepare 期评测无 prompt)或'
+                '归另一会话本地,平台 API 不暴露 prompt 原文</td></tr>')
+    parts = []
+    for label, rel in ent:
+        p = HERE / rel
+        if not p.exists():
+            parts.append(f"<p class='dim'>{label}: 文件缺失 {rel}</p>")
+            continue
+        txt = _h.escape(p.read_text())
+        parts.append(f"<details><summary>{label} — <code>{rel}</code> "
+                     f"({p.stat().st_size} B, 点击展开)</summary>"
+                     f"<pre class='pmt'>{txt}</pre></details>")
+    return f'<tr><th>发出 prompt</th><td>{"".join(parts)}</td></tr>'
+
+
 def md(s):
     import re
     return re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", s)
@@ -105,6 +136,7 @@ for c in C:
 <tr><th>代码位置</th><td class="mono">{c['code']}</td></tr>
 <tr><th>性能数据位置</th><td class="mono">{c['data']}</td></tr>
 <tr><th>备注</th><td>{md(c['note'])}</td></tr>
+{prompt_block(c['a'])}
 </table></div>""")
 
 
@@ -207,6 +239,12 @@ th {{ background: #f0f3f8; }}
 .kv th {{ width: 150px; background: #f7f9fc; font-weight: 600; }}
 .chip {{ font-size: 11.5px; background: #f0f3f8; border: 1px solid #b9c4d6; border-radius: 10px; padding: 1px 9px; margin-left: 8px; }}
 .legend span {{ margin-right: 18px; }}
+.dim {{ color: #8a94a8; }}
+details {{ margin: 4px 0; }}
+summary {{ cursor: pointer; color: #23508f; }}
+pre.pmt {{ background: #f6f8fb; border: 1px solid #d6dde8; border-radius: 8px;
+          padding: 10px 14px; overflow-x: auto; font-size: 11.5px; line-height: 1.45;
+          max-height: 480px; overflow-y: auto; white-space: pre-wrap; }}
 .sw {{ display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 4px; vertical-align: -1px; }}
 </style></head><body>
 <h1>KernelFactory campaigns 台账索引(loncheng@nvidia.com,2026-07-21 → 07-24)</h1>

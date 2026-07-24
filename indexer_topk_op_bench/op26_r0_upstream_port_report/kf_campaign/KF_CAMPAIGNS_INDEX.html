@@ -14,6 +14,12 @@ th { background: #f0f3f8; }
 .kv th { width: 150px; background: #f7f9fc; font-weight: 600; }
 .chip { font-size: 11.5px; background: #f0f3f8; border: 1px solid #b9c4d6; border-radius: 10px; padding: 1px 9px; margin-left: 8px; }
 .legend span { margin-right: 18px; }
+.dim { color: #8a94a8; }
+details { margin: 4px 0; }
+summary { cursor: pointer; color: #23508f; }
+pre.pmt { background: #f6f8fb; border: 1px solid #d6dde8; border-radius: 8px;
+          padding: 10px 14px; overflow-x: auto; font-size: 11.5px; line-height: 1.45;
+          max-height: 480px; overflow-y: auto; white-space: pre-wrap; }
 .sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 4px; vertical-align: -1px; }
 </style></head><body>
 <h1>KernelFactory campaigns 台账索引(loncheng@nvidia.com,2026-07-21 → 07-24)</h1>
@@ -49,6 +55,227 @@ th { background: #f0f3f8; }
 <tr><th>代码位置</th><td class="mono">indexer_topk_op_bench/op26_r0_upstream_port_report/kf_campaign/harvest/r2_c74fb3c0 + c74f_sbx(graft)</td></tr>
 <tr><th>性能数据位置</th><td class="mono">indexer_topk_op_bench/op26_r0_upstream_port_report/kf_campaign/grid_c74fsbx.csv 等</td></tr>
 <tr><th>备注</th><td>round-harvest-verdict 流程首建;两次 grid 因双 driver 作废(纪律起源)</td></tr>
+<tr><th>发出 prompt</th><td><details><summary>campaign prompt(v1, 开跑原文) — <code>prompt.md</code> (4549 B, 点击展开)</summary><pre class='pmt'># DeepSeek-V4 Indexer Top-K Decode (BS=1, fp32, B200) — Beat the Production GVR Kernel
+
+## Problem
+
+Sparse-attention indexer top-K selection at decode time. One row of real
+captured indexer logits (`logits[1, npad]`, fp32, valid length `n_valid`,
+tail padded with `FLT_MIN`-lowest so pad never enters the top-k). Return the
+`int32` indices of the `k` largest values, any order; ties at the k-th value
+boundary may be resolved either way (the correctness checker is index-SET
+based and tie-robust).
+
+`pre_idx[1, k]` is the PREVIOUS decode step&#x27;s top-k (temporal warm hint).
+Its overlap with the true top-k ranges 0.02–1.0 across workloads (typically
+&gt;0.5). You may exploit it (e.g. threshold seeding) but correctness and the
+no-regression bar must hold even at 0.02 overlap.
+
+Workloads are REAL production captures from three models:
+- V4-Flash: k=512,  n ∈ {1027, 8195, 32771, 131075, 262127}
+- V4-Pro:   k=1024, n ∈ {1027, 8195, 32771, 131075, 262127}
+- V3.2:     k=2048, n ∈ {4111, 32783, 131087, 163775}
+
+Two workloads per (model, n): a low-hint-overlap layer and a high-overlap
+layer. The logits distribution is NOT random — it is a heavy-tailed real
+indexer score distribution (near-exponential CCDF); algorithms that look
+good on `randn` can behave very differently here.
+
+## Baseline
+
+The baseline timings are the production TensorRT-LLM GVR (guess-verify-refine)
+kernel from PR #16457, measured with nsys (pure kernel time, cold-L2) on the
+same B200 SKU. It runs 5–29 µs per workload. It is a single-CTA-per-row
+(cluster multi-CTA at large n) histogram-ladder + secant-refine design.
+
+## Target
+
+- **Required:** geomean speedup ≥ 1.30× over the given baselines, and NO
+  workload slower than ~1.05× (no-regression is a hard acceptance bar —
+  a kernel that wins big on average but loses any cell will be rejected
+  downstream).
+- The final acceptance re-measures your kernel externally with nsys cold-L2
+  on all 865 real cells (the 28 here are a stratified subset), so do not
+  overfit to warm-cache effects or to these exact n values — `n` is dynamic
+  (any value up to ~262k), `k ∈ {512, 1024, 2048}`.
+
+## Hard-won structural knowledge (from months of manual optimization — do not re-discover these dead ends)
+
+1. **BS=1 is latency-bound, not bandwidth-bound.** A single CTA on one of
+   148 SMs leaves ~90% of cycles idle (measured 24% occupancy, &lt;1% DRAM/SM
+   util at small n). The single biggest structural lever is
+   **multi-CTA-per-row cooperation** (e.g. 8 CTAs scanning disjoint chunks
+   with a cheap global-atomic merge). The fastest known kernel on this
+   workload (an sglang-style 2-kernel streaming top-k, ~1.4× over baseline)
+   wins exactly this way.
+2. **Histogram/radix select over fp32-as-ordered-uint is the strong family.**
+   One global pass building a 256-bin (or hierarchical 256×256) histogram of
+   the monotone key `u = f ^ ((f &gt;&gt; 31) | 0x80000000)`, prefix-scan to find
+   the k-th bin, then a collect pass (or fused collect of a slightly
+   over-admitted candidate set) with a tiny tail-select on the boundary bin.
+3. Dead ends measured net-negative on THIS workload/hardware (B200):
+   - per-element ballot/popc slot-reservation to fuse count+collect into one
+     pass (coordination cost ≈ a full extra pass);
+   - staging the row into shared memory first (row re-reads are already
+     cheap L2 hits);
+   - multi-round secant/interpolation refinement of a scalar threshold —
+     converges but each round is a barrier-separated pass; keep passes ≤2.
+   - CUB DeviceRadixSort / full sort: ~10× too slow at these sizes.
+4. **Launch overhead matters at 5–29 µs.** Prefer ONE kernel launch
+   (or 2 with programmatic dependent launch). CUDA graphs are banned by the
+   compliance judge — win inside the kernel, not by replay amortization.
+5. Beware the k-th-value tie boundary: the checker requires all indices with
+   value strictly greater than the k-th value, and allows any tie subset to
+   fill the remainder. Do not drop a strictly-greater element under
+   concurrent compaction (arrival-order races on the boundary bin are the
+   classic silent bug here).
+
+## Requirements
+
+- CUDA C++ (sm_100a Blackwell). fp32 in, int32 indices out.
+- Exact per the tie-robust set semantics above — no approximation.
+- Dynamic `n` (up to 262144, padded width `npad = ceil(n/64)*64`), dynamic
+  hint quality. `k` is one of {512, 1024, 2048} at runtime.
+- Deterministic output not required (any tie resolution accepted), but the
+  index set must be exactly right on every run.
+</pre></details><details><summary>prompt v2(round-2 前更新) — <code>prompt_v2.md</code> (7210 B, 点击展开)</summary><pre class='pmt'># DeepSeek-V4 Indexer Top-K Decode (BS=1, fp32, B200) — Beat the Round-2 Champion
+
+## Problem
+
+Sparse-attention indexer top-K selection at decode time. One row of real
+captured indexer logits (`logits[1, npad]`, fp32, valid length `n_valid`,
+tail padded so pad never enters the top-k). Return the `int32` indices of
+the `k` largest values, any order; ties at the k-th value boundary may be
+resolved either way (the correctness checker is index-SET based and
+tie-robust). Exactness is non-negotiable: every index whose value is
+strictly greater than the k-th value must appear, on every run.
+
+`pre_idx[1, k]` is the PREVIOUS decode step&#x27;s top-k (temporal warm hint).
+Overlap with the true top-k ranges 0.02–1.0 across workloads (typically
+&gt;0.5). Exploit it (e.g. threshold seeding), but correctness and the
+no-regression bar must hold even at 0.02 overlap. You may NOT branch on
+any estimate of hint quality computed outside the kernel (hit-rate is
+unknowable at inference); in-kernel admission escape / lagged feedback is
+fine.
+
+Workloads are REAL production captures from three models, n up to ~1.05M:
+- V4-Flash: k=512,  n rungs 4K / 32K / 128K / 512K / 1M
+- V4-Pro:   k=1024, n rungs 4K / 32K / 128K / 512K / 1M  (highest priority)
+- V3.2:     k=2048, n rungs 4K / 32K / 128K / 256K
+
+Two workloads per (model, rung): a low-hint-overlap layer and a
+high-overlap layer. The logits distribution is NOT random — heavy-tailed
+real indexer scores (near-exponential CCDF); algorithms that look good on
+`randn` behave differently here. Priority for effort allocation:
+V4-Pro &gt; others; n ≥ 32K &gt; small n.
+
+## Baseline — this is the hard part
+
+The baseline you must beat is NOT the original production kernel. It is
+the ROUND-2 CHAMPION of the previous campaign on this exact problem: a
+guess-verify-refine (GVR) design with all-CTA cooperative scanning for
+n ≥ 8448, per-pass early-exit, a bottom-k complement kernel for high-hint
+rows, a dedicated `&lt;&lt;&lt;1,1024&gt;&gt;&gt;` single-CTA rung for 8448 &lt; n ≤ 16896, and
+secant+log threshold refinement seeded from `pre_idx`. It already runs
+1.68× faster (external nsys, cold-L2) than the production kernel it
+replaced, is exact on all 865 external cells, and regresses none of them.
+Its full source is provided as the baseline solution — read it first;
+incremental surgery on it is a legitimate strategy.
+
+## Target
+
+- **Required:** geomean speedup &gt; 1.0× over the given champion baselines
+  with NO workload slower (no-regression is a hard acceptance bar — a
+  kernel that wins big on average but loses any cell will be rejected
+  downstream). Meaningful wins are +5–15% geomean; single-cell heroics
+  that lose elsewhere are worthless.
+- Final acceptance re-measures externally with nsys cold-L2 on all 865
+  real cells (the cells here are a stratified subset). Platform timings
+  have a ~15µs floor that compresses your true speedup — do not tune to
+  the harness floor; win in kernel time. Do not overfit to these exact n
+  values: `n` is dynamic (up to ~1.05M), `k ∈ {512, 1024, 2048}` at
+  runtime, hint quality is dynamic.
+
+## Required algorithmic skeleton
+
+Keep the GVR skeleton: (a) `pre_idx` as the threshold prior, (b) a
+secant+log-transform style exact threshold solve (or an equivalent
+threshold-refinement structure), (c) an exact refine of the surviving
+candidates. Any per-stage restructuring that preserves exactness is
+allowed (the champion&#x27;s all-coop scan, early-exit, and complement kernel
+are precedents). Mature primitives (histogram ladders, radix digit
+passes) may be absorbed INTO stages, but do not replace the whole kernel
+with a generic radix-select / full-sort top-k and do not build a
+per-case dispatcher across unrelated top-k operators.
+
+## Where the remaining time is (measured, nsys/NCU — start here)
+
+1. **P4 block (final collect: handoff + refine + writeback) is the
+   dominant cost: median ~37% of kernel time (23–58%) across the grid.**
+   Known-untried levers: eliminate the leader-CTA value-handoff and
+   parallelize the final collect across cluster CTAs (&quot;distP4&quot;);
+   confine the P4 threshold search to warp0 to remove 2–3 block-wide
+   barriers.
+2. Mid passes (scan + count + falsification) are 17–48%; per-pass
+   early-exit already harvests much of this in the champion.
+3. For n ≥ 512K only: a (warp, window) sideband that lets the scan skip
+   provably sub-threshold windows may pay; it measured ~0 replay benefit
+   at smaller n.
+
+## Dead ends — measured net-negative on THIS workload/hardware; do not re-discover
+
+1. BS=1 is latency-bound, not bandwidth-bound (24% occupancy, &lt;1% DRAM at
+   small n). The multi-CTA cooperation lever is ALREADY in the champion —
+   re-deriving it is not progress.
+2. `pre_idx` warm-hint grafted onto radix-select: no win (hint only helps
+   threshold-style skeletons).
+3. Private per-warp histograms to avoid smem atomics: loses (SM100
+   pipelines same-address atomics fine).
+4. Multi-CTA for SMALL n (&lt; ~8K): launch/sync overhead dominates; the
+   champion&#x27;s single-CTA rungs win there.
+5. More than 8–32 CTAs at large n: merge cost eats the scan win.
+6. Per-element ballot/popc slot-reservation to fuse count+collect into
+   one pass: coordination ≈ a full extra pass.
+7. Staging the row into shared memory first: row re-reads are cheap L2
+   hits.
+8. Extra secant/interpolation refinement rounds: each is a
+   barrier-separated pass; keep passes ≤2.
+9. CUB DeviceRadixSort / full sort: ~10× too slow at these sizes.
+10. Fusing the final-collect histogram into the P3 scan loop: pollutes
+    the scan inner loop, −15%.
+11. Shrinking histogram bins below 512 for k=2048: exact-tail scratch
+    overflows (silent UB); kNumBins=512 at k=2048 is already in the
+    production baseline.
+12. Launch-config-only retuning: ceiling measured at ~1.025×.
+13. CUDA graphs / replay amortization are banned by the compliance judge —
+    win inside the kernel.
+
+## Correctness traps
+
+- The k-th-value tie boundary: the checker requires ALL indices with
+  value strictly greater than the k-th value, plus any tie subset to fill
+  the remainder. Arrival-order races on the boundary bin under concurrent
+  compaction are the classic silent bug — never drop a strictly-greater
+  element.
+- Real data is UNDERSHOOT-biased for hint-seeded thresholds (the seeded
+  count almost always comes in below k, not above): guards that only fire
+  on overshoot are dead code here.
+- On cluster launches, `cluster.arrive_relaxed()` has no release
+  semantics: a DSMEM read of a just-written scalar can observe stale
+  data. Use `cluster_arrive()` (release) or an acq_rel cluster fence on
+  the write side. Symptom: wrong indices clustered by CTA slice.
+
+## Requirements
+
+- CUDA C++ (sm_100a Blackwell). fp32 in, int32 indices out.
+- Exact per the tie-robust set semantics above — no approximation.
+- Dynamic `n` (up to ~1.05M, padded width `npad = ceil(n/64)*64`), dynamic
+  hint quality, `k ∈ {512, 1024, 2048}` at runtime.
+- Deterministic output not required (any tie resolution accepted), but
+  the index set must be exactly right on every run.
+- One kernel launch preferred (or 2 with programmatic dependent launch);
+  launch overhead is material at 3–29 µs.
+</pre></details></td></tr>
 </table></div><div class="card" id="kf1">
 <h3>gvr-topk-r3(baseline 验证失败) <span class="chip">Failed</span></h3>
 <table class="kv">
@@ -62,6 +289,7 @@ th { background: #f0f3f8; }
 <tr><th>代码位置</th><td class="mono">—</td></tr>
 <tr><th>性能数据位置</th><td class="mono">—</td></tr>
 <tr><th>备注</th><td>平台缺口 D1 首次发现: baseline evaluator 不 stage 资产</td></tr>
+<tr><th>发出 prompt</th><td class="dim">无(prepare 期评测无 prompt)或归另一会话本地,平台 API 不暴露 prompt 原文</td></tr>
 </table></div><div class="card" id="r3">
 <h3>gvr-topk-r3 <span class="chip">Cancelled</span></h3>
 <table class="kv">
@@ -75,6 +303,632 @@ th { background: #f0f3f8; }
 <tr><th>代码位置</th><td class="mono">indexer_topk_op_bench/op26_r0_upstream_port_report/kf_campaign/harvest/(aef33fac/becd/30e7 系)+ compB</td></tr>
 <tr><th>性能数据位置</th><td class="mono">indexer_topk_op_bench/op26_r0_upstream_port_report/kf_campaign/grid_r3grid*.csv</td></tr>
 <tr><th>备注</th><td>平台 4 轮未超 harvested aef33fac;compB 为 operator 收口拼装</td></tr>
+<tr><th>发出 prompt</th><td><details><summary>campaign prompt(含 champion 源码内联) — <code>gvr-topk-r3/prompt.md</code> (25138 B, 点击展开)</summary><pre class='pmt'># DeepSeek-V4 Indexer Top-K Decode (BS=1, fp32, B200) — Beat the Round-2 Champion
+
+## Problem
+
+Sparse-attention indexer top-K selection at decode time. One row of real
+captured indexer logits (`logits[1, npad]`, fp32, valid length `n_valid`,
+tail padded so pad never enters the top-k). Return the `int32` indices of
+the `k` largest values, any order; ties at the k-th value boundary may be
+resolved either way (the correctness checker is index-SET based and
+tie-robust). Exactness is non-negotiable: every index whose value is
+strictly greater than the k-th value must appear, on every run.
+
+`pre_idx[1, k]` is the PREVIOUS decode step&#x27;s top-k (temporal warm hint).
+Overlap with the true top-k ranges 0.02–1.0 across workloads (typically
+&gt;0.5). Exploit it (e.g. threshold seeding), but correctness and the
+no-regression bar must hold even at 0.02 overlap. You may NOT branch on
+any estimate of hint quality computed outside the kernel (hit-rate is
+unknowable at inference); in-kernel admission escape / lagged feedback is
+fine.
+
+Workloads are REAL production captures from three models, n up to ~1.05M:
+- V4-Flash: k=512,  n rungs 4K / 32K / 128K / 512K / 1M
+- V4-Pro:   k=1024, n rungs 4K / 32K / 128K / 512K / 1M  (highest priority)
+- V3.2:     k=2048, n rungs 4K / 32K / 128K / 256K
+
+Two workloads per (model, rung): a low-hint-overlap layer and a
+high-overlap layer. The logits distribution is NOT random — heavy-tailed
+real indexer scores (near-exponential CCDF); algorithms that look good on
+`randn` behave differently here. Priority for effort allocation:
+V4-Pro &gt; others; n ≥ 32K &gt; small n.
+
+## Baseline — this is the hard part
+
+The baseline you must beat is NOT the original production kernel. It is
+the ROUND-2 CHAMPION of the previous campaign on this exact problem: a
+guess-verify-refine (GVR) design with all-CTA cooperative scanning for
+n ≥ 8448, per-pass early-exit, a bottom-k complement kernel for high-hint
+rows, a dedicated `&lt;&lt;&lt;1,1024&gt;&gt;&gt;` single-CTA rung for 8448 &lt; n ≤ 16896, and
+secant+log threshold refinement seeded from `pre_idx`. It already runs
+1.68× faster (external nsys, cold-L2) than the production kernel it
+replaced, is exact on all 865 external cells, and regresses none of them.
+Its full source is provided as the baseline solution — read it first;
+incremental surgery on it is a legitimate strategy.
+
+## Target
+
+- **Required:** geomean speedup &gt; 1.0× over the given champion baselines
+  with NO workload slower (no-regression is a hard acceptance bar — a
+  kernel that wins big on average but loses any cell will be rejected
+  downstream). Meaningful wins are +5–15% geomean; single-cell heroics
+  that lose elsewhere are worthless.
+- Final acceptance re-measures externally with nsys cold-L2 on all 865
+  real cells (the cells here are a stratified subset). Platform timings
+  have a ~15µs floor that compresses your true speedup — do not tune to
+  the harness floor; win in kernel time. Do not overfit to these exact n
+  values: `n` is dynamic (up to ~1.05M), `k ∈ {512, 1024, 2048}` at
+  runtime, hint quality is dynamic.
+
+## Required algorithmic skeleton
+
+Keep the GVR skeleton: (a) `pre_idx` as the threshold prior, (b) a
+secant+log-transform style exact threshold solve (or an equivalent
+threshold-refinement structure), (c) an exact refine of the surviving
+candidates. Any per-stage restructuring that preserves exactness is
+allowed (the champion&#x27;s all-coop scan, early-exit, and complement kernel
+are precedents). Mature primitives (histogram ladders, radix digit
+passes) may be absorbed INTO stages, but do not replace the whole kernel
+with a generic radix-select / full-sort top-k and do not build a
+per-case dispatcher across unrelated top-k operators.
+
+## Where the remaining time is (measured, nsys/NCU — start here)
+
+1. **P4 block (final collect: handoff + refine + writeback) is the
+   dominant cost: median ~37% of kernel time (23–58%) across the grid.**
+   Known-untried levers: eliminate the leader-CTA value-handoff and
+   parallelize the final collect across cluster CTAs (&quot;distP4&quot;);
+   confine the P4 threshold search to warp0 to remove 2–3 block-wide
+   barriers.
+2. Mid passes (scan + count + falsification) are 17–48%; per-pass
+   early-exit already harvests much of this in the champion.
+3. For n ≥ 512K only: a (warp, window) sideband that lets the scan skip
+   provably sub-threshold windows may pay; it measured ~0 replay benefit
+   at smaller n.
+
+## Dead ends — measured net-negative on THIS workload/hardware; do not re-discover
+
+1. BS=1 is latency-bound, not bandwidth-bound (24% occupancy, &lt;1% DRAM at
+   small n). The multi-CTA cooperation lever is ALREADY in the champion —
+   re-deriving it is not progress.
+2. `pre_idx` warm-hint grafted onto radix-select: no win (hint only helps
+   threshold-style skeletons).
+3. Private per-warp histograms to avoid smem atomics: loses (SM100
+   pipelines same-address atomics fine).
+4. Multi-CTA for SMALL n (&lt; ~8K): launch/sync overhead dominates; the
+   champion&#x27;s single-CTA rungs win there.
+5. More than 8–32 CTAs at large n: merge cost eats the scan win.
+6. Per-element ballot/popc slot-reservation to fuse count+collect into
+   one pass: coordination ≈ a full extra pass.
+7. Staging the row into shared memory first: row re-reads are cheap L2
+   hits.
+8. Extra secant/interpolation refinement rounds: each is a
+   barrier-separated pass; keep passes ≤2.
+9. CUB DeviceRadixSort / full sort: ~10× too slow at these sizes.
+10. Fusing the final-collect histogram into the P3 scan loop: pollutes
+    the scan inner loop, −15%.
+11. Shrinking histogram bins below 512 for k=2048: exact-tail scratch
+    overflows (silent UB); kNumBins=512 at k=2048 is already in the
+    production baseline.
+12. Launch-config-only retuning: ceiling measured at ~1.025×.
+13. CUDA graphs / replay amortization are banned by the compliance judge —
+    win inside the kernel.
+
+## Correctness traps
+
+- The k-th-value tie boundary: the checker requires ALL indices with
+  value strictly greater than the k-th value, plus any tie subset to fill
+  the remainder. Arrival-order races on the boundary bin under concurrent
+  compaction are the classic silent bug — never drop a strictly-greater
+  element.
+- Real data is UNDERSHOOT-biased for hint-seeded thresholds (the seeded
+  count almost always comes in below k, not above): guards that only fire
+  on overshoot are dead code here.
+- On cluster launches, `cluster.arrive_relaxed()` has no release
+  semantics: a DSMEM read of a just-written scalar can observe stale
+  data. Use `cluster_arrive()` (release) or an acq_rel cluster fence on
+  the write side. Symptom: wrong indices clustered by CTA slice.
+
+## Requirements
+
+- CUDA C++ (sm_100a Blackwell). fp32 in, int32 indices out.
+- Exact per the tie-robust set semantics above — no approximation.
+- Dynamic `n` (up to ~1.05M, padded width `npad = ceil(n/64)*64`), dynamic
+  hint quality, `k ∈ {512, 1024, 2048}` at runtime.
+- Deterministic output not required (any tie resolution accepted), but
+  the index set must be exactly right on every run.
+- One kernel launch preferred (or 2 with programmatic dependent launch);
+  launch overhead is material at 3–29 µs.
+
+
+## Baseline (champion) full source — the timings you must beat were measured from exactly this code
+
+The per-workload baseline timings are platform measurements of this champion. Incremental surgery on it is a legitimate strategy.
+
+`main.cpp`:
+```cpp
+#include &lt;torch/extension.h&gt;
+#include &lt;ATen/cuda/CUDAContext.h&gt;
+#include &lt;cuda_runtime.h&gt;
+
+void topk_launch(const float* logits, int n, int k, int* out,
+                 cudaStream_t stream);
+
+void run(torch::Tensor logits, torch::Tensor pre_idx, int64_t n_valid,
+         torch::Tensor indices) {
+    (void)pre_idx;
+    topk_launch(logits.data_ptr&lt;float&gt;(), (int)n_valid,
+                (int)indices.size(1), indices.data_ptr&lt;int&gt;(),
+                at::cuda::getCurrentCUDAStream());
+}
+
+PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+    m.def(&quot;run&quot;, &amp;run, &quot;Exact CUDA radix top-k&quot;);
+}
+```
+
+`kernel.cu`:
+```cuda
+#include &lt;cuda_runtime.h&gt;
+#include &lt;cooperative_groups.h&gt;
+#include &lt;cstdint&gt;
+
+namespace cg = cooperative_groups;
+
+__device__ __forceinline__ unsigned int fkey(float f) {
+    unsigned int u = __float_as_uint(f);
+    unsigned int mask = (unsigned int)(-(int)(u &gt;&gt; 31)) | 0x80000000u;
+    return u ^ mask;
+}
+
+__device__ __forceinline__ bool pair_less(
+        unsigned int ak, int ai, unsigned int bk, int bi) {
+    return ak &lt; bk || (ak == bk &amp;&amp; ai &lt; bi);
+}
+
+// Exact complement specialization for k=n-3.  It finds three minima with
+// three short hierarchical reductions, then emits every other index.
+__global__ __launch_bounds__(512, 1)
+void bottom3_kernel(const float* __restrict__ logits, int n,
+                    int* __restrict__ out) {
+    const int tid = threadIdx.x;
+    const int lane = tid &amp; 31;
+    const int warp = tid &gt;&gt; 5;
+    unsigned int keys[3];
+    int ids[3];
+#pragma unroll
+    for (int item = 0; item &lt; 3; ++item) {
+        int idx = tid + item * 512;
+        keys[item] = idx &lt; n ? fkey(logits[idx]) : 0xffffffffu;
+        ids[item] = idx &lt; n ? idx : 0x7fffffff;
+    }
+
+    __shared__ unsigned int warp_keys[16][3];
+    __shared__ int warp_ids[16][3];
+    __shared__ int excluded[3];
+
+    // Each warp extracts its local three minima without block barriers.
+#pragma unroll
+    for (int pick = 0; pick &lt; 3; ++pick) {
+        unsigned int best_key = keys[0];
+        int best_idx = ids[0];
+#pragma unroll
+        for (int item = 1; item &lt; 3; ++item) {
+            if (pair_less(keys[item], ids[item], best_key, best_idx)) {
+                best_key = keys[item];
+                best_idx = ids[item];
+            }
+        }
+#pragma unroll
+        for (int off = 16; off; off &gt;&gt;= 1) {
+            unsigned int ok = __shfl_down_sync(0xffffffffu, best_key, off);
+            int oi = __shfl_down_sync(0xffffffffu, best_idx, off);
+            if (lane + off &lt; 32 &amp;&amp; pair_less(ok, oi, best_key, best_idx)) {
+                best_key = ok;
+                best_idx = oi;
+            }
+        }
+        if (lane == 0) {
+            warp_keys[warp][pick] = best_key;
+            warp_ids[warp][pick] = best_idx;
+        }
+        int chosen = __shfl_sync(0xffffffffu, best_idx, 0);
+#pragma unroll
+        for (int item = 0; item &lt; 3; ++item) {
+            if (ids[item] == chosen) {
+                keys[item] = 0xffffffffu;
+                ids[item] = 0x7fffffff;
+            }
+        }
+    }
+    __syncthreads();
+
+    // Warp 0 extracts the global three minima from the 16 local triples.
+    if (warp == 0) {
+#pragma unroll
+        for (int item = 0; item &lt; 3; ++item) {
+            keys[item] = lane &lt; 16 ? warp_keys[lane][item] : 0xffffffffu;
+            ids[item] = lane &lt; 16 ? warp_ids[lane][item] : 0x7fffffff;
+        }
+#pragma unroll
+        for (int pick = 0; pick &lt; 3; ++pick) {
+            unsigned int best_key = keys[0];
+            int best_idx = ids[0];
+#pragma unroll
+            for (int item = 1; item &lt; 3; ++item) {
+                if (pair_less(keys[item], ids[item], best_key, best_idx)) {
+                    best_key = keys[item];
+                    best_idx = ids[item];
+                }
+            }
+#pragma unroll
+            for (int off = 16; off; off &gt;&gt;= 1) {
+                unsigned int ok = __shfl_down_sync(0xffffffffu, best_key, off);
+                int oi = __shfl_down_sync(0xffffffffu, best_idx, off);
+                if (lane + off &lt; 32 &amp;&amp; pair_less(ok, oi, best_key, best_idx)) {
+                    best_key = ok;
+                    best_idx = oi;
+                }
+            }
+            if (lane == 0) excluded[pick] = best_idx;
+            int chosen = __shfl_sync(0xffffffffu, best_idx, 0);
+#pragma unroll
+            for (int item = 0; item &lt; 3; ++item) {
+                if (ids[item] == chosen) {
+                    keys[item] = 0xffffffffu;
+                    ids[item] = 0x7fffffff;
+                }
+            }
+        }
+        if (lane == 0) {
+            if (excluded[0] &gt; excluded[1]) { int x=excluded[0]; excluded[0]=excluded[1]; excluded[1]=x; }
+            if (excluded[1] &gt; excluded[2]) { int x=excluded[1]; excluded[1]=excluded[2]; excluded[2]=x; }
+            if (excluded[0] &gt; excluded[1]) { int x=excluded[0]; excluded[0]=excluded[1]; excluded[1]=x; }
+        }
+    }
+    __syncthreads();
+    for (int idx = tid; idx &lt; n; idx += 512) {
+        bool omit = idx == excluded[0] || idx == excluded[1] || idx == excluded[2];
+        int rank = (excluded[0] &lt; idx) + (excluded[1] &lt; idx) + (excluded[2] &lt; idx);
+        if (!omit) out[idx - rank] = idx;
+    }
+}
+
+// Block-wide descending histogram search.  The caller supplies one total per
+// warp; 512-thread launches require all 16 entries.
+__device__ __forceinline__ void find_boundary_bins(
+        const unsigned int* __restrict__ hist, int nb,
+        unsigned int* warp_totals, int* s_bin, int* s_above,
+        int remaining) {
+    int tid = threadIdx.x;
+    int lane = tid &amp; 31;
+    int warp = tid &gt;&gt; 5;
+    int nwarps = blockDim.x &gt;&gt; 5;
+    int bins_per_thread = nb / blockDim.x;
+    int base = tid * bins_per_thread;
+    unsigned int local = 0;
+    for (int j = 0; j &lt; bins_per_thread; ++j) local += hist[base + j];
+    unsigned int suffix = local;
+#pragma unroll
+    for (int off = 1; off &lt; 32; off &lt;&lt;= 1) {
+        unsigned int v = __shfl_down_sync(0xffffffffu, suffix, off);
+        if (lane + off &lt; 32) suffix += v;
+    }
+    if (lane == 0) warp_totals[warp] = suffix;
+    __syncthreads();
+    unsigned int higher_warps = 0;
+    for (int w = warp + 1; w &lt; nwarps; ++w) higher_warps += warp_totals[w];
+    unsigned int higher = suffix - local + higher_warps;
+    if ((int)higher &lt; remaining &amp;&amp; (int)(higher + local) &gt;= remaining) {
+        unsigned int cumulative = higher;
+        int boundary = base;
+        int above = (int)higher;
+        for (int j = bins_per_thread - 1; j &gt;= 0; --j) {
+            unsigned int next = cumulative + hist[base + j];
+            if ((int)next &gt;= remaining) {
+                boundary = base + j;
+                above = (int)cumulative;
+                break;
+            }
+            cumulative = next;
+        }
+        *s_bin = boundary;
+        *s_above = above;
+    }
+    __syncthreads();
+}
+
+__device__ __forceinline__ void find_boundary_update(
+        const unsigned int* hist, unsigned int* s_prefix,
+        int* s_remaining, int* s_total, unsigned int prefix, int shift) {
+    if (threadIdx.x &lt; 32) {
+        int lane = threadIdx.x;
+        int remaining = *s_remaining;
+        unsigned int bins[8];
+        unsigned int local = 0;
+#pragma unroll
+        for (int j = 0; j &lt; 8; ++j) {
+            bins[j] = hist[lane * 8 + j];
+            local += bins[j];
+        }
+        unsigned int suffix = local;
+#pragma unroll
+        for (int off = 1; off &lt; 32; off &lt;&lt;= 1) {
+            unsigned int v = __shfl_down_sync(0xffffffffu, suffix, off);
+            if (lane + off &lt; 32) suffix += v;
+        }
+        unsigned int higher = suffix - local;
+        if ((int)higher &lt; remaining &amp;&amp; (int)(higher + local) &gt;= remaining) {
+            unsigned int cumulative = higher;
+            int boundary = lane * 8;
+            int above = (int)higher;
+#pragma unroll
+            for (int j = 7; j &gt;= 0; --j) {
+                unsigned int next = cumulative + bins[j];
+                if ((int)next &gt;= remaining) {
+                    boundary = lane * 8 + j;
+                    above = (int)cumulative;
+                    break;
+                }
+                cumulative = next;
+            }
+            *s_prefix = prefix | ((unsigned int)boundary &lt;&lt; shift);
+            *s_total += above;
+            *s_remaining = remaining - above;
+        }
+    }
+}
+
+template&lt;int KPT&gt;
+__global__ __launch_bounds__(1024, 1)
+void topk_small(const float* __restrict__ logits, int n, int k,
+                int* __restrict__ out) {
+    int tid = threadIdx.x;
+    int nt = blockDim.x;
+    __shared__ unsigned int hist4[4][256];
+    __shared__ unsigned int prefix;
+    __shared__ int remaining;
+    __shared__ int total_above;
+    __shared__ int gt_write;
+    __shared__ int tie_write;
+
+    unsigned int keys[KPT];
+    int ids[KPT];
+#pragma unroll
+    for (int j = 0; j &lt; KPT; ++j) {
+        int i = tid + j * nt;
+        ids[j] = i;
+        keys[j] = i &lt; n ? fkey(logits[i]) : 0u;
+    }
+    for (int i = tid; i &lt; 1024; i += nt) ((unsigned int*)hist4)[i] = 0;
+    if (tid == 0) {
+        prefix = 0;
+        remaining = k;
+        total_above = 0;
+        gt_write = 0;
+        tie_write = 0;
+    }
+    __syncthreads();
+
+    int consumed = 0;
+#pragma unroll
+    for (int pass = 0; pass &lt; 4; ++pass) {
+        int shift = 24 - pass * 8;
+        unsigned int high_mask = pass == 0 ? 0u : (0xffffffffu &lt;&lt; (shift + 8));
+        unsigned int p = prefix;
+#pragma unroll
+        for (int j = 0; j &lt; KPT; ++j) {
+            unsigned int key = keys[j];
+            if (ids[j] &lt; n &amp;&amp; (key &amp; high_mask) == (p &amp; high_mask))
+                atomicAdd(&amp;hist4[pass][(key &gt;&gt; shift) &amp; 255u], 1u);
+        }
+        __syncthreads();
+        find_boundary_update(hist4[pass], &amp;prefix, &amp;remaining,
+                             &amp;total_above, p, shift);
+        __syncthreads();
+        consumed += 8;
+        int selected = (prefix &gt;&gt; shift) &amp; 255u;
+        if ((int)hist4[pass][selected] == remaining) break;
+    }
+
+    int tail_shift = 32 - consumed;
+    unsigned int threshold = tail_shift ? (prefix &gt;&gt; tail_shift) : prefix;
+    int mandatory = total_above;
+    int ties_needed = remaining;
+    int lane = tid &amp; 31;
+#pragma unroll
+    for (int j = 0; j &lt; KPT; ++j) {
+        int i = ids[j];
+        unsigned int key = keys[j];
+        if (tail_shift) key &gt;&gt;= tail_shift;
+        bool gt = i &lt; n &amp;&amp; key &gt; threshold;
+        bool eq = i &lt; n &amp;&amp; key == threshold;
+        unsigned int gm = __ballot_sync(0xffffffffu, gt);
+        unsigned int em = __ballot_sync(0xffffffffu, eq);
+        if (gt) {
+            int rank = __popc(gm &amp; ((1u &lt;&lt; lane) - 1));
+            int leader = __ffs(gm) - 1;
+            int base = 0;
+            if (lane == leader) base = atomicAdd(&amp;gt_write, __popc(gm));
+            base = __shfl_sync(gm, base, leader);
+            out[base + rank] = i;
+        }
+        if (eq) {
+            int rank = __popc(em &amp; ((1u &lt;&lt; lane) - 1));
+            int leader = __ffs(em) - 1;
+            int base = 0;
+            if (lane == leader) base = atomicAdd(&amp;tie_write, __popc(em));
+            base = __shfl_sync(em, base, leader);
+            int slot = base + rank;
+            if (slot &lt; ties_needed) out[mandatory + slot] = i;
+        }
+    }
+}
+
+// scratch layout (u32): hist[6144], gt, tie.
+__global__ __launch_bounds__(512, 4)
+void topk_coop(const float* __restrict__ logits, int n, int k,
+               unsigned int* __restrict__ scratch, int* __restrict__ out) {
+    cg::grid_group grid = cg::this_grid();
+    int tid = threadIdx.x;
+    int gtid = blockIdx.x * blockDim.x + tid;
+    int gstride = gridDim.x * blockDim.x;
+    unsigned int* global_hist = scratch;
+    int* gt_write = (int*)(scratch + 3 * 4096);
+    int* tie_write = (int*)(scratch + 3 * 4096 + 1);
+
+    __shared__ unsigned int hist[4096];
+    __shared__ unsigned int warp_totals[16];
+    __shared__ int boundary;
+    __shared__ int above;
+
+    if (gtid == 0) {
+        *gt_write = 0;
+        *tie_write = 0;
+    }
+    unsigned int prefix = 0;
+    int remaining = k;
+    int total_above = 0;
+    int consumed = 0;
+
+    const bool wide = n &lt;= 65536 &amp;&amp; k == 1024;
+    const int histogram_stride = wide ? 4096 : 2048;
+#pragma unroll
+    for (int pass = 0; pass &lt; 3; ++pass) {
+        const int shift = wide ? (pass == 0 ? 21 : (pass == 1 ? 9 : 0))
+                               : (pass == 0 ? 21 : (pass == 1 ? 10 : 0));
+        const int bits = wide ? (pass == 0 ? 11 : (pass == 1 ? 12 : 9))
+                              : (pass == 2 ? 10 : 11);
+        const int nb = 1 &lt;&lt; bits;
+        const unsigned int digit_mask = nb - 1;
+        const unsigned int high_mask = pass == 0 ? 0u : (0xffffffffu &lt;&lt; (shift + bits));
+        for (int i = tid; i &lt; nb; i += blockDim.x) hist[i] = 0;
+        __syncthreads();
+
+        const int n4 = n &amp; ~3;
+        const float4* input4 = reinterpret_cast&lt;const float4*&gt;(logits);
+        for (int i4 = gtid; i4 &lt; (n4 &gt;&gt; 2); i4 += gstride) {
+            float4 v = input4[i4];
+            unsigned int u0 = fkey(v.x), u1 = fkey(v.y);
+            unsigned int u2 = fkey(v.z), u3 = fkey(v.w);
+            if ((u0 &amp; high_mask) == (prefix &amp; high_mask)) atomicAdd(&amp;hist[(u0 &gt;&gt; shift) &amp; digit_mask], 1u);
+            if ((u1 &amp; high_mask) == (prefix &amp; high_mask)) atomicAdd(&amp;hist[(u1 &gt;&gt; shift) &amp; digit_mask], 1u);
+            if ((u2 &amp; high_mask) == (prefix &amp; high_mask)) atomicAdd(&amp;hist[(u2 &gt;&gt; shift) &amp; digit_mask], 1u);
+            if ((u3 &amp; high_mask) == (prefix &amp; high_mask)) atomicAdd(&amp;hist[(u3 &gt;&gt; shift) &amp; digit_mask], 1u);
+        }
+        for (int i = n4 + gtid; i &lt; n; i += gstride) {
+            unsigned int key = fkey(logits[i]);
+            if ((key &amp; high_mask) == (prefix &amp; high_mask))
+                    atomicAdd(&amp;hist[(key &gt;&gt; shift) &amp; digit_mask], 1u);
+        }
+        __syncthreads();
+        unsigned int* merged = global_hist + pass * histogram_stride;
+        for (int i = tid; i &lt; nb; i += blockDim.x) {
+            unsigned int count = hist[i];
+            if (count) atomicAdd(&amp;merged[i], count);
+        }
+        grid.sync();
+        // Redundant per-CTA scans are faster here than serializing all CTAs on
+        // a leader mailbox: the merged histogram is resident and read-only.
+        find_boundary_bins(merged, nb, warp_totals,
+                           &amp;boundary, &amp;above, remaining);
+        bool whole_bucket = above + (int)merged[boundary] == remaining;
+        prefix |= (unsigned int)boundary &lt;&lt; shift;
+        total_above += above;
+        remaining -= above;
+        consumed += bits;
+        // If every element in the boundary bucket is required, lower radix
+        // digits cannot change the selected set.  Stop the dependent chain.
+        if (whole_bucket) break;
+    }
+
+    int final_shift = 32 - consumed;
+    unsigned int threshold = final_shift ? (prefix &gt;&gt; final_shift) : prefix;
+    int lane = tid &amp; 31;
+    int iters = (n + gstride - 1) / gstride;
+    int ties_needed = remaining;
+    for (int it = 0; it &lt; iters; ++it) {
+        int i = it * gstride + gtid;
+        unsigned int key = i &lt; n ? fkey(logits[i]) : 0u;
+        if (final_shift) key &gt;&gt;= final_shift;
+        bool gt = i &lt; n &amp;&amp; key &gt; threshold;
+        bool eq = i &lt; n &amp;&amp; key == threshold;
+        unsigned int gm = __ballot_sync(0xffffffffu, gt);
+        unsigned int em = __ballot_sync(0xffffffffu, eq);
+        if (gt) {
+            int rank = __popc(gm &amp; ((1u &lt;&lt; lane) - 1));
+            int leader = __ffs(gm) - 1;
+            int base = 0;
+            if (lane == leader) base = atomicAdd(gt_write, __popc(gm));
+            base = __shfl_sync(gm, base, leader);
+            out[base + rank] = i;
+        }
+        if (eq) {
+            int rank = __popc(em &amp; ((1u &lt;&lt; lane) - 1));
+            int leader = __ffs(em) - 1;
+            int base = 0;
+            if (lane == leader) base = atomicAdd(tie_write, __popc(em));
+            base = __shfl_sync(em, base, leader);
+            int slot = base + rank;
+            if (slot &lt; ties_needed) out[total_above + slot] = i;
+        }
+    }
+    for (int i = gtid; i &lt; 3 * histogram_stride; i += gstride) global_hist[i] = 0;
+}
+
+static unsigned int* g_scratch = nullptr;
+static int g_max_coop_blocks = 0;
+static int g_sms = 0;
+
+void topk_launch(const float* logits, int n, int k, int* out,
+                 cudaStream_t stream) {
+    if (n - k == 3 &amp;&amp; n &lt;= 1536) {
+        bottom3_kernel&lt;&lt;&lt;1, 512, 0, stream&gt;&gt;&gt;(logits, n, out);
+        return;
+    }
+    if (n &lt;= 1536) {
+        topk_small&lt;2&gt;&lt;&lt;&lt;1, 768, 0, stream&gt;&gt;&gt;(logits, n, k, out);
+        return;
+    }
+    if (n &lt;= 2304) {
+        topk_small&lt;3&gt;&lt;&lt;&lt;1, 768, 0, stream&gt;&gt;&gt;(logits, n, k, out);
+        return;
+    }
+    if (n &lt;= 4608) {
+        topk_small&lt;6&gt;&lt;&lt;&lt;1, 768, 0, stream&gt;&gt;&gt;(logits, n, k, out);
+        return;
+    }
+    if (n &lt;= 8448) {
+        topk_small&lt;11&gt;&lt;&lt;&lt;1, 768, 0, stream&gt;&gt;&gt;(logits, n, k, out);
+        return;
+    }
+    if (n &lt;= 16896) {
+        topk_small&lt;17&gt;&lt;&lt;&lt;1, 1024, 0, stream&gt;&gt;&gt;(logits, n, k, out);
+        return;
+    }
+
+    if (!g_scratch) {
+        cudaMalloc(&amp;g_scratch, (3 * 4096 + 2) * sizeof(unsigned int));
+        cudaMemset(g_scratch, 0, (3 * 4096 + 2) * sizeof(unsigned int));
+    }
+    if (!g_max_coop_blocks) {
+        int active = 0;
+        cudaOccupancyMaxActiveBlocksPerMultiprocessor(
+            &amp;active, topk_coop, 512, 0);
+        cudaDeviceGetAttribute(&amp;g_sms, cudaDevAttrMultiProcessorCount, 0);
+        g_max_coop_blocks = active * g_sms;
+    }
+    int blocks = (n + 2047) / 2048;
+    if (blocks &lt; g_sms) blocks = g_sms;
+    if (blocks &gt; g_max_coop_blocks) blocks = g_max_coop_blocks;
+    void* args[] = {(void*)&amp;logits, (void*)&amp;n, (void*)&amp;k,
+                    (void*)&amp;g_scratch, (void*)&amp;out};
+    cudaLaunchCooperativeKernel((void*)topk_coop, dim3(blocks), dim3(512),
+                                args, 0, stream);
+}
+```
+</pre></details></td></tr>
 </table></div><div class="card" id="r4f">
 <h3>R4 baseline-eval(失败) <span class="chip">Failed</span></h3>
 <table class="kv">
@@ -88,6 +942,7 @@ th { background: #f0f3f8; }
 <tr><th>代码位置</th><td class="mono">—</td></tr>
 <tr><th>性能数据位置</th><td class="mono">—</td></tr>
 <tr><th>备注</th><td>D1 复现(0/28 safetensors missing)→ 改走 baselines.jsonl</td></tr>
+<tr><th>发出 prompt</th><td class="dim">无(prepare 期评测无 prompt)或归另一会话本地,平台 API 不暴露 prompt 原文</td></tr>
 </table></div><div class="card" id="r4">
 <h3>gvr-topk-cold60(R4 冷启动) <span class="chip">Cancelled(预算)</span></h3>
 <table class="kv">
@@ -101,6 +956,639 @@ th { background: #f0f3f8; }
 <tr><th>代码位置</th><td class="mono">indexer_topk_op_bench/op26_r0_upstream_port_report/kf_campaign/harvest/r3_28dc11f6 · fork:kf/r4-champion-final-bs1 @e1049bca</td></tr>
 <tr><th>性能数据位置</th><td class="mono">indexer_topk_op_bench/op26_r0_upstream_port_report/kf_campaign/grid_r4r3cg.csv(判决)· grid_r4pr2.csv(分母)· R4_CLOSEOUT.md · R4_CHAMPION_BS1_REPORT.html</td></tr>
 <tr><th>备注</th><td>判决链 v5→v14→r2wd→v25→v27→r3a003→28dc(1.295→1.653);prompt=32KB 限内源码 digest</td></tr>
+<tr><th>发出 prompt</th><td><details><summary>campaign prompt(§B v3-coldstart + 19.9KB 源码 digest) — <code>gvr-topk-cold60/prompt.md</code> (27704 B, 点击展开)</summary><pre class='pmt'># DeepSeek-V4 Indexer Top-K Decode (BS=1, fp32, B200) — Optimize the Production GVR Kernel
+
+## Problem
+
+Sparse-attention indexer top-K selection at decode time. One row of real
+captured indexer logits (`logits[1, npad]`, fp32, valid length `n_valid`,
+tail padded so pad never enters the top-k). Return the `int32` indices of
+the `k` largest values, any order; ties at the k-th value boundary may be
+resolved either way (the correctness checker is index-SET based and
+tie-robust). Exactness is non-negotiable: every index whose value is
+strictly greater than the k-th value must appear, on every run.
+
+`pre_idx[1, k]` is the PREVIOUS decode step&#x27;s top-k (temporal warm hint).
+Overlap with the true top-k ranges 0.02–1.0 across workloads (typically
+&gt;0.5). Exploiting it is REQUIRED (see skeleton below), but correctness and
+the no-regression bar must hold even at 0.02 overlap. You may NOT branch
+on any estimate of hint quality computed outside the kernel (hit-rate is
+unknowable at inference); in-kernel admission escape / lagged feedback is
+fine.
+
+Workloads are REAL production captures from three models, n up to ~1.05M:
+- V4-Flash: k=512,  n rungs 4K / 32K / 128K / 512K / 1M
+- V4-Pro:   k=1024, n rungs 4K / 32K / 128K / 512K / 1M  (highest priority)
+- V3.2:     k=2048, n rungs 4K / 32K / 128K / 256K
+
+Two workloads per (model, rung): a low-hint-overlap layer and a
+high-overlap layer. The logits distribution is NOT random — heavy-tailed
+real indexer scores (near-exponential CCDF); algorithms that look good on
+`randn` behave differently here. Priority for effort allocation:
+V4-Pro &gt; others; n ≥ 32K &gt; small n.
+
+## Baseline
+
+The baseline you must beat is the CURRENT PRODUCTION kernel: the
+guess-verify-refine (GVR) top-K from TensorRT-LLM PR#16457 (latest head,
+including its K=2048 tail-ladder tuning). Its structure: seed a threshold
+guess from `pre_idx`, verify/refine the threshold with a secant solve in
+log space, then exactly collect the surviving candidates. It is written in
+CuTe DSL (Python); a verbatim source digest — full config/dispatch/
+orchestration layers plus the signature and docstring of every phase
+primitive — is in the APPENDIX at the bottom of this brief. Read it first —
+your job is to make THIS algorithm faster (re-expressed in CUDA C++), not
+to replace it. You must find the profitable directions yourself by
+profiling and analysis.
+
+The per-workload baseline timings (your speedup denominator) are EXTERNAL
+nsys cold-L2 pure-kernel-time medians of exactly that production kernel on
+an idle B200 — they contain none of the ~15µs harness floor your own
+platform measurements include. Consequence: at true kernel parity your
+platform speedup will read ~0.5-0.9x, NOT 1.0x; the compression is
+strongest on the smallest workloads. Do not be discouraged by sub-1.0
+readings early on — track your RELATIVE progress across submissions, and
+judge absolute wins by how much kernel time you save on the large-n cells
+where the floor is a smaller fraction.
+
+One measured fact about where its time goes (from the external report on
+the full 865-cell grid): the FINAL-COLLECT block (threshold handoff +
+refine + writeback, &quot;P4&quot;) dominates — it is the largest phase on 827 of
+865 cells, median ~37% of kernel time (range 23–58%). The mid scan/count
+passes are second. How to attack that is yours to work out.
+
+## Target
+
+- **Required:** geomean speedup &gt; 1.0× over the given baseline with NO
+  workload slower (no-regression is a hard acceptance bar — a kernel that
+  wins big on average but loses any cell will be rejected downstream).
+  The external acceptance goal is +60% geomean on the full 865-cell grid;
+  every incremental win counts toward it.
+- Final acceptance re-measures externally with nsys cold-L2 on all 865
+  real cells (the cells here are a stratified subset). Platform timings
+  have a ~15µs floor that compresses your true speedup roughly 1.3–1.4× —
+  do not tune to the harness floor; win in kernel time. Do not overfit to
+  these exact n values: `n` is dynamic (up to ~1.05M), `k ∈ {512, 1024,
+  2048}` at runtime, hint quality is dynamic.
+
+## Required algorithmic skeleton — HARD compliance rule
+
+Keep the GVR skeleton: (a) `pre_idx` as the threshold prior, (b) a
+secant+log-transform style exact threshold solve (or an equivalent
+threshold-refinement structure), (c) an exact refine of the surviving
+candidates. Any per-stage restructuring that preserves exactness is
+allowed. Mature primitives (histogram ladders, radix digit passes) may be
+absorbed INTO stages.
+
+**Non-negotiable:** a submission that abandons the `pre_idx` prior, or
+replaces the threshold-prior structure wholesale with a prior-free
+selection algorithm (plain radix-select, full sort, sampling-based
+selection), is NON-COMPLIANT and will be rejected even if it is faster.
+Likewise, do not build a per-case dispatcher across unrelated top-k
+operators. The goal of this campaign is a better GVR, not a different
+algorithm.
+
+## Dead ends — measured net-negative on THIS workload/hardware; do not re-discover
+
+1. BS=1 is latency-bound, not bandwidth-bound (24% occupancy, &lt;1% DRAM at
+   small n). Bandwidth-oriented rewrites miss the bottleneck.
+2. `pre_idx` warm-hint grafted onto radix-select: no win (hint only helps
+   threshold-style skeletons) — and prior-free pivots are banned anyway.
+3. Private per-warp histograms to avoid smem atomics: loses (SM100
+   pipelines same-address atomics fine).
+4. Multi-CTA for SMALL n (&lt; ~8K): launch/sync overhead dominates;
+   single-CTA wins there.
+5. More than 8–32 CTAs at large n: merge cost eats the scan win.
+6. Per-element ballot/popc slot-reservation to fuse count+collect into
+   one pass: coordination ≈ a full extra pass.
+7. Staging the row into shared memory first: row re-reads are cheap L2
+   hits.
+8. Extra secant/interpolation refinement rounds: each is a
+   barrier-separated pass; keep passes ≤2.
+9. CUB DeviceRadixSort / full sort: ~10× too slow at these sizes (and
+   banned as a wholesale replacement).
+10. Fusing the final-collect histogram into the P3 scan loop: pollutes
+    the scan inner loop, −15%.
+11. Shrinking histogram bins below 512 for k=2048: exact-tail scratch
+    overflows (silent UB); kNumBins=512 at k=2048 is already in the
+    baseline.
+12. Launch-config-only retuning: ceiling measured at ~1.025×.
+13. CUDA graphs / replay amortization are banned by the compliance judge —
+    win inside the kernel.
+
+## Correctness traps
+
+- The k-th-value tie boundary: the checker requires ALL indices with
+  value strictly greater than the k-th value, plus any tie subset to fill
+  the remainder. Arrival-order races on the boundary bin under concurrent
+  compaction are the classic silent bug — never drop a strictly-greater
+  element.
+- Real data is UNDERSHOOT-biased for hint-seeded thresholds (the seeded
+  count almost always comes in below k, not above): guards that only fire
+  on overshoot are dead code here.
+- On cluster launches, `cluster.arrive_relaxed()` has no release
+  semantics: a DSMEM read of a just-written scalar can observe stale
+  data. Use `cluster_arrive()` (release) or an acq_rel cluster fence on
+  the write side. Symptom: wrong indices clustered by CTA slice.
+
+## Requirements
+
+- CUDA C++ (sm_100a Blackwell). fp32 in, int32 indices out.
+- Exact per the tie-robust set semantics above — no approximation.
+- Dynamic `n` (up to ~1.05M, padded width `npad = ceil(n/64)*64`), dynamic
+  hint quality, `k ∈ {512, 1024, 2048}` at runtime.
+- Deterministic output not required (any tie resolution accepted), but
+  the index set must be exactly right on every run.
+- One kernel launch preferred (or 2 with programmatic dependent launch);
+  launch overhead is material at 3–29 µs.
+
+---
+
+## APPENDIX — baseline kernel source digest (verbatim spans from the production CuTe DSL file, PR#16457 pinned head)
+
+The production kernel is a 5,000-line CuTe DSL (Python) file; it cannot be shipped whole. Below are VERBATIM spans: full text of the per-K constants, constructor (every tuning knob + tuned default), launch-time config dispatch, and the per-row orchestration body; plus signature + docstring of every phase primitive. Timings in baselines.jsonl were measured from exactly this code (see Baseline section).
+
+```python
+class GvrParams:
+    kFTarget: int
+    kC: int  # candidate buffer cap
+    kNumBins: int  # histogram bin count
+
+    @staticmethod
+    def get(dtype_name: str, top_k: int, compress_ratio: int = 1) -&gt; &quot;GvrParams&quot;:
+        &quot;&quot;&quot;Per-(dtype, K, cr) tuning constants, mirroring CUDA&#x27;s
+        ``GvrParams&lt;T, K&gt;`` template specialization. For K ∈ {512, 1024}
+        cr=1 (DSv3.2) and cr=4 (DSv4, PR #14413) use different kFTarget —
+        V4 aligns kFTarget with kK to avoid upper-clamp saturation on
+        tight-sigma layers (1.5-2.2x fewer P2 iters on swe-bench). K=2048 is
+        identical across cr (V4 doesn&#x27;t natively use it).
+        &quot;&quot;&quot;
+        TABLE = {
+            # --- cr = 1 (DSv3.2): tuned on V3.2 swe-bench data ---
+            (&quot;float32&quot;, 512, 1): GvrParams(kFTarget=384, kC=5120, kNumBins=1024),
+            (&quot;float32&quot;, 1024, 1): GvrParams(kFTarget=2560, kC=5120, kNumBins=1024),
+            (&quot;float32&quot;, 2048, 1): GvrParams(kFTarget=3072, kC=6144, kNumBins=2048),
+            (&quot;bfloat16&quot;, 512, 1): GvrParams(kFTarget=384, kC=5120, kNumBins=512),
+            (&quot;bfloat16&quot;, 1024, 1): GvrParams(kFTarget=2560, kC=5120, kNumBins=512),
+            (&quot;bfloat16&quot;, 2048, 1): GvrParams(kFTarget=4096, kC=5120, kNumBins=2048),
+            (&quot;float16&quot;, 512, 1): GvrParams(kFTarget=384, kC=5120, kNumBins=512),
+            (&quot;float16&quot;, 1024, 1): GvrParams(kFTarget=2560, kC=5120, kNumBins=1024),
+            (&quot;float16&quot;, 2048, 1): GvrParams(kFTarget=4096, kC=5120, kNumBins=2048),
+            # --- cr = 4 (DSv4): tuned on V4 Flash/Pro swe-bench data ---
+            (&quot;float32&quot;, 512, 4): GvrParams(kFTarget=512, kC=5120, kNumBins=1024),
+            (&quot;float32&quot;, 1024, 4): GvrParams(kFTarget=1024, kC=5120, kNumBins=1024),
+            (&quot;float32&quot;, 2048, 4): GvrParams(kFTarget=3072, kC=6144, kNumBins=2048),
+            (&quot;bfloat16&quot;, 512, 4): GvrParams(kFTarget=512, kC=5120, kNumBins=512),
+            (&quot;bfloat16&quot;, 1024, 4): GvrParams(kFTarget=1024, kC=5120, kNumBins=512),
+            (&quot;bfloat16&quot;, 2048, 4): GvrParams(kFTarget=4096, kC=5120, kNumBins=2048),
+            (&quot;float16&quot;, 512, 4): GvrParams(kFTarget=512, kC=5120, kNumBins=512),
+            (&quot;float16&quot;, 1024, 4): GvrParams(kFTarget=1024, kC=5120, kNumBins=1024),
+            (&quot;float16&quot;, 2048, 4): GvrParams(kFTarget=4096, kC=5120, kNumBins=2048),
+        }
+        key = (dtype_name, top_k, compress_ratio)
+        if key not in TABLE:
+            raise ValueError(f&quot;Unsupported GvrParams&lt;{dtype_name}, {top_k}, cr={compress_ratio}&gt;&quot;)
+        return TABLE[key]
+
+class GvrTopKKernel:
+    def __init__(
+        self,
+        ...
+
+    @cute.jit
+    def phase1_preidx_stats(
+        self,
+        input_row,  # cute.Tensor [N] fp32 (post-cast for half-prec)
+        N,  # length of input_row
+        pre_idx_row,  # cute.Tensor [M] int32
+        pre_idx_count,
+        pre_idx_offset,
+        smem_wmin_f32,  # cute.Tensor [NUM_WARPS] float32
+        smem_wmax_f32,  # cute.Tensor [NUM_WARPS] float32
+        smem_wsum_f32,  # cute.Tensor [NUM_WARPS] float32
+        smem_wcnt_i32,  # cute.Tensor [NUM_WARPS] int32
+        s_thr,  # cute.Tensor [3] float32: [threshold, val_lo, val_hi]
+        s_iscalars,  # cute.Tensor [6] int32: [cand_count, done, cnt_lo, cnt_hi, out_count, local_cand_count]
+        tidx,
+        warp_id,
+        lane,
+        smem_gath=None,  # cute.Tensor [top_k] f32 or None (p1b_cache): stash
+        # the gathered value per preIdx slot so P1b skips a 2nd GMEM gather.
+        s_mt_thr=None,  # r0_vseed: P1 also parks pmean in the last rung
+        # column (visibility via P1&#x27;s own trailing barrier -&gt; zero extra sync).
+    ):
+        &quot;&quot;&quot;preIdx scan + warp reduce + block aggregate + initial threshold.
+
+        Smem layout split: floats kept in fp32 buffers, ints kept in int32
+        buffers (no bit-cast tricks needed — avoids ArithValue/ir_value
+        coupling and keeps types clean for the MLIR codegen).
+        &quot;&quot;&quot;
+        ...
+
+    @cute.jit
+    def phase1b_hspace_rungs(
+        self,
+        ...
+
+    @cute.jit
+    def block_count_ge(
+        self,
+        input_row,  # cute.Tensor [N] fp32 (full row; this CTA only scans its slice)
+        slice_start,  # int32: index in input_row where this CTA&#x27;s slice starts
+        slice_end,  # int32: index in input_row where this CTA&#x27;s slice ends
+        threshold,  # cutlass.Float32 scalar
+        smem_ptcnt,  # cute.Tensor [BLOCK_SIZE] int32 (P3 cache)
+        smem_wcnt,  # cute.Tensor [NUM_WARPS] int32 (block reduce scratch)
+        s_iscalars,  # cute.Tensor [6] int32 (writes [0] = cand_count)
+        s_cluster_partial,  # cute.Tensor [1] int32 (per-CTA partial scratch for DSMEM)
+        tidx,
+        warp_id,
+        lane,
+        do_cluster_sync,  # bool: False = skip DSMEM aggregation (cs=1 / short-row degrade)
+        smem_input=None,  # optional SMEM-cached slice (smem_input[i] == input_row[slice_start+i])
+        redundant=False,  # trace-time: every-warp reduce, return the total
+        wcnt_off=None,  # int32 staging bank offset into smem_wcnt (parity)
+    ):
+        &quot;&quot;&quot;Count input[i] &gt;= threshold across this CTA&#x27;s row slice, then
+        DSMEM-aggregate across the cluster.
+
+        ``redundant=True`` (p2_warp_redundant, cluster_size == 1 only):
+        after the staging barrier EVERY warp reduces the warp counts
+        lane-parallel and the block total RETURNS in a register —
+        bit-identical across warps — instead of a leader writing
+        s_iscalars[0] for a barrier-published broadcast. ``wcnt_off``
+        parity-banks the smem_wcnt staging so a warp that has moved on
+        to the next Phase-2 round cannot clobber a slot a slower warp is
+        still reading (the per-round staging barrier bounds the drift to
+        one round).
+
+        Vectorized scan: each thread loads vec_w elements per iter (128 or
+        256 bits) over ``input_row[slice_start : slice_end)``; scalar tail
+        handles the remainder.
+
+        Cluster aggregation (cluster_size &gt; 1): every CTA stages its
+        slice-local count into ``s_cluster_partial[call &amp; 1]`` (parity
+        double-buffer; slot 2 is the tid0-private call counter), syncs the
+        cluster, then DSMEM-reads every peer&#x27;s slot and sums into
+        ``s_iscalars[0]``.
+        After this every CTA&#x27;s ``s_iscalars[0]`` holds the same
+        cluster-wide cand_count, so Phase 2&#x27;s secant update stays a
+        leader-only scalar op on a value all CTAs agree on.
+        &quot;&quot;&quot;
+        ...
+
+    @cute.jit
+    def phase2_secant_search(
+        self,
+        input_row,
+        N,
+        slice_start,
+        slice_end,
+        smem_ptcnt,
+        smem_wcnt,
+        s_thr,  # [threshold, val_lo, val_hi]
+        s_iscalars,  # [cand_count, done, cnt_lo, cnt_hi, out_count]
+        s_cluster_partial,  # [3] int32 cluster scratch (parity slots + counter)
+        tidx,
+        warp_id,
+        lane,
+        do_cluster_sync,  # bool: False = cs=1 / short-row degrade (skip cluster sync)
+        smem_input=None,  # optional SMEM-cached slice
+    ):
+        &quot;&quot;&quot;Refine s_thr[0] until cand_count lands in [kK, kCC].
+
+        Each iter calls block_count_ge at the candidate threshold and
+        updates the bracket (val_lo, val_hi, cnt_lo, cnt_hi). Sets
+        s_iscalars[1] (done) = 1 on convergence, 2 on bracket exhaustion.
+        &quot;&quot;&quot;
+        ...
+
+    @cute.jit
+    def phase3_collect_candidates(
+        self,
+        input_row,
+        N,
+        slice_start,
+        slice_end,
+        smem_keys,
+        smem_vals,
+        smem_ptcnt,
+        smem_wcnt,
+        s_thr,
+        s_iscalars,
+        s_cluster_partial,
+        tidx,
+        warp_id,
+        lane,
+        do_cluster_sync,  # bool: False = cs=1 / short-row degrade (skip cluster sync)
+        smem_input=None,  # optional SMEM-cached slice
+    ):
+        &quot;&quot;&quot;Retry-shrink (when P2 didn&#x27;t converge) + prefix sum + stream-write.
+
+        On exit, smem_keys[0 : cand_count] / smem_vals[0 : cand_count]
+        hold every (value, index) pair with value &gt;= threshold, in the
+        scan order each thread produces them. Uses smem_ptcnt cached by
+        the last block_count_ge in Phase 2 (or by the retry-shrink below).
+        &quot;&quot;&quot;
+        ...
+
+    @cute.jit
+    def block_fused_snap_iter(
+        self,
+        keys_base,  # hoisted SMEM window base of smem_keys (iterator.toint())
+        smem_wcnt,
+        smem_hist,  # reused as scratch for s_up/s_down warp aggregates
+        s_thr,
+        s_iscalars,
+        count,
+        tidx,
+        warp_id,
+        lane,
+    ):
+        &quot;&quot;&quot;One iteration of histogram snap. Updates s_iscalars[2]=cnt_lo (cge),
+        s_iscalars[3]=cnt_hi (cgt), and s_thr[0]=threshold (moves toward
+        the cnt-in-(kK_GT, kK_GE) bracket).
+        &quot;&quot;&quot;
+        ...
+
+    @cute.jit
+    def _hist_build(self, keys_base, smem_hist, cand_count, lo, inv, tidx):
+        &quot;&quot;&quot;Zero smem_hist[0:kBins], then histogram keys[0:cand_count] with
+        bin = clamp(int((v - lo) * inv), 0, kBins-1). Out-of-window values
+        clamp into the edge bins, which keeps cumulative counts from the
+        top exact for the k-th search (everything above the window lands
+        in the top bin). Barrier after the zero pass and after the build.&quot;&quot;&quot;
+        ...
+
+    @cute.jit
+    def _kth_bin_search(
+        self, smem_hist, smem_wcnt, s_thr, s_iscalars, lo, binw, tidx, warp_id, lane
+    ):
+        &quot;&quot;&quot;Parallel k-th bin search (3-step, high→low). Writes
+        s_thr[0] = lower edge of the selected bin (lo + bidx*binw) and
+        s_iscalars[4] = selected bin&#x27;s count (gates the level-2 histogram
+        refinement). Clobbers s_iscalars[2]/[3] as staging (both are
+        rewritten by the snap loop before anyone else reads them).
+        Trailing barrier.&quot;&quot;&quot;
+        ...
+
+    @cute.jit
+    def phase4_rank_scatter(
+        self,
+        ...
+
+    @cute.jit
+    def phase4_histogram_snap(
+        self,
+        smem_keys,
+        smem_vals,
+        smem_hist,
+        smem_wcnt,
+        s_thr,
+        s_iscalars,
+        output_values_row,
+        output_indices_row,
+        cand_count,
+        tidx,
+        warp_id,
+        lane,
+    ):
+        &quot;&quot;&quot;Three branches by cand_count vs kK:
+        == kK: direct emit (fast path)
+        &gt;  kK: histogram k-th bin search → snap → 2-pass writeback
+        &lt;  kK: emit cand_count + pad with -FLT_MAX
+        &quot;&quot;&quot;
+        ...
+
+    @cute.kernel
+    def gvr_topk_kernel(
+        self,
+        input_data: cute.Tensor,  # [numRows, stride0] dtype
+        pre_idx: cute.Tensor,  # [numRows / next_n, pre_idx_stride] int32
+        seq_lens: cute.Tensor,  # [numRows / next_n] int32
+        output_values: cute.Tensor,  # [numRows, top_k] dtype
+        output_indices: cute.Tensor,  # [numRows, top_k] int32
+        order_row: cute.Tensor,  # [batch_size] int32 (or None when seqlen_sorted=False)
+    ):
+        &quot;&quot;&quot;Thin entry: bidx → row_idx → run_one_row.
+
+        grid = (num_rows * cluster_size,) where num_rows = batch_size *
+        next_n. cluster_id = bidx // cluster_size, cta_in_cluster ∈
+        [0, cluster_size). CTA r scans row[r * N / cs : (r+1) * N / cs]
+        in Phase 2, so the per-row GE-count scales as 1 / cs. At
+        cluster_size == 1 this collapses to one CTA per row scanning
+        the whole row.
+
+        When ``self.seqlen_sorted`` is True, the LJF dispatch order
+        operates at REQUEST granularity (``order_row`` has length
+        batch_size = num_rows / next_n). The owning row is resolved as
+        ``order_row[cluster_id // next_n] * next_n + cluster_id % next_n``
+        so the ``next_n`` rows of one request stay contiguous in
+        dispatch order. All ``cluster_size`` CTAs within a cluster see
+        the same ``cluster_id`` and therefore the same row, preserving
+        cluster-sync semantics.
+
+        Body is extracted into :meth:`run_one_row` so other entries (e.g.
+        the LB load-balance variant) can resolve ``row_idx`` differently
+        from the mappings used here.
+        &quot;&quot;&quot;
+        ...
+
+    @cute.jit
+    def run_one_row(
+        self,
+        row_idx,  # int32, owning row in [0, num_rows)
+        input_data: cute.Tensor,  # [numRows, stride0] dtype
+        pre_idx: cute.Tensor,  # [numRows / next_n, pre_idx_stride] int32
+        seq_lens: cute.Tensor,  # [numRows / next_n] int32
+        output_values: cute.Tensor,  # [numRows, top_k] dtype, optional
+        output_indices: cute.Tensor,  # [numRows, top_k] int32
+    ):
+        &quot;&quot;&quot;Dispatch: compute per-row slice + cluster sync mode, call _run_phases.
+
+        ``run_one_row`` only handles row resolution, SMEM allocation, and
+        the per-row long-vs-short decision. Phase 1-4 are in
+        :meth:`_run_phases`.
+
+        Short-row degrade: when the actual row workload fits within ONE
+        CTA&#x27;s design slice (``ceil(max_seq_len / cluster_size)``), CTA 0
+        solo-scans the row (do_cluster_sync=False, no cluster sync) and
+        the other cluster CTAs fall through ``run_one_row`` without
+        calling ``_run_phases``. CuTe DSL doesn&#x27;t support runtime
+        ``return``, so non-leader CTAs naturally reach
+        ``griddepcontrol_launch_dependents`` at the end.
+        &quot;&quot;&quot;
+        ...
+
+    @cute.jit
+    def _run_phases(
+        self,
+        input_row,
+        pre_idx_row,
+        output_values_row,
+        output_indices_row,
+        N,
+        pre_idx_offset,
+        pre_idx_count,
+        slice_start,
+        slice_end,
+        do_cluster_sync,
+        cta_in_cluster,
+        smem_keys,
+        smem_vals,
+        smem_hist,
+        smem_ptcnt,
+        smem_wcnt,
+        smem_wmin,
+        smem_wmax,
+        smem_wsum,
+        smem_wcnt_p1,
+        s_thr,
+        s_iscalars,
+        s_cluster_partial,
+        smem_input,
+        s_mt_thr,
+        smem_ptcnt_multi,
+        smem_wcnt_multi,
+        s_mt_cnt,
+        s_r0col,
+        s_cluster_partial_m,
+        smem_gath,
+        tidx,
+        warp_id,
+        lane,
+    ):
+        &quot;&quot;&quot;Run Phase 1-4 + final cluster barrier on a given row slice.
+
+        Caller (``run_one_row``) decides slice + do_cluster_sync per row:
+          - cs=1                 → slice=[0,N), do_cluster_sync=False
+          - cs&gt;1, long row       → slice=N/cs per CTA, do_cluster_sync=True
+          - cs&gt;1, short row      → slice=[0,N), do_cluster_sync=False, CTA 0 only
+
+        Non-leader CTAs in short-row mode never call this helper.
+        &quot;&quot;&quot;
+        ...
+
+    def pick_config(
+        torch_dtype,
+        num_rows: int,
+        num_candidates: int,
+        max_seq_len: Optional[int] = None,
+        num_sms: Optional[int] = None,
+    ) -&gt; dict:
+        &quot;&quot;&quot;Pick the launch-shape ctor kwargs for ``(dtype, BS, N)``.
+
+        Mirrors the production runner policy (cluster_size auto-pick +
+        ``_pick_tuning``) so any caller instantiating the kernel directly
+        gets the same shapes the custom op would use. Rationale (B200,
+        nsys cold-L2, 2026-07-15 big-BS triage): a config frozen at the
+        BS=1 optimum (cs = N&gt;=65536 ? 4 : 1, T=1024, mbpm=1) is geomean
+        2.27x slower (max 6.0x) than the op-bench anchor at BS in
+        {64, 256, 1024}, while this policy is 0.95x (parity/better).
+        Multi-CTA splitting only pays while the grid is a single wave
+        (num_rows * cluster_size &lt;= num_sms); past that, row parallelism
+        already saturates the SMs and per-row splitting is pure overhead.
+
+        ``max_seq_len``: pass the peak runtime N under CUDA-graph capture
+        so the variant is picked for the replay shape, not the capture
+        shape (same contract as the custom op&#x27;s ``_pick_tuning``).
+
+        Returns kwargs for ``GvrTopKKernel(...)``: ``cluster_size``,
+        ``num_threads``, ``use_256bit_load``, ``min_blocks_per_mp``,
+        ``enable_warp_parallel_reduce``.
+        &quot;&quot;&quot;
+        import torch  # local: keep the module importable without torch
+
+        if num_sms is None:
+            num_sms = GvrTopKKernel._device_num_sms()
+        n_row = max_seq_len if max_seq_len is not None else num_candidates
+        is_fp32 = torch_dtype == torch.float32
+
+        # cluster_size: B200 SXM5 synth-data tuning (matches the custom
+        # op&#x27;s auto-pick): N &lt; 64K -&gt; 1 (sync unrecouped); tiny grid at
+        # large N -&gt; 8; single-wave -&gt; 4/2; multi-wave -&gt; 1.
+        if n_row &lt; 65536:
+            cluster_size = 1
+        elif num_rows &lt;= 4 and n_row &gt;= 131072:
+            cluster_size = 8
+        elif num_rows * 4 &lt;= num_sms:
+            cluster_size = 4
+        elif num_rows * 2 &lt;= num_sms:
+            cluster_size = 2
+        else:
+            cluster_size = 1
+
+        # Cluster CTAs split the row, so tuning targets per-CTA work.
+        n_per_cta = n_row // cluster_size
+        # T=1024 needs 1 CTA/SM grid AND enough per-CTA vec work. Under
+        # graph capture, raise the half-prec bar so a small capture-N
+        # doesn&#x27;t force T=1024 on small-N replays.
+        n_thresh_t = 131072 if (max_seq_len is not None and not is_fp32) else 65536
+        num_threads = 1024 if (num_rows &lt;= num_sms and n_per_cta &gt;= n_thresh_t) else 512
+        # V=256-bit only helps fp32 at large N; half-prec cvt doubles reg
+        # pressure. Caller must hand a 32B-aligned contiguous tensor
+        # (``launch`` downgrades on misalignment).
+        use_256bit_load = is_fp32 and n_per_cta &gt;= 16384
+        enable_warp_parallel_reduce = num_threads == 1024
+
+        # min_blocks_per_mp: reg-vs-occupancy 3-tier (fp32 wants ~70 regs
+        # for 4-LDG ILP -&gt; mb&lt;=2; half-prec fits 40 regs -&gt; mb=3 packs
+        # 3 CTA/SM when rows oversubscribe the device).
+        vec_bits = 256 if use_256bit_load else 128
+        vec_w = vec_bits // (32 if is_fp32 else 16)
+        n_vec_iters = max(1, n_per_cta // (num_threads * vec_w))
+        if is_fp32:
+            if n_vec_iters &lt; 4:
+                min_blocks_per_mp = 0
+            elif num_rows &lt;= num_sms:
+                min_blocks_per_mp = 1
+            elif num_sms * 2 &lt; num_rows &lt;= num_sms * 3 and n_per_cta &lt;= 32768:
+                min_blocks_per_mp = 3
+            else:
+                min_blocks_per_mp = 2
+        else:
+            if num_rows &gt; num_sms:
+                min_blocks_per_mp = 3
+            elif n_vec_iters &lt; 4:
+                min_blocks_per_mp = 0
+            else:
+                min_blocks_per_mp = 1
+
+        return dict(
+            cluster_size=cluster_size,
+            num_threads=num_threads,
+            use_256bit_load=use_256bit_load,
+            min_blocks_per_mp=min_blocks_per_mp,
+            enable_warp_parallel_reduce=enable_warp_parallel_reduce,
+        )
+
+    @classmethod
+    def launch(
+        cls,
+        logits,
+        pre_idx,
+        seq_lens,
+        output_indices,
+        top_k: int,
+        next_n: int = 1,
+        compress_ratio: int = 1,
+        max_seq_len: Optional[int] = None,
+        num_sms: Optional[int] = None,
+        **kernel_overrides,
+    ) -&gt; None:
+        &quot;&quot;&quot;Compile-and-launch with ``pick_config`` shapes (indices-only path).
+
+        Owns a class-level compiled-variant cache keyed by every ctor knob,
+        so repeated calls at any (BS, N, dtype) reuse the right variant.
+        ``kernel_overrides`` (e.g. ``enable_r0=False``, ``cluster_size=8``)
+        override the picked config and participate in the cache key.
+        Mirrors the custom op&#x27;s compile contract: sym_int shapes, tvm-ffi
+        env stream (launches on the ambient torch stream), fixed
+        ``return_output_values=False`` / ``seqlen_sorted=False``.
+        &quot;&quot;&quot;
+        ...
+
+```</pre></details></td></tr>
 </table></div><div class="card" id="r5a">
 <h3>gvr-topk-bs2x(R5 v1) <span class="chip">Cancelled(止损)</span></h3>
 <table class="kv">
@@ -114,6 +1602,337 @@ th { background: #f0f3f8; }
 <tr><th>代码位置</th><td class="mono">—(无有效产出)</td></tr>
 <tr><th>性能数据位置</th><td class="mono">indexer_topk_op_bench/op26_r0_upstream_port_report/kf_campaign/r5_bs/(工装)</td></tr>
 <tr><th>备注</th><td>平台 submit 评测对 custom_inputs 全判 0%(bugs 26583-26602)→ 止损重开</td></tr>
+<tr><th>发出 prompt</th><td><details><summary>campaign prompt(v1-bs) — <code>gvr-topk-bs2x/prompt.md</code> (15642 B, 点击展开)</summary><pre class='pmt'># DeepSeek Indexer Top-K Decode, BATCHED (BS 1-1024, fp32, B200) — Scale the GVR Champion Across Batch
+
+## Problem
+
+Batched sparse-attention indexer top-K at decode time. `logits[b, npad]` fp32
+(REAL captured indexer rows; every batch row is a materialized copy of the
+same captured row — distinct memory, so no L2-aliasing shortcuts), valid
+length `n_valid`, tail padded with -FLT_MAX. `pre_idx[b, k]` int32 is the
+previous step&#x27;s top-k per row (again identical copies). Return `indices[b, k]`
+int32: per-row exact top-k index set (tie-robust checker per row). Entry:
+  run(logits, pre_idx, n_valid, indices)   # DPS, torch binding
+
+Axes: b in {1..1024} (workloads sample 1/4/32/256/1024), k in {512,1024,2048},
+n up to ~1.05M (`npad = ceil(n/64)*64`). Real heavy-tailed logits; hint
+overlap 0.27-1.0. Do not overfit exact axis values.
+
+## Baseline &amp; starting point
+
+Per-workload baseline timings are EXTERNAL nsys cold-L2 kernel times of the
+PRODUCTION kernel (TensorRT-LLM PR#16457 GVR, CuTe DSL) run NATIVELY BATCHED
+([b, npad] in one launch) on an idle B200. Beat THAT. The external acceptance
+bars on the full 750-case real grid (75 cells x 10 BS points):
+  1) average (geomean) speedup vs the production batched kernel &gt;= 2.0x;
+  2) EVERY case &gt;= 1.0x (no regression anywhere), and the campaign objective
+     beyond the bars is to MAXIMIZE THE MINIMUM per-case speedup;
+  3) BS=1 must retain the existing BS=1 champion&#x27;s performance (the champion
+     source digest below IS the starting point — at BS=1 it already runs
+     1.63x geomean over production on 865 cells; do not give that back).
+
+Platform timings carry a fixed per-eval overhead; at BS&gt;=32 it is negligible.
+Track relative progress at small BS.
+
+## Required algorithmic skeleton — HARD compliance rule (unchanged)
+
+Keep the GVR skeleton per row: (a) `pre_idx` as threshold prior, (b) a
+secant/log-style exact threshold solve (equivalent refinement structures OK),
+(c) exact refine of surviving candidates. The npad&lt;=12288 direct path (the
+analytic trivial-convergence limit of the threshold solve) is compliant.
+Wholesale prior-free replacements (plain radix-select/sort over rows) are
+NON-COMPLIANT even if faster. No dispatch on hint quality (unknowable);
+in-kernel admission escape is fine. CUDA graphs / framework kernels banned.
+
+## What is already known about batch scaling THIS kernel (measured)
+
+- The BS=1 champion below is a LATENCY design: 16-CTA cluster + full
+  register residency per row. Naively batching it with grid.y=b is
+  OCCUPANCY-LOCKED: high register counts pin it at 1 CTA/SM, and 16 CTAs
+  PER ROW saturates 148 SMs at b&gt;=10. At large b the problem flips from
+  latency-bound to THROUGHPUT-bound: per-row resources must shrink
+  (fewer CTAs/row, fewer registers, smaller rung ladders) as b grows.
+- Measured on this data: a streaming 1-CTA/row variant with a reduced
+  4-rung ladder + 2-deep hint seeding unlocked large-N high-BS
+  (flash 512k BS=1024 ~1.9x vs production). That is a floor, not a target.
+- The production baseline ITSELF batches natively and amortizes well —
+  your denominator is strongest exactly where the champion is weakest
+  (mid/high BS). Expect the required curve shape: keep the BS=1 wins,
+  then win throughput at BS&gt;=32 via occupancy, not per-row latency.
+- Per-row work is IDENTICAL across rows (same data): divergence between
+  rows is zero; per-row adaptive passes still differ only via atomics
+  noise. Do not rely on that (correctness must hold for arbitrary rows),
+  but you may exploit uniformity for performance (e.g. shared threshold
+  seeding across rows is legitimate ONLY as a performance hint if
+  correctness never depends on rows being equal).
+
+## Dead ends already measured at BS=1 (do not re-discover; most still apply per row)
+
+1. Prior-free radix/sort rewrites: banned and ~10x slow.
+2. Private per-warp histograms (SM100 same-address atomics are fine).
+3. Per-element ballot/popc fused count+collect: costs a full pass.
+4. Staging whole row into smem before scanning: L2 re-reads are cheap.
+5. &gt;2 extra secant rounds; keep passes bounded.
+6. cp.async pipelining on the scan loop (barrier overhead &gt; latency hidden).
+7. Launch-config-only retuning of the production kernel: ceiling 1.025x.
+8. CUDA graphs / replay amortization: banned by the judge.
+
+## Correctness traps (unchanged from BS=1 campaign)
+
+- Tie boundary: never drop a strictly-greater element; ties fill remainder.
+- Real data is undershoot-biased for hint-seeded thresholds.
+- Cluster DSMEM: `arrive_relaxed` has no release semantics — parity-bank
+  or fence your count exchanges.
+- Batched twist: out-of-bounds writes to a NEIGHBOR ROW&#x27;s output slice are
+  the new silent killer; per-row slot counters must be row-local.
+
+## Requirements
+
+- CUDA C++ (sm_100a). fp32 in, int32 out, DPS, torch binding.
+- Entry signature EXACTLY: run(logits, pre_idx, n_valid, indices).
+- Exact per-row (tie-robust), every run, all b in 1..1024.
+- One launch preferred (or few); at b=1024 launch count matters less than
+  occupancy, at b=1 it is 3-29us of the budget — dispatch on (b, npad, k)
+  (all known at launch) is expected.
+
+---
+
+## APPENDIX — BS=1 champion source digest (verbatim spans; this is the kernel whose BS=1 performance you must retain)
+
+Full file is 1344 lines; spans below give the constants, the register-resident core, and the complete launch/dispatch layer. Reconstruct the rest from structure (phases mirror the production GVR: P1 hint-CCDF rung ladder, P2 multi-threshold count + log-secant, P3 DSMEM collect, P4 radix refine + tie-ticket writeback; plus the direct exact path for npad&lt;=12288).
+
+```cuda
+// GVR (guess-verify-refine) top-k for DeepSeek indexer decode, BS=1, fp32, B200 (sm_100a).
+//
+// Skeleton (kept from the production GVR kernel, re-expressed in CUDA C++):
+//   P1: gather logits[pre_idx] (temporal warm hint), build a rung ladder of
+//       candidate thresholds from the hint value CCDF.
+//   P2: one multi-threshold count pass over the row measures the global CCDF at
+//       all 8 rungs at once; if no rung lands in [K, kC], iterate a log-space
+//       secant solve (exponential-CCDF model) one threshold per pass.
+//   P3: collect all (value, index) pairs &gt;= threshold into CTA0 shared memory
+//       (cluster DSMEM pushes, offsets from cached per-thread counts).
+//   P4: exact refine: bitwise radix select of the K-th key among candidates,
+//       then a strict-greater + tie-ticket writeback (tie-robust exactness).
+// A value-plateau fallback (max-below descent + direct global emit) keeps the
+// kernel exact even when no threshold can land a count inside [K, kC].
+#include &lt;cuda_runtime.h&gt;
+#include &lt;cooperative_groups.h&gt;
+#include &lt;cfloat&gt;
+#include &lt;cmath&gt;
+
+namespace cg = cooperative_groups;
+
+constexpr int RUNGS = 8;        // thresholds measured per count pass
+constexpr int KCMAX = 8192;     // candidate buffer capacity
+constexpr int MAXPASS = 8;      // multi-rung refine shrinks the bracket ~9x per pass
+
+template &lt;int TB&gt;
+struct Smem {
+  static constexpr int NWARP = TB / 32;
+  unsigned long long cand[KCMAX];  // packed (key&lt;&lt;32 | index) candidates (CTA0 only)
+  int ptcnt[RUNGS * TB];            // per-thread &gt;= counts per rung (P3 offsets)
+  int hist[256];                   // P4 radix histogram / P1 hint histogram (64 bins)
+  float rungs[RUNGS];              // thresholds, descending
+  int rcnt_local[RUNGS];           // this CTA&#x27;s slice counts
+  int rcnt[RUNGS];                 // cluster-wide counts
+  int rpre[RUNGS];                 // exclusive prefix of peer CTA counts
+  int ipartial[2][RUNGS];          // parity-banked DSMEM exchange slots
+  float fpartial[2];               // parity slots for max-below exchange
+  float fwred[2 * NWARP];          // warp reduce scratch (min/max)
+  int iwred[NWARP];                // warp scan scratch
+  float hminmax[2];
+  int sel_above[2];                // P4: selected bin, count strictly above it
+  int sel_count;                   // P4: population of the selected radix bin
+  int cnt_m;                       // emit: strict-greater slot counter
+  int cnt_t;                       // emit: tie ticket counter
+};
+
+__device__ __forceinline__ unsigned f2u(float f) {
+  unsigned u = __float_as_uint(f);
+  return u ^ ((u &amp; 0x80000000u) ? 0xFFFFFFFFu : 0x80000000u);
+}
+
+// Count elements &gt;= rungs[r] over this CTA&#x27;s slice for R thresholds in one read.
+// Caches per-thread counts in s-&gt;ptcnt and accumulates CTA totals in s-&gt;rcnt_local.
+// Caller must zero s-&gt;rcnt_local and __syncthreads() before; call exchange after.
+
+// …(smem struct, count/exchange/max_below/phase1/gvr_topk_kernel: as in the production-mirroring structure)…
+
+// ---- Register-resident GVR (npad &lt;= CS*TB*MAXV*4) --------------------------
+// Same phases as gvr_topk_kernel, but each thread loads its &lt;=MAXV float4s of
+// the row into REGISTERS once, up front (the loads retire while the P1 hint
+// gather runs). Every count pass, the max-below descent, the collect, and the
+// plateau emit then run from registers: the row is read from memory exactly
+// once, so refine iterations cost only ALU + the count exchange. Out-of-range
+// lanes hold -FLT_MAX (same as the row pad), which can never pass a threshold.
+
+template &lt;int TB, int R, int MAXV&gt;
+__device__ __forceinline__ void count_reg(Smem&lt;TB&gt;* s, const float4 (&amp;a)[MAXV], int tid) {
+  float tr[R];
+#pragma unroll
+  for (int r = 0; r &lt; R; ++r) tr[r] = s-&gt;rungs[r];
+  int c[R];
+#pragma unroll
+  for (int r = 0; r &lt; R; ++r) c[r] = 0;
+#pragma unroll
+  for (int u = 0; u &lt; MAXV; ++u)
+#pragma unroll
+    for (int r = 0; r &lt; R; ++r)
+      c[r] += (int)(a[u].x &gt;= tr[r]) + (int)(a[u].y &gt;= tr[r]) + (int)(a[u].z &gt;= tr[r]) +
+              (int)(a[u].w &gt;= tr[r]);
+#pragma unroll
+  for (int r = 0; r &lt; R; ++r) s-&gt;ptcnt[r * TB + tid] = c[r];
+}
+
+template &lt;int TB, int CS, int MAXV&gt;
+__device__ __forceinline__ float max_below_reg(Smem&lt;TB&gt;* s, const float4 (&amp;a)[MAXV], float thi,
+                                               int par, int tid) {
+  constexpr int NWARP = TB / 32;
+  float m = -FLT_MAX;
+#pragma unroll
+  for (int u = 0; u &lt; MAXV; ++u) {
+    if (a[u].x &lt; thi) m = fmaxf(m, a[u].x);
+    if (a[u].y &lt; thi) m = fmaxf(m, a[u].y);
+    if (a[u].z &lt; thi) m = fmaxf(m, a[u].z);
+    if (a[u].w &lt; thi) m = fmaxf(m, a[u].w);
+  }
+#pragma unroll
+  for (int o = 16; o; o &gt;&gt;= 1) m = fmaxf(m, __shfl_down_sync(0xFFFFFFFFu, m, o));
+  int lane = tid &amp; 31, wid = tid &gt;&gt; 5;
+  if (lane == 0) s-&gt;fwred[wid] = m;
+  __syncthreads();
+  if (tid == 0) {
+    float mm = -FLT_MAX;
+    for (int w = 0; w &lt; NWARP; ++w) mm = fmaxf(mm, s-&gt;fwred[w]);
+    s-&gt;fpartial[par] = mm;
+  }
+  if constexpr (CS == 1) {
+    __syncthreads();
+    return s-&gt;fpartial[par];
+  } else {
+    cg::cluster_group cl = cg::this_cluster();
+    cl.sync();
+    float mm = -FLT_MAX;
+#pragma unroll
+    for (int rr = 0; rr &lt; CS; ++rr) {
+      Smem&lt;TB&gt;* ps = (Smem&lt;TB&gt;*)cl.map_shared_rank(s, rr);
+      mm = fmaxf(mm, ps-&gt;fpartial[par]);
+    }
+    return mm;
+
+// …(gvr_topk_reg body, direct path, P4 helpers)…
+
+
+template &lt;int TB&gt;
+static void launch_direct(const float* logits, int* out, int npad, int K, cudaStream_t stream) {
+  static bool inited = false;
+  if (!inited) {
+    cudaFuncSetAttribute(direct_topk_kernel&lt;TB&gt;, cudaFuncAttributeMaxDynamicSharedMemorySize,
+                         (int)sizeof(DSmem&lt;TB&gt;));
+    inited = true;
+  }
+  direct_topk_kernel&lt;TB&gt;&lt;&lt;&lt;1, TB, sizeof(DSmem&lt;TB&gt;), stream&gt;&gt;&gt;(logits, out, npad, K);
+}
+
+template &lt;int CS, int TB&gt;
+static void launch_gvr(const float* logits, const int* pre_idx, int* out, int npad, int K, int kC,
+                       cudaStream_t stream) {
+  static bool inited = false;
+  if (!inited) {
+    cudaFuncSetAttribute(gvr_topk_kernel&lt;CS, TB&gt;, cudaFuncAttributeMaxDynamicSharedMemorySize,
+                         (int)sizeof(Smem&lt;TB&gt;));
+    if (CS &gt; 8)
+      cudaFuncSetAttribute(gvr_topk_kernel&lt;CS, TB&gt;, cudaFuncAttributeNonPortableClusterSizeAllowed, 1);
+    inited = true;
+  }
+  if constexpr (CS == 1) {
+    gvr_topk_kernel&lt;1, TB&gt;&lt;&lt;&lt;1, TB, sizeof(Smem&lt;TB&gt;), stream&gt;&gt;&gt;(logits, pre_idx, out, npad, K, kC);
+  } else {
+    cudaLaunchConfig_t cfg = {};
+    cfg.gridDim = dim3(CS, 1, 1);
+    cfg.blockDim = dim3(TB, 1, 1);
+    cfg.dynamicSmemBytes = sizeof(Smem&lt;TB&gt;);
+    cfg.stream = stream;
+    cudaLaunchAttribute attrs[1];
+    attrs[0].id = cudaLaunchAttributeClusterDimension;
+    attrs[0].val.clusterDim.x = CS;
+    attrs[0].val.clusterDim.y = 1;
+    attrs[0].val.clusterDim.z = 1;
+    cfg.attrs = attrs;
+    cfg.numAttrs = 1;
+    cudaLaunchKernelEx(&amp;cfg, gvr_topk_kernel&lt;CS, TB&gt;, logits, pre_idx, out, npad, K, kC);
+  }
+}
+
+
+template &lt;int CS, int TB, int MAXV, int AR = RUNGS&gt;
+static void launch_reg(const float* logits, const int* pre_idx, int* out, int npad, int K, int kC,
+                       cudaStream_t stream) {
+  static bool inited = false;
+  if (!inited) {
+    cudaFuncSetAttribute(gvr_topk_reg&lt;CS, TB, MAXV, AR&gt;, cudaFuncAttributeMaxDynamicSharedMemorySize,
+                         (int)sizeof(Smem&lt;TB&gt;));
+    if (CS &gt; 8)
+      cudaFuncSetAttribute(gvr_topk_reg&lt;CS, TB, MAXV, AR&gt;,
+                           cudaFuncAttributeNonPortableClusterSizeAllowed, 1);
+    inited = true;
+  }
+  if constexpr (CS == 1) {
+    gvr_topk_reg&lt;1, TB, MAXV, AR&gt;&lt;&lt;&lt;1, TB, sizeof(Smem&lt;TB&gt;), stream&gt;&gt;&gt;(logits, pre_idx, out, npad, K, kC);
+  } else {
+    cudaLaunchConfig_t cfg = {};
+    cfg.gridDim = dim3(CS, 1, 1);
+    cfg.blockDim = dim3(TB, 1, 1);
+    cfg.dynamicSmemBytes = sizeof(Smem&lt;TB&gt;);
+    cfg.stream = stream;
+    cudaLaunchAttribute attrs[1];
+    attrs[0].id = cudaLaunchAttributeClusterDimension;
+    attrs[0].val.clusterDim.x = CS;
+    attrs[0].val.clusterDim.y = 1;
+    attrs[0].val.clusterDim.z = 1;
+    cfg.attrs = attrs;
+    cfg.numAttrs = 1;
+    cudaLaunchKernelEx(&amp;cfg, gvr_topk_reg&lt;CS, TB, MAXV, AR&gt;, logits, pre_idx, out, npad, K, kC);
+  }
+}
+
+void gvr_topk_launch(const float* logits, const int* pre_idx, int* out, int npad, int K,
+                     cudaStream_t stream) {
+  int kC = (K &gt;= 2048) ? 8192 : 6144;
+  // MAXV is matched tightly to each tier: mostly-dummy register slots cost
+  // real time (predicated loads + dead compares), so keep slots nearly full.
+  if (npad &lt;= DKCMAX)
+    launch_direct&lt;1024&gt;(logits, out, npad, K, stream);
+  else if (npad &lt; 16384)
+    launch_reg&lt;1, 512, 8&gt;(logits, pre_idx, out, npad, K, kC, stream);   // vpc &lt;= 4095
+  else if (npad &lt; 32768)
+    launch_reg&lt;4, 512, 4&gt;(logits, pre_idx, out, npad, K, kC, stream);   // vpc &lt;= 2048
+  else if (npad &lt;= 49152)
+    launch_reg&lt;8, 512, 3&gt;(logits, pre_idx, out, npad, K, kC, stream);   // vpc &lt;= 1536
+  else if (npad &lt;= 65536)
+    launch_reg&lt;8, 512, 4&gt;(logits, pre_idx, out, npad, K, kC, stream);   // vpc &lt;= 2048
+  else if (npad &lt;= 131072)
+    launch_reg&lt;8, 512, 8&gt;(logits, pre_idx, out, npad, K, kC, stream);   // vpc &lt;= 4096
+  else if (npad &lt;= 163840)
+    // AR6&#x27;s shifted quantile ladder measured faster on every K=2048 cell of
+    // this tier (-0.5 to -3.1us); K&lt;=1024 regressed (+3us convergence misses).
+    if (K &gt;= 2048)
+      launch_reg&lt;16, 512, 5, 6&gt;(logits, pre_idx, out, npad, K, kC, stream);  // vpc &lt;= 2560
+    else
+      launch_reg&lt;16, 512, 5&gt;(logits, pre_idx, out, npad, K, kC, stream);
+  else if (npad &lt;= 262144)
+    // AR6 measured faster for K=512 (-0.7 to -1.3us) and K=1024 (r2-validated)
+    // at this tier; K=2048 unmeasured here, keep the denser AR8 ladder.
+    if (K == 2048)
+      launch_reg&lt;16, 512, 8&gt;(logits, pre_idx, out, npad, K, kC, stream);  // vpc &lt;= 4096
+    else
+      launch_reg&lt;16, 512, 8, 6&gt;(logits, pre_idx, out, npad, K, kC, stream);
+  else
+    launch_gvr&lt;16, 512&gt;(logits, pre_idx, out, npad, K, kC, stream);     // streaming for huge n
+}
+```
+</pre></details></td></tr>
 </table></div><div class="card" id="r5b">
 <h3>gvr-topk-bs2x-v2(R5 v2) <span class="chip">Cancelled(DQ→fork)</span></h3>
 <table class="kv">
@@ -127,6 +1946,340 @@ th { background: #f0f3f8; }
 <tr><th>代码位置</th><td class="mono">indexer_topk_op_bench/op26_r0_upstream_port_report/kf_campaign/harvest/r5_7bea12c6 · r5_5a1431a5</td></tr>
 <tr><th>性能数据位置</th><td class="mono">indexer_topk_op_bench/op26_r0_upstream_port_report/kf_campaign/r5_bs/grid_r5g_v23.csv · grid_r5g_v39.csv</td></tr>
 <tr><th>备注</th><td>lineage 遗传 row0 竞态(cs>1 cluster × b>1)→ cancel + fork 注入 steering</td></tr>
+<tr><th>发出 prompt</th><td><details><summary>campaign prompt(v2, 物化 safetensors 版) — <code>gvr-topk-bs2x-v2/prompt.md</code> (15873 B, 点击展开)</summary><pre class='pmt'># DeepSeek Indexer Top-K Decode, BATCHED (BS 1-1024, fp32, B200) — Scale the GVR Champion Across Batch
+
+## Problem
+
+Batched sparse-attention indexer top-K at decode time. `logits[b, npad]` fp32
+(REAL captured indexer rows; every batch row is a materialized copy of the
+same captured row — distinct memory, so no L2-aliasing shortcuts), valid
+length `n_valid`, tail padded with -FLT_MAX. `pre_idx[b, k]` int32 is the
+previous step&#x27;s top-k per row (again identical copies). Return `indices[b, k]`
+int32: per-row exact top-k index set (tie-robust checker per row). Entry:
+  run(logits, pre_idx, n_valid, indices)   # DPS, torch binding
+
+Axes: b in {1..1024} (platform workloads sample b in {1,4,32,128,256,1024};
+asset-size limits keep the largest-b x largest-n corner OFF the platform —
+external acceptance still measures the FULL 75-cell x BS{2..1024} grid, so
+optimize the whole envelope, especially b&gt;=256 at n&gt;=128k), k in {512,1024,2048},
+n up to ~1.05M (`npad = ceil(n/64)*64`). Real heavy-tailed logits; hint
+overlap 0.27-1.0. Do not overfit exact axis values.
+
+## Baseline &amp; starting point
+
+Per-workload baseline timings are EXTERNAL nsys cold-L2 kernel times of the
+PRODUCTION kernel (TensorRT-LLM PR#16457 GVR, CuTe DSL) run NATIVELY BATCHED
+([b, npad] in one launch) on an idle B200. Beat THAT. The external acceptance
+bars on the full 750-case real grid (75 cells x 10 BS points):
+  1) average (geomean) speedup vs the production batched kernel &gt;= 2.0x;
+  2) EVERY case &gt;= 1.0x (no regression anywhere), and the campaign objective
+     beyond the bars is to MAXIMIZE THE MINIMUM per-case speedup;
+  3) BS=1 must retain the existing BS=1 champion&#x27;s performance (the champion
+     source digest below IS the starting point — at BS=1 it already runs
+     1.63x geomean over production on 865 cells; do not give that back).
+
+Platform timings carry a fixed per-eval overhead; at BS&gt;=32 it is negligible.
+Track relative progress at small BS.
+
+## Required algorithmic skeleton — HARD compliance rule (unchanged)
+
+Keep the GVR skeleton per row: (a) `pre_idx` as threshold prior, (b) a
+secant/log-style exact threshold solve (equivalent refinement structures OK),
+(c) exact refine of surviving candidates. The npad&lt;=12288 direct path (the
+analytic trivial-convergence limit of the threshold solve) is compliant.
+Wholesale prior-free replacements (plain radix-select/sort over rows) are
+NON-COMPLIANT even if faster. No dispatch on hint quality (unknowable);
+in-kernel admission escape is fine. CUDA graphs / framework kernels banned.
+
+## What is already known about batch scaling THIS kernel (measured)
+
+- The BS=1 champion below is a LATENCY design: 16-CTA cluster + full
+  register residency per row. Naively batching it with grid.y=b is
+  OCCUPANCY-LOCKED: high register counts pin it at 1 CTA/SM, and 16 CTAs
+  PER ROW saturates 148 SMs at b&gt;=10. At large b the problem flips from
+  latency-bound to THROUGHPUT-bound: per-row resources must shrink
+  (fewer CTAs/row, fewer registers, smaller rung ladders) as b grows.
+- Measured on this data: a streaming 1-CTA/row variant with a reduced
+  4-rung ladder + 2-deep hint seeding unlocked large-N high-BS
+  (flash 512k BS=1024 ~1.9x vs production). That is a floor, not a target.
+- The production baseline ITSELF batches natively and amortizes well —
+  your denominator is strongest exactly where the champion is weakest
+  (mid/high BS). Expect the required curve shape: keep the BS=1 wins,
+  then win throughput at BS&gt;=32 via occupancy, not per-row latency.
+- Per-row work is IDENTICAL across rows (same data): divergence between
+  rows is zero; per-row adaptive passes still differ only via atomics
+  noise. Do not rely on that (correctness must hold for arbitrary rows),
+  but you may exploit uniformity for performance (e.g. shared threshold
+  seeding across rows is legitimate ONLY as a performance hint if
+  correctness never depends on rows being equal).
+
+## Dead ends already measured at BS=1 (do not re-discover; most still apply per row)
+
+1. Prior-free radix/sort rewrites: banned and ~10x slow.
+2. Private per-warp histograms (SM100 same-address atomics are fine).
+3. Per-element ballot/popc fused count+collect: costs a full pass.
+4. Staging whole row into smem before scanning: L2 re-reads are cheap.
+5. &gt;2 extra secant rounds; keep passes bounded.
+6. cp.async pipelining on the scan loop (barrier overhead &gt; latency hidden).
+7. Launch-config-only retuning of the production kernel: ceiling 1.025x.
+8. CUDA graphs / replay amortization: banned by the judge.
+
+## Correctness traps (unchanged from BS=1 campaign)
+
+- Tie boundary: never drop a strictly-greater element; ties fill remainder.
+- Real data is undershoot-biased for hint-seeded thresholds.
+- Cluster DSMEM: `arrive_relaxed` has no release semantics — parity-bank
+  or fence your count exchanges.
+- Batched twist: out-of-bounds writes to a NEIGHBOR ROW&#x27;s output slice are
+  the new silent killer; per-row slot counters must be row-local.
+
+## Requirements
+
+- CUDA C++ (sm_100a). fp32 in, int32 out, DPS, torch binding.
+- Entry signature EXACTLY: run(logits, pre_idx, n_valid, indices).
+- Exact per-row (tie-robust), every run, all b in 1..1024.
+- One launch preferred (or few); at b=1024 launch count matters less than
+  occupancy, at b=1 it is 3-29us of the budget — dispatch on (b, npad, k)
+  (all known at launch) is expected.
+
+---
+
+## APPENDIX — BS=1 champion source digest (verbatim spans; this is the kernel whose BS=1 performance you must retain)
+
+Full file is 1344 lines; spans below give the constants, the register-resident core, and the complete launch/dispatch layer. Reconstruct the rest from structure (phases mirror the production GVR: P1 hint-CCDF rung ladder, P2 multi-threshold count + log-secant, P3 DSMEM collect, P4 radix refine + tie-ticket writeback; plus the direct exact path for npad&lt;=12288).
+
+```cuda
+// GVR (guess-verify-refine) top-k for DeepSeek indexer decode, BS=1, fp32, B200 (sm_100a).
+//
+// Skeleton (kept from the production GVR kernel, re-expressed in CUDA C++):
+//   P1: gather logits[pre_idx] (temporal warm hint), build a rung ladder of
+//       candidate thresholds from the hint value CCDF.
+//   P2: one multi-threshold count pass over the row measures the global CCDF at
+//       all 8 rungs at once; if no rung lands in [K, kC], iterate a log-space
+//       secant solve (exponential-CCDF model) one threshold per pass.
+//   P3: collect all (value, index) pairs &gt;= threshold into CTA0 shared memory
+//       (cluster DSMEM pushes, offsets from cached per-thread counts).
+//   P4: exact refine: bitwise radix select of the K-th key among candidates,
+//       then a strict-greater + tie-ticket writeback (tie-robust exactness).
+// A value-plateau fallback (max-below descent + direct global emit) keeps the
+// kernel exact even when no threshold can land a count inside [K, kC].
+#include &lt;cuda_runtime.h&gt;
+#include &lt;cooperative_groups.h&gt;
+#include &lt;cfloat&gt;
+#include &lt;cmath&gt;
+
+namespace cg = cooperative_groups;
+
+constexpr int RUNGS = 8;        // thresholds measured per count pass
+constexpr int KCMAX = 8192;     // candidate buffer capacity
+constexpr int MAXPASS = 8;      // multi-rung refine shrinks the bracket ~9x per pass
+
+template &lt;int TB&gt;
+struct Smem {
+  static constexpr int NWARP = TB / 32;
+  unsigned long long cand[KCMAX];  // packed (key&lt;&lt;32 | index) candidates (CTA0 only)
+  int ptcnt[RUNGS * TB];            // per-thread &gt;= counts per rung (P3 offsets)
+  int hist[256];                   // P4 radix histogram / P1 hint histogram (64 bins)
+  float rungs[RUNGS];              // thresholds, descending
+  int rcnt_local[RUNGS];           // this CTA&#x27;s slice counts
+  int rcnt[RUNGS];                 // cluster-wide counts
+  int rpre[RUNGS];                 // exclusive prefix of peer CTA counts
+  int ipartial[2][RUNGS];          // parity-banked DSMEM exchange slots
+  float fpartial[2];               // parity slots for max-below exchange
+  float fwred[2 * NWARP];          // warp reduce scratch (min/max)
+  int iwred[NWARP];                // warp scan scratch
+  float hminmax[2];
+  int sel_above[2];                // P4: selected bin, count strictly above it
+  int sel_count;                   // P4: population of the selected radix bin
+  int cnt_m;                       // emit: strict-greater slot counter
+  int cnt_t;                       // emit: tie ticket counter
+};
+
+__device__ __forceinline__ unsigned f2u(float f) {
+  unsigned u = __float_as_uint(f);
+  return u ^ ((u &amp; 0x80000000u) ? 0xFFFFFFFFu : 0x80000000u);
+}
+
+// Count elements &gt;= rungs[r] over this CTA&#x27;s slice for R thresholds in one read.
+// Caches per-thread counts in s-&gt;ptcnt and accumulates CTA totals in s-&gt;rcnt_local.
+// Caller must zero s-&gt;rcnt_local and __syncthreads() before; call exchange after.
+
+// …(smem struct, count/exchange/max_below/phase1/gvr_topk_kernel: as in the production-mirroring structure)…
+
+// ---- Register-resident GVR (npad &lt;= CS*TB*MAXV*4) --------------------------
+// Same phases as gvr_topk_kernel, but each thread loads its &lt;=MAXV float4s of
+// the row into REGISTERS once, up front (the loads retire while the P1 hint
+// gather runs). Every count pass, the max-below descent, the collect, and the
+// plateau emit then run from registers: the row is read from memory exactly
+// once, so refine iterations cost only ALU + the count exchange. Out-of-range
+// lanes hold -FLT_MAX (same as the row pad), which can never pass a threshold.
+
+template &lt;int TB, int R, int MAXV&gt;
+__device__ __forceinline__ void count_reg(Smem&lt;TB&gt;* s, const float4 (&amp;a)[MAXV], int tid) {
+  float tr[R];
+#pragma unroll
+  for (int r = 0; r &lt; R; ++r) tr[r] = s-&gt;rungs[r];
+  int c[R];
+#pragma unroll
+  for (int r = 0; r &lt; R; ++r) c[r] = 0;
+#pragma unroll
+  for (int u = 0; u &lt; MAXV; ++u)
+#pragma unroll
+    for (int r = 0; r &lt; R; ++r)
+      c[r] += (int)(a[u].x &gt;= tr[r]) + (int)(a[u].y &gt;= tr[r]) + (int)(a[u].z &gt;= tr[r]) +
+              (int)(a[u].w &gt;= tr[r]);
+#pragma unroll
+  for (int r = 0; r &lt; R; ++r) s-&gt;ptcnt[r * TB + tid] = c[r];
+}
+
+template &lt;int TB, int CS, int MAXV&gt;
+__device__ __forceinline__ float max_below_reg(Smem&lt;TB&gt;* s, const float4 (&amp;a)[MAXV], float thi,
+                                               int par, int tid) {
+  constexpr int NWARP = TB / 32;
+  float m = -FLT_MAX;
+#pragma unroll
+  for (int u = 0; u &lt; MAXV; ++u) {
+    if (a[u].x &lt; thi) m = fmaxf(m, a[u].x);
+    if (a[u].y &lt; thi) m = fmaxf(m, a[u].y);
+    if (a[u].z &lt; thi) m = fmaxf(m, a[u].z);
+    if (a[u].w &lt; thi) m = fmaxf(m, a[u].w);
+  }
+#pragma unroll
+  for (int o = 16; o; o &gt;&gt;= 1) m = fmaxf(m, __shfl_down_sync(0xFFFFFFFFu, m, o));
+  int lane = tid &amp; 31, wid = tid &gt;&gt; 5;
+  if (lane == 0) s-&gt;fwred[wid] = m;
+  __syncthreads();
+  if (tid == 0) {
+    float mm = -FLT_MAX;
+    for (int w = 0; w &lt; NWARP; ++w) mm = fmaxf(mm, s-&gt;fwred[w]);
+    s-&gt;fpartial[par] = mm;
+  }
+  if constexpr (CS == 1) {
+    __syncthreads();
+    return s-&gt;fpartial[par];
+  } else {
+    cg::cluster_group cl = cg::this_cluster();
+    cl.sync();
+    float mm = -FLT_MAX;
+#pragma unroll
+    for (int rr = 0; rr &lt; CS; ++rr) {
+      Smem&lt;TB&gt;* ps = (Smem&lt;TB&gt;*)cl.map_shared_rank(s, rr);
+      mm = fmaxf(mm, ps-&gt;fpartial[par]);
+    }
+    return mm;
+
+// …(gvr_topk_reg body, direct path, P4 helpers)…
+
+
+template &lt;int TB&gt;
+static void launch_direct(const float* logits, int* out, int npad, int K, cudaStream_t stream) {
+  static bool inited = false;
+  if (!inited) {
+    cudaFuncSetAttribute(direct_topk_kernel&lt;TB&gt;, cudaFuncAttributeMaxDynamicSharedMemorySize,
+                         (int)sizeof(DSmem&lt;TB&gt;));
+    inited = true;
+  }
+  direct_topk_kernel&lt;TB&gt;&lt;&lt;&lt;1, TB, sizeof(DSmem&lt;TB&gt;), stream&gt;&gt;&gt;(logits, out, npad, K);
+}
+
+template &lt;int CS, int TB&gt;
+static void launch_gvr(const float* logits, const int* pre_idx, int* out, int npad, int K, int kC,
+                       cudaStream_t stream) {
+  static bool inited = false;
+  if (!inited) {
+    cudaFuncSetAttribute(gvr_topk_kernel&lt;CS, TB&gt;, cudaFuncAttributeMaxDynamicSharedMemorySize,
+                         (int)sizeof(Smem&lt;TB&gt;));
+    if (CS &gt; 8)
+      cudaFuncSetAttribute(gvr_topk_kernel&lt;CS, TB&gt;, cudaFuncAttributeNonPortableClusterSizeAllowed, 1);
+    inited = true;
+  }
+  if constexpr (CS == 1) {
+    gvr_topk_kernel&lt;1, TB&gt;&lt;&lt;&lt;1, TB, sizeof(Smem&lt;TB&gt;), stream&gt;&gt;&gt;(logits, pre_idx, out, npad, K, kC);
+  } else {
+    cudaLaunchConfig_t cfg = {};
+    cfg.gridDim = dim3(CS, 1, 1);
+    cfg.blockDim = dim3(TB, 1, 1);
+    cfg.dynamicSmemBytes = sizeof(Smem&lt;TB&gt;);
+    cfg.stream = stream;
+    cudaLaunchAttribute attrs[1];
+    attrs[0].id = cudaLaunchAttributeClusterDimension;
+    attrs[0].val.clusterDim.x = CS;
+    attrs[0].val.clusterDim.y = 1;
+    attrs[0].val.clusterDim.z = 1;
+    cfg.attrs = attrs;
+    cfg.numAttrs = 1;
+    cudaLaunchKernelEx(&amp;cfg, gvr_topk_kernel&lt;CS, TB&gt;, logits, pre_idx, out, npad, K, kC);
+  }
+}
+
+
+template &lt;int CS, int TB, int MAXV, int AR = RUNGS&gt;
+static void launch_reg(const float* logits, const int* pre_idx, int* out, int npad, int K, int kC,
+                       cudaStream_t stream) {
+  static bool inited = false;
+  if (!inited) {
+    cudaFuncSetAttribute(gvr_topk_reg&lt;CS, TB, MAXV, AR&gt;, cudaFuncAttributeMaxDynamicSharedMemorySize,
+                         (int)sizeof(Smem&lt;TB&gt;));
+    if (CS &gt; 8)
+      cudaFuncSetAttribute(gvr_topk_reg&lt;CS, TB, MAXV, AR&gt;,
+                           cudaFuncAttributeNonPortableClusterSizeAllowed, 1);
+    inited = true;
+  }
+  if constexpr (CS == 1) {
+    gvr_topk_reg&lt;1, TB, MAXV, AR&gt;&lt;&lt;&lt;1, TB, sizeof(Smem&lt;TB&gt;), stream&gt;&gt;&gt;(logits, pre_idx, out, npad, K, kC);
+  } else {
+    cudaLaunchConfig_t cfg = {};
+    cfg.gridDim = dim3(CS, 1, 1);
+    cfg.blockDim = dim3(TB, 1, 1);
+    cfg.dynamicSmemBytes = sizeof(Smem&lt;TB&gt;);
+    cfg.stream = stream;
+    cudaLaunchAttribute attrs[1];
+    attrs[0].id = cudaLaunchAttributeClusterDimension;
+    attrs[0].val.clusterDim.x = CS;
+    attrs[0].val.clusterDim.y = 1;
+    attrs[0].val.clusterDim.z = 1;
+    cfg.attrs = attrs;
+    cfg.numAttrs = 1;
+    cudaLaunchKernelEx(&amp;cfg, gvr_topk_reg&lt;CS, TB, MAXV, AR&gt;, logits, pre_idx, out, npad, K, kC);
+  }
+}
+
+void gvr_topk_launch(const float* logits, const int* pre_idx, int* out, int npad, int K,
+                     cudaStream_t stream) {
+  int kC = (K &gt;= 2048) ? 8192 : 6144;
+  // MAXV is matched tightly to each tier: mostly-dummy register slots cost
+  // real time (predicated loads + dead compares), so keep slots nearly full.
+  if (npad &lt;= DKCMAX)
+    launch_direct&lt;1024&gt;(logits, out, npad, K, stream);
+  else if (npad &lt; 16384)
+    launch_reg&lt;1, 512, 8&gt;(logits, pre_idx, out, npad, K, kC, stream);   // vpc &lt;= 4095
+  else if (npad &lt; 32768)
+    launch_reg&lt;4, 512, 4&gt;(logits, pre_idx, out, npad, K, kC, stream);   // vpc &lt;= 2048
+  else if (npad &lt;= 49152)
+    launch_reg&lt;8, 512, 3&gt;(logits, pre_idx, out, npad, K, kC, stream);   // vpc &lt;= 1536
+  else if (npad &lt;= 65536)
+    launch_reg&lt;8, 512, 4&gt;(logits, pre_idx, out, npad, K, kC, stream);   // vpc &lt;= 2048
+  else if (npad &lt;= 131072)
+    launch_reg&lt;8, 512, 8&gt;(logits, pre_idx, out, npad, K, kC, stream);   // vpc &lt;= 4096
+  else if (npad &lt;= 163840)
+    // AR6&#x27;s shifted quantile ladder measured faster on every K=2048 cell of
+    // this tier (-0.5 to -3.1us); K&lt;=1024 regressed (+3us convergence misses).
+    if (K &gt;= 2048)
+      launch_reg&lt;16, 512, 5, 6&gt;(logits, pre_idx, out, npad, K, kC, stream);  // vpc &lt;= 2560
+    else
+      launch_reg&lt;16, 512, 5&gt;(logits, pre_idx, out, npad, K, kC, stream);
+  else if (npad &lt;= 262144)
+    // AR6 measured faster for K=512 (-0.7 to -1.3us) and K=1024 (r2-validated)
+    // at this tier; K=2048 unmeasured here, keep the denser AR8 ladder.
+    if (K == 2048)
+      launch_reg&lt;16, 512, 8&gt;(logits, pre_idx, out, npad, K, kC, stream);  // vpc &lt;= 4096
+    else
+      launch_reg&lt;16, 512, 8, 6&gt;(logits, pre_idx, out, npad, K, kC, stream);
+  else
+    launch_gvr&lt;16, 512&gt;(logits, pre_idx, out, npad, K, kC, stream);     // streaming for huge n
+}
+```
+</pre></details></td></tr>
 </table></div><div class="card" id="r5c">
 <h3>gvr-topk-bs2x-v3(R5 fork) <span class="chip">Cancelled(预算, r5 完成)</span></h3>
 <table class="kv">
@@ -140,6 +2293,391 @@ th { background: #f0f3f8; }
 <tr><th>代码位置</th><td class="mono">indexer_topk_op_bench/op26_r0_upstream_port_report/kf_campaign/harvest/r5final_156ab438 · fork:kf/r5-champion-bs-combined @3e04d248</td></tr>
 <tr><th>性能数据位置</th><td class="mono">indexer_topk_op_bench/op26_r0_upstream_port_report/kf_campaign/r5_bs/grid_r5g_final.csv · grid_r5bs1guard.csv · R5_CLOSEOUT.md</td></tr>
 <tr><th>备注</th><td>exactness 战役成功(8→0);吞吐域(bs16-256 中大N)为结构墙;部署建议 = (b,npad,K) 三路分派</td></tr>
+<tr><th>发出 prompt</th><td><details><summary>继承 v2 prompt(不变) — <code>gvr-topk-bs2x-v2/prompt.md</code> (15873 B, 点击展开)</summary><pre class='pmt'># DeepSeek Indexer Top-K Decode, BATCHED (BS 1-1024, fp32, B200) — Scale the GVR Champion Across Batch
+
+## Problem
+
+Batched sparse-attention indexer top-K at decode time. `logits[b, npad]` fp32
+(REAL captured indexer rows; every batch row is a materialized copy of the
+same captured row — distinct memory, so no L2-aliasing shortcuts), valid
+length `n_valid`, tail padded with -FLT_MAX. `pre_idx[b, k]` int32 is the
+previous step&#x27;s top-k per row (again identical copies). Return `indices[b, k]`
+int32: per-row exact top-k index set (tie-robust checker per row). Entry:
+  run(logits, pre_idx, n_valid, indices)   # DPS, torch binding
+
+Axes: b in {1..1024} (platform workloads sample b in {1,4,32,128,256,1024};
+asset-size limits keep the largest-b x largest-n corner OFF the platform —
+external acceptance still measures the FULL 75-cell x BS{2..1024} grid, so
+optimize the whole envelope, especially b&gt;=256 at n&gt;=128k), k in {512,1024,2048},
+n up to ~1.05M (`npad = ceil(n/64)*64`). Real heavy-tailed logits; hint
+overlap 0.27-1.0. Do not overfit exact axis values.
+
+## Baseline &amp; starting point
+
+Per-workload baseline timings are EXTERNAL nsys cold-L2 kernel times of the
+PRODUCTION kernel (TensorRT-LLM PR#16457 GVR, CuTe DSL) run NATIVELY BATCHED
+([b, npad] in one launch) on an idle B200. Beat THAT. The external acceptance
+bars on the full 750-case real grid (75 cells x 10 BS points):
+  1) average (geomean) speedup vs the production batched kernel &gt;= 2.0x;
+  2) EVERY case &gt;= 1.0x (no regression anywhere), and the campaign objective
+     beyond the bars is to MAXIMIZE THE MINIMUM per-case speedup;
+  3) BS=1 must retain the existing BS=1 champion&#x27;s performance (the champion
+     source digest below IS the starting point — at BS=1 it already runs
+     1.63x geomean over production on 865 cells; do not give that back).
+
+Platform timings carry a fixed per-eval overhead; at BS&gt;=32 it is negligible.
+Track relative progress at small BS.
+
+## Required algorithmic skeleton — HARD compliance rule (unchanged)
+
+Keep the GVR skeleton per row: (a) `pre_idx` as threshold prior, (b) a
+secant/log-style exact threshold solve (equivalent refinement structures OK),
+(c) exact refine of surviving candidates. The npad&lt;=12288 direct path (the
+analytic trivial-convergence limit of the threshold solve) is compliant.
+Wholesale prior-free replacements (plain radix-select/sort over rows) are
+NON-COMPLIANT even if faster. No dispatch on hint quality (unknowable);
+in-kernel admission escape is fine. CUDA graphs / framework kernels banned.
+
+## What is already known about batch scaling THIS kernel (measured)
+
+- The BS=1 champion below is a LATENCY design: 16-CTA cluster + full
+  register residency per row. Naively batching it with grid.y=b is
+  OCCUPANCY-LOCKED: high register counts pin it at 1 CTA/SM, and 16 CTAs
+  PER ROW saturates 148 SMs at b&gt;=10. At large b the problem flips from
+  latency-bound to THROUGHPUT-bound: per-row resources must shrink
+  (fewer CTAs/row, fewer registers, smaller rung ladders) as b grows.
+- Measured on this data: a streaming 1-CTA/row variant with a reduced
+  4-rung ladder + 2-deep hint seeding unlocked large-N high-BS
+  (flash 512k BS=1024 ~1.9x vs production). That is a floor, not a target.
+- The production baseline ITSELF batches natively and amortizes well —
+  your denominator is strongest exactly where the champion is weakest
+  (mid/high BS). Expect the required curve shape: keep the BS=1 wins,
+  then win throughput at BS&gt;=32 via occupancy, not per-row latency.
+- Per-row work is IDENTICAL across rows (same data): divergence between
+  rows is zero; per-row adaptive passes still differ only via atomics
+  noise. Do not rely on that (correctness must hold for arbitrary rows),
+  but you may exploit uniformity for performance (e.g. shared threshold
+  seeding across rows is legitimate ONLY as a performance hint if
+  correctness never depends on rows being equal).
+
+## Dead ends already measured at BS=1 (do not re-discover; most still apply per row)
+
+1. Prior-free radix/sort rewrites: banned and ~10x slow.
+2. Private per-warp histograms (SM100 same-address atomics are fine).
+3. Per-element ballot/popc fused count+collect: costs a full pass.
+4. Staging whole row into smem before scanning: L2 re-reads are cheap.
+5. &gt;2 extra secant rounds; keep passes bounded.
+6. cp.async pipelining on the scan loop (barrier overhead &gt; latency hidden).
+7. Launch-config-only retuning of the production kernel: ceiling 1.025x.
+8. CUDA graphs / replay amortization: banned by the judge.
+
+## Correctness traps (unchanged from BS=1 campaign)
+
+- Tie boundary: never drop a strictly-greater element; ties fill remainder.
+- Real data is undershoot-biased for hint-seeded thresholds.
+- Cluster DSMEM: `arrive_relaxed` has no release semantics — parity-bank
+  or fence your count exchanges.
+- Batched twist: out-of-bounds writes to a NEIGHBOR ROW&#x27;s output slice are
+  the new silent killer; per-row slot counters must be row-local.
+
+## Requirements
+
+- CUDA C++ (sm_100a). fp32 in, int32 out, DPS, torch binding.
+- Entry signature EXACTLY: run(logits, pre_idx, n_valid, indices).
+- Exact per-row (tie-robust), every run, all b in 1..1024.
+- One launch preferred (or few); at b=1024 launch count matters less than
+  occupancy, at b=1 it is 3-29us of the budget — dispatch on (b, npad, k)
+  (all known at launch) is expected.
+
+---
+
+## APPENDIX — BS=1 champion source digest (verbatim spans; this is the kernel whose BS=1 performance you must retain)
+
+Full file is 1344 lines; spans below give the constants, the register-resident core, and the complete launch/dispatch layer. Reconstruct the rest from structure (phases mirror the production GVR: P1 hint-CCDF rung ladder, P2 multi-threshold count + log-secant, P3 DSMEM collect, P4 radix refine + tie-ticket writeback; plus the direct exact path for npad&lt;=12288).
+
+```cuda
+// GVR (guess-verify-refine) top-k for DeepSeek indexer decode, BS=1, fp32, B200 (sm_100a).
+//
+// Skeleton (kept from the production GVR kernel, re-expressed in CUDA C++):
+//   P1: gather logits[pre_idx] (temporal warm hint), build a rung ladder of
+//       candidate thresholds from the hint value CCDF.
+//   P2: one multi-threshold count pass over the row measures the global CCDF at
+//       all 8 rungs at once; if no rung lands in [K, kC], iterate a log-space
+//       secant solve (exponential-CCDF model) one threshold per pass.
+//   P3: collect all (value, index) pairs &gt;= threshold into CTA0 shared memory
+//       (cluster DSMEM pushes, offsets from cached per-thread counts).
+//   P4: exact refine: bitwise radix select of the K-th key among candidates,
+//       then a strict-greater + tie-ticket writeback (tie-robust exactness).
+// A value-plateau fallback (max-below descent + direct global emit) keeps the
+// kernel exact even when no threshold can land a count inside [K, kC].
+#include &lt;cuda_runtime.h&gt;
+#include &lt;cooperative_groups.h&gt;
+#include &lt;cfloat&gt;
+#include &lt;cmath&gt;
+
+namespace cg = cooperative_groups;
+
+constexpr int RUNGS = 8;        // thresholds measured per count pass
+constexpr int KCMAX = 8192;     // candidate buffer capacity
+constexpr int MAXPASS = 8;      // multi-rung refine shrinks the bracket ~9x per pass
+
+template &lt;int TB&gt;
+struct Smem {
+  static constexpr int NWARP = TB / 32;
+  unsigned long long cand[KCMAX];  // packed (key&lt;&lt;32 | index) candidates (CTA0 only)
+  int ptcnt[RUNGS * TB];            // per-thread &gt;= counts per rung (P3 offsets)
+  int hist[256];                   // P4 radix histogram / P1 hint histogram (64 bins)
+  float rungs[RUNGS];              // thresholds, descending
+  int rcnt_local[RUNGS];           // this CTA&#x27;s slice counts
+  int rcnt[RUNGS];                 // cluster-wide counts
+  int rpre[RUNGS];                 // exclusive prefix of peer CTA counts
+  int ipartial[2][RUNGS];          // parity-banked DSMEM exchange slots
+  float fpartial[2];               // parity slots for max-below exchange
+  float fwred[2 * NWARP];          // warp reduce scratch (min/max)
+  int iwred[NWARP];                // warp scan scratch
+  float hminmax[2];
+  int sel_above[2];                // P4: selected bin, count strictly above it
+  int sel_count;                   // P4: population of the selected radix bin
+  int cnt_m;                       // emit: strict-greater slot counter
+  int cnt_t;                       // emit: tie ticket counter
+};
+
+__device__ __forceinline__ unsigned f2u(float f) {
+  unsigned u = __float_as_uint(f);
+  return u ^ ((u &amp; 0x80000000u) ? 0xFFFFFFFFu : 0x80000000u);
+}
+
+// Count elements &gt;= rungs[r] over this CTA&#x27;s slice for R thresholds in one read.
+// Caches per-thread counts in s-&gt;ptcnt and accumulates CTA totals in s-&gt;rcnt_local.
+// Caller must zero s-&gt;rcnt_local and __syncthreads() before; call exchange after.
+
+// …(smem struct, count/exchange/max_below/phase1/gvr_topk_kernel: as in the production-mirroring structure)…
+
+// ---- Register-resident GVR (npad &lt;= CS*TB*MAXV*4) --------------------------
+// Same phases as gvr_topk_kernel, but each thread loads its &lt;=MAXV float4s of
+// the row into REGISTERS once, up front (the loads retire while the P1 hint
+// gather runs). Every count pass, the max-below descent, the collect, and the
+// plateau emit then run from registers: the row is read from memory exactly
+// once, so refine iterations cost only ALU + the count exchange. Out-of-range
+// lanes hold -FLT_MAX (same as the row pad), which can never pass a threshold.
+
+template &lt;int TB, int R, int MAXV&gt;
+__device__ __forceinline__ void count_reg(Smem&lt;TB&gt;* s, const float4 (&amp;a)[MAXV], int tid) {
+  float tr[R];
+#pragma unroll
+  for (int r = 0; r &lt; R; ++r) tr[r] = s-&gt;rungs[r];
+  int c[R];
+#pragma unroll
+  for (int r = 0; r &lt; R; ++r) c[r] = 0;
+#pragma unroll
+  for (int u = 0; u &lt; MAXV; ++u)
+#pragma unroll
+    for (int r = 0; r &lt; R; ++r)
+      c[r] += (int)(a[u].x &gt;= tr[r]) + (int)(a[u].y &gt;= tr[r]) + (int)(a[u].z &gt;= tr[r]) +
+              (int)(a[u].w &gt;= tr[r]);
+#pragma unroll
+  for (int r = 0; r &lt; R; ++r) s-&gt;ptcnt[r * TB + tid] = c[r];
+}
+
+template &lt;int TB, int CS, int MAXV&gt;
+__device__ __forceinline__ float max_below_reg(Smem&lt;TB&gt;* s, const float4 (&amp;a)[MAXV], float thi,
+                                               int par, int tid) {
+  constexpr int NWARP = TB / 32;
+  float m = -FLT_MAX;
+#pragma unroll
+  for (int u = 0; u &lt; MAXV; ++u) {
+    if (a[u].x &lt; thi) m = fmaxf(m, a[u].x);
+    if (a[u].y &lt; thi) m = fmaxf(m, a[u].y);
+    if (a[u].z &lt; thi) m = fmaxf(m, a[u].z);
+    if (a[u].w &lt; thi) m = fmaxf(m, a[u].w);
+  }
+#pragma unroll
+  for (int o = 16; o; o &gt;&gt;= 1) m = fmaxf(m, __shfl_down_sync(0xFFFFFFFFu, m, o));
+  int lane = tid &amp; 31, wid = tid &gt;&gt; 5;
+  if (lane == 0) s-&gt;fwred[wid] = m;
+  __syncthreads();
+  if (tid == 0) {
+    float mm = -FLT_MAX;
+    for (int w = 0; w &lt; NWARP; ++w) mm = fmaxf(mm, s-&gt;fwred[w]);
+    s-&gt;fpartial[par] = mm;
+  }
+  if constexpr (CS == 1) {
+    __syncthreads();
+    return s-&gt;fpartial[par];
+  } else {
+    cg::cluster_group cl = cg::this_cluster();
+    cl.sync();
+    float mm = -FLT_MAX;
+#pragma unroll
+    for (int rr = 0; rr &lt; CS; ++rr) {
+      Smem&lt;TB&gt;* ps = (Smem&lt;TB&gt;*)cl.map_shared_rank(s, rr);
+      mm = fmaxf(mm, ps-&gt;fpartial[par]);
+    }
+    return mm;
+
+// …(gvr_topk_reg body, direct path, P4 helpers)…
+
+
+template &lt;int TB&gt;
+static void launch_direct(const float* logits, int* out, int npad, int K, cudaStream_t stream) {
+  static bool inited = false;
+  if (!inited) {
+    cudaFuncSetAttribute(direct_topk_kernel&lt;TB&gt;, cudaFuncAttributeMaxDynamicSharedMemorySize,
+                         (int)sizeof(DSmem&lt;TB&gt;));
+    inited = true;
+  }
+  direct_topk_kernel&lt;TB&gt;&lt;&lt;&lt;1, TB, sizeof(DSmem&lt;TB&gt;), stream&gt;&gt;&gt;(logits, out, npad, K);
+}
+
+template &lt;int CS, int TB&gt;
+static void launch_gvr(const float* logits, const int* pre_idx, int* out, int npad, int K, int kC,
+                       cudaStream_t stream) {
+  static bool inited = false;
+  if (!inited) {
+    cudaFuncSetAttribute(gvr_topk_kernel&lt;CS, TB&gt;, cudaFuncAttributeMaxDynamicSharedMemorySize,
+                         (int)sizeof(Smem&lt;TB&gt;));
+    if (CS &gt; 8)
+      cudaFuncSetAttribute(gvr_topk_kernel&lt;CS, TB&gt;, cudaFuncAttributeNonPortableClusterSizeAllowed, 1);
+    inited = true;
+  }
+  if constexpr (CS == 1) {
+    gvr_topk_kernel&lt;1, TB&gt;&lt;&lt;&lt;1, TB, sizeof(Smem&lt;TB&gt;), stream&gt;&gt;&gt;(logits, pre_idx, out, npad, K, kC);
+  } else {
+    cudaLaunchConfig_t cfg = {};
+    cfg.gridDim = dim3(CS, 1, 1);
+    cfg.blockDim = dim3(TB, 1, 1);
+    cfg.dynamicSmemBytes = sizeof(Smem&lt;TB&gt;);
+    cfg.stream = stream;
+    cudaLaunchAttribute attrs[1];
+    attrs[0].id = cudaLaunchAttributeClusterDimension;
+    attrs[0].val.clusterDim.x = CS;
+    attrs[0].val.clusterDim.y = 1;
+    attrs[0].val.clusterDim.z = 1;
+    cfg.attrs = attrs;
+    cfg.numAttrs = 1;
+    cudaLaunchKernelEx(&amp;cfg, gvr_topk_kernel&lt;CS, TB&gt;, logits, pre_idx, out, npad, K, kC);
+  }
+}
+
+
+template &lt;int CS, int TB, int MAXV, int AR = RUNGS&gt;
+static void launch_reg(const float* logits, const int* pre_idx, int* out, int npad, int K, int kC,
+                       cudaStream_t stream) {
+  static bool inited = false;
+  if (!inited) {
+    cudaFuncSetAttribute(gvr_topk_reg&lt;CS, TB, MAXV, AR&gt;, cudaFuncAttributeMaxDynamicSharedMemorySize,
+                         (int)sizeof(Smem&lt;TB&gt;));
+    if (CS &gt; 8)
+      cudaFuncSetAttribute(gvr_topk_reg&lt;CS, TB, MAXV, AR&gt;,
+                           cudaFuncAttributeNonPortableClusterSizeAllowed, 1);
+    inited = true;
+  }
+  if constexpr (CS == 1) {
+    gvr_topk_reg&lt;1, TB, MAXV, AR&gt;&lt;&lt;&lt;1, TB, sizeof(Smem&lt;TB&gt;), stream&gt;&gt;&gt;(logits, pre_idx, out, npad, K, kC);
+  } else {
+    cudaLaunchConfig_t cfg = {};
+    cfg.gridDim = dim3(CS, 1, 1);
+    cfg.blockDim = dim3(TB, 1, 1);
+    cfg.dynamicSmemBytes = sizeof(Smem&lt;TB&gt;);
+    cfg.stream = stream;
+    cudaLaunchAttribute attrs[1];
+    attrs[0].id = cudaLaunchAttributeClusterDimension;
+    attrs[0].val.clusterDim.x = CS;
+    attrs[0].val.clusterDim.y = 1;
+    attrs[0].val.clusterDim.z = 1;
+    cfg.attrs = attrs;
+    cfg.numAttrs = 1;
+    cudaLaunchKernelEx(&amp;cfg, gvr_topk_reg&lt;CS, TB, MAXV, AR&gt;, logits, pre_idx, out, npad, K, kC);
+  }
+}
+
+void gvr_topk_launch(const float* logits, const int* pre_idx, int* out, int npad, int K,
+                     cudaStream_t stream) {
+  int kC = (K &gt;= 2048) ? 8192 : 6144;
+  // MAXV is matched tightly to each tier: mostly-dummy register slots cost
+  // real time (predicated loads + dead compares), so keep slots nearly full.
+  if (npad &lt;= DKCMAX)
+    launch_direct&lt;1024&gt;(logits, out, npad, K, stream);
+  else if (npad &lt; 16384)
+    launch_reg&lt;1, 512, 8&gt;(logits, pre_idx, out, npad, K, kC, stream);   // vpc &lt;= 4095
+  else if (npad &lt; 32768)
+    launch_reg&lt;4, 512, 4&gt;(logits, pre_idx, out, npad, K, kC, stream);   // vpc &lt;= 2048
+  else if (npad &lt;= 49152)
+    launch_reg&lt;8, 512, 3&gt;(logits, pre_idx, out, npad, K, kC, stream);   // vpc &lt;= 1536
+  else if (npad &lt;= 65536)
+    launch_reg&lt;8, 512, 4&gt;(logits, pre_idx, out, npad, K, kC, stream);   // vpc &lt;= 2048
+  else if (npad &lt;= 131072)
+    launch_reg&lt;8, 512, 8&gt;(logits, pre_idx, out, npad, K, kC, stream);   // vpc &lt;= 4096
+  else if (npad &lt;= 163840)
+    // AR6&#x27;s shifted quantile ladder measured faster on every K=2048 cell of
+    // this tier (-0.5 to -3.1us); K&lt;=1024 regressed (+3us convergence misses).
+    if (K &gt;= 2048)
+      launch_reg&lt;16, 512, 5, 6&gt;(logits, pre_idx, out, npad, K, kC, stream);  // vpc &lt;= 2560
+    else
+      launch_reg&lt;16, 512, 5&gt;(logits, pre_idx, out, npad, K, kC, stream);
+  else if (npad &lt;= 262144)
+    // AR6 measured faster for K=512 (-0.7 to -1.3us) and K=1024 (r2-validated)
+    // at this tier; K=2048 unmeasured here, keep the denser AR8 ladder.
+    if (K == 2048)
+      launch_reg&lt;16, 512, 8&gt;(logits, pre_idx, out, npad, K, kC, stream);  // vpc &lt;= 4096
+    else
+      launch_reg&lt;16, 512, 8, 6&gt;(logits, pre_idx, out, npad, K, kC, stream);
+  else
+    launch_gvr&lt;16, 512&gt;(logits, pre_idx, out, npad, K, kC, stream);     // streaming for huge n
+}
+```
+</pre></details><details><summary>fork --append-prompt(steering 追加段) — <code>r5_bs/fork_steering.md</code> (2704 B, 点击展开)</summary><pre class='pmt'># EXTERNAL FULL-GRID VERDICT — round-2 lineage has a CORRECTNESS BUG and two dispatch holes
+
+The external referee ran your two best kernels (r2-v23 and r2-v39) on the FULL
+750-case real grid (75 cells x BS{2..1024}, nsys cold-L2, per-row exactness).
+Both are DISQUALIFIED. Read carefully — the platform workload subset cannot see
+any of this, so you must fix it blind and self-test.
+
+## 1. EXACTNESS FAILURES (inherited across your whole round-1/2 lineage)
+
+Identical 8 failing cases in BOTH kernels, ALWAYS batch row 0 corrupted
+(missing strictly-greater top-k elements, value diff up to 1.8):
+
+  pro_512k  (k=1024, n=131063, npad=131072)  bs=2, 4, 8, 16
+  flash_128k (k=512,  n=32771)               bs=64
+  pro_128k  (k=1024, n=32771)                bs=64
+  (row 0 ONLY, every time; rows 1..b-1 exact)
+
+Signature suggests a cross-row race or wrong row-base in whatever tier serves
+these (npad, bs) combos — e.g. a shared/prior stage that still reads/writes
+row 0&#x27;s slice while other rows proceed, or a cluster/DSMEM exchange keyed to
+row 0. The platform subset has NO workload at (512k, bs 2-16) or bs=64, so
+internal scores stay green while the kernel is wrong. Fix first; performance
+is meaningless until every (npad, bs) shape is exact. SELF-TEST: build a
+random-data unit test sweeping bs in {2,3,4,8,16,64,96} x npad in
+{16384, 32768, 65536, 131072, 262144} x k in {512,1024,2048} and verify the
+top-k index set per row before you submit anything.
+
+## 2. FULL-GRID PERFORMANCE PICTURE (external, vs production native batch)
+
+r2-v23: geomean 0.9348, 462/750 cases SLOWER than production.
+r2-v39: geomean 0.9426, 458/750 slower. Your platform subset flatters you:
+the probe subset (BS 4/32/256/1024 on 9 cells) reads ~1.07.
+
+Two structural holes dominate:
+- bs=128 at n~16387 (all three k): 0.40-0.47x — a tier/dispatch hole between
+  your latency tiers and streaming tiers. bs=96..192 needs a real design,
+  not a boundary fallthrough.
+- K=1024 large-n (n=262127) at bs&gt;=128: 0.42-0.47x — production&#x27;s native
+  batch amortizes the row scan; your per-row streaming ladder does not. At
+  this shape the winning direction is throughput: rows-per-CTA &gt; 1 or
+  row-major persistent CTAs with per-SM slicing, minimal per-row setup, and
+  ladder work shared across rows resident on the same SM.
+
+Strong zones to KEEP: small-n all bs (up to 3.5x), large-n bs&lt;=8, bs=1024
+small/mid-n. Do not give these back while fixing the holes.
+
+## 3. Acceptance reminder (unchanged, externally enforced)
+
+average (geomean) &gt;= 2.0x vs production on the full 750-case grid, EVERY case
+&gt;= 1.0x, per-row tie-robust exactness everywhere, BS=1 keeps the existing
+champion&#x27;s level. GVR skeleton hard rule unchanged.
+</pre></details></td></tr>
 </table></div><div class="card" id="fr">
 <h3>gvr-topk-pr16457-fresh <span class="chip">Completed</span></h3>
 <table class="kv">
@@ -153,6 +2691,7 @@ th { background: #f0f3f8; }
 <tr><th>代码位置</th><td class="mono">未知(另一会话)</td></tr>
 <tr><th>性能数据位置</th><td class="mono">未知(另一会话)</td></tr>
 <tr><th>备注</th><td>内部 0.84 未过平价;如需盘点可接管</td></tr>
+<tr><th>发出 prompt</th><td class="dim">无(prepare 期评测无 prompt)或归另一会话本地,平台 API 不暴露 prompt 原文</td></tr>
 </table></div><div class="card" id="d1">
 <h3>dsl-fp4-paged-mqa-logits <span class="chip">Completed</span></h3>
 <table class="kv">
@@ -166,6 +2705,7 @@ th { background: #f0f3f8; }
 <tr><th>代码位置</th><td class="mono">未知</td></tr>
 <tr><th>性能数据位置</th><td class="mono">未知</td></tr>
 <tr><th>备注</th><td></td></tr>
+<tr><th>发出 prompt</th><td class="dim">无(prepare 期评测无 prompt)或归另一会话本地,平台 API 不暴露 prompt 原文</td></tr>
 </table></div><div class="card" id="d2">
 <h3>dsl-fp8-paged-mqa-logits <span class="chip">Completed</span></h3>
 <table class="kv">
@@ -179,6 +2719,7 @@ th { background: #f0f3f8; }
 <tr><th>代码位置</th><td class="mono">未知</td></tr>
 <tr><th>性能数据位置</th><td class="mono">未知</td></tr>
 <tr><th>备注</th><td></td></tr>
+<tr><th>发出 prompt</th><td class="dim">无(prepare 期评测无 prompt)或归另一会话本地,平台 API 不暴露 prompt 原文</td></tr>
 </table></div><div class="card" id="d0">
 <h3>dsl-fp4/fp8 早期 7 次(round-0 ×2 + Failed ×5) <span class="chip">Completed×2 / Failed×5</span></h3>
 <table class="kv">
@@ -192,6 +2733,7 @@ th { background: #f0f3f8; }
 <tr><th>代码位置</th><td class="mono">未知</td></tr>
 <tr><th>性能数据位置</th><td class="mono">未知</td></tr>
 <tr><th>备注</th><td>连续失败后 round-0 冒烟成功,再起 3 轮正式跑</td></tr>
+<tr><th>发出 prompt</th><td class="dim">无(prepare 期评测无 prompt)或归另一会话本地,平台 API 不暴露 prompt 原文</td></tr>
 </table></div>
 
 <h2>④ 公共工装 / 纪律速查</h2>
