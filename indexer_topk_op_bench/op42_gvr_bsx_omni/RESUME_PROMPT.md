@@ -17,14 +17,23 @@ nsys cold-L2 = only arbiter. Full objective: PLAN.md. Contract: AUTONOMY.md.
   `scripts/parse_ab.py` → `results/ab_data.csv`.
 - Env knob: `GVR_BSX_DENSE_BS=<n>` dense-tier BS threshold (0=off, default 32).
 
-## State (2026-07-24, evening)
+## State (2026-07-24, session resumed ~09:10 UTC)
 - iter6 DONE: uniform sample stride fix — 9-cell nsys: BS256-1024 gm 1.20-1.23
   (min 0.89), BS128 1.01, BS32-64 0.80-0.87; pro_1024k 1.98, flash_1024k 1.38.
-- iter7 RUNNING/last: tp CS in {1,2,4,8} (cluster DSMEM push), CS by
-  bs*CS<=296; env GVR_BSX_TP_BS=16. Tags iter7_*.
-- Arm portfolio: BS<8 champion latency tiers / 8-15 dense reg / >=16 tp-CS.
-- Next after iter7: (a) mid-band verdict, (b) 100-cell stratified screen x
-  full BS ladder, (c) full 865x11 grid infra (est ~13 GPU-h on 4 GPUs).
+- iter7 DONE: tp CS in {1,2,4,8} clusters; dispatch (bs,npad) bands BAKED into
+  launcher. Portfolio: direct(<=12288)->bs<256; latency bs<8; dense [8,16)
+  big-npad / [64,128) small-npad; tp elsewhere. CS1 for bs>=128.
+- M1 82-cell screen (tag m1, cells results/screen_cells.txt, full BS ladder,
+  baked dispatch): first launch died with prior session @22/82; RELAUNCHED
+  09:08 on this shell's node (hostname reads umbriel-b200-048 — anchor cell
+  flash_128k_L02 re-run matched 073 data within 0.5% on head arm, mixing OK).
+  4 shards x 15 cells, setsid, idempotent via .done markers.
+- GOTCHA: parse_ab.py dedups by (cell,BS,arm) WITHOUT tag — never parse a
+  probe/anchor rep before the canonical m1 rep, or the canonical rows get
+  dropped. (Happened once; anchor rows stripped + m1 rep re-parsed, CSV clean.)
+- After M1: (a) gm projection vs 1.40 bar; (b) weak-cell clustering -> iter8
+  levers: BW efficiency (ncu), tail-trim K2048, tp fused U=8 batch loads +
+  __ldcs, 3 CTA/SM via smaller smem at K<=1024.
 
 ## Older state
 - iter0: node anchored; head event-axis artifact documented (nsys only).
