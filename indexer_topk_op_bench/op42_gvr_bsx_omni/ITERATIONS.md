@@ -64,3 +64,23 @@ Dispatch baked into launcher (per-npad bands + CS=f(bs,npad)); env knobs
 now explicit-override-only. Portfolio: direct(<=12288)->bs<256; latency
 bs<8; dense [8,16) big-npad / [64,128) small-npad; tp elsewhere.
 Next: M1 82-cell stratified screen x full BS ladder (baked dispatch).
+
+## M1 — 2026-07-24 — 82-cell stratified screen DONE (baked dispatch, full BS ladder)
+Relaunch note: first launch died with session @22/82; resumed on -048 after
+anchor cell matched -073 within 0.5% (RESUME gotcha entry). 82/82, 0 FAIL,
+902 pairs, all exact.
+VERDICT vs bar 1.40: OVERALL gm 1.3198 (min 0.303, max 2.97) — MISS by ~6%.
+By BS: 1/2/4/8 = 1.72/1.65/1.63/1.48; 16-128 = 1.13-1.20; 256-1024 = 1.17-1.19.
+By model: flash 1.326 / pro 1.351 / v32 1.285.
+Weak mass decomposes into:
+(a) 5 PATHOLOGICAL cells (min<0.55 @BS>=16): pro_1024k_L32,
+    v32_{32k L03,32k L41,64k L41,256k L03} — excluding them gm = 1.3700.
+    All collapse uniformly across BS16-1024 (0.30-0.49) => arm-level failure
+    on those layers' distributions (suspect: sampled-pivot overshoot ->
+    re-stream, K=2048-heavy), not a capacity effect.
+(b) structural bands (patho excluded): 128-512k x BS16-128 weak 39/76;
+    32-128k x BS16-1024 weak 48/119. <32k and >=512k mostly healthy.
+iter8 targets (ordered): (1) fix patho-layer collapse (re-stream escape /
+pivot calibration robustness) — worth +4pp gm alone; (2) mid-npad x mid-BS
+band (tp fused U=8 batch loads + __ldcs, 3 CTA/SM at K<=1024, ncu BW attrib).
+Data: results/m1_data.csv (fresh parse), analyzer scripts/analyze_m1.py.
