@@ -1,0 +1,50 @@
+{
+ "pro_128k_L30|BS16|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_128k_L30|BS16|bsx": [
+  true,
+  ""
+ ],
+ "pro_128k_L30|BS32|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_128k_L30|BS32|bsx": [
+  true,
+  ""
+ ],
+ "pro_128k_L30|BS64|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_128k_L30|BS64|bsx": [
+  true,
+  ""
+ ],
+ "pro_128k_L30|BS128|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_128k_L30|BS128|bsx": [
+  true,
+  ""
+ ],
+ "pro_128k_L30|BS256|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_128k_L30|BS256|bsx": [
+  true,
+  ""
+ ],
+ "pro_128k_L30|BS1024|gvr_pr": [
+  true,
+  ""
+ ],
+ "pro_128k_L30|BS1024|bsx": [
+  true,
+  ""
+ ]
+}

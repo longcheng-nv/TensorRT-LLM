@@ -1,0 +1,38 @@
+{
+ "flash_32k_L36|BS1|bsx": [
+  true,
+  ""
+ ],
+ "flash_32k_L36|BS4|bsx": [
+  true,
+  ""
+ ],
+ "flash_32k_L36|BS8|bsx": [
+  true,
+  ""
+ ],
+ "flash_32k_L36|BS16|bsx": [
+  true,
+  ""
+ ],
+ "flash_32k_L36|BS32|bsx": [
+  true,
+  ""
+ ],
+ "flash_32k_L36|BS64|bsx": [
+  true,
+  ""
+ ],
+ "flash_32k_L36|BS128|bsx": [
+  true,
+  ""
+ ],
+ "flash_32k_L36|BS256|bsx": [
+  true,
+  ""
+ ],
+ "flash_32k_L36|BS1024|bsx": [
+  true,
+  ""
+ ]
+}

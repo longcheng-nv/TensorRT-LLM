@@ -1,0 +1,50 @@
+{
+ "flash_1024k_L16|BS16|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_1024k_L16|BS16|bsx": [
+  true,
+  ""
+ ],
+ "flash_1024k_L16|BS32|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_1024k_L16|BS32|bsx": [
+  true,
+  ""
+ ],
+ "flash_1024k_L16|BS64|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_1024k_L16|BS64|bsx": [
+  true,
+  ""
+ ],
+ "flash_1024k_L16|BS128|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_1024k_L16|BS128|bsx": [
+  true,
+  ""
+ ],
+ "flash_1024k_L16|BS256|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_1024k_L16|BS256|bsx": [
+  true,
+  ""
+ ],
+ "flash_1024k_L16|BS1024|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_1024k_L16|BS1024|bsx": [
+  true,
+  ""
+ ]
+}

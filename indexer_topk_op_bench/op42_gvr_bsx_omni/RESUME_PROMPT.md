@@ -17,7 +17,16 @@ nsys cold-L2 = only arbiter. Full objective: PLAN.md. Contract: AUTONOMY.md.
   `scripts/parse_ab.py` → `results/ab_data.csv`.
 - Env knob: `GVR_BSX_DENSE_BS=<n>` dense-tier BS threshold (0=off, default 32).
 
-## State (2026-07-24)
+## State (2026-07-24, evening)
+- iter6 DONE: uniform sample stride fix — 9-cell nsys: BS256-1024 gm 1.20-1.23
+  (min 0.89), BS128 1.01, BS32-64 0.80-0.87; pro_1024k 1.98, flash_1024k 1.38.
+- iter7 RUNNING/last: tp CS in {1,2,4,8} (cluster DSMEM push), CS by
+  bs*CS<=296; env GVR_BSX_TP_BS=16. Tags iter7_*.
+- Arm portfolio: BS<8 champion latency tiers / 8-15 dense reg / >=16 tp-CS.
+- Next after iter7: (a) mid-band verdict, (b) 100-cell stratified screen x
+  full BS ladder, (c) full 865x11 grid infra (est ~13 GPU-h on 4 GPUs).
+
+## Older state
 - iter0: node anchored; head event-axis artifact documented (nsys only).
 - iter1 DONE (nsys, 12 cells × 11 BS, 264 measurements, all exact):
   grid.y row-batching. gm 0.95 overall; BS≤8 1.47-1.75; collapse ≥BS16 on

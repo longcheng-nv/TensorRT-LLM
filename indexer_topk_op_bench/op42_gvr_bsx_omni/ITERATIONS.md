@@ -53,3 +53,14 @@ count<K -> hmin re-collect stream. Fix: idx = v0 + (j*T + tid)*SS uniform.
 Ledger: (positional-biased row sampling fabricates threshold estimates on
 real decode data, domain: any sampled-pivot scheme, evidence: nsys iter5
 v32 cells + code) — measurement/algorithm artifact. 24/24 exact so far.
+
+## iter 7 — 2026-07-24 — SHIP-CANDIDATE (dispatch baked)
+Hypothesis: tp CS>1 clusters fill SMs in mid-BS band (bs*CS<=296).
+Result (nsys 5 cells): BS16 ~1.0-1.06, BS32 0.90-1.05 (v32_256k 0.62->1.05);
+BS128 CS2 REGRESSES vs CS1 (cluster overhead > parallelism gain near
+capacity) -> CS1 for bs>=128. Small-npad cells prefer dense/latency to
+bs~64-128. 24/24+40/40+45/45+32/32 gates exact.
+Dispatch baked into launcher (per-npad bands + CS=f(bs,npad)); env knobs
+now explicit-override-only. Portfolio: direct(<=12288)->bs<256; latency
+bs<8; dense [8,16) big-npad / [64,128) small-npad; tp elsewhere.
+Next: M1 82-cell stratified screen x full BS ladder (baked dispatch).

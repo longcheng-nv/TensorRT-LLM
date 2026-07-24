@@ -1789,37 +1789,45 @@ static void launch_tp_cs(const float* logits, const int* pre_idx, int* out, int 
   }
 }
 
+static int p2floor(int x) { int p = 1; while (p * 2 <= x) p *= 2; return p; }
+
 template <int TB>
 static void launch_tp(const float* logits, const int* pre_idx, int* out, int npad, int K, int kC,
                       int bs, cudaStream_t stream) {
-  // CS by co-residency (tp = 2 CTAs/SM -> ~296 slots): keep bs*CS <= ~296 and
-  // the whole GPU busy in one wave for the mid-BS band.
-  if (bs >= 256)
-    launch_tp_cs<TB, 1>(logits, pre_idx, out, npad, K, kC, bs, stream);
-  else if (bs >= 128)
-    launch_tp_cs<TB, 2>(logits, pre_idx, out, npad, K, kC, bs, stream);
-  else if (bs >= 64)
-    launch_tp_cs<TB, 4>(logits, pre_idx, out, npad, K, kC, bs, stream);
-  else
-    launch_tp_cs<TB, 8>(logits, pre_idx, out, npad, K, kC, bs, stream);
+  // CS by co-residency (tp = 2 CTAs/SM -> ~296 slots) AND slice size (>=16K
+  // floats/CTA — smaller slices pay more in cluster overhead than they gain).
+  // bs>=128: CS1 measured strictly better (iter7).
+  int cs = 1;
+  if (bs < 128) {
+    cs = p2floor(296 / bs);
+    int capn = p2floor(npad / 16384 > 0 ? npad / 16384 : 1);
+    if (cs > capn) cs = capn;
+    if (cs > 8) cs = 8;
+  }
+  switch (cs) {
+    case 8: launch_tp_cs<TB, 8>(logits, pre_idx, out, npad, K, kC, bs, stream); break;
+    case 4: launch_tp_cs<TB, 4>(logits, pre_idx, out, npad, K, kC, bs, stream); break;
+    case 2: launch_tp_cs<TB, 2>(logits, pre_idx, out, npad, K, kC, bs, stream); break;
+    default: launch_tp_cs<TB, 1>(logits, pre_idx, out, npad, K, kC, bs, stream); break;
+  }
 }
 
-static int tp_bs_threshold() {
-  static int t = -1;
-  if (t < 0) {
+static int tp_bs_threshold() {  // -1 = unset (baked per-npad bands apply)
+  static int t = -2;
+  if (t == -2) {
     const char* e = getenv("GVR_BSX_TP_BS");
-    t = e ? atoi(e) : 48;
-    if (t <= 0) t = 1 << 30;
+    t = e ? atoi(e) : -1;
+    if (t == 0) t = 1 << 30;
   }
   return t;
 }
 
-static int dense_bs_threshold() {
-  static int t = -1;
-  if (t < 0) {
+static int dense_bs_threshold() {  // -1 = unset (baked per-npad bands apply)
+  static int t = -2;
+  if (t == -2) {
     const char* e = getenv("GVR_BSX_DENSE_BS");
-    t = e ? atoi(e) : 32;
-    if (t <= 0) t = 1 << 30;  // 0 disables dense tiers
+    t = e ? atoi(e) : -1;
+    if (t == 0) t = 1 << 30;  // 0 disables dense tiers
   }
   return t;
 }
@@ -1827,11 +1835,21 @@ static int dense_bs_threshold() {
 void gvr_topk_launch_batched(const float* logits, const int* pre_idx, int* out, int npad, int K,
                              int bs, cudaStream_t stream) {
   int kC = (K >= 2048) ? 8192 : 6144;
-  if (bs >= tp_bs_threshold()) {
+  // Arm dispatch measured on the iter1-iter7 nsys grids (b200-073):
+  //  npad<=12288 : direct 1-CTA/row to bs<256 (1.3-2.1x), tp beyond (1.7x+).
+  //  npad<32768  : latency tiers bs<8, dense reg 8..127, tp >=128.
+  //  npad>=32768 : latency bs<8; dense for [8,16) only when npad>=163840
+  //                (CS16 tiers degrade from bs8); tp >=16.
+  // Env overrides (probes): GVR_BSX_TP_BS / GVR_BSX_DENSE_BS.
+  int tpb = tp_bs_threshold();
+  if (tpb < 0) tpb = (npad <= DKCMAX) ? 256 : (npad < 32768 ? 128 : 16);
+  int dnb = dense_bs_threshold();
+  if (dnb < 0) dnb = (npad >= 163840) ? 8 : (npad < 32768 ? 64 : 1 << 30);
+  if (bs >= tpb) {
     launch_tp<512>(logits, pre_idx, out, npad, K, kC, bs, stream);
     return;
   }
-  if (npad > DKCMAX && bs >= dense_bs_threshold()) {
+  if (npad > DKCMAX && bs >= dnb) {
     launch_dense(logits, pre_idx, out, npad, K, kC, bs, stream);
     return;
   }

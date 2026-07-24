@@ -1,0 +1,34 @@
+{
+ "v32_16k_L20|BS1|bsx": [
+  true,
+  ""
+ ],
+ "v32_16k_L20|BS4|bsx": [
+  true,
+  ""
+ ],
+ "v32_16k_L20|BS8|bsx": [
+  true,
+  ""
+ ],
+ "v32_16k_L20|BS16|bsx": [
+  true,
+  ""
+ ],
+ "v32_16k_L20|BS64|bsx": [
+  true,
+  ""
+ ],
+ "v32_16k_L20|BS128|bsx": [
+  true,
+  ""
+ ],
+ "v32_16k_L20|BS256|bsx": [
+  true,
+  ""
+ ],
+ "v32_16k_L20|BS1024|bsx": [
+  true,
+  ""
+ ]
+}

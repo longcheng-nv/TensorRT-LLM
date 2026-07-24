@@ -1,0 +1,50 @@
+{
+ "v32_64k_L20|BS16|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_64k_L20|BS16|bsx": [
+  true,
+  ""
+ ],
+ "v32_64k_L20|BS32|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_64k_L20|BS32|bsx": [
+  true,
+  ""
+ ],
+ "v32_64k_L20|BS64|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_64k_L20|BS64|bsx": [
+  true,
+  ""
+ ],
+ "v32_64k_L20|BS128|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_64k_L20|BS128|bsx": [
+  true,
+  ""
+ ],
+ "v32_64k_L20|BS256|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_64k_L20|BS256|bsx": [
+  true,
+  ""
+ ],
+ "v32_64k_L20|BS1024|gvr_pr": [
+  true,
+  ""
+ ],
+ "v32_64k_L20|BS1024|bsx": [
+  true,
+  ""
+ ]
+}
