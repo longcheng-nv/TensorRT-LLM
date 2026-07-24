@@ -17,9 +17,9 @@ C = [  # (anchor, id, name, status, rounds, internal, local, start, end, cost, o
  dict(a="c1", id="tfb91bvwm972kfyf1bc1trj5e0", name="gvr-topk-bs1-real(第一期)", st="Cancelled", rd=2,
       internal="1.3385", local="champion c74f_sbx **1.6828**(865 格, 0 回退)", t0="07-21 10:15", t1="07-21 ~18:11",
       cost="≈$690", own="本会话系(第一 lineage)",
-      goal="BS=1 865 真实格 beat 旧 PR head(e6fdbfac3d),nsys 冷判", cons="GVR 骨架;无 coldstart 限制",
+      goal="BS=1 865 真实格 beat 旧 PR head(e6fdbfac3d),nsys 冷判", cons="GVR 骨架(执行中放宽 — 见备注)",
       code=f"{KFP}/harvest/r2_c74fb3c0 + c74f_sbx(graft)", data=f"{KFP}/grid_c74fsbx.csv 等",
-      note="round-harvest-verdict 流程首建;两次 grid 因双 driver 作废(纪律起源)"),
+      note="round-harvest-verdict 流程首建;两次 grid 因双 driver 作废(纪律起源)。**⚠ champion c74f_sbx 源码 0 次引用 pre_idx — preIdx 先验被放弃**(实测证伪 hint 收益后 Bar-first 取向)"),
  dict(a="kf1", id="k7rhy79h015gn3fpqv5cs154w8", name="gvr-topk-r3(baseline 验证失败)", st="Failed", rd=0,
       internal="—", local="—", t0="07-21 13:36", t1="+40s", cost="~0", own="本会话系",
       goal="R3 起跑(baseline-solution 现测)", cons="—", code="—", data="—",
@@ -27,9 +27,9 @@ C = [  # (anchor, id, name, status, rounds, internal, local, start, end, cost, o
  dict(a="r3", id="e5q1zgrfhs0z57dj6850kc444r", name="gvr-topk-r3", st="Cancelled", rd=4,
       internal="1.1111", local="operator 复合 compB **1.8267**(865 格, 0 回退)", t0="07-22 03:15", t1="07-22 ~15:49",
       cost="$761", own="本会话系(第一 lineage R3)",
-      goal="从 champion c74f_sbx 再推高(baselines=平台 champion 时延)", cons="骨架放宽(campaign-1 先例)",
+      goal="从 champion c74f_sbx 再推高(baselines=平台 champion 时延)", cons="**骨架放宽(R3_LEDGER D4, 用户 2026-07-22 裁定)**: (a) preIdx 先验由实测证据废止(12 项证伪 + hint 挂载 WASH 1.0001);(b) 保留为直方图前缀阈值精化;(c) 精确 refine 完整保留;禁装饰性 hint 路径,报告须连证据链明示",
       code=f"{KFP}/harvest/(aef33fac/becd/30e7 系)+ compB", data=f"{KFP}/grid_r3grid*.csv",
-      note="平台 4 轮未超 harvested aef33fac;compB 为 operator 收口拼装"),
+      note="平台 4 轮未超 harvested aef33fac;compB 为 operator 收口拼装。**⚠ compB 属 直方图+radix 系(无 pre_idx),其 1.8267× 为放宽骨架口径;R4 因此立项硬锁骨架,真 GVR 达 1.6531×(差 ~10% = 先验约束实测代价)**"),
  dict(a="r4f", id="6qfpzj957x01z2epbyr51srp68", name="R4 baseline-eval(失败)", st="Failed", rd=0,
       internal="—", local="—", t0="07-22 02:40", t1="+40s", cost="~0", own="本会话",
       goal="R4 prepare 的 cute_dsl baseline 现测", cons="—", code="—", data="—",
@@ -169,11 +169,17 @@ G = []
 for y, lab in [(30, "第一 lineage(BS=1)"), (208, "第二 lineage R4(BS=1 冷启动)"),
                (386, "R5(BS=2-1024)"), (596, "另一会话")]:
     G.append(f'<text x="12" y="{y}" class="lane">{lab}</text>')
+# Lane-1 skeleton-compliance annotation (D4 loose-skeleton adjudication)
+G.append('<g class="warn"><rect x="30" y="112" width="1010" height="62" rx="8"/>'
+         '<text x="42" y="130">⚠ 骨架合规注记: 第一 lineage 终版算子(c74f_sbx / compA / compB)源码 0 次引用 pre_idx —'
+         '<tspan font-weight="700">preIdx 先验被整体放弃</tspan>,实际走向 直方图前缀阈值梯 + radix 精确尾(GVR 三要素仅存 b 变体 + c)。</text>'
+         '<text x="42" y="147">依据 R3_LEDGER D4(用户 2026-07-22 裁定): Bar-first 放宽骨架,(a) 先验由实测证据废止(12 项证伪 + hint 挂载 WASH 1.0001),须连证据链明示。</text>'
+         '<text x="42" y="164">⇒ 其 1.8267× 是"放宽骨架"口径;正因此 R4 立项为骨架硬锁的第二 lineage(28dc11f6 真 GVR: P1 消费 pre_idx,1.6531×,差值 ~10% = 先验约束实测代价)。</text></g>')
 # Lineage 1
 G.append(node(30, 44, 190, 56, "c1", ["campaign-1", "bs1-real · 1.34 内部"]))
 G.append(node(280, 44, 140, 44, "kf1", ["r3 baseline", "Failed(D1)"], cls="n bad"))
 G.append(node(470, 44, 180, 56, "r3", ["gvr-topk-r3", "4轮 · 1.11 内部"]))
-G.append(onode(720, 44, 220, 56, ["产出: compB 1.8267×", "(865 格 · 0 回退)"]))
+G.append(onode(720, 44, 260, 56, ["产出: compB 1.8267×(865 格 · 0 回退)", "⚠ 放宽骨架: 无 pre_idx, 直方图+radix 系"]))
 G.append(edge(220, 72, 280, 66, dash=True))
 G.append(edge(220, 72, 470, 72))
 G.append(edge(650, 72, 720, 72))
@@ -221,6 +227,8 @@ SVG = ('<svg viewBox="0 0 1080 740" xmlns="http://www.w3.org/2000/svg" style="wi
        '.o text{font:12px sans-serif;fill:#173d27}'
        '.e{fill:none;stroke:#8fa0ba;stroke-width:1.5}'
        '.lane{font:600 13px sans-serif;fill:#55627a}'
+       '.warn rect{fill:#fff8ec;stroke:#c98a4b;stroke-width:1.2}'
+       '.warn text{font:11.5px sans-serif;fill:#6b4a1b}'
        '</style>' + "".join(G) + "</svg>")
 
 PAGE = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
