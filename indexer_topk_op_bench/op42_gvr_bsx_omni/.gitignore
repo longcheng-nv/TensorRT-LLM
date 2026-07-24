@@ -1,0 +1,4 @@
+results/nsys/*.nsys-rep
+results/nsys/*.sqlite
+src/build_pt/
+**/__pycache__/

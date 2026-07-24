@@ -1,0 +1,42 @@
+{
+ "flash_128k_L36|BS1|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_128k_L36|BS1|bsx": [
+  true,
+  ""
+ ],
+ "flash_128k_L36|BS2|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_128k_L36|BS2|bsx": [
+  true,
+  ""
+ ],
+ "flash_128k_L36|BS8|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_128k_L36|BS8|bsx": [
+  true,
+  ""
+ ],
+ "flash_128k_L36|BS64|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_128k_L36|BS64|bsx": [
+  true,
+  ""
+ ],
+ "flash_128k_L36|BS1024|gvr_pr": [
+  true,
+  ""
+ ],
+ "flash_128k_L36|BS1024|bsx": [
+  true,
+  ""
+ ]
+}

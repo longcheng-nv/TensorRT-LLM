@@ -16,6 +16,7 @@
 #include <cooperative_groups.h>
 #include <cfloat>
 #include <cmath>
+#include <cstdlib>
 
 namespace cg = cooperative_groups;
 
@@ -1340,9 +1341,41 @@ static void launch_reg(const float* logits, const int* pre_idx, int* out, int np
   }
 }
 
+// Dense tiers for large BS: minimal CTAs/row (still register-resident, row
+// read ONCE). Rationale: with __launch_bounds__(TB,1) co-residency is 148
+// CTAs; per-row fixed cost (P1 latency, secant ALU, barriers, P4-solo) is
+// paid once per WAVE, so waves = bs*CS/148 must be minimized at large BS.
+static void launch_dense(const float* logits, const int* pre_idx, int* out, int npad, int K,
+                         int kC, int bs, cudaStream_t stream) {
+  if (npad < 32768)
+    launch_reg<1, 1024, 8>(logits, pre_idx, out, npad, K, kC, bs, stream);   // vpc <= 8191
+  else if (npad <= 65536)
+    launch_reg<2, 1024, 8>(logits, pre_idx, out, npad, K, kC, bs, stream);   // vpc <= 8192
+  else if (npad <= 131072)
+    launch_reg<4, 1024, 8>(logits, pre_idx, out, npad, K, kC, bs, stream);   // vpc <= 8192
+  else if (npad <= 262144)
+    launch_reg<8, 1024, 8>(logits, pre_idx, out, npad, K, kC, bs, stream);   // vpc <= 8192
+  else
+    launch_gvr<16, 512>(logits, pre_idx, out, npad, K, kC, bs, stream);
+}
+
+static int dense_bs_threshold() {
+  static int t = -1;
+  if (t < 0) {
+    const char* e = getenv("GVR_BSX_DENSE_BS");
+    t = e ? atoi(e) : 32;
+    if (t <= 0) t = 1 << 30;  // 0 disables dense tiers
+  }
+  return t;
+}
+
 void gvr_topk_launch_batched(const float* logits, const int* pre_idx, int* out, int npad, int K,
                              int bs, cudaStream_t stream) {
   int kC = (K >= 2048) ? 8192 : 6144;
+  if (npad > DKCMAX && bs >= dense_bs_threshold()) {
+    launch_dense(logits, pre_idx, out, npad, K, kC, bs, stream);
+    return;
+  }
   // MAXV is matched tightly to each tier: mostly-dummy register slots cost
   // real time (predicated loads + dead compares), so keep slots nearly full.
   if (npad <= DKCMAX)
