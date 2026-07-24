@@ -206,10 +206,10 @@ def ledge(x1, y1, xm, y2, x2, dash=False, lab=None):
 
 
 G = []
-LANE_BG = [(16, 148, "#f8fafd", "第一 lineage(BS=1)· 07-21 → 07-22"),
-           (356, 128, "#f8fafd", "第二 lineage R4(BS=1 冷启动, 骨架硬锁)· 07-22 → 07-23"),
-           (516, 190, "#f8fafd", "R5(BS=2-1024)· 07-22 → 07-24"),
-           (738, 118, "#faf8fd", "另一会话")]
+LANE_BG = [(16, 240, "#f8fafd", "第一 lineage(BS=1 → 收口后 BS-scaling 直系延伸)· 07-21 → 07-22"),
+           (448, 128, "#f8fafd", "第二 lineage R4(BS=1 冷启动, 骨架硬锁)· 07-22 → 07-23"),
+           (608, 190, "#f8fafd", "R5(BS=2-1024)· 07-22 → 07-24"),
+           (830, 178, "#faf8fd", "另一会话(含 r3_v11 批量化并行线)")]
 for y, h, col, lab in LANE_BG:
     G.append(f'<rect x="8" y="{y}" width="1104" height="{h}" rx="10" fill="{col}" stroke="#e3e9f2"/>')
     G.append(f'<text x="20" y="{y + 20}" class="lane">{lab}</text>')
@@ -225,9 +225,18 @@ G.append(hedge(196, Y1 + 31, 252, lab="产出+graft"))
 G.append(hedge(462, Y1 + 31, 518, lab="作 baseline"))
 G.append(hedge(686, Y1 + 31, 742, lab="复合+graft"))
 G.append(vedge(602, Y1 - 10, Y1, dash=True))
+# post-close BS-scaling extension of compB (two parallel follow-ups)
+G.append(onode(742, Y1 + 84, 246, 62, ["§7.8 BS-scaling 实测(收口即测)", "BS=1 全胜; crossover@BS=2;", "bs1024 批式臂快 45-125× ⇒ BS==1 门"]))
+G.append(vedge(865, Y1 + 62, Y1 + 84))
+G.append('<g class="n other"><rect x="446" y="{y}" width="250" height="62" rx="9"/>'
+         '<text x="571" y="{t1}" text-anchor="middle">kf/compb-bs-ext(另一会话)</text>'
+         '<text x="571" y="{t2}" text-anchor="middle">tp4 mid-BS 融合直方图臂 + 统一 dispatcher</text></g>'.format(y=Y1+84, t1=Y1+104, t2=Y1+120))
+G.append(f'<a href="{GH}kf/compb-bs-ext" target="_blank" class="gh"><text x="571" y="{Y1+136}" text-anchor="middle">⧉ github: kf/compb-bs-ext</text></a>')
+G.append(f'<line x1="742" y1="{Y1+115}" x2="702" y2="{Y1+115}" class="e" marker-end="url(#arr)"/>')
+G.append(f'<text x="722" y="{Y1+108}" class="elab" text-anchor="middle">扩 BS>1</text>')
 
 # ---- Lane 2: R4
-Y2 = 406
+Y2 = 498
 G.append(node(28, Y2, 168, 62, "r4f", ["baseline-eval", "Failed(D1 复现)"], cls="n bad"))
 G.append(node(252, Y2, 210, 62, "r4", ["gvr-topk-cold60(R4)", "3轮 · 内部 1.3701 · $1110"]))
 G.append(onode(518, Y2, 220, 62, ["champion 28dc11f6", "865格 1.6531× · 0 回退 · 真 GVR"], gh="kf/r4-champion-final-bs1"))
@@ -242,7 +251,7 @@ G.append(f'<path d="M1060,{Y2 - 6} L1052,{Y2 - 6}" class="e d" marker-end="url(#
 G.append(f'<text x="1066" y="{(Y1 + Y2) // 2}" class="elab" writing-mode="tb">仅死路清单/陷阱/REPORT 事实(禁解法)</text>')
 
 # ---- Lane 3: R5 (chain + fan-out done with L-edges at distinct heights)
-Y3 = 566
+Y3 = 658
 G.append(node(28, Y3, 168, 56, "r5a", ["bs2x v1 · $9", "custom_inputs 全 0%"], cls="n bad"))
 G.append(node(252, Y3, 210, 56, "r5b", ["bs2x-v2 · 3轮 · $719", "内部 0.98 · lineage DQ"]))
 G.append(node(518, Y3, 220, 56, "r5c", ["bs2x-v3 fork(rounds3-5)", "内部 1.0756 · $597"]))
@@ -258,24 +267,29 @@ G.append(ledge(738, Y3 + 40, 760, Y3 + 110, 794))
 G.append(vedge(560, Y2 + 62, Y3 - 6, dash=True, lab="champion digest → prompt 起点"))
 
 # ---- Lane 4: other session
-Y4 = 786
+Y4 = 878
 G.append(node(28, Y4, 210, 52, "d0", ["dsl-fp4/fp8 起跑 ×7", "Failed×5 · round0×2"], cls="n other"))
 G.append(node(294, Y4, 190, 52, "d2", ["dsl-fp8 · 3轮 · 0.83"], cls="n other"))
 G.append(node(540, Y4, 190, 52, "d1", ["dsl-fp4 · 3轮 · 1.04"], cls="n other"))
 G.append(node(794, Y4, 246, 52, "fr", ["gvr-topk-pr16457-fresh", "3轮 · 0.84 · 未本地复核"], cls="n other"))
 G.append(hedge(238, Y4 + 26, 294))
 G.append(hedge(484, Y4 + 26, 540))
+# parallel line: op38 batched r3_v11 (other session)
+G.append('<g class="n other"><rect x="28" y="{y}" width="456" height="46" rx="9"/>'
+         '<text x="256" y="{t1}" text-anchor="middle">op38_r3v11_bs: grid.y 批量化 R4 中期 champion r3_v11(与 R5 平行的第三条 BS 线)</text>'
+         '<text x="256" y="{t2}" text-anchor="middle">发现: 寄存器驻留在高 BS 占用锁死 1 CTA/SM(该结论已注入 R5 prompt)</text></g>'.format(y=Y4+66, t1=Y4+84, t2=Y4+100))
+G.append(f'<a href="{GH}kf/gvr-topk-r3v11-bs" target="_blank" class="gh"><text x="560" y="{Y4+95}">⧉ github: kf/gvr-topk-r3v11-bs(+ kf/gvr-topk-r3v11)</text></a>')
 
 # ---- skeleton-compliance annotation between lane1 and lane2
 G.append('<g class="warn"><rect x="8" y="180" width="1104" height="158" rx="10"/>'
-         '<text x="24" y="204" font-weight="700">⚠ 骨架合规注记(第一 lineage)</text>'
-         '<text x="24" y="228">· 终版算子 c74f_sbx / compA / compB 源码 0 次引用 pre_idx — preIdx 先验被整体放弃,实际走向 直方图前缀阈值梯 + radix 精确尾(GVR 三要素仅存 b 变体 + c)。</text>'
-         '<text x="24" y="252">· 依据 R3_LEDGER D4(用户 2026-07-22 裁定): Bar-first 放宽骨架 — (a) 先验由实测证据废止(12 项证伪 + hint 挂载 WASH 1.0001),(b) 保留为直方图前缀阈值精化,(c) 精确 refine 完整保留。</text>'
-         '<text x="24" y="276">· 两分支代际关系: compB = c74fsbx 直系升级(+topk_mid 中段 rung 治 N=16387 弱带 +19% · K2048 专用 v30::topk_coop 梯 · aefm::topk_fast 非协作快尾),对 c74fsbx +8.1%。</text>'
-         '<text x="24" y="300">· ⇒ 1.8267× 与 1.6828× 均为"放宽骨架"口径,不可与硬锁骨架的 R4 1.6531× 直接混比;R4 因此立项(真 GVR: P1 消费 pre_idx),差值 ~10% = 先验约束实测代价。</text>'
-         '<text x="24" y="324">· 两分支分母亦不同: c74fsbx vs 旧 head e6fdbfac3d;compB vs R3 时点 head(已含 #16424 优化)。</text></g>')
+         '<text x="24" y="296" font-weight="700">⚠ 骨架合规注记(第一 lineage)</text>'
+         '<text x="24" y="320">· 终版算子 c74f_sbx / compA / compB 源码 0 次引用 pre_idx — preIdx 先验被整体放弃,实际走向 直方图前缀阈值梯 + radix 精确尾(GVR 三要素仅存 b 变体 + c)。</text>'
+         '<text x="24" y="344">· 依据 R3_LEDGER D4(用户 2026-07-22 裁定): Bar-first 放宽骨架 — (a) 先验由实测证据废止(12 项证伪 + hint 挂载 WASH 1.0001),(b) 保留为直方图前缀阈值精化,(c) 精确 refine 完整保留。</text>'
+         '<text x="24" y="368">· 两分支代际关系: compB = c74fsbx 直系升级(+topk_mid 中段 rung 治 N=16387 弱带 +19% · K2048 专用 v30::topk_coop 梯 · aefm::topk_fast 非协作快尾),对 c74fsbx +8.1%。</text>'
+         '<text x="24" y="392">· ⇒ 1.8267× 与 1.6828× 均为"放宽骨架"口径,不可与硬锁骨架的 R4 1.6531× 直接混比;R4 因此立项(真 GVR: P1 消费 pre_idx),差值 ~10% = 先验约束实测代价。</text>'
+         '<text x="24" y="416">· 两分支分母亦不同: c74fsbx vs 旧 head e6fdbfac3d;compB vs R3 时点 head(已含 #16424 优化)。</text></g>')
 
-SVG = ('<svg viewBox="0 0 1120 858" xmlns="http://www.w3.org/2000/svg" style="width:100%">'
+SVG = ('<svg viewBox="0 0 1120 1032" xmlns="http://www.w3.org/2000/svg" style="width:100%">'
        '<defs><marker id="arr" markerWidth="9" markerHeight="9" refX="7" refY="4.5" '
        'orient="auto"><path d="M0,0 L8,4.5 L0,9 z" fill="#7f93b3"/></marker></defs>'
        '<style>'
