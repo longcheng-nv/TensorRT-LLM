@@ -1189,15 +1189,23 @@ __global__ void __launch_bounds__(TB, 2) gvr_topk_tp(
     xch++;
     __syncthreads();
     if (tid == 0) {
-      int lo = (3 * K) / 2, hi = (6 * kC) / 10;
+      // Adaptive acceptance (iter8a): the fixed band [1.5K, 0.6kC] rejected
+      // rungs whose TRUE count was comfortably inside [K, kC] whenever the
+      // ladder is coarse (low-hr layers) -> pivot fell to the hmin floor
+      // (count up to 150x kC) -> overflow -> 3-4 extra full-row streams
+      // (M1 patho cells, 0.30-0.49). Accept a rung iff its est is >= 2
+      // sampling sigmas inside [K, kC]; sigma(est) = sqrt(SS * est).
       int best = AR - 1;
       long long bestd = 0x7fffffffffffLL;
       long long tgt = (long long)3 * K;
-      if (tgt > hi) tgt = hi;
-      if (tgt < lo) tgt = lo;
+      long long hi0 = (long long)(6 * kC) / 10, lo0 = (3LL * K) / 2;
+      if (tgt > hi0) tgt = hi0;
+      if (tgt < lo0) tgt = lo0;
       for (int j = 0; j < AR; ++j) {
         long long est = (long long)s->rcnt[j] * SS;
-        if (est >= lo && est <= hi) {
+        if (est <= 0) continue;
+        float g = 2.0f * sqrtf((float)((long long)SS * est));
+        if ((float)est - g >= (float)K && (float)est + g <= (float)kC) {
           long long dd = est > tgt ? est - tgt : tgt - est;
           if (dd < bestd) { bestd = dd; best = j; }
         }
