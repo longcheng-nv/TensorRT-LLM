@@ -12,3 +12,11 @@
 - 花费快照: COSTS_20260723.md
 - **终局 (07-23 20:49 UTC Completed, 3 轮停滞, $636.43)**: champion `gvr_topk_r3_dense1024` (82e2b292, r3-a004)。本地 nsys 终判探针 (b200-027 GPU0, 6 代表格): **cold gm 0.952, 4/6 回退, 最好 pro_1024k 1.019** — 真实 kernel 时间贴平略输 PR 头, 距 gm1.6 bar 无望; 维持并行 session 判读: 不建议 fork (pool 冻结 + 差距结构性)。骨架合规 (多阈值单遍探测替代 secant + SMEM radix refine, 均在允许范围)。
 - **测量陷阱 (本次实锤, 复测 KF 候选必读)**: (1) quick_ab CUDA-event 的 5.7 gm 是假象 — PR 头 cuteDSL 大 n (post-cr n≥128K) 路径有 ~1.1ms/call **host 税** (event 计时含 host gap, nsys GPU-projected 剔除后 21-29µs); 小 n 的 1.1-1.6× 同样被 host 开销不对称污染 (nsys 实际 0.87-0.95)。kernel 判决只认 nsys (再次验证)。(2) 候选 torch-ext 构建必须 `TORCH_CUDA_ARCH_LIST=10.0a` 强制覆盖 (环境预设多架构列表使 cluster_group 代码在 sm_75/8x pass 下解体) — 已固化进 quick_ab.py。(3) b200-027 overlay 根分区 100% 满 → nsys Bus error; 绕过 = `TMPDIR=/dev/shm/loncheng_tmp`。
+
+## FORK (2026-07-24, 本 session): gvr-topk-fresh-banded
+- **ID**: `xp49vmaw193c90sthdzyk0av9c`, forked from round 4, rounds 4-8, stagnation 4.
+- **分带 bar (用户重定标)**: Band A = ISL 32K-1M: gm ≥1.60× 且 per-case ≥0.95;
+  Band B = ISL 4K-32K: gm ≥1.00× 且 per-case ≥0.95。steering = fork_steering_banded.md
+  (勿碰 4k 地板格 / 砍行流量是唯一 1.6× 杠杆 / r1-3 GO+dead-end 清单)。
+- 已知随行缺陷: pool 冻结 → 2 个 fable-5 死槽 (429) 继续空转, 有效 4 agent/轮。
+- 终判: Band A/B 分带判卷, 外部 nsys cold-L2 (ACCEPTANCE_DELTA_20260723.md 放宽版)。
