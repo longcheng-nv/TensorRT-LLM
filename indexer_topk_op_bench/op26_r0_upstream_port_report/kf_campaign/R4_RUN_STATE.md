@@ -315,3 +315,20 @@ Updated 2026-07-22 (会话暂停：用户要求迁移到另一台机器)。
 - 交付: R5_CLOSEOUT.md(判决/分域图/结构性结论/部署建议 = (b,npad,K) 静态
   三路分派: b=1→R4 champ, b≤8/小N→R5 champ, 其余→head)+
   fork 分支 kf/r5-champion-bs-combined @3e04d248 + COST_LEDGER 终账 $2435.93。
+
+## R6 BS-scaling +40% 战役(gvr-topk-bs40)启动 2026-07-24
+
+- **campaign `gspn6jvr1h44n8akdredmr8nt8`**(03:47Z STARTED, effort high,
+  $1000/8h, max_rounds 8, stagnation 8 = 跑满全部 rounds 再裁决,用户指令)。
+- 目标(双 K 组, 全 BS1-1024 真实包络 = 865 bs1 + 750 bs>1):
+  K512+K1024(999 格)gm ≥1.40 且全格 ≥0.95;K2048(616 格)同;全 exact
+  (torch.topk value 集合一致, indices 不保序)。
+- 约束: GVR 原始骨架(preIdx 先验→secant+log→refine)硬锁;P1/P4 可等价重构;
+  radix 只可吸收进子阶段;**禁 per-case dispatch 到其他 top-K 算子**;
+  起点 = R5 champion 156ab438 digest(禁 c74f_sbx/compA);prompt 直面
+  先验弃用史(3 次证伪 + WASH 1.0001),指出跨行先验摊销等破局口。
+- 现状距离(R4@bs1+R5@bs>1 组合): K512+1024 gm 1.2548(256 格 <0.95)、
+  K2048 1.3783(91 格 <0.95);瓶颈带 = valley 0.740 / bw 0.765 / mid 0.802。
+- 工装: workload_bs3.jsonl(45 条, 353MB, 补 valley/盲区/bs1 覆盖),
+  baselines = grid_r4pr2 + grid_r5pr 本地现测;判决 = 1615 格
+  (nsys_ab 865 + nsys_bs 750)。

@@ -1,0 +1,54 @@
+{
+ "name": "indexer_topk_decode_bs_real_v2",
+ "description": "DeepSeek indexer decode top-k, REAL captured logits rows (SS7b grid), batched: BS copies of the same row. fp32 in, int32 indices out, tie-robust per-row exactness.",
+ "op_type": "selection",
+ "axes": {
+  "b": {
+   "type": "var",
+   "description": "batch size (1..1024), all rows identical copies"
+  },
+  "n": {
+   "type": "var",
+   "description": "valid row length (post-compression)"
+  },
+  "k": {
+   "type": "var",
+   "description": "top-k: 512/1024/2048"
+  },
+  "npad": {
+   "type": "expr",
+   "expression": "(n + 63) // 64 * 64"
+  }
+ },
+ "inputs": {
+  "logits": {
+   "shape": [
+    "b",
+    "npad"
+   ],
+   "dtype": "float32"
+  },
+  "pre_idx": {
+   "shape": [
+    "b",
+    "k"
+   ],
+   "dtype": "int32"
+  },
+  "n_valid": {
+   "shape": null,
+   "dtype": "int32"
+  }
+ },
+ "outputs": {
+  "indices": {
+   "shape": [
+    "b",
+    "k"
+   ],
+   "dtype": "int32"
+  }
+ },
+ "custom_correctness_entrypoint": "check_topk",
+ "reference": "import torch\n\n\ndef run(logits, pre_idx, n_valid):\n    b = logits.shape[0]\n    k = pre_idx.shape[1]\n    vals = logits[:, :n_valid].float()\n    return torch.topk(vals, k, dim=1, largest=True,\n                      sorted=True).indices.to(torch.int32)\n\n\ndef check_topk(ref_outputs, user_outputs, *, mandatory, tie, k, n, b):\n    \"\"\"Tie-robust top-k index-set check, applied to EVERY batch row\n    (all rows are copies of the same captured row).\"\"\"\n    out = user_outputs[\"indices\"].to(torch.int64).cpu()\n    problems = []\n    if out.shape != (b, k):\n        problems.append(f\"shape {tuple(out.shape)} != ({b},{k})\")\n    else:\n        mand = torch.tensor(mandatory, dtype=torch.int64)\n        tie_t = (torch.tensor(tie, dtype=torch.int64) if len(tie)\n                 else torch.empty(0, dtype=torch.int64))\n        allowed = torch.cat([mand, tie_t])\n        for i in range(b):\n            idx = out[i]\n            if int(idx.min()) < 0 or int(idx.max()) >= n:\n                problems.append(f\"row {i}: index out of range\"); break\n            if torch.unique(idx).numel() != k:\n                problems.append(f\"row {i}: duplicate indices\"); break\n            if not bool(torch.isin(idx, allowed).all()):\n                problems.append(f\"row {i}: index outside true top-k set\"); break\n            if not bool(torch.isin(mand, idx).all()):\n                problems.append(f\"row {i}: missing mandatory index\"); break\n    passed = len(problems) == 0\n    return {\"indices\": {\"passed\": passed, \"message\": \"; \".join(problems) or \"ok\"}}\n"
+}
