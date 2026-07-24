@@ -1,0 +1,11 @@
+- runtime: claude
+  model: opus-4.8
+  count: 2
+  reasoning_effort: high
+- runtime: codex
+  model: gpt-5.6-sol
+  count: 2
+  reasoning_effort: high
+- runtime: n3
+  model: claude-opus-4-8
+  count: 2
