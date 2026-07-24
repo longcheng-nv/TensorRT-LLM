@@ -220,20 +220,20 @@ G.append(node(28, Y1, 168, 62, "c1", ["campaign-1 bs1-real", "2轮 · 内部 1.3
 G.append(onode(252, Y1, 210, 62, ["c74f_sbx 1.6828×(865格)", "⚠ 无 pre_idx(放宽骨架)"], gh="kf/gvr-topk-c74fsbx"))
 G.append(node(518, Y1, 168, 62, "r3", ["gvr-topk-r3", "4轮 · 内部 1.11", "$761"]))
 G.append(onode(742, Y1, 246, 62, ["compB 1.8267×(865格 · 0回退)", "= c74fsbx + topk_mid/coop/fast"], gh="kf/gvr-topk-compB"))
-G.append(node(518, Y1 - 44, 168, 34, "kf1", ["baseline 验证 Failed(D1)"], cls="n bad"))
+G.append(node(28, Y1 + 84, 190, 44, "kf1", ["baseline 验证 Failed(D1)"], cls="n bad"))
 G.append(hedge(196, Y1 + 31, 252, lab="产出+graft"))
 G.append(hedge(462, Y1 + 31, 518, lab="作 baseline"))
 G.append(hedge(686, Y1 + 31, 742, lab="复合+graft"))
-G.append(vedge(602, Y1 - 10, Y1, dash=True))
+G.append(f'<path d="M123,{Y1+84} L123,{Y1+72} L560,{Y1+72} L560,{Y1+68}" class="e d" marker-end="url(#arr)"/>')
 # post-close BS-scaling extension of compB (two parallel follow-ups)
 G.append(onode(742, Y1 + 84, 246, 62, ["§7.8 BS-scaling 实测(收口即测)", "BS=1 全胜; crossover@BS=2;", "bs1024 批式臂快 45-125× ⇒ BS==1 门"]))
 G.append(vedge(865, Y1 + 62, Y1 + 84))
-G.append('<g class="n other"><rect x="446" y="{y}" width="250" height="62" rx="9"/>'
-         '<text x="571" y="{t1}" text-anchor="middle">kf/compb-bs-ext(另一会话)</text>'
+G.append('<g class="n other"><rect x="252" y="{y}" width="236" height="62" rx="9"/>'
+         '<text x="370" y="{t1}" text-anchor="middle">kf/compb-bs-ext(另一会话)</text>'
          '<text x="571" y="{t2}" text-anchor="middle">tp4 mid-BS 融合直方图臂 + 统一 dispatcher</text></g>'.format(y=Y1+84, t1=Y1+104, t2=Y1+120))
-G.append(f'<a href="{GH}kf/compb-bs-ext" target="_blank" class="gh"><text x="571" y="{Y1+136}" text-anchor="middle">⧉ github: kf/compb-bs-ext</text></a>')
-G.append(f'<line x1="742" y1="{Y1+115}" x2="702" y2="{Y1+115}" class="e" marker-end="url(#arr)"/>')
-G.append(f'<text x="722" y="{Y1+108}" class="elab" text-anchor="middle">扩 BS>1</text>')
+G.append(f'<a href="{GH}kf/compb-bs-ext" target="_blank" class="gh"><text x="370" y="{Y1+136}" text-anchor="middle">⧉ github: kf/compb-bs-ext</text></a>')
+G.append(f'<line x1="742" y1="{Y1+115}" x2="494" y2="{Y1+115}" class="e" marker-end="url(#arr)"/>')
+G.append(f'<text x="615" y="{Y1+108}" class="elab" text-anchor="middle">扩 BS>1</text>')
 
 # ---- Lane 2: R4
 Y2 = 336
@@ -245,10 +245,8 @@ G.append(hedge(196, Y2 + 31, 252, dash=True, lab="改走 baselines.jsonl"))
 G.append(hedge(462, Y2 + 31, 518, lab="round-3 收割"))
 G.append(hedge(738, Y2 + 31, 794))
 # knowledge flow lane1 -> lane2 (single clean vertical, right side, no crossings)
-G.append(vedge(1060, Y1 + 31, Y2 - 6, dash=True))
-G.append(f'<path d="M988,{Y1 + 31} L1060,{Y1 + 31}" class="e d"/>')
-G.append(f'<path d="M1060,{Y2 - 6} L1052,{Y2 - 6}" class="e d" marker-end="url(#arr)"/>')
-G.append(f'<text x="1066" y="{(Y1 + Y2) // 2}" class="elab" writing-mode="tb">仅死路清单/陷阱/REPORT 事实(禁解法)</text>')
+G.append(f'<path d="M988,{Y1 + 31} L1072,{Y1 + 31} L1072,322 L357,322 L357,{Y2 - 6}" class="e d" marker-end="url(#arr)"/>')
+G.append(f'<text x="1092" y="128" class="elab" writing-mode="tb">仅注入: 死路/陷阱/REPORT 事实</text>')
 
 # ---- Lane 3: R5 (chain + fan-out done with L-edges at distinct heights)
 Y3 = 494
@@ -264,7 +262,8 @@ G.append(hedge(738, Y3 + 20, 794))
 G.append(ledge(738, Y3 + 40, 766, Y3 + 66, 794))
 G.append(ledge(738, Y3 + 40, 760, Y3 + 110, 794))
 # R4 champion -> R5 prompt digest (single vertical at champion column)
-G.append(vedge(560, Y2 + 62, Y3 - 6, dash=True, lab="champion digest → prompt 起点"))
+G.append(vedge(560, Y2 + 62, Y3 - 6, dash=True))
+G.append('<text x="572" y="430" class="elab">champion digest → prompt 起点</text>')
 
 # ---- Lane 4: other session
 Y4 = 712
