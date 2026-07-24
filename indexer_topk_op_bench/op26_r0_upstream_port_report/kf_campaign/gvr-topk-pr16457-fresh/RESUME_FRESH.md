@@ -10,3 +10,5 @@
 - **接续**: `kf campaign show 6em6mf55g11g767p5wcepgy07w`;收割 `kf campaign kernel list 6em6mf55g11g767p5wcepgy07w --top 10`;外部终判走本目录既有 harvest 流程 (drive_grid_* + nsys_ab.py, 865 格 + BS 网格, per-batch p95 锚检查, 禁并发探针)。
 - **同名不同物**: 平台上另有 Running 的 gvr-topk-bs2x-v3 (befh5fh…, R5 旧战役) — 勿混淆。
 - 花费快照: COSTS_20260723.md
+- **终局 (07-23 20:49 UTC Completed, 3 轮停滞, $636.43)**: champion `gvr_topk_r3_dense1024` (82e2b292, r3-a004)。本地 nsys 终判探针 (b200-027 GPU0, 6 代表格): **cold gm 0.952, 4/6 回退, 最好 pro_1024k 1.019** — 真实 kernel 时间贴平略输 PR 头, 距 gm1.6 bar 无望; 维持并行 session 判读: 不建议 fork (pool 冻结 + 差距结构性)。骨架合规 (多阈值单遍探测替代 secant + SMEM radix refine, 均在允许范围)。
+- **测量陷阱 (本次实锤, 复测 KF 候选必读)**: (1) quick_ab CUDA-event 的 5.7 gm 是假象 — PR 头 cuteDSL 大 n (post-cr n≥128K) 路径有 ~1.1ms/call **host 税** (event 计时含 host gap, nsys GPU-projected 剔除后 21-29µs); 小 n 的 1.1-1.6× 同样被 host 开销不对称污染 (nsys 实际 0.87-0.95)。kernel 判决只认 nsys (再次验证)。(2) 候选 torch-ext 构建必须 `TORCH_CUDA_ARCH_LIST=10.0a` 强制覆盖 (环境预设多架构列表使 cluster_group 代码在 sm_75/8x pass 下解体) — 已固化进 quick_ab.py。(3) b200-027 overlay 根分区 100% 满 → nsys Bus error; 绕过 = `TMPDIR=/dev/shm/loncheng_tmp`。

@@ -77,9 +77,13 @@ def build_candidate(cdir, name="kf_cand"):
     if "PYBIND11_MODULE" in blob or "torch/extension.h" in blob:
         from torch.utils.cpp_extension import load
         (cdir / "build_pt").mkdir(exist_ok=True)
+        # Candidates use sm_90+/sm_100a features (cluster_group, DSMEM); the
+        # ambient multi-arch TORCH_CUDA_ARCH_LIST (7.5..12.0) breaks their build.
+        os.environ["TORCH_CUDA_ARCH_LIST"] = "10.0a"
         mod = load(name=name, sources=srcs,
                    build_directory=str((cdir / "build_pt").resolve()),
-                   extra_cuda_cflags=["-O3"], verbose=False)
+                   extra_cuda_cflags=["-O3", "--use_fast_math", "-std=c++17"],
+                   verbose=False)
         fns = [f for f in dir(mod) if not f.startswith("_")]
         return mod, ("run" if "run" in fns else fns[0])
     import tvm_ffi
@@ -134,20 +138,9 @@ def main():
 
     cmod, entry = None, None
     if not args.self_test:
-        import tvm_ffi
-        cdir = Path(args.cand)
-        srcs = sorted(str(p) for p in cdir.glob("*.cu")) + \
-               sorted(str(p) for p in cdir.glob("*.cpp"))
-        assert srcs, f"no sources in {cdir}"
-        lib = tvm_ffi.cpp.build(name="kf_cand", sources=srcs,
-                                output_dir=str(cdir / "build"))
-        cmod = tvm_ffi.load_module(lib)
+        cmod, entry = build_candidate(args.cand)
         if args.entry:
             entry = args.entry
-        else:
-            fns = [f for f in dir(cmod) if not f.startswith("_")]
-            assert len(fns) >= 1, fns
-            entry = fns[0]
         print(f"candidate entry: {entry}")
 
     rows = load_cells()
