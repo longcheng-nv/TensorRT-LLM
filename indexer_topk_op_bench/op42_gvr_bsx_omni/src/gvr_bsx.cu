@@ -1189,25 +1189,36 @@ __global__ void __launch_bounds__(TB, 2) gvr_topk_tp(
     xch++;
     __syncthreads();
     if (tid == 0) {
-      // Adaptive acceptance (iter8a): the fixed band [1.5K, 0.6kC] rejected
-      // rungs whose TRUE count was comfortably inside [K, kC] whenever the
-      // ladder is coarse (low-hr layers) -> pivot fell to the hmin floor
-      // (count up to 150x kC) -> overflow -> 3-4 extra full-row streams
-      // (M1 patho cells, 0.30-0.49). Accept a rung iff its est is >= 2
-      // sampling sigmas inside [K, kC]; sigma(est) = sqrt(SS * est).
+      // Pivot pick: sweet band [1.5K, 0.6kC] first (iter7 behavior, tuned for
+      // P4 cost). iter8b ESCAPE: when the band is EMPTY (coarse ladder on
+      // low-hr layers), a 2-sigma sampling guard re-admits any rung whose est
+      // is confidently inside [K, kC] (sigma(est) = sqrt(SS*est)) instead of
+      // falling to the hmin floor (count up to 150x kC -> overflow -> 3-4
+      // extra full-row streams; M1 patho cells 0.30-0.49). Sym-2sigma-only
+      // (iter8a) regressed 3 cells by letting a closer-to-tgt hmin outbid the
+      // band pick -> band stays primary; guard is fallback-only.
+      int lo = (3 * K) / 2, hi = (6 * kC) / 10;
       int best = AR - 1;
       long long bestd = 0x7fffffffffffLL;
       long long tgt = (long long)3 * K;
-      long long hi0 = (long long)(6 * kC) / 10, lo0 = (3LL * K) / 2;
-      if (tgt > hi0) tgt = hi0;
-      if (tgt < lo0) tgt = lo0;
+      if (tgt > hi) tgt = hi;
+      if (tgt < lo) tgt = lo;
       for (int j = 0; j < AR; ++j) {
         long long est = (long long)s->rcnt[j] * SS;
-        if (est <= 0) continue;
-        float g = 2.0f * sqrtf((float)((long long)SS * est));
-        if ((float)est - g >= (float)K && (float)est + g <= (float)kC) {
+        if (est >= lo && est <= hi) {
           long long dd = est > tgt ? est - tgt : tgt - est;
           if (dd < bestd) { bestd = dd; best = j; }
+        }
+      }
+      if (bestd == 0x7fffffffffffLL) {
+        for (int j = 0; j < AR; ++j) {
+          long long est = (long long)s->rcnt[j] * SS;
+          if (est <= 0) continue;
+          float g = 2.0f * sqrtf((float)((long long)SS * est));
+          if ((float)est - g >= (float)K && (float)est + g <= (float)kC) {
+            long long dd = est > tgt ? est - tgt : tgt - est;
+            if (dd < bestd) { bestd = dd; best = j; }
+          }
         }
       }
       // rungs[0] = pivot (push threshold), rungs[1] = hmin floor (count >= K
