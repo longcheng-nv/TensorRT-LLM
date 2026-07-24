@@ -112,7 +112,9 @@ def prompt_block(anchor):
 
 def md(s):
     import re
-    return re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", s)
+    s = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", s)
+    return re.sub(r"fork:(kf/[\w./-]+)",
+                  r'<a href="https://github.com/longcheng-nv/TensorRT-LLM/tree/\1" target="_blank">fork:\1</a>', s)
 
 
 rows_html = []
@@ -133,7 +135,7 @@ for c in C:
 <tr><th>花费</th><td>{c['cost']}</td></tr>
 <tr><th>发起目标</th><td>{md(c['goal'])}</td></tr>
 <tr><th>约束</th><td>{c['cons']}</td></tr>
-<tr><th>代码位置</th><td class="mono">{c['code']}</td></tr>
+<tr><th>代码位置</th><td class="mono">{md(c['code'])}</td></tr>
 <tr><th>性能数据位置</th><td class="mono">{c['data']}</td></tr>
 <tr><th>备注</th><td>{md(c['note'])}</td></tr>
 {prompt_block(c['a'])}
@@ -150,13 +152,23 @@ def node(x, y, w, h, anchor, lines, cls="n"):
             f'<text x="{x + w/2}" y="{ty}" text-anchor="middle">{tspan}</text></a>')
 
 
-def onode(x, y, w, h, lines):  # output artifact node (no link target card)
+GH = "https://github.com/longcheng-nv/TensorRT-LLM/tree/"
+
+
+def onode(x, y, w, h, lines, gh=None):
+    """Output artifact node; gh=<branch> adds a clickable GitHub link line."""
     tspan = "".join(
         f'<tspan x="{x + w/2}" dy="{"1.2em" if i else 0}">{ln}</tspan>'
         for i, ln in enumerate(lines))
-    ty = y + h / 2 - (len(lines) - 1) * 8 + 4
-    return (f'<g class="o"><rect x="{x}" y="{y}" width="{w}" height="{h}" rx="9"/>'
-            f'<text x="{x + w/2}" y="{ty}" text-anchor="middle">{tspan}</text></g>')
+    nl = len(lines) + (1 if gh else 0)
+    ty = y + h / 2 - (nl - 1) * 8 + 4
+    s = (f'<g class="o"><rect x="{x}" y="{y}" width="{w}" height="{h}" rx="9"/>'
+         f'<text x="{x + w/2}" y="{ty}" text-anchor="middle">{tspan}</text>')
+    if gh:
+        s += (f'<a href="{GH}{gh}" target="_blank" class="gh">'
+              f'<text x="{x + w/2}" y="{ty + (nl - 1) * 16}" text-anchor="middle">'
+              f'⧉ github: {gh}</text></a>')
+    return s + "</g>"
 
 
 def edge(x1, y1, x2, y2, dash=False):
@@ -205,9 +217,9 @@ for y, h, col, lab in LANE_BG:
 # ---- Lane 1: campaign-1 -> c74f_sbx -> R3 -> compB (one clean left-to-right chain)
 Y1 = 66
 G.append(node(28, Y1, 168, 62, "c1", ["campaign-1 bs1-real", "2轮 · 内部 1.34", "$690"]))
-G.append(onode(252, Y1, 210, 62, ["c74f_sbx 1.6828×(865格)", "⚠ 无 pre_idx(放宽骨架)", "fork: kf/gvr-topk-c74fsbx"]))
+G.append(onode(252, Y1, 210, 62, ["c74f_sbx 1.6828×(865格)", "⚠ 无 pre_idx(放宽骨架)"], gh="kf/gvr-topk-c74fsbx"))
 G.append(node(518, Y1, 168, 62, "r3", ["gvr-topk-r3", "4轮 · 内部 1.11", "$761"]))
-G.append(onode(742, Y1, 246, 62, ["compB 1.8267×(865格 · 0回退)", "= c74fsbx + topk_mid/coop/fast", "fork: kf/gvr-topk-compB"]))
+G.append(onode(742, Y1, 246, 62, ["compB 1.8267×(865格 · 0回退)", "= c74fsbx + topk_mid/coop/fast"], gh="kf/gvr-topk-compB"))
 G.append(node(518, Y1 - 44, 168, 34, "kf1", ["baseline 验证 Failed(D1)"], cls="n bad"))
 G.append(hedge(196, Y1 + 31, 252, lab="产出+graft"))
 G.append(hedge(462, Y1 + 31, 518, lab="作 baseline"))
@@ -218,7 +230,7 @@ G.append(vedge(602, Y1 - 10, Y1, dash=True))
 Y2 = 406
 G.append(node(28, Y2, 168, 62, "r4f", ["baseline-eval", "Failed(D1 复现)"], cls="n bad"))
 G.append(node(252, Y2, 210, 62, "r4", ["gvr-topk-cold60(R4)", "3轮 · 内部 1.3701 · $1110"]))
-G.append(onode(518, Y2, 220, 62, ["champion 28dc11f6", "865格 1.6531× · 0 回退 · 真 GVR", "fork: kf/r4-champion-final-bs1"]))
+G.append(onode(518, Y2, 220, 62, ["champion 28dc11f6", "865格 1.6531× · 0 回退 · 真 GVR"], gh="kf/r4-champion-final-bs1"))
 G.append(onode(794, Y2, 246, 62, ["R4_CLOSEOUT.md", "R4_CHAMPION_BS1_REPORT.html", "grid_r4r3cg.csv / grid_r4pr2.csv"]))
 G.append(hedge(196, Y2 + 31, 252, dash=True, lab="改走 baselines.jsonl"))
 G.append(hedge(462, Y2 + 31, 518, lab="round-3 收割"))
@@ -235,7 +247,7 @@ G.append(node(28, Y3, 168, 56, "r5a", ["bs2x v1 · $9", "custom_inputs 全 0%"],
 G.append(node(252, Y3, 210, 56, "r5b", ["bs2x-v2 · 3轮 · $719", "内部 0.98 · lineage DQ"]))
 G.append(node(518, Y3, 220, 56, "r5c", ["bs2x-v3 fork(rounds3-5)", "内部 1.0756 · $597"]))
 G.append(onode(794, Y3 - 6, 246, 46, ["champion 156ab438(全 exact)", "750格 0.9862 → 目标未达成"]))
-G.append(onode(794, Y3 + 48, 246, 36, ["fork: kf/r5-champion-bs-combined"]))
+G.append(onode(794, Y3 + 48, 246, 36, ["fork 留档 →"], gh="kf/r5-champion-bs-combined"))
 G.append(onode(794, Y3 + 92, 246, 36, ["R5_CLOSEOUT.md · grid_r5g_final.csv"]))
 G.append(hedge(196, Y3 + 28, 252, lab="重构 workloads"))
 G.append(hedge(462, Y3 + 28, 518, lab="cancel+fork+steering"))
@@ -274,6 +286,8 @@ SVG = ('<svg viewBox="0 0 1120 858" xmlns="http://www.w3.org/2000/svg" style="wi
        '.n.other rect{fill:#f2eefb;stroke:#8d7fb3}'
        '.o rect{fill:#e7f5ec;stroke:#5c9a74;stroke-width:1.2}'
        '.o text{font:11.5px sans-serif;fill:#173d27}'
+       '.gh text{font:11px ui-monospace,monospace;fill:#23508f;text-decoration:underline}'
+       '.gh:hover text{fill:#0b2f66}'
        '.e{fill:none;stroke:#7f93b3;stroke-width:1.6}'
        '.e.d{stroke-dasharray:5,4;stroke:#a9b6ca}'
        '.elab{font:10.5px sans-serif;fill:#55627a}'
