@@ -207,7 +207,7 @@ def ledge(x1, y1, xm, y2, x2, dash=False, lab=None):
 
 G = []
 LANE_BG = [(16, 240, "#f8fafd", "第一 lineage(BS=1 → 收口后 BS-scaling 直系延伸)· 07-21 → 07-22 · ⚠ 骨架合规注记见图底"),
-           (286, 128, "#f8fafd", "第二 lineage R4(BS=1 冷启动, 骨架硬锁)· 07-22 → 07-23"),
+           (286, 128, "#f2faf5", "第二 lineage R4(BS=1 冷启动, 骨架硬锁)· 07-22 → 07-23 · ✓ 满足 GVR 优化原始要求与约束(preIdx 先验+secant-log+精确 refine 三要素完整合规, 三 Bar 全达成)"),
            (444, 190, "#f8fafd", "R5(BS=2-1024)· 07-22 → 07-24"),
            (664, 178, "#faf8fd", "另一会话(含 r3_v11 批量化并行线)")]
 for y, h, col, lab in LANE_BG:
@@ -241,7 +241,7 @@ G.append(f'<text x="615" y="{Y1+108}" class="elab" text-anchor="middle">扩 BS>1
 Y2 = 336
 G.append(node(28, Y2, 168, 62, "r4f", ["baseline-eval", "Failed(D1 复现)"], cls="n bad"))
 G.append(node(252, Y2, 210, 62, "r4", ["gvr-topk-cold60(R4)", "3轮 · 内部 1.3701 · $1110"]))
-G.append(onode(518, Y2, 220, 62, ["champion 28dc11f6", "865格 1.6531× · 0 回退 · 真 GVR"], gh="kf/r4-champion-final-bs1"))
+G.append(onode(518, Y2, 220, 62, ["champion 28dc11f6 ✓ 骨架合规", "865格 1.6531× · 0 回退 · 真 GVR"], gh="kf/r4-champion-final-bs1"))
 G.append(onode(794, Y2, 246, 62, ["R4_CLOSEOUT.md", "R4_CHAMPION_BS1_REPORT.html", "grid_r4r3cg.csv / grid_r4pr2.csv"]))
 G.append(hedge(196, Y2 + 31, 252, dash=True, lab="改走 baselines.jsonl"))
 G.append(hedge(462, Y2 + 31, 518, lab="round-3 收割"))
