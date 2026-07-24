@@ -340,3 +340,10 @@ Updated 2026-07-22 (会话暂停：用户要求迁移到另一台机器)。
   (05:10Z STARTED): prompt 增设"跨行复用精确合规线"—— P1 先验/阈值梯可
   跨行摊销(带逐行逃逸);阈值验证/收集/refine 必须逐行对本行数据;
   结果广播(含验证式)与行等价测试跳选择 = auto-DQ。
+- **R6 v2 round-1 收口(0.5189)+ 合规甄别**: 榜首两名 `_radix`(a1445afb
+  0 pre_idx / c50040d3 仅签名 1 处, 0 secant)= prior-free **DQ**(prompt v2
+  明令仍被 n3/codex 违反 — 平台判官不执法,内部 fitness 奖励投机;
+  战役策略固化: 每轮只收割"最佳合规"kernel,grep 门 = pre_idx 实引用 +
+  secant/log 存在)。**合规前沿 = b54159e7**(gvr_radix_11_11_10_v1,
+  内部 0.4456): 本地 45 案例探针 gm 0.6465, 全 exact, bs1 仅 0.552
+  (未吸收 R4 结构, round-1 白手起家水位)。round 2 进行中。
