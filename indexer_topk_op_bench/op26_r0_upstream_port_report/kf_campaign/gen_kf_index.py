@@ -62,10 +62,33 @@ C = [  # (anchor, id, name, status, rounds, internal, local, start, end, cost, o
       code=f"{KFP}/harvest/r5final_156ab438 · fork:kf/r5-champion-bs-combined @3e04d248",
       data=f"{KFP}/r5_bs/grid_r5g_final.csv · grid_r5bs1guard.csv · R5_CLOSEOUT.md",
       note="exactness 战役成功(8→0);吞吐域(bs16-256 中大N)为结构墙;部署建议 = (b,npad,K) 三路分派"),
- dict(a="fr", id="6em6mf55g11g767p5wcepgy07w", name="gvr-topk-pr16457-fresh", st="Completed", rd=3,
-      internal="0.84", local="未复核(本会话外)", t0="07-23 21:48", t1="07-24 ~10:1x", cost="未核", own="**另一会话**",
-      goal="artifact indexer-topk-decode-fresh-full(推测: 全格 fresh 分母重跑)", cons="未知(另一会话)",
-      code="未知(另一会话)", data="未知(另一会话)", note="内部 0.84 未过平价;如需盘点可接管"),
+ dict(a="fr", id="6em6mf55g11g767p5wcepgy07w", name="gvr-topk-pr16457-fresh", st="Completed(CLOSED)", rd=3,
+      internal="0.84", local="champion 82e2b292 nsys 探针(6 代表格): **gm 0.952 / 4 回退 / exact 28/28** — 真实 kernel 贴平略输 PR 头,距 bar 无望,判 CLOSED",
+      t0="07-23 08:17", t1="07-23 20:49", cost="$636.43", own="fresh 会话(第三 lineage 冷启动)",
+      goal="PR#16457 冷启动双 bar: BS=1 865 格 gm≥1.60 + BS2-1024 gm≥2.0;07-23 回退 bar 用户放宽至 单格 ≤5%(≥0.95×)",
+      cons="GVR 骨架强制;冷启动 — 禁旧 champion/弃用分析,仅 op26 REPORT 事实 + PR#16457 源码摘录;58 workload(28 BS1 + 30 BS 扩展)",
+      code=f"{KFP}/harvest/fresh_r3_82e2", data=f"{KFP}/ab_fresh82e2p.json · gvr-topk-pr16457-fresh/RESUME_FRESH.md",
+      note="**平台缺陷: 2×fable-5 槽位 org 限额 0 rpm(429)秒死,有效 4 agent/轮,pool 冻结不可换**;3 轮停滞收敛;胜格集中 4k 小格,32K-512K 主战场 0.87-0.95。测量陷阱三连已实锤并固化(quick_ab/RESUME): CUDA-event 大 n(post-cr ≥128K)PR 头 cuteDSL host 税 ~1.1ms/call 只认 nsys · TORCH_CUDA_ARCH_LIST=10.0a 强制 · b200-027 overlay 满 TMPDIR=/dev/shm"),
+ dict(a="frb", id="xp49vmaw193c90sthdzyk0av9c", name="gvr-topk-fresh-banded(fork 再战)", st="Running", rd="4-8",
+      internal="0.87(起步)", local="—(进行中)", t0="07-24 ~06:2x", t1="—", cost="进行中", own="fresh 会话(fork)",
+      goal="分带 bar 重定标: Band A(ISL 32K-1M) gm≥1.60 且 ≥0.95/格;Band B(4K-32K) gm≥1.00 且 ≥0.95/格",
+      cons="fork 冻结继承 fresh 的 pool(2 fable-5 死槽随行,有效 4/轮)与 workloads;--append-prompt steering: 勿碰 4k 平台地板格 / 大 N 1.6× 唯一杠杆 = 砍行流量到 ~1 遍 / r1-3 GO+dead-end 清单",
+      code="—(进行中)", data=f"{KFP}/gvr-topk-pr16457-fresh/fork_steering_banded.md · {KFP}/ACCEPTANCE_DELTA_20260723.md",
+      note="forked from round 4, rounds 4-8, stagnation 4;终判分带判卷(外部 nsys cold-L2)"),
+ dict(a="ra", id="rd06zd9zf55jdfxfr5z077t6wg", name="gvr-topk-bs1-recal(战役 A)", st="Running", rd="1/10",
+      internal="0.35(r1 早期,种子 floor 未立)", local="—(进行中)", t0="07-24 06:07", t1="—", cost="cap $1200", own="本会话(recal 线)",
+      goal="bar 重定标: BS=1 865 格 gm≥1.60 + 单格回退 ≤5% + 全 exact;战役 B(gvr-topk-bsx-recal, BS2-1024 gm≥1.25 — oracle≈1.44 之下)待 A 收口后启动",
+      cons="GVR 骨架;**R4 champion 28dc11f6 种子放开(用户 07-24 批准)** — 源码经 --asset 附入(平台 prompt 上限 32KB);弱区攻击序 32K-64K 全模型 > V3.2 K2048@8K-16K > 128K-256K;禁回吐 4k-8k/512K-1M 强区",
+      code=f"{KFP}/gvr-topk-bs1-recal/(seed_r4_champion.cu + prompt.md)",
+      data=f"{KFP}/gvr-topk-bs1-recal/RESUME_RECAL.md · monitor_recal.jsonl",
+      note="pool 换血修 fresh 死槽教训(2×claude opus-4.8 high + 2×codex gpt-5.6-sol high + 2×n3 opus-4.8, 无 fable-5);10 轮/stagnation 5(fresh 3 轮即停的修正);fresh 战役 6 条 nsys 验证技术事实注入 prompt"),
+ dict(a="b40", id="gspn6jvr…(v1) / pq3hwx7eh94k…(v2)", name="gvr-topk-bs40 v1 + v2", st="v1 Cancelled / v2 Running", rd="1",
+      internal="0.82 / 0.45", local="—", t0="07-24 ~03:3x / ~05:0x", t1="—", cost="进行中", own="**另一会话**",
+      goal="BS 侧新线(bs40 系;详情归属另一会话)", cons="未知(另一会话)", code="未知", data="未知",
+      note="v1 跑 1h22m 止损重发 v2"),
+ dict(a="d3", id="tbk1d2yhks46…(fp4) / 1expg9bm4x6m…(fp8)", name="dsl-fp4/fp8-paged-mqa-logits(二批)", st="Running ×2", rd="1",
+      internal="— / 0.31", local="—", t0="07-24 ~06:1x", t1="—", cost="进行中", own="**另一会话**",
+      goal="DSL MQA-logits 线二批重跑(一批 fp4 1.04 / fp8 0.83 收口后)", cons="未知", code="未知", data="未知", note=""),
  dict(a="d1", id="9dprgt29j515d75q1b6gyyqw1g", name="dsl-fp4-paged-mqa-logits", st="Completed", rd=3,
       internal="1.04", local="未复核(本会话外)", t0="07-23 15:58", t1="07-23 ~22:2x", cost="未核", own="**另一会话**",
       goal="cuteDSL FP4 paged-MQA logits 算子", cons="未知", code="未知", data="未知", note=""),
@@ -88,6 +111,10 @@ PROMPTS = {  # anchor -> [(label, path)]
     "r5b": [("campaign prompt(v2, 物化 safetensors 版)", "gvr-topk-bs2x-v2/prompt.md")],
     "r5c": [("继承 v2 prompt(不变)", "gvr-topk-bs2x-v2/prompt.md"),
             ("fork --append-prompt(steering 追加段)", "r5_bs/fork_steering.md")],
+    "fr": [("campaign prompt(冷启动版)", "gvr-topk-pr16457-fresh/prompt.md")],
+    "frb": [("继承 fresh prompt(不变)", "gvr-topk-pr16457-fresh/prompt.md"),
+            ("fork --append-prompt(分带 steering)", "gvr-topk-pr16457-fresh/fork_steering_banded.md")],
+    "ra": [("campaign prompt(cold60 基底 + bar 放宽补丁 + R4 种子章节;源码走 --asset)", "gvr-topk-bs1-recal/prompt.md")],
 }
 
 
@@ -209,7 +236,8 @@ G = []
 LANE_BG = [(16, 240, "#f8fafd", "第一 lineage(BS=1 → 收口后 BS-scaling 直系延伸)· 07-21 → 07-22 · ⚠ 骨架合规注记见图底"),
            (286, 128, "#f2faf5", "第二 lineage R4(BS=1 冷启动, 骨架硬锁)· 07-22 → 07-23 · ✓ 满足 GVR 优化原始要求与约束(preIdx 先验+secant-log+精确 refine 三要素完整合规, 三 Bar 全达成)"),
            (444, 190, "#f8fafd", "R5(BS=2-1024)· 07-22 → 07-24"),
-           (664, 178, "#faf8fd", "另一会话(含 r3_v11 批量化并行线)")]
+           (664, 178, "#faf8fd", "另一会话(含 r3_v11 批量化并行线)"),
+           (862, 152, "#f5fbf8", "07-24 再战多线: bs1-recal(R4 种子放开, 本会话) · fresh-banded fork(fresh 会话) · bs40 / dsl 二批(另两会话)")]
 for y, h, col, lab in LANE_BG:
     G.append(f'<rect x="8" y="{y}" width="1104" height="{h}" rx="10" fill="{col}" stroke="#e3e9f2"/>')
     G.append(f'<text x="20" y="{y + 20}" class="lane">{lab}</text>')
@@ -281,16 +309,29 @@ G.append('<g class="n other"><rect x="28" y="{y}" width="456" height="46" rx="9"
          '<text x="256" y="{t2}" text-anchor="middle">发现: 寄存器驻留在高 BS 占用锁死 1 CTA/SM(该结论已注入 R5 prompt)</text></g>'.format(y=Y4+66, t1=Y4+84, t2=Y4+100))
 G.append(f'<a href="{GH}kf/gvr-topk-r3v11-bs" target="_blank" class="gh"><text x="560" y="{Y4+95}">⧉ github: kf/gvr-topk-r3v11-bs(+ kf/gvr-topk-r3v11)</text></a>')
 
-# ---- skeleton-compliance annotation between lane1 and lane2
-G.append('<g class="warn"><rect x="8" y="862" width="1104" height="158" rx="10"/>'
-         '<text x="24" y="886" font-weight="700">⚠ 骨架合规注记(第一 lineage)</text>'
-         '<text x="24" y="910">· 终版算子 c74f_sbx / compA / compB 源码 0 次引用 pre_idx — preIdx 先验被整体放弃,实际走向 直方图前缀阈值梯 + radix 精确尾(GVR 三要素仅存 b 变体 + c)。</text>'
-         '<text x="24" y="934">· 依据 R3_LEDGER D4(用户 2026-07-22 裁定): Bar-first 放宽骨架 — (a) 先验由实测证据废止(12 项证伪 + hint 挂载 WASH 1.0001),(b) 保留为直方图前缀阈值精化,(c) 精确 refine 完整保留。</text>'
-         '<text x="24" y="958">· 两分支代际关系: compB = c74fsbx 直系升级(+topk_mid 中段 rung 治 N=16387 弱带 +19% · K2048 专用 v30::topk_coop 梯 · aefm::topk_fast 非协作快尾),对 c74fsbx +8.1%。</text>'
-         '<text x="24" y="982">· ⇒ 1.8267× 与 1.6828× 均为"放宽骨架"口径,不可与硬锁骨架的 R4 1.6531× 直接混比;R4 因此立项(真 GVR: P1 消费 pre_idx),差值 ~10% = 先验约束实测代价。</text>'
-         '<text x="24" y="1006">· 两分支分母亦不同: c74fsbx vs 旧 head e6fdbfac3d;compB vs R3 时点 head(已含 #16424 优化)。</text></g>')
+# ---- Lane 5: 07-24 re-scoped campaigns
+Y5 = 890
+G.append(node(28, Y5, 230, 62, "ra", ["gvr-topk-bs1-recal(战役A)", "R4 种子 + bar 重定标(≤5% 回退)", "Running · 10 轮 · cap $1200"]))
+G.append(node(318, Y5, 220, 62, "frb", ["gvr-topk-fresh-banded", "fork r4-8 · 分带 bar", "Running(2 死槽随行)"], cls="n other"))
+G.append(node(598, Y5, 200, 62, "b40", ["bs40 v1→v2", "v1 止损 · v2 Running r1"], cls="n other"))
+G.append(node(858, Y5, 182, 62, "d3", ["dsl 二批 fp4/fp8", "Running r1 ×2"], cls="n other"))
+# R4 champion --seed--> bs1-recal (dashed, routed along right margin between lanes)
+G.append(f'<path d="M738,390 L1108,390 L1108,856 L143,856 L143,{Y5 - 6}" class="e d" marker-end="url(#arr)"/>')
+G.append(f'<text x="200" y="852" class="elab">R4 champion 28dc11f6 作种子(用户 07-24 批准, --asset 附入)</text>')
+# fresh -> fresh-banded fork (dashed)
+G.append(f'<path d="M917,764 L917,872 L428,872 L428,{Y5 - 6}" class="e d" marker-end="url(#arr)"/>')
+G.append(f'<text x="620" y="868" class="elab">收口判读(nsys 0.952)→ fork + 分带 steering</text>')
 
-SVG = ('<svg viewBox="0 0 1120 1032" xmlns="http://www.w3.org/2000/svg" style="width:100%">'
+# ---- skeleton-compliance annotation between lane1 and lane2
+G.append('<g class="warn"><rect x="8" y="1030" width="1104" height="158" rx="10"/>'
+         '<text x="24" y="1054" font-weight="700">⚠ 骨架合规注记(第一 lineage)</text>'
+         '<text x="24" y="1078">· 终版算子 c74f_sbx / compA / compB 源码 0 次引用 pre_idx — preIdx 先验被整体放弃,实际走向 直方图前缀阈值梯 + radix 精确尾(GVR 三要素仅存 b 变体 + c)。</text>'
+         '<text x="24" y="1102">· 依据 R3_LEDGER D4(用户 2026-07-22 裁定): Bar-first 放宽骨架 — (a) 先验由实测证据废止(12 项证伪 + hint 挂载 WASH 1.0001),(b) 保留为直方图前缀阈值精化,(c) 精确 refine 完整保留。</text>'
+         '<text x="24" y="1126">· 两分支代际关系: compB = c74fsbx 直系升级(+topk_mid 中段 rung 治 N=16387 弱带 +19% · K2048 专用 v30::topk_coop 梯 · aefm::topk_fast 非协作快尾),对 c74fsbx +8.1%。</text>'
+         '<text x="24" y="1150">· ⇒ 1.8267× 与 1.6828× 均为"放宽骨架"口径,不可与硬锁骨架的 R4 1.6531× 直接混比;R4 因此立项(真 GVR: P1 消费 pre_idx),差值 ~10% = 先验约束实测代价。</text>'
+         '<text x="24" y="1174">· 两分支分母亦不同: c74fsbx vs 旧 head e6fdbfac3d;compB vs R3 时点 head(已含 #16424 优化)。</text></g>')
+
+SVG = ('<svg viewBox="0 0 1120 1200" xmlns="http://www.w3.org/2000/svg" style="width:100%">'
        '<defs><marker id="arr" markerWidth="9" markerHeight="9" refX="7" refY="4.5" '
        'orient="auto"><path d="M0,0 L8,4.5 L0,9 z" fill="#7f93b3"/></marker></defs>'
        '<style>'
@@ -336,10 +377,11 @@ pre.pmt {{ background: #f6f8fb; border: 1px solid #d6dde8; border-radius: 8px;
 .sw {{ display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 4px; vertical-align: -1px; }}
 </style></head><body>
 <h1>KernelFactory campaigns 台账索引(loncheng@nvidia.com,2026-07-21 → 07-24)</h1>
-<p>共 18 个 campaign(本会话系 8 + 另一会话 10)。判决口径:内部 speedup = KF 平台
-(含 ~15µs eval 地板,只作轮内排序);<b>本地 nsys 复核 = B200 cold-L2 配对纯 kernel
-时间(ship 判据)</b>。KF 总花费(本会话系,终账):<b>$3196.93</b>
-(第一期 ≈$690 + R3 $761 + R4 $1110.62 + R5 $1325.31)。</p>
+<p>共 24 个 campaign(GVR 四条血统: 第一 lineage / R4 冷启动 / R5 BS / fresh 冷启动→banded fork + recal 再战;另有 DSL 与 bs40 并行线)。
+判决口径:内部 speedup = KF 平台(含 ~15µs eval 地板,只作轮内排序);<b>本地 nsys 复核 = B200 cold-L2 配对纯 kernel
+时间(ship 判据)</b>。KF 花费:已收口 <b>$3833.36</b>
+(第一期 ≈$690 + R3 $761 + R4 $1110.62 + R5 $1325.31 + fresh $636.43),另有 4 场 Running 累积中(bs1-recal cap $1200)。
+<span class="dim">更新: 2026-07-24(战役 A gvr-topk-bs1-recal 启动 + fresh 收口判读 + banded fork)</span></p>
 
 <h2>① 任务关系图(可点击节点跳转对应卡片;hover 高亮;虚线 = 知识/材料流)</h2>
 <p class="legend"><span><span class="sw" style="background:#eef3fb;border:1px solid #7f93b3"></span>campaign</span>

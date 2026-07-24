@@ -23,22 +23,23 @@ pre.pmt { background: #f6f8fb; border: 1px solid #d6dde8; border-radius: 8px;
 .sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 4px; vertical-align: -1px; }
 </style></head><body>
 <h1>KernelFactory campaigns 台账索引(loncheng@nvidia.com,2026-07-21 → 07-24)</h1>
-<p>共 18 个 campaign(本会话系 8 + 另一会话 10)。判决口径:内部 speedup = KF 平台
-(含 ~15µs eval 地板,只作轮内排序);<b>本地 nsys 复核 = B200 cold-L2 配对纯 kernel
-时间(ship 判据)</b>。KF 总花费(本会话系,终账):<b>$3196.93</b>
-(第一期 ≈$690 + R3 $761 + R4 $1110.62 + R5 $1325.31)。</p>
+<p>共 24 个 campaign(GVR 四条血统: 第一 lineage / R4 冷启动 / R5 BS / fresh 冷启动→banded fork + recal 再战;另有 DSL 与 bs40 并行线)。
+判决口径:内部 speedup = KF 平台(含 ~15µs eval 地板,只作轮内排序);<b>本地 nsys 复核 = B200 cold-L2 配对纯 kernel
+时间(ship 判据)</b>。KF 花费:已收口 <b>$3833.36</b>
+(第一期 ≈$690 + R3 $761 + R4 $1110.62 + R5 $1325.31 + fresh $636.43),另有 4 场 Running 累积中(bs1-recal cap $1200)。
+<span class="dim">更新: 2026-07-24(战役 A gvr-topk-bs1-recal 启动 + fresh 收口判读 + banded fork)</span></p>
 
 <h2>① 任务关系图(可点击节点跳转对应卡片;hover 高亮;虚线 = 知识/材料流)</h2>
 <p class="legend"><span><span class="sw" style="background:#eef3fb;border:1px solid #7f93b3"></span>campaign</span>
 <span><span class="sw" style="background:#fdeee3;border:1px solid #c98a4b"></span>失败/止损</span>
 <span><span class="sw" style="background:#e7f5ec;border:1px solid #5c9a74"></span>产出(champion/分支/报告)</span>
 <span><span class="sw" style="background:#f2eefb;border:1px solid #8d7fb3"></span>另一会话</span></p>
-<svg viewBox="0 0 1120 1032" xmlns="http://www.w3.org/2000/svg" style="width:100%"><defs><marker id="arr" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L8,4.5 L0,9 z" fill="#7f93b3"/></marker></defs><style>.n rect{fill:#eef3fb;stroke:#7f93b3;stroke-width:1.3}.n text{font:12px sans-serif;fill:#1a2233}.n:hover rect{fill:#dbe7fb;stroke:#1a2233;stroke-width:2}.n.bad rect{fill:#fdeee3;stroke:#c98a4b}.n.other rect{fill:#f2eefb;stroke:#8d7fb3}.o rect{fill:#e7f5ec;stroke:#5c9a74;stroke-width:1.2}.o text{font:11.5px sans-serif;fill:#173d27}.gh text{font:11px ui-monospace,monospace;fill:#23508f;text-decoration:underline}.gh:hover text{fill:#0b2f66}.e{fill:none;stroke:#7f93b3;stroke-width:1.6}.e.d{stroke-dasharray:5,4;stroke:#a9b6ca}.elab{font:10.5px sans-serif;fill:#55627a}.lane{font:600 13px sans-serif;fill:#55627a}.warn rect{fill:#fff8ec;stroke:#c98a4b;stroke-width:1.2}.warn text{font:12px sans-serif;fill:#6b4a1b}</style><rect x="8" y="16" width="1104" height="240" rx="10" fill="#f8fafd" stroke="#e3e9f2"/><text x="20" y="36" class="lane">第一 lineage(BS=1 → 收口后 BS-scaling 直系延伸)· 07-21 → 07-22 · ⚠ 骨架合规注记见图底</text><rect x="8" y="286" width="1104" height="128" rx="10" fill="#f2faf5" stroke="#e3e9f2"/><text x="20" y="306" class="lane">第二 lineage R4(BS=1 冷启动, 骨架硬锁)· 07-22 → 07-23 · ✓ 满足 GVR 优化原始要求与约束(preIdx 先验+secant-log+精确 refine 三要素完整合规, 三 Bar 全达成)</text><rect x="8" y="444" width="1104" height="190" rx="10" fill="#f8fafd" stroke="#e3e9f2"/><text x="20" y="464" class="lane">R5(BS=2-1024)· 07-22 → 07-24</text><rect x="8" y="664" width="1104" height="178" rx="10" fill="#faf8fd" stroke="#e3e9f2"/><text x="20" y="684" class="lane">另一会话(含 r3_v11 批量化并行线)</text><a href="#c1" class="n"><rect x="28" y="66" width="168" height="62" rx="9"/><text x="112.0" y="85.0" text-anchor="middle"><tspan x="112.0" dy="0">campaign-1 bs1-real</tspan><tspan x="112.0" dy="1.2em">2轮 · 内部 1.34</tspan><tspan x="112.0" dy="1.2em">$690</tspan></text></a><g class="o"><rect x="252" y="66" width="210" height="62" rx="9"/><text x="357.0" y="85.0" text-anchor="middle"><tspan x="357.0" dy="0">c74f_sbx 1.6828×(865格)</tspan><tspan x="357.0" dy="1.2em">⚠ 无 pre_idx(放宽骨架)</tspan></text><a href="https://github.com/longcheng-nv/TensorRT-LLM/tree/kf/gvr-topk-c74fsbx" target="_blank" class="gh"><text x="357.0" y="117.0" text-anchor="middle">⧉ github: kf/gvr-topk-c74fsbx</text></a></g><a href="#r3" class="n"><rect x="518" y="66" width="168" height="62" rx="9"/><text x="602.0" y="85.0" text-anchor="middle"><tspan x="602.0" dy="0">gvr-topk-r3</tspan><tspan x="602.0" dy="1.2em">4轮 · 内部 1.11</tspan><tspan x="602.0" dy="1.2em">$761</tspan></text></a><g class="o"><rect x="742" y="66" width="246" height="62" rx="9"/><text x="865.0" y="85.0" text-anchor="middle"><tspan x="865.0" dy="0">compB 1.8267×(865格 · 0回退)</tspan><tspan x="865.0" dy="1.2em">= c74fsbx + topk_mid/coop/fast</tspan></text><a href="https://github.com/longcheng-nv/TensorRT-LLM/tree/kf/gvr-topk-compB" target="_blank" class="gh"><text x="865.0" y="117.0" text-anchor="middle">⧉ github: kf/gvr-topk-compB</text></a></g><a href="#kf1" class="n bad"><rect x="28" y="150" width="190" height="44" rx="9"/><text x="123.0" y="176.0" text-anchor="middle"><tspan x="123.0" dy="0">baseline 验证 Failed(D1)</tspan></text></a><line x1="196" y1="97" x2="246" y2="97" class="e" marker-end="url(#arr)"/><text x="224" y="90" class="elab" text-anchor="middle">产出+graft</text><line x1="462" y1="97" x2="512" y2="97" class="e" marker-end="url(#arr)"/><text x="490" y="90" class="elab" text-anchor="middle">作 baseline</text><line x1="686" y1="97" x2="736" y2="97" class="e" marker-end="url(#arr)"/><text x="714" y="90" class="elab" text-anchor="middle">复合+graft</text><path d="M123,150 L123,138 L560,138 L560,134" class="e d" marker-end="url(#arr)"/><g class="o"><rect x="742" y="150" width="246" height="62" rx="9"/><text x="865.0" y="169.0" text-anchor="middle"><tspan x="865.0" dy="0">§7.8 BS-scaling 实测(收口即测)</tspan><tspan x="865.0" dy="1.2em">BS=1 全胜; crossover@BS=2;</tspan><tspan x="865.0" dy="1.2em">bs1024 批式臂快 45-125× ⇒ BS==1 门</tspan></text></g><line x1="865" y1="128" x2="865" y2="144" class="e" marker-end="url(#arr)"/><g class="n other"><rect x="252" y="150" width="236" height="90" rx="9"/><text x="370" y="167" text-anchor="middle">kf/compb-bs-ext(另一会话)</text><text x="370" y="182" text-anchor="middle">tp4 mid-BS 融合臂 + 统一 dispatcher</text><text x="370" y="197" text-anchor="middle">baseline 实测 gm 1.597×(BS8-1024, 48/48 exact)</text><text x="370" y="212" text-anchor="middle">stage2 终局留另一会话(门 gm≥2.0/min≥1.2)</text></g><a href="https://github.com/longcheng-nv/TensorRT-LLM/tree/kf/compb-bs-ext" target="_blank" class="gh"><text x="370" y="228" text-anchor="middle">⧉ github: kf/compb-bs-ext</text></a><line x1="742" y1="181" x2="494" y2="181" class="e" marker-end="url(#arr)"/><text x="615" y="174" class="elab" text-anchor="middle">扩 BS>1</text><a href="#r4f" class="n bad"><rect x="28" y="336" width="168" height="62" rx="9"/><text x="112.0" y="363.0" text-anchor="middle"><tspan x="112.0" dy="0">baseline-eval</tspan><tspan x="112.0" dy="1.2em">Failed(D1 复现)</tspan></text></a><a href="#r4" class="n"><rect x="252" y="336" width="210" height="62" rx="9"/><text x="357.0" y="363.0" text-anchor="middle"><tspan x="357.0" dy="0">gvr-topk-cold60(R4)</tspan><tspan x="357.0" dy="1.2em">3轮 · 内部 1.3701 · $1110</tspan></text></a><g class="o"><rect x="518" y="336" width="220" height="62" rx="9"/><text x="628.0" y="355.0" text-anchor="middle"><tspan x="628.0" dy="0">champion 28dc11f6 ✓ 骨架合规</tspan><tspan x="628.0" dy="1.2em">865格 1.6531× · 0 回退 · 真 GVR</tspan></text><a href="https://github.com/longcheng-nv/TensorRT-LLM/tree/kf/r4-champion-final-bs1" target="_blank" class="gh"><text x="628.0" y="387.0" text-anchor="middle">⧉ github: kf/r4-champion-final-bs1</text></a></g><g class="o"><rect x="794" y="336" width="246" height="62" rx="9"/><text x="917.0" y="355.0" text-anchor="middle"><tspan x="917.0" dy="0">R4_CLOSEOUT.md</tspan><tspan x="917.0" dy="1.2em">R4_CHAMPION_BS1_REPORT.html</tspan><tspan x="917.0" dy="1.2em">grid_r4r3cg.csv / grid_r4pr2.csv</tspan></text></g><line x1="196" y1="367" x2="246" y2="367" class="e d" marker-end="url(#arr)"/><text x="224" y="360" class="elab" text-anchor="middle">改走 baselines.jsonl</text><line x1="462" y1="367" x2="512" y2="367" class="e" marker-end="url(#arr)"/><text x="490" y="360" class="elab" text-anchor="middle">round-3 收割</text><line x1="738" y1="367" x2="788" y2="367" class="e" marker-end="url(#arr)"/><path d="M988,97 L1072,97 L1072,322 L357,322 L357,330" class="e d" marker-end="url(#arr)"/><text x="1092" y="128" class="elab" writing-mode="tb">仅注入: 死路/陷阱/REPORT 事实</text><a href="#r5a" class="n bad"><rect x="28" y="494" width="168" height="56" rx="9"/><text x="112.0" y="518.0" text-anchor="middle"><tspan x="112.0" dy="0">bs2x v1 · $9</tspan><tspan x="112.0" dy="1.2em">custom_inputs 全 0%</tspan></text></a><a href="#r5b" class="n"><rect x="252" y="494" width="210" height="56" rx="9"/><text x="357.0" y="518.0" text-anchor="middle"><tspan x="357.0" dy="0">bs2x-v2 · 3轮 · $719</tspan><tspan x="357.0" dy="1.2em">内部 0.98 · lineage DQ</tspan></text></a><a href="#r5c" class="n"><rect x="518" y="494" width="220" height="56" rx="9"/><text x="628.0" y="518.0" text-anchor="middle"><tspan x="628.0" dy="0">bs2x-v3 fork(rounds3-5)</tspan><tspan x="628.0" dy="1.2em">内部 1.0756 · $597</tspan></text></a><g class="o"><rect x="794" y="488" width="246" height="46" rx="9"/><text x="917.0" y="507.0" text-anchor="middle"><tspan x="917.0" dy="0">champion 156ab438(全 exact)</tspan><tspan x="917.0" dy="1.2em">750格 0.9862 → 目标未达成</tspan></text></g><g class="o"><rect x="794" y="542" width="246" height="36" rx="9"/><text x="917.0" y="556.0" text-anchor="middle"><tspan x="917.0" dy="0">fork 留档 →</tspan></text><a href="https://github.com/longcheng-nv/TensorRT-LLM/tree/kf/r5-champion-bs-combined" target="_blank" class="gh"><text x="917.0" y="572.0" text-anchor="middle">⧉ github: kf/r5-champion-bs-combined</text></a></g><g class="o"><rect x="794" y="586" width="246" height="36" rx="9"/><text x="917.0" y="608.0" text-anchor="middle"><tspan x="917.0" dy="0">R5_CLOSEOUT.md · grid_r5g_final.csv</tspan></text></g><line x1="196" y1="522" x2="246" y2="522" class="e" marker-end="url(#arr)"/><text x="224" y="515" class="elab" text-anchor="middle">重构 workloads</text><line x1="462" y1="522" x2="512" y2="522" class="e" marker-end="url(#arr)"/><text x="490" y="515" class="elab" text-anchor="middle">cancel+fork+steering</text><line x1="738" y1="514" x2="788" y2="514" class="e" marker-end="url(#arr)"/><path d="M738,534 L766,534 L766,560 L788,560" class="e" marker-end="url(#arr)"/><path d="M738,534 L760,534 L760,604 L788,604" class="e" marker-end="url(#arr)"/><line x1="560" y1="398" x2="560" y2="482" class="e d" marker-end="url(#arr)"/><text x="572" y="430" class="elab">champion digest → prompt 起点</text><a href="#d0" class="n other"><rect x="28" y="712" width="210" height="52" rx="9"/><text x="133.0" y="734.0" text-anchor="middle"><tspan x="133.0" dy="0">dsl-fp4/fp8 起跑 ×7</tspan><tspan x="133.0" dy="1.2em">Failed×5 · round0×2</tspan></text></a><a href="#d2" class="n other"><rect x="294" y="712" width="190" height="52" rx="9"/><text x="389.0" y="742.0" text-anchor="middle"><tspan x="389.0" dy="0">dsl-fp8 · 3轮 · 0.83</tspan></text></a><a href="#d1" class="n other"><rect x="540" y="712" width="190" height="52" rx="9"/><text x="635.0" y="742.0" text-anchor="middle"><tspan x="635.0" dy="0">dsl-fp4 · 3轮 · 1.04</tspan></text></a><a href="#fr" class="n other"><rect x="794" y="712" width="246" height="52" rx="9"/><text x="917.0" y="734.0" text-anchor="middle"><tspan x="917.0" dy="0">gvr-topk-pr16457-fresh</tspan><tspan x="917.0" dy="1.2em">3轮 · 0.84 · 未本地复核</tspan></text></a><line x1="238" y1="738" x2="288" y2="738" class="e" marker-end="url(#arr)"/><line x1="484" y1="738" x2="534" y2="738" class="e" marker-end="url(#arr)"/><g class="n other"><rect x="28" y="778" width="456" height="46" rx="9"/><text x="256" y="796" text-anchor="middle">op38_r3v11_bs: grid.y 批量化 R4 中期 champion r3_v11(与 R5 平行的第三条 BS 线)</text><text x="256" y="812" text-anchor="middle">发现: 寄存器驻留在高 BS 占用锁死 1 CTA/SM(该结论已注入 R5 prompt)</text></g><a href="https://github.com/longcheng-nv/TensorRT-LLM/tree/kf/gvr-topk-r3v11-bs" target="_blank" class="gh"><text x="560" y="807">⧉ github: kf/gvr-topk-r3v11-bs(+ kf/gvr-topk-r3v11)</text></a><g class="warn"><rect x="8" y="862" width="1104" height="158" rx="10"/><text x="24" y="886" font-weight="700">⚠ 骨架合规注记(第一 lineage)</text><text x="24" y="910">· 终版算子 c74f_sbx / compA / compB 源码 0 次引用 pre_idx — preIdx 先验被整体放弃,实际走向 直方图前缀阈值梯 + radix 精确尾(GVR 三要素仅存 b 变体 + c)。</text><text x="24" y="934">· 依据 R3_LEDGER D4(用户 2026-07-22 裁定): Bar-first 放宽骨架 — (a) 先验由实测证据废止(12 项证伪 + hint 挂载 WASH 1.0001),(b) 保留为直方图前缀阈值精化,(c) 精确 refine 完整保留。</text><text x="24" y="958">· 两分支代际关系: compB = c74fsbx 直系升级(+topk_mid 中段 rung 治 N=16387 弱带 +19% · K2048 专用 v30::topk_coop 梯 · aefm::topk_fast 非协作快尾),对 c74fsbx +8.1%。</text><text x="24" y="982">· ⇒ 1.8267× 与 1.6828× 均为"放宽骨架"口径,不可与硬锁骨架的 R4 1.6531× 直接混比;R4 因此立项(真 GVR: P1 消费 pre_idx),差值 ~10% = 先验约束实测代价。</text><text x="24" y="1006">· 两分支分母亦不同: c74fsbx vs 旧 head e6fdbfac3d;compB vs R3 时点 head(已含 #16424 优化)。</text></g></svg>
+<svg viewBox="0 0 1120 1200" xmlns="http://www.w3.org/2000/svg" style="width:100%"><defs><marker id="arr" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L8,4.5 L0,9 z" fill="#7f93b3"/></marker></defs><style>.n rect{fill:#eef3fb;stroke:#7f93b3;stroke-width:1.3}.n text{font:12px sans-serif;fill:#1a2233}.n:hover rect{fill:#dbe7fb;stroke:#1a2233;stroke-width:2}.n.bad rect{fill:#fdeee3;stroke:#c98a4b}.n.other rect{fill:#f2eefb;stroke:#8d7fb3}.o rect{fill:#e7f5ec;stroke:#5c9a74;stroke-width:1.2}.o text{font:11.5px sans-serif;fill:#173d27}.gh text{font:11px ui-monospace,monospace;fill:#23508f;text-decoration:underline}.gh:hover text{fill:#0b2f66}.e{fill:none;stroke:#7f93b3;stroke-width:1.6}.e.d{stroke-dasharray:5,4;stroke:#a9b6ca}.elab{font:10.5px sans-serif;fill:#55627a}.lane{font:600 13px sans-serif;fill:#55627a}.warn rect{fill:#fff8ec;stroke:#c98a4b;stroke-width:1.2}.warn text{font:12px sans-serif;fill:#6b4a1b}</style><rect x="8" y="16" width="1104" height="240" rx="10" fill="#f8fafd" stroke="#e3e9f2"/><text x="20" y="36" class="lane">第一 lineage(BS=1 → 收口后 BS-scaling 直系延伸)· 07-21 → 07-22 · ⚠ 骨架合规注记见图底</text><rect x="8" y="286" width="1104" height="128" rx="10" fill="#f2faf5" stroke="#e3e9f2"/><text x="20" y="306" class="lane">第二 lineage R4(BS=1 冷启动, 骨架硬锁)· 07-22 → 07-23 · ✓ 满足 GVR 优化原始要求与约束(preIdx 先验+secant-log+精确 refine 三要素完整合规, 三 Bar 全达成)</text><rect x="8" y="444" width="1104" height="190" rx="10" fill="#f8fafd" stroke="#e3e9f2"/><text x="20" y="464" class="lane">R5(BS=2-1024)· 07-22 → 07-24</text><rect x="8" y="664" width="1104" height="178" rx="10" fill="#faf8fd" stroke="#e3e9f2"/><text x="20" y="684" class="lane">另一会话(含 r3_v11 批量化并行线)</text><rect x="8" y="862" width="1104" height="152" rx="10" fill="#f5fbf8" stroke="#e3e9f2"/><text x="20" y="882" class="lane">07-24 再战多线: bs1-recal(R4 种子放开, 本会话) · fresh-banded fork(fresh 会话) · bs40 / dsl 二批(另两会话)</text><a href="#c1" class="n"><rect x="28" y="66" width="168" height="62" rx="9"/><text x="112.0" y="85.0" text-anchor="middle"><tspan x="112.0" dy="0">campaign-1 bs1-real</tspan><tspan x="112.0" dy="1.2em">2轮 · 内部 1.34</tspan><tspan x="112.0" dy="1.2em">$690</tspan></text></a><g class="o"><rect x="252" y="66" width="210" height="62" rx="9"/><text x="357.0" y="85.0" text-anchor="middle"><tspan x="357.0" dy="0">c74f_sbx 1.6828×(865格)</tspan><tspan x="357.0" dy="1.2em">⚠ 无 pre_idx(放宽骨架)</tspan></text><a href="https://github.com/longcheng-nv/TensorRT-LLM/tree/kf/gvr-topk-c74fsbx" target="_blank" class="gh"><text x="357.0" y="117.0" text-anchor="middle">⧉ github: kf/gvr-topk-c74fsbx</text></a></g><a href="#r3" class="n"><rect x="518" y="66" width="168" height="62" rx="9"/><text x="602.0" y="85.0" text-anchor="middle"><tspan x="602.0" dy="0">gvr-topk-r3</tspan><tspan x="602.0" dy="1.2em">4轮 · 内部 1.11</tspan><tspan x="602.0" dy="1.2em">$761</tspan></text></a><g class="o"><rect x="742" y="66" width="246" height="62" rx="9"/><text x="865.0" y="85.0" text-anchor="middle"><tspan x="865.0" dy="0">compB 1.8267×(865格 · 0回退)</tspan><tspan x="865.0" dy="1.2em">= c74fsbx + topk_mid/coop/fast</tspan></text><a href="https://github.com/longcheng-nv/TensorRT-LLM/tree/kf/gvr-topk-compB" target="_blank" class="gh"><text x="865.0" y="117.0" text-anchor="middle">⧉ github: kf/gvr-topk-compB</text></a></g><a href="#kf1" class="n bad"><rect x="28" y="150" width="190" height="44" rx="9"/><text x="123.0" y="176.0" text-anchor="middle"><tspan x="123.0" dy="0">baseline 验证 Failed(D1)</tspan></text></a><line x1="196" y1="97" x2="246" y2="97" class="e" marker-end="url(#arr)"/><text x="224" y="90" class="elab" text-anchor="middle">产出+graft</text><line x1="462" y1="97" x2="512" y2="97" class="e" marker-end="url(#arr)"/><text x="490" y="90" class="elab" text-anchor="middle">作 baseline</text><line x1="686" y1="97" x2="736" y2="97" class="e" marker-end="url(#arr)"/><text x="714" y="90" class="elab" text-anchor="middle">复合+graft</text><path d="M123,150 L123,138 L560,138 L560,134" class="e d" marker-end="url(#arr)"/><g class="o"><rect x="742" y="150" width="246" height="62" rx="9"/><text x="865.0" y="169.0" text-anchor="middle"><tspan x="865.0" dy="0">§7.8 BS-scaling 实测(收口即测)</tspan><tspan x="865.0" dy="1.2em">BS=1 全胜; crossover@BS=2;</tspan><tspan x="865.0" dy="1.2em">bs1024 批式臂快 45-125× ⇒ BS==1 门</tspan></text></g><line x1="865" y1="128" x2="865" y2="144" class="e" marker-end="url(#arr)"/><g class="n other"><rect x="252" y="150" width="236" height="90" rx="9"/><text x="370" y="167" text-anchor="middle">kf/compb-bs-ext(另一会话)</text><text x="370" y="182" text-anchor="middle">tp4 mid-BS 融合臂 + 统一 dispatcher</text><text x="370" y="197" text-anchor="middle">baseline 实测 gm 1.597×(BS8-1024, 48/48 exact)</text><text x="370" y="212" text-anchor="middle">stage2 终局留另一会话(门 gm≥2.0/min≥1.2)</text></g><a href="https://github.com/longcheng-nv/TensorRT-LLM/tree/kf/compb-bs-ext" target="_blank" class="gh"><text x="370" y="228" text-anchor="middle">⧉ github: kf/compb-bs-ext</text></a><line x1="742" y1="181" x2="494" y2="181" class="e" marker-end="url(#arr)"/><text x="615" y="174" class="elab" text-anchor="middle">扩 BS>1</text><a href="#r4f" class="n bad"><rect x="28" y="336" width="168" height="62" rx="9"/><text x="112.0" y="363.0" text-anchor="middle"><tspan x="112.0" dy="0">baseline-eval</tspan><tspan x="112.0" dy="1.2em">Failed(D1 复现)</tspan></text></a><a href="#r4" class="n"><rect x="252" y="336" width="210" height="62" rx="9"/><text x="357.0" y="363.0" text-anchor="middle"><tspan x="357.0" dy="0">gvr-topk-cold60(R4)</tspan><tspan x="357.0" dy="1.2em">3轮 · 内部 1.3701 · $1110</tspan></text></a><g class="o"><rect x="518" y="336" width="220" height="62" rx="9"/><text x="628.0" y="355.0" text-anchor="middle"><tspan x="628.0" dy="0">champion 28dc11f6 ✓ 骨架合规</tspan><tspan x="628.0" dy="1.2em">865格 1.6531× · 0 回退 · 真 GVR</tspan></text><a href="https://github.com/longcheng-nv/TensorRT-LLM/tree/kf/r4-champion-final-bs1" target="_blank" class="gh"><text x="628.0" y="387.0" text-anchor="middle">⧉ github: kf/r4-champion-final-bs1</text></a></g><g class="o"><rect x="794" y="336" width="246" height="62" rx="9"/><text x="917.0" y="355.0" text-anchor="middle"><tspan x="917.0" dy="0">R4_CLOSEOUT.md</tspan><tspan x="917.0" dy="1.2em">R4_CHAMPION_BS1_REPORT.html</tspan><tspan x="917.0" dy="1.2em">grid_r4r3cg.csv / grid_r4pr2.csv</tspan></text></g><line x1="196" y1="367" x2="246" y2="367" class="e d" marker-end="url(#arr)"/><text x="224" y="360" class="elab" text-anchor="middle">改走 baselines.jsonl</text><line x1="462" y1="367" x2="512" y2="367" class="e" marker-end="url(#arr)"/><text x="490" y="360" class="elab" text-anchor="middle">round-3 收割</text><line x1="738" y1="367" x2="788" y2="367" class="e" marker-end="url(#arr)"/><path d="M988,97 L1072,97 L1072,322 L357,322 L357,330" class="e d" marker-end="url(#arr)"/><text x="1092" y="128" class="elab" writing-mode="tb">仅注入: 死路/陷阱/REPORT 事实</text><a href="#r5a" class="n bad"><rect x="28" y="494" width="168" height="56" rx="9"/><text x="112.0" y="518.0" text-anchor="middle"><tspan x="112.0" dy="0">bs2x v1 · $9</tspan><tspan x="112.0" dy="1.2em">custom_inputs 全 0%</tspan></text></a><a href="#r5b" class="n"><rect x="252" y="494" width="210" height="56" rx="9"/><text x="357.0" y="518.0" text-anchor="middle"><tspan x="357.0" dy="0">bs2x-v2 · 3轮 · $719</tspan><tspan x="357.0" dy="1.2em">内部 0.98 · lineage DQ</tspan></text></a><a href="#r5c" class="n"><rect x="518" y="494" width="220" height="56" rx="9"/><text x="628.0" y="518.0" text-anchor="middle"><tspan x="628.0" dy="0">bs2x-v3 fork(rounds3-5)</tspan><tspan x="628.0" dy="1.2em">内部 1.0756 · $597</tspan></text></a><g class="o"><rect x="794" y="488" width="246" height="46" rx="9"/><text x="917.0" y="507.0" text-anchor="middle"><tspan x="917.0" dy="0">champion 156ab438(全 exact)</tspan><tspan x="917.0" dy="1.2em">750格 0.9862 → 目标未达成</tspan></text></g><g class="o"><rect x="794" y="542" width="246" height="36" rx="9"/><text x="917.0" y="556.0" text-anchor="middle"><tspan x="917.0" dy="0">fork 留档 →</tspan></text><a href="https://github.com/longcheng-nv/TensorRT-LLM/tree/kf/r5-champion-bs-combined" target="_blank" class="gh"><text x="917.0" y="572.0" text-anchor="middle">⧉ github: kf/r5-champion-bs-combined</text></a></g><g class="o"><rect x="794" y="586" width="246" height="36" rx="9"/><text x="917.0" y="608.0" text-anchor="middle"><tspan x="917.0" dy="0">R5_CLOSEOUT.md · grid_r5g_final.csv</tspan></text></g><line x1="196" y1="522" x2="246" y2="522" class="e" marker-end="url(#arr)"/><text x="224" y="515" class="elab" text-anchor="middle">重构 workloads</text><line x1="462" y1="522" x2="512" y2="522" class="e" marker-end="url(#arr)"/><text x="490" y="515" class="elab" text-anchor="middle">cancel+fork+steering</text><line x1="738" y1="514" x2="788" y2="514" class="e" marker-end="url(#arr)"/><path d="M738,534 L766,534 L766,560 L788,560" class="e" marker-end="url(#arr)"/><path d="M738,534 L760,534 L760,604 L788,604" class="e" marker-end="url(#arr)"/><line x1="560" y1="398" x2="560" y2="482" class="e d" marker-end="url(#arr)"/><text x="572" y="430" class="elab">champion digest → prompt 起点</text><a href="#d0" class="n other"><rect x="28" y="712" width="210" height="52" rx="9"/><text x="133.0" y="734.0" text-anchor="middle"><tspan x="133.0" dy="0">dsl-fp4/fp8 起跑 ×7</tspan><tspan x="133.0" dy="1.2em">Failed×5 · round0×2</tspan></text></a><a href="#d2" class="n other"><rect x="294" y="712" width="190" height="52" rx="9"/><text x="389.0" y="742.0" text-anchor="middle"><tspan x="389.0" dy="0">dsl-fp8 · 3轮 · 0.83</tspan></text></a><a href="#d1" class="n other"><rect x="540" y="712" width="190" height="52" rx="9"/><text x="635.0" y="742.0" text-anchor="middle"><tspan x="635.0" dy="0">dsl-fp4 · 3轮 · 1.04</tspan></text></a><a href="#fr" class="n other"><rect x="794" y="712" width="246" height="52" rx="9"/><text x="917.0" y="734.0" text-anchor="middle"><tspan x="917.0" dy="0">gvr-topk-pr16457-fresh</tspan><tspan x="917.0" dy="1.2em">3轮 · 0.84 · 未本地复核</tspan></text></a><line x1="238" y1="738" x2="288" y2="738" class="e" marker-end="url(#arr)"/><line x1="484" y1="738" x2="534" y2="738" class="e" marker-end="url(#arr)"/><g class="n other"><rect x="28" y="778" width="456" height="46" rx="9"/><text x="256" y="796" text-anchor="middle">op38_r3v11_bs: grid.y 批量化 R4 中期 champion r3_v11(与 R5 平行的第三条 BS 线)</text><text x="256" y="812" text-anchor="middle">发现: 寄存器驻留在高 BS 占用锁死 1 CTA/SM(该结论已注入 R5 prompt)</text></g><a href="https://github.com/longcheng-nv/TensorRT-LLM/tree/kf/gvr-topk-r3v11-bs" target="_blank" class="gh"><text x="560" y="807">⧉ github: kf/gvr-topk-r3v11-bs(+ kf/gvr-topk-r3v11)</text></a><a href="#ra" class="n"><rect x="28" y="890" width="230" height="62" rx="9"/><text x="143.0" y="909.0" text-anchor="middle"><tspan x="143.0" dy="0">gvr-topk-bs1-recal(战役A)</tspan><tspan x="143.0" dy="1.2em">R4 种子 + bar 重定标(≤5% 回退)</tspan><tspan x="143.0" dy="1.2em">Running · 10 轮 · cap $1200</tspan></text></a><a href="#frb" class="n other"><rect x="318" y="890" width="220" height="62" rx="9"/><text x="428.0" y="909.0" text-anchor="middle"><tspan x="428.0" dy="0">gvr-topk-fresh-banded</tspan><tspan x="428.0" dy="1.2em">fork r4-8 · 分带 bar</tspan><tspan x="428.0" dy="1.2em">Running(2 死槽随行)</tspan></text></a><a href="#b40" class="n other"><rect x="598" y="890" width="200" height="62" rx="9"/><text x="698.0" y="917.0" text-anchor="middle"><tspan x="698.0" dy="0">bs40 v1→v2</tspan><tspan x="698.0" dy="1.2em">v1 止损 · v2 Running r1</tspan></text></a><a href="#d3" class="n other"><rect x="858" y="890" width="182" height="62" rx="9"/><text x="949.0" y="917.0" text-anchor="middle"><tspan x="949.0" dy="0">dsl 二批 fp4/fp8</tspan><tspan x="949.0" dy="1.2em">Running r1 ×2</tspan></text></a><path d="M738,390 L1108,390 L1108,856 L143,856 L143,884" class="e d" marker-end="url(#arr)"/><text x="200" y="852" class="elab">R4 champion 28dc11f6 作种子(用户 07-24 批准, --asset 附入)</text><path d="M917,764 L917,872 L428,872 L428,884" class="e d" marker-end="url(#arr)"/><text x="620" y="868" class="elab">收口判读(nsys 0.952)→ fork + 分带 steering</text><g class="warn"><rect x="8" y="1030" width="1104" height="158" rx="10"/><text x="24" y="1054" font-weight="700">⚠ 骨架合规注记(第一 lineage)</text><text x="24" y="1078">· 终版算子 c74f_sbx / compA / compB 源码 0 次引用 pre_idx — preIdx 先验被整体放弃,实际走向 直方图前缀阈值梯 + radix 精确尾(GVR 三要素仅存 b 变体 + c)。</text><text x="24" y="1102">· 依据 R3_LEDGER D4(用户 2026-07-22 裁定): Bar-first 放宽骨架 — (a) 先验由实测证据废止(12 项证伪 + hint 挂载 WASH 1.0001),(b) 保留为直方图前缀阈值精化,(c) 精确 refine 完整保留。</text><text x="24" y="1126">· 两分支代际关系: compB = c74fsbx 直系升级(+topk_mid 中段 rung 治 N=16387 弱带 +19% · K2048 专用 v30::topk_coop 梯 · aefm::topk_fast 非协作快尾),对 c74fsbx +8.1%。</text><text x="24" y="1150">· ⇒ 1.8267× 与 1.6828× 均为"放宽骨架"口径,不可与硬锁骨架的 R4 1.6531× 直接混比;R4 因此立项(真 GVR: P1 消费 pre_idx),差值 ~10% = 先验约束实测代价。</text><text x="24" y="1174">· 两分支分母亦不同: c74fsbx vs 旧 head e6fdbfac3d;compB vs R3 时点 head(已含 #16424 优化)。</text></g></svg>
 
 <h2>② 总表</h2>
 <table><tr><th>名称</th><th>ID</th><th>状态</th><th>轮</th><th>内部</th><th>本地 nsys 复核</th>
 <th>开始</th><th>结束</th><th>花费</th><th>归属</th></tr>
-<tr id="row-c1"><td><a href="#c1">gvr-topk-bs1-real(第一期)</a></td><td class="mono">tfb91bvwm972kf…</td><td>Cancelled</td><td>2</td><td>1.3385</td><td>champion c74f_sbx <b>1.6828</b>(865 格, 0 回退)</td><td>07-21 10:15</td><td>07-21 ~18:11</td><td>≈$690</td><td>本会话系(第一 lineage)</td></tr><tr id="row-kf1"><td><a href="#kf1">gvr-topk-r3(baseline 验证失败)</a></td><td class="mono">k7rhy79h015gn3…</td><td>Failed</td><td>0</td><td>—</td><td>—</td><td>07-21 13:36</td><td>+40s</td><td>~0</td><td>本会话系</td></tr><tr id="row-r3"><td><a href="#r3">gvr-topk-r3</a></td><td class="mono">e5q1zgrfhs0z57…</td><td>Cancelled</td><td>4</td><td>1.1111</td><td>operator 复合 compB <b>1.8267</b>(865 格, 0 回退)</td><td>07-22 03:15</td><td>07-22 ~15:49</td><td>$761</td><td>本会话系(第一 lineage R3)</td></tr><tr id="row-r4f"><td><a href="#r4f">R4 baseline-eval(失败)</a></td><td class="mono">6qfpzj957x01z2…</td><td>Failed</td><td>0</td><td>—</td><td>—</td><td>07-22 02:40</td><td>+40s</td><td>~0</td><td>本会话</td></tr><tr id="row-r4"><td><a href="#r4">gvr-topk-cold60(R4 冷启动)</a></td><td class="mono">pra6srbd7h4pqe…</td><td>Cancelled(预算)</td><td>3</td><td>1.3701</td><td>champion 28dc11f6 <b>1.6531</b>(865 格, 865 exact, 0 真实回退)→ 三 Bar 全达成</td><td>07-22 02:48</td><td>07-23 ~14:2x</td><td>$1110.62</td><td>本会话(R4)</td></tr><tr id="row-r5a"><td><a href="#r5a">gvr-topk-bs2x(R5 v1)</a></td><td class="mono">rngnxv95cx5qfd…</td><td>Cancelled(止损)</td><td>2</td><td>—(全 0%)</td><td>—</td><td>07-22 22:04</td><td>07-23 ~05:0x</td><td>$9.38</td><td>本会话(R5)</td></tr><tr id="row-r5b"><td><a href="#r5b">gvr-topk-bs2x-v2(R5 v2)</a></td><td class="mono">vk9m3tetqh165a…</td><td>Cancelled(DQ→fork)</td><td>3</td><td>0.9799</td><td>v23/v39 全格 0.9348/0.9426 + <b>8 例盲区 inexact(DQ)</b></td><td>07-23 06:59</td><td>07-23 ~13:1x</td><td>$719.02</td><td>本会话(R5)</td></tr><tr id="row-r5c"><td><a href="#r5c">gvr-topk-bs2x-v3(R5 fork)</a></td><td class="mono">befh5fh2595es8…</td><td>Cancelled(预算, r5 完成)</td><td>5</td><td>1.0756</td><td>champion 156ab438: <b>全 exact</b>(750+865)但 750 格 gm <b>0.9862</b>/391 回退; BS=1 1.2233(=R4champ×0.743)→ 目标未达成</td><td>07-23 19:23(rounds 3-5)</td><td>07-24 ~07:4x</td><td>$596.91</td><td>本会话(R5)</td></tr><tr id="row-fr"><td><a href="#fr">gvr-topk-pr16457-fresh</a></td><td class="mono">6em6mf55g11g76…</td><td>Completed</td><td>3</td><td>0.84</td><td>未复核(本会话外)</td><td>07-23 21:48</td><td>07-24 ~10:1x</td><td>未核</td><td><b>另一会话</b></td></tr><tr id="row-d1"><td><a href="#d1">dsl-fp4-paged-mqa-logits</a></td><td class="mono">9dprgt29j515d7…</td><td>Completed</td><td>3</td><td>1.04</td><td>未复核(本会话外)</td><td>07-23 15:58</td><td>07-23 ~22:2x</td><td>未核</td><td><b>另一会话</b></td></tr><tr id="row-d2"><td><a href="#d2">dsl-fp8-paged-mqa-logits</a></td><td class="mono">66mcp39jf15g38…</td><td>Completed</td><td>3</td><td>0.83</td><td>未复核(本会话外)</td><td>07-23 15:53</td><td>07-23 ~22:1x</td><td>未核</td><td><b>另一会话</b></td></tr><tr id="row-d0"><td><a href="#d0">dsl-fp4/fp8 早期 7 次(round-0 ×2 + Failed ×5)</a></td><td class="mono">0mv4xsw7… / 3a…</td><td>Completed×2 / Failed×5</td><td>0</td><td>1.00 / —</td><td>—</td><td>07-23 08:22-08:32</td><td>即刻~短</td><td>未核</td><td><b>另一会话</b></td></tr>
+<tr id="row-c1"><td><a href="#c1">gvr-topk-bs1-real(第一期)</a></td><td class="mono">tfb91bvwm972kf…</td><td>Cancelled</td><td>2</td><td>1.3385</td><td>champion c74f_sbx <b>1.6828</b>(865 格, 0 回退)</td><td>07-21 10:15</td><td>07-21 ~18:11</td><td>≈$690</td><td>本会话系(第一 lineage)</td></tr><tr id="row-kf1"><td><a href="#kf1">gvr-topk-r3(baseline 验证失败)</a></td><td class="mono">k7rhy79h015gn3…</td><td>Failed</td><td>0</td><td>—</td><td>—</td><td>07-21 13:36</td><td>+40s</td><td>~0</td><td>本会话系</td></tr><tr id="row-r3"><td><a href="#r3">gvr-topk-r3</a></td><td class="mono">e5q1zgrfhs0z57…</td><td>Cancelled</td><td>4</td><td>1.1111</td><td>operator 复合 compB <b>1.8267</b>(865 格, 0 回退)</td><td>07-22 03:15</td><td>07-22 ~15:49</td><td>$761</td><td>本会话系(第一 lineage R3)</td></tr><tr id="row-r4f"><td><a href="#r4f">R4 baseline-eval(失败)</a></td><td class="mono">6qfpzj957x01z2…</td><td>Failed</td><td>0</td><td>—</td><td>—</td><td>07-22 02:40</td><td>+40s</td><td>~0</td><td>本会话</td></tr><tr id="row-r4"><td><a href="#r4">gvr-topk-cold60(R4 冷启动)</a></td><td class="mono">pra6srbd7h4pqe…</td><td>Cancelled(预算)</td><td>3</td><td>1.3701</td><td>champion 28dc11f6 <b>1.6531</b>(865 格, 865 exact, 0 真实回退)→ 三 Bar 全达成</td><td>07-22 02:48</td><td>07-23 ~14:2x</td><td>$1110.62</td><td>本会话(R4)</td></tr><tr id="row-r5a"><td><a href="#r5a">gvr-topk-bs2x(R5 v1)</a></td><td class="mono">rngnxv95cx5qfd…</td><td>Cancelled(止损)</td><td>2</td><td>—(全 0%)</td><td>—</td><td>07-22 22:04</td><td>07-23 ~05:0x</td><td>$9.38</td><td>本会话(R5)</td></tr><tr id="row-r5b"><td><a href="#r5b">gvr-topk-bs2x-v2(R5 v2)</a></td><td class="mono">vk9m3tetqh165a…</td><td>Cancelled(DQ→fork)</td><td>3</td><td>0.9799</td><td>v23/v39 全格 0.9348/0.9426 + <b>8 例盲区 inexact(DQ)</b></td><td>07-23 06:59</td><td>07-23 ~13:1x</td><td>$719.02</td><td>本会话(R5)</td></tr><tr id="row-r5c"><td><a href="#r5c">gvr-topk-bs2x-v3(R5 fork)</a></td><td class="mono">befh5fh2595es8…</td><td>Cancelled(预算, r5 完成)</td><td>5</td><td>1.0756</td><td>champion 156ab438: <b>全 exact</b>(750+865)但 750 格 gm <b>0.9862</b>/391 回退; BS=1 1.2233(=R4champ×0.743)→ 目标未达成</td><td>07-23 19:23(rounds 3-5)</td><td>07-24 ~07:4x</td><td>$596.91</td><td>本会话(R5)</td></tr><tr id="row-fr"><td><a href="#fr">gvr-topk-pr16457-fresh</a></td><td class="mono">6em6mf55g11g76…</td><td>Completed(CLOSED)</td><td>3</td><td>0.84</td><td>champion 82e2b292 nsys 探针(6 代表格): <b>gm 0.952 / 4 回退 / exact 28/28</b> — 真实 kernel 贴平略输 PR 头,距 bar 无望,判 CLOSED</td><td>07-23 08:17</td><td>07-23 20:49</td><td>$636.43</td><td>fresh 会话(第三 lineage 冷启动)</td></tr><tr id="row-frb"><td><a href="#frb">gvr-topk-fresh-banded(fork 再战)</a></td><td class="mono">xp49vmaw193c90…</td><td>Running</td><td>4-8</td><td>0.87(起步)</td><td>—(进行中)</td><td>07-24 ~06:2x</td><td>—</td><td>进行中</td><td>fresh 会话(fork)</td></tr><tr id="row-ra"><td><a href="#ra">gvr-topk-bs1-recal(战役 A)</a></td><td class="mono">rd06zd9zf55jdf…</td><td>Running</td><td>1/10</td><td>0.35(r1 早期,种子 floor 未立)</td><td>—(进行中)</td><td>07-24 06:07</td><td>—</td><td>cap $1200</td><td>本会话(recal 线)</td></tr><tr id="row-b40"><td><a href="#b40">gvr-topk-bs40 v1 + v2</a></td><td class="mono">gspn6jvr…(v1) …</td><td>v1 Cancelled / v2 Running</td><td>1</td><td>0.82 / 0.45</td><td>—</td><td>07-24 ~03:3x / ~05:0x</td><td>—</td><td>进行中</td><td><b>另一会话</b></td></tr><tr id="row-d3"><td><a href="#d3">dsl-fp4/fp8-paged-mqa-logits(二批)</a></td><td class="mono">tbk1d2yhks46…(…</td><td>Running ×2</td><td>1</td><td>— / 0.31</td><td>—</td><td>07-24 ~06:1x</td><td>—</td><td>进行中</td><td><b>另一会话</b></td></tr><tr id="row-d1"><td><a href="#d1">dsl-fp4-paged-mqa-logits</a></td><td class="mono">9dprgt29j515d7…</td><td>Completed</td><td>3</td><td>1.04</td><td>未复核(本会话外)</td><td>07-23 15:58</td><td>07-23 ~22:2x</td><td>未核</td><td><b>另一会话</b></td></tr><tr id="row-d2"><td><a href="#d2">dsl-fp8-paged-mqa-logits</a></td><td class="mono">66mcp39jf15g38…</td><td>Completed</td><td>3</td><td>0.83</td><td>未复核(本会话外)</td><td>07-23 15:53</td><td>07-23 ~22:1x</td><td>未核</td><td><b>另一会话</b></td></tr><tr id="row-d0"><td><a href="#d0">dsl-fp4/fp8 早期 7 次(round-0 ×2 + Failed ×5)</a></td><td class="mono">0mv4xsw7… / 3a…</td><td>Completed×2 / Failed×5</td><td>0</td><td>1.00 / —</td><td>—</td><td>07-23 08:22-08:32</td><td>即刻~短</td><td>未核</td><td><b>另一会话</b></td></tr>
 </table>
 
 <h2>③ 逐 campaign 卡片</h2>
@@ -2679,18 +2680,2047 @@ average (geomean) &gt;= 2.0x vs production on the full 750-case grid, EVERY case
 champion&#x27;s level. GVR skeleton hard rule unchanged.
 </pre></details></td></tr>
 </table></div><div class="card" id="fr">
-<h3>gvr-topk-pr16457-fresh <span class="chip">Completed</span></h3>
+<h3>gvr-topk-pr16457-fresh <span class="chip">Completed(CLOSED)</span></h3>
 <table class="kv">
 <tr><th>ID</th><td class="mono">6em6mf55g11g767p5wcepgy07w</td></tr>
 <tr><th>轮次 / 内部 speedup</th><td>3 / 0.84</td></tr>
-<tr><th>本地 nsys 复核</th><td>未复核(本会话外)</td></tr>
-<tr><th>起止(UTC)</th><td>07-23 21:48 → 07-24 ~10:1x</td></tr>
-<tr><th>花费</th><td>未核</td></tr>
-<tr><th>发起目标</th><td>artifact indexer-topk-decode-fresh-full(推测: 全格 fresh 分母重跑)</td></tr>
+<tr><th>本地 nsys 复核</th><td>champion 82e2b292 nsys 探针(6 代表格): <b>gm 0.952 / 4 回退 / exact 28/28</b> — 真实 kernel 贴平略输 PR 头,距 bar 无望,判 CLOSED</td></tr>
+<tr><th>起止(UTC)</th><td>07-23 08:17 → 07-23 20:49</td></tr>
+<tr><th>花费</th><td>$636.43</td></tr>
+<tr><th>发起目标</th><td>PR#16457 冷启动双 bar: BS=1 865 格 gm≥1.60 + BS2-1024 gm≥2.0;07-23 回退 bar 用户放宽至 单格 ≤5%(≥0.95×)</td></tr>
+<tr><th>约束</th><td>GVR 骨架强制;冷启动 — 禁旧 champion/弃用分析,仅 op26 REPORT 事实 + PR#16457 源码摘录;58 workload(28 BS1 + 30 BS 扩展)</td></tr>
+<tr><th>代码位置</th><td class="mono">indexer_topk_op_bench/op26_r0_upstream_port_report/kf_campaign/harvest/fresh_r3_82e2</td></tr>
+<tr><th>性能数据位置</th><td class="mono">indexer_topk_op_bench/op26_r0_upstream_port_report/kf_campaign/ab_fresh82e2p.json · gvr-topk-pr16457-fresh/RESUME_FRESH.md</td></tr>
+<tr><th>备注</th><td><b>平台缺陷: 2×fable-5 槽位 org 限额 0 rpm(429)秒死,有效 4 agent/轮,pool 冻结不可换</b>;3 轮停滞收敛;胜格集中 4k 小格,32K-512K 主战场 0.87-0.95。测量陷阱三连已实锤并固化(quick_ab/RESUME): CUDA-event 大 n(post-cr ≥128K)PR 头 cuteDSL host 税 ~1.1ms/call 只认 nsys · TORCH_CUDA_ARCH_LIST=10.0a 强制 · b200-027 overlay 满 TMPDIR=/dev/shm</td></tr>
+<tr><th>发出 prompt</th><td><details><summary>campaign prompt(冷启动版) — <code>gvr-topk-pr16457-fresh/prompt.md</code> (27001 B, 点击展开)</summary><pre class='pmt'># DeepSeek Indexer Top-K Decode (BS 1-1024, fp32, B200) — Optimize the Production GVR Kernel, Fresh Start
+
+## Problem
+
+Sparse-attention indexer top-K selection at decode time, batched.
+`logits[b, npad]` fp32 holds REAL captured production indexer rows, valid
+length `n_valid`, tail padded so pad never enters the top-k. For b &gt; 1
+every batch row is a materialized copy of the same captured row (distinct
+memory — no L2-aliasing shortcuts). Return `indices[b, k]` int32: per-row
+indices of the k largest values, any order; ties at the k-th value
+boundary may be resolved either way (the correctness checker is
+index-SET based and tie-robust, applied to EVERY row). Exactness is
+non-negotiable: every index whose value is strictly greater than the
+k-th value must appear, on every run, on every row.
+
+`pre_idx[b, k]` int32 is the PREVIOUS decode step&#x27;s top-k (temporal warm
+hint; identical copies across rows). Overlap with the true top-k ranges
+0.02-1.0 across workloads (typically &gt;0.5). Exploiting it is REQUIRED
+(see skeleton below), but correctness and the no-regression bar must
+hold even at 0.02 overlap. You may NOT branch on any estimate of hint
+quality computed outside the kernel (hit-rate is unknowable at
+inference); in-kernel admission escape / lagged feedback is fine.
+
+Workloads are REAL production captures from three models, n up to ~1.05M:
+- V4-Flash: k=512,  ISL rungs 4K-1M
+- V4-Pro:   k=1024, ISL rungs 4K-1M   (HIGHEST priority)
+- V3.2:     k=2048, ISL rungs 4K-256K
+b spans {1, 4, 32, 128, 256, 1024} on the platform; the external
+acceptance grid covers BS 2-1024 densely, so treat b as fully dynamic.
+The logits distribution is NOT random — heavy-tailed real indexer scores
+(near-exponential CCDF); algorithms that look good on `randn` behave
+differently here. Priority for effort allocation:
+V4-Pro &gt; V4-Flash ≈ V3.2; n in 32K-1M &gt; n in 4K-32K.
+
+## Baseline &amp; starting point
+
+The baseline you must beat is the CURRENT PRODUCTION kernel: the
+guess-verify-refine (GVR) top-K from TensorRT-LLM PR#16457 (latest head,
+including its K=2048 tail-ladder tuning), run NATIVELY BATCHED
+([b, npad] in one launch). Its structure: seed a threshold guess from
+`pre_idx`, verify/refine the threshold with a secant solve in log space,
+then exactly collect the surviving candidates. It is written in CuTe DSL
+(Python); a verbatim source digest — full config/dispatch/orchestration
+layers plus the signature and docstring of every phase primitive — is in
+the APPENDIX at the bottom of this brief. Read it first — your job is to
+make THIS algorithm faster (re-expressed in CUDA C++), not to replace
+it. This is a FRESH-START campaign: no prior optimized variant is
+provided, and you must find the profitable directions yourself by
+profiling and analysis.
+
+The per-workload baseline timings (your speedup denominator) are
+EXTERNAL nsys cold-L2 pure-kernel-time medians of exactly that
+production kernel on an idle B200 — they contain none of the ~15µs
+harness floor your own platform measurements include. Consequence: at
+true kernel parity your platform speedup will read ~0.5-0.9x on
+small-BS/small-n cells, NOT 1.0x. Do not be discouraged by sub-1.0
+readings early on — track RELATIVE progress across submissions; at
+BS&gt;=32 the floor is negligible and platform numbers are close to truth.
+
+Two measured facts about the production kernel you may rely on (from the
+external report on the full 865-cell BS=1 grid):
+- The FINAL-COLLECT block (threshold handoff + refine + writeback, &quot;P4&quot;)
+  dominates: largest phase on 827 of 865 cells, median ~37% of kernel
+  time (range 23-58%). The mid scan/count passes are second.
+- Real data is UNDERSHOOT-biased for hint-seeded thresholds (the seeded
+  count almost always comes in below k, not above): guards that only
+  fire on overshoot are dead code here.
+How to attack is yours to work out.
+
+## Target — two external acceptance bars
+
+Bar 1 (BS=1): geomean speedup &gt;= 1.60x over the production baseline on
+the FULL external 865-cell BS=1 grid (the BS=1 cells here are a
+stratified subset), with NO case slower than the baseline anywhere
+(no-regression is a hard acceptance bar — a kernel that wins big on
+average but loses any cell will be rejected downstream).
+
+Bar 2 (BS&gt;1): geomean speedup &gt;= 2.0x over the natively-batched
+production baseline across the external BS 2-1024 grid (all models, all
+ISL rungs), again with no per-case regression.
+
+The production baseline itself batches natively and amortizes launch
+overhead well — your denominator is strongest at mid/high BS. Expect the
+required curve shape: win latency at BS=1, win throughput at BS&gt;=32.
+Final acceptance re-measures externally with nsys cold-L2 (L2 flushed
+between iterations). Do not overfit to the exact n values here: n is
+dynamic (up to ~1.05M), k in {512, 1024, 2048} and b in {1..1024} at
+runtime, hint quality is dynamic.
+
+## Required algorithmic skeleton — HARD compliance rule
+
+Keep the GVR skeleton per row: (a) `pre_idx` as the threshold prior,
+(b) a secant+log-transform style exact threshold solve (or an equivalent
+threshold-refinement structure), (c) an exact refine of the surviving
+candidates. Any per-stage restructuring that preserves exactness is
+allowed — in particular P1 (prior/seed) and P4 (final collect) may be
+re-engineered freely as long as the stage contract holds. Mature
+primitives (histogram ladders, radix digit passes, CUB block/warp
+primitives) may be absorbed INTO stages.
+
+**Non-negotiable:** a submission that abandons the `pre_idx` prior, or
+replaces the threshold-prior structure wholesale with a prior-free
+selection algorithm (plain radix-select, full sort, sampling-based
+selection), is NON-COMPLIANT and will be rejected even if it is faster.
+Likewise, do not build a per-case dispatcher across unrelated top-k
+operators. The goal of this campaign is a better GVR, not a different
+algorithm.
+
+## Correctness traps
+
+- The k-th-value tie boundary: the checker requires ALL indices with
+  value strictly greater than the k-th value, plus any tie subset to
+  fill the remainder. Arrival-order races on the boundary bin under
+  concurrent compaction are the classic silent bug — never drop a
+  strictly-greater element. At b &gt; 1 the same race can fire on some rows
+  only; the checker checks every row.
+- Batch rows are independent copies: never share per-row state (counts,
+  thresholds, candidate buffers) across rows without per-row isolation.
+
+## Requirements
+
+- CUDA C++ (sm_100a Blackwell B200). fp32 in, int32 indices out.
+- Exact per the tie-robust set semantics above — no approximation.
+- Dynamic n (up to ~1.05M, padded width `npad = ceil(n/64)*64`), dynamic
+  b (1..1024), dynamic hint quality, k in {512, 1024, 2048} at runtime.
+- Deterministic output not required (any tie resolution accepted), but
+  the index set must be exactly right on every run.
+- Few kernel launches preferred; launch overhead is material at BS=1
+  (3-29 µs scale). CUDA graphs / framework kernels are banned by the
+  compliance judge — win inside the kernel.
+
+---
+
+## APPENDIX — baseline kernel source digest (verbatim spans from the production CuTe DSL file, PR#16457 pinned head)
+
+The production kernel is a 5,000-line CuTe DSL (Python) file; it cannot be shipped whole. Below are VERBATIM spans: full text of the per-K constants, constructor (every tuning knob + tuned default), launch-time config dispatch, and the per-row orchestration body; plus signature + docstring of every phase primitive. Timings in baselines.jsonl were measured from exactly this code (see Baseline section).
+
+```python
+class GvrParams:
+    kFTarget: int
+    kC: int  # candidate buffer cap
+    kNumBins: int  # histogram bin count
+
+    @staticmethod
+    def get(dtype_name: str, top_k: int, compress_ratio: int = 1) -&gt; &quot;GvrParams&quot;:
+        &quot;&quot;&quot;Per-(dtype, K, cr) tuning constants, mirroring CUDA&#x27;s
+        ``GvrParams&lt;T, K&gt;`` template specialization. For K ∈ {512, 1024}
+        cr=1 (DSv3.2) and cr=4 (DSv4, PR #14413) use different kFTarget —
+        V4 aligns kFTarget with kK to avoid upper-clamp saturation on
+        tight-sigma layers (1.5-2.2x fewer P2 iters on swe-bench). K=2048 is
+        identical across cr (V4 doesn&#x27;t natively use it).
+        &quot;&quot;&quot;
+        TABLE = {
+            # --- cr = 1 (DSv3.2): tuned on V3.2 swe-bench data ---
+            (&quot;float32&quot;, 512, 1): GvrParams(kFTarget=384, kC=5120, kNumBins=1024),
+            (&quot;float32&quot;, 1024, 1): GvrParams(kFTarget=2560, kC=5120, kNumBins=1024),
+            (&quot;float32&quot;, 2048, 1): GvrParams(kFTarget=3072, kC=6144, kNumBins=2048),
+            (&quot;bfloat16&quot;, 512, 1): GvrParams(kFTarget=384, kC=5120, kNumBins=512),
+            (&quot;bfloat16&quot;, 1024, 1): GvrParams(kFTarget=2560, kC=5120, kNumBins=512),
+            (&quot;bfloat16&quot;, 2048, 1): GvrParams(kFTarget=4096, kC=5120, kNumBins=2048),
+            (&quot;float16&quot;, 512, 1): GvrParams(kFTarget=384, kC=5120, kNumBins=512),
+            (&quot;float16&quot;, 1024, 1): GvrParams(kFTarget=2560, kC=5120, kNumBins=1024),
+            (&quot;float16&quot;, 2048, 1): GvrParams(kFTarget=4096, kC=5120, kNumBins=2048),
+            # --- cr = 4 (DSv4): tuned on V4 Flash/Pro swe-bench data ---
+            (&quot;float32&quot;, 512, 4): GvrParams(kFTarget=512, kC=5120, kNumBins=1024),
+            (&quot;float32&quot;, 1024, 4): GvrParams(kFTarget=1024, kC=5120, kNumBins=1024),
+            (&quot;float32&quot;, 2048, 4): GvrParams(kFTarget=3072, kC=6144, kNumBins=2048),
+            (&quot;bfloat16&quot;, 512, 4): GvrParams(kFTarget=512, kC=5120, kNumBins=512),
+            (&quot;bfloat16&quot;, 1024, 4): GvrParams(kFTarget=1024, kC=5120, kNumBins=512),
+            (&quot;bfloat16&quot;, 2048, 4): GvrParams(kFTarget=4096, kC=5120, kNumBins=2048),
+            (&quot;float16&quot;, 512, 4): GvrParams(kFTarget=512, kC=5120, kNumBins=512),
+            (&quot;float16&quot;, 1024, 4): GvrParams(kFTarget=1024, kC=5120, kNumBins=1024),
+            (&quot;float16&quot;, 2048, 4): GvrParams(kFTarget=4096, kC=5120, kNumBins=2048),
+        }
+        key = (dtype_name, top_k, compress_ratio)
+        if key not in TABLE:
+            raise ValueError(f&quot;Unsupported GvrParams&lt;{dtype_name}, {top_k}, cr={compress_ratio}&gt;&quot;)
+        return TABLE[key]
+
+class GvrTopKKernel:
+    def __init__(
+        self,
+        ...
+
+    @cute.jit
+    def phase1_preidx_stats(
+        self,
+        input_row,  # cute.Tensor [N] fp32 (post-cast for half-prec)
+        N,  # length of input_row
+        pre_idx_row,  # cute.Tensor [M] int32
+        pre_idx_count,
+        pre_idx_offset,
+        smem_wmin_f32,  # cute.Tensor [NUM_WARPS] float32
+        smem_wmax_f32,  # cute.Tensor [NUM_WARPS] float32
+        smem_wsum_f32,  # cute.Tensor [NUM_WARPS] float32
+        smem_wcnt_i32,  # cute.Tensor [NUM_WARPS] int32
+        s_thr,  # cute.Tensor [3] float32: [threshold, val_lo, val_hi]
+        s_iscalars,  # cute.Tensor [6] int32: [cand_count, done, cnt_lo, cnt_hi, out_count, local_cand_count]
+        tidx,
+        warp_id,
+        lane,
+        smem_gath=None,  # cute.Tensor [top_k] f32 or None (p1b_cache): stash
+        # the gathered value per preIdx slot so P1b skips a 2nd GMEM gather.
+        s_mt_thr=None,  # r0_vseed: P1 also parks pmean in the last rung
+        # column (visibility via P1&#x27;s own trailing barrier -&gt; zero extra sync).
+    ):
+        &quot;&quot;&quot;preIdx scan + warp reduce + block aggregate + initial threshold.
+
+        Smem layout split: floats kept in fp32 buffers, ints kept in int32
+        buffers (no bit-cast tricks needed — avoids ArithValue/ir_value
+        coupling and keeps types clean for the MLIR codegen).
+        &quot;&quot;&quot;
+        ...
+
+    @cute.jit
+    def phase1b_hspace_rungs(
+        self,
+        ...
+
+    @cute.jit
+    def block_count_ge(
+        self,
+        input_row,  # cute.Tensor [N] fp32 (full row; this CTA only scans its slice)
+        slice_start,  # int32: index in input_row where this CTA&#x27;s slice starts
+        slice_end,  # int32: index in input_row where this CTA&#x27;s slice ends
+        threshold,  # cutlass.Float32 scalar
+        smem_ptcnt,  # cute.Tensor [BLOCK_SIZE] int32 (P3 cache)
+        smem_wcnt,  # cute.Tensor [NUM_WARPS] int32 (block reduce scratch)
+        s_iscalars,  # cute.Tensor [6] int32 (writes [0] = cand_count)
+        s_cluster_partial,  # cute.Tensor [1] int32 (per-CTA partial scratch for DSMEM)
+        tidx,
+        warp_id,
+        lane,
+        do_cluster_sync,  # bool: False = skip DSMEM aggregation (cs=1 / short-row degrade)
+        smem_input=None,  # optional SMEM-cached slice (smem_input[i] == input_row[slice_start+i])
+        redundant=False,  # trace-time: every-warp reduce, return the total
+        wcnt_off=None,  # int32 staging bank offset into smem_wcnt (parity)
+    ):
+        &quot;&quot;&quot;Count input[i] &gt;= threshold across this CTA&#x27;s row slice, then
+        DSMEM-aggregate across the cluster.
+
+        ``redundant=True`` (p2_warp_redundant, cluster_size == 1 only):
+        after the staging barrier EVERY warp reduces the warp counts
+        lane-parallel and the block total RETURNS in a register —
+        bit-identical across warps — instead of a leader writing
+        s_iscalars[0] for a barrier-published broadcast. ``wcnt_off``
+        parity-banks the smem_wcnt staging so a warp that has moved on
+        to the next Phase-2 round cannot clobber a slot a slower warp is
+        still reading (the per-round staging barrier bounds the drift to
+        one round).
+
+        Vectorized scan: each thread loads vec_w elements per iter (128 or
+        256 bits) over ``input_row[slice_start : slice_end)``; scalar tail
+        handles the remainder.
+
+        Cluster aggregation (cluster_size &gt; 1): every CTA stages its
+        slice-local count into ``s_cluster_partial[call &amp; 1]`` (parity
+        double-buffer; slot 2 is the tid0-private call counter), syncs the
+        cluster, then DSMEM-reads every peer&#x27;s slot and sums into
+        ``s_iscalars[0]``.
+        After this every CTA&#x27;s ``s_iscalars[0]`` holds the same
+        cluster-wide cand_count, so Phase 2&#x27;s secant update stays a
+        leader-only scalar op on a value all CTAs agree on.
+        &quot;&quot;&quot;
+        ...
+
+    @cute.jit
+    def phase2_secant_search(
+        self,
+        input_row,
+        N,
+        slice_start,
+        slice_end,
+        smem_ptcnt,
+        smem_wcnt,
+        s_thr,  # [threshold, val_lo, val_hi]
+        s_iscalars,  # [cand_count, done, cnt_lo, cnt_hi, out_count]
+        s_cluster_partial,  # [3] int32 cluster scratch (parity slots + counter)
+        tidx,
+        warp_id,
+        lane,
+        do_cluster_sync,  # bool: False = cs=1 / short-row degrade (skip cluster sync)
+        smem_input=None,  # optional SMEM-cached slice
+    ):
+        &quot;&quot;&quot;Refine s_thr[0] until cand_count lands in [kK, kCC].
+
+        Each iter calls block_count_ge at the candidate threshold and
+        updates the bracket (val_lo, val_hi, cnt_lo, cnt_hi). Sets
+        s_iscalars[1] (done) = 1 on convergence, 2 on bracket exhaustion.
+        &quot;&quot;&quot;
+        ...
+
+    @cute.jit
+    def phase3_collect_candidates(
+        self,
+        input_row,
+        N,
+        slice_start,
+        slice_end,
+        smem_keys,
+        smem_vals,
+        smem_ptcnt,
+        smem_wcnt,
+        s_thr,
+        s_iscalars,
+        s_cluster_partial,
+        tidx,
+        warp_id,
+        lane,
+        do_cluster_sync,  # bool: False = cs=1 / short-row degrade (skip cluster sync)
+        smem_input=None,  # optional SMEM-cached slice
+    ):
+        &quot;&quot;&quot;Retry-shrink (when P2 didn&#x27;t converge) + prefix sum + stream-write.
+
+        On exit, smem_keys[0 : cand_count] / smem_vals[0 : cand_count]
+        hold every (value, index) pair with value &gt;= threshold, in the
+        scan order each thread produces them. Uses smem_ptcnt cached by
+        the last block_count_ge in Phase 2 (or by the retry-shrink below).
+        &quot;&quot;&quot;
+        ...
+
+    @cute.jit
+    def block_fused_snap_iter(
+        self,
+        keys_base,  # hoisted SMEM window base of smem_keys (iterator.toint())
+        smem_wcnt,
+        smem_hist,  # reused as scratch for s_up/s_down warp aggregates
+        s_thr,
+        s_iscalars,
+        count,
+        tidx,
+        warp_id,
+        lane,
+    ):
+        &quot;&quot;&quot;One iteration of histogram snap. Updates s_iscalars[2]=cnt_lo (cge),
+        s_iscalars[3]=cnt_hi (cgt), and s_thr[0]=threshold (moves toward
+        the cnt-in-(kK_GT, kK_GE) bracket).
+        &quot;&quot;&quot;
+        ...
+
+    @cute.jit
+    def _hist_build(self, keys_base, smem_hist, cand_count, lo, inv, tidx):
+        &quot;&quot;&quot;Zero smem_hist[0:kBins], then histogram keys[0:cand_count] with
+        bin = clamp(int((v - lo) * inv), 0, kBins-1). Out-of-window values
+        clamp into the edge bins, which keeps cumulative counts from the
+        top exact for the k-th search (everything above the window lands
+        in the top bin). Barrier after the zero pass and after the build.&quot;&quot;&quot;
+        ...
+
+    @cute.jit
+    def _kth_bin_search(
+        self, smem_hist, smem_wcnt, s_thr, s_iscalars, lo, binw, tidx, warp_id, lane
+    ):
+        &quot;&quot;&quot;Parallel k-th bin search (3-step, high→low). Writes
+        s_thr[0] = lower edge of the selected bin (lo + bidx*binw) and
+        s_iscalars[4] = selected bin&#x27;s count (gates the level-2 histogram
+        refinement). Clobbers s_iscalars[2]/[3] as staging (both are
+        rewritten by the snap loop before anyone else reads them).
+        Trailing barrier.&quot;&quot;&quot;
+        ...
+
+    @cute.jit
+    def phase4_rank_scatter(
+        self,
+        ...
+
+    @cute.jit
+    def phase4_histogram_snap(
+        self,
+        smem_keys,
+        smem_vals,
+        smem_hist,
+        smem_wcnt,
+        s_thr,
+        s_iscalars,
+        output_values_row,
+        output_indices_row,
+        cand_count,
+        tidx,
+        warp_id,
+        lane,
+    ):
+        &quot;&quot;&quot;Three branches by cand_count vs kK:
+        == kK: direct emit (fast path)
+        &gt;  kK: histogram k-th bin search → snap → 2-pass writeback
+        &lt;  kK: emit cand_count + pad with -FLT_MAX
+        &quot;&quot;&quot;
+        ...
+
+    @cute.kernel
+    def gvr_topk_kernel(
+        self,
+        input_data: cute.Tensor,  # [numRows, stride0] dtype
+        pre_idx: cute.Tensor,  # [numRows / next_n, pre_idx_stride] int32
+        seq_lens: cute.Tensor,  # [numRows / next_n] int32
+        output_values: cute.Tensor,  # [numRows, top_k] dtype
+        output_indices: cute.Tensor,  # [numRows, top_k] int32
+        order_row: cute.Tensor,  # [batch_size] int32 (or None when seqlen_sorted=False)
+    ):
+        &quot;&quot;&quot;Thin entry: bidx → row_idx → run_one_row.
+
+        grid = (num_rows * cluster_size,) where num_rows = batch_size *
+        next_n. cluster_id = bidx // cluster_size, cta_in_cluster ∈
+        [0, cluster_size). CTA r scans row[r * N / cs : (r+1) * N / cs]
+        in Phase 2, so the per-row GE-count scales as 1 / cs. At
+        cluster_size == 1 this collapses to one CTA per row scanning
+        the whole row.
+
+        When ``self.seqlen_sorted`` is True, the LJF dispatch order
+        operates at REQUEST granularity (``order_row`` has length
+        batch_size = num_rows / next_n). The owning row is resolved as
+        ``order_row[cluster_id // next_n] * next_n + cluster_id % next_n``
+        so the ``next_n`` rows of one request stay contiguous in
+        dispatch order. All ``cluster_size`` CTAs within a cluster see
+        the same ``cluster_id`` and therefore the same row, preserving
+        cluster-sync semantics.
+
+        Body is extracted into :meth:`run_one_row` so other entries (e.g.
+        the LB load-balance variant) can resolve ``row_idx`` differently
+        from the mappings used here.
+        &quot;&quot;&quot;
+        ...
+
+    @cute.jit
+    def run_one_row(
+        self,
+        row_idx,  # int32, owning row in [0, num_rows)
+        input_data: cute.Tensor,  # [numRows, stride0] dtype
+        pre_idx: cute.Tensor,  # [numRows / next_n, pre_idx_stride] int32
+        seq_lens: cute.Tensor,  # [numRows / next_n] int32
+        output_values: cute.Tensor,  # [numRows, top_k] dtype, optional
+        output_indices: cute.Tensor,  # [numRows, top_k] int32
+    ):
+        &quot;&quot;&quot;Dispatch: compute per-row slice + cluster sync mode, call _run_phases.
+
+        ``run_one_row`` only handles row resolution, SMEM allocation, and
+        the per-row long-vs-short decision. Phase 1-4 are in
+        :meth:`_run_phases`.
+
+        Short-row degrade: when the actual row workload fits within ONE
+        CTA&#x27;s design slice (``ceil(max_seq_len / cluster_size)``), CTA 0
+        solo-scans the row (do_cluster_sync=False, no cluster sync) and
+        the other cluster CTAs fall through ``run_one_row`` without
+        calling ``_run_phases``. CuTe DSL doesn&#x27;t support runtime
+        ``return``, so non-leader CTAs naturally reach
+        ``griddepcontrol_launch_dependents`` at the end.
+        &quot;&quot;&quot;
+        ...
+
+    @cute.jit
+    def _run_phases(
+        self,
+        input_row,
+        pre_idx_row,
+        output_values_row,
+        output_indices_row,
+        N,
+        pre_idx_offset,
+        pre_idx_count,
+        slice_start,
+        slice_end,
+        do_cluster_sync,
+        cta_in_cluster,
+        smem_keys,
+        smem_vals,
+        smem_hist,
+        smem_ptcnt,
+        smem_wcnt,
+        smem_wmin,
+        smem_wmax,
+        smem_wsum,
+        smem_wcnt_p1,
+        s_thr,
+        s_iscalars,
+        s_cluster_partial,
+        smem_input,
+        s_mt_thr,
+        smem_ptcnt_multi,
+        smem_wcnt_multi,
+        s_mt_cnt,
+        s_r0col,
+        s_cluster_partial_m,
+        smem_gath,
+        tidx,
+        warp_id,
+        lane,
+    ):
+        &quot;&quot;&quot;Run Phase 1-4 + final cluster barrier on a given row slice.
+
+        Caller (``run_one_row``) decides slice + do_cluster_sync per row:
+          - cs=1                 → slice=[0,N), do_cluster_sync=False
+          - cs&gt;1, long row       → slice=N/cs per CTA, do_cluster_sync=True
+          - cs&gt;1, short row      → slice=[0,N), do_cluster_sync=False, CTA 0 only
+
+        Non-leader CTAs in short-row mode never call this helper.
+        &quot;&quot;&quot;
+        ...
+
+    def pick_config(
+        torch_dtype,
+        num_rows: int,
+        num_candidates: int,
+        max_seq_len: Optional[int] = None,
+        num_sms: Optional[int] = None,
+    ) -&gt; dict:
+        &quot;&quot;&quot;Pick the launch-shape ctor kwargs for ``(dtype, BS, N)``.
+
+        Mirrors the production runner policy (cluster_size auto-pick +
+        ``_pick_tuning``) so any caller instantiating the kernel directly
+        gets the same shapes the custom op would use. Rationale (B200,
+        nsys cold-L2, 2026-07-15 big-BS triage): a config frozen at the
+        BS=1 optimum (cs = N&gt;=65536 ? 4 : 1, T=1024, mbpm=1) is geomean
+        2.27x slower (max 6.0x) than the op-bench anchor at BS in
+        {64, 256, 1024}, while this policy is 0.95x (parity/better).
+        Multi-CTA splitting only pays while the grid is a single wave
+        (num_rows * cluster_size &lt;= num_sms); past that, row parallelism
+        already saturates the SMs and per-row splitting is pure overhead.
+
+        ``max_seq_len``: pass the peak runtime N under CUDA-graph capture
+        so the variant is picked for the replay shape, not the capture
+        shape (same contract as the custom op&#x27;s ``_pick_tuning``).
+
+        Returns kwargs for ``GvrTopKKernel(...)``: ``cluster_size``,
+        ``num_threads``, ``use_256bit_load``, ``min_blocks_per_mp``,
+        ``enable_warp_parallel_reduce``.
+        &quot;&quot;&quot;
+        import torch  # local: keep the module importable without torch
+
+        if num_sms is None:
+            num_sms = GvrTopKKernel._device_num_sms()
+        n_row = max_seq_len if max_seq_len is not None else num_candidates
+        is_fp32 = torch_dtype == torch.float32
+
+        # cluster_size: B200 SXM5 synth-data tuning (matches the custom
+        # op&#x27;s auto-pick): N &lt; 64K -&gt; 1 (sync unrecouped); tiny grid at
+        # large N -&gt; 8; single-wave -&gt; 4/2; multi-wave -&gt; 1.
+        if n_row &lt; 65536:
+            cluster_size = 1
+        elif num_rows &lt;= 4 and n_row &gt;= 131072:
+            cluster_size = 8
+        elif num_rows * 4 &lt;= num_sms:
+            cluster_size = 4
+        elif num_rows * 2 &lt;= num_sms:
+            cluster_size = 2
+        else:
+            cluster_size = 1
+
+        # Cluster CTAs split the row, so tuning targets per-CTA work.
+        n_per_cta = n_row // cluster_size
+        # T=1024 needs 1 CTA/SM grid AND enough per-CTA vec work. Under
+        # graph capture, raise the half-prec bar so a small capture-N
+        # doesn&#x27;t force T=1024 on small-N replays.
+        n_thresh_t = 131072 if (max_seq_len is not None and not is_fp32) else 65536
+        num_threads = 1024 if (num_rows &lt;= num_sms and n_per_cta &gt;= n_thresh_t) else 512
+        # V=256-bit only helps fp32 at large N; half-prec cvt doubles reg
+        # pressure. Caller must hand a 32B-aligned contiguous tensor
+        # (``launch`` downgrades on misalignment).
+        use_256bit_load = is_fp32 and n_per_cta &gt;= 16384
+        enable_warp_parallel_reduce = num_threads == 1024
+
+        # min_blocks_per_mp: reg-vs-occupancy 3-tier (fp32 wants ~70 regs
+        # for 4-LDG ILP -&gt; mb&lt;=2; half-prec fits 40 regs -&gt; mb=3 packs
+        # 3 CTA/SM when rows oversubscribe the device).
+        vec_bits = 256 if use_256bit_load else 128
+        vec_w = vec_bits // (32 if is_fp32 else 16)
+        n_vec_iters = max(1, n_per_cta // (num_threads * vec_w))
+        if is_fp32:
+            if n_vec_iters &lt; 4:
+                min_blocks_per_mp = 0
+            elif num_rows &lt;= num_sms:
+                min_blocks_per_mp = 1
+            elif num_sms * 2 &lt; num_rows &lt;= num_sms * 3 and n_per_cta &lt;= 32768:
+                min_blocks_per_mp = 3
+            else:
+                min_blocks_per_mp = 2
+        else:
+            if num_rows &gt; num_sms:
+                min_blocks_per_mp = 3
+            elif n_vec_iters &lt; 4:
+                min_blocks_per_mp = 0
+            else:
+                min_blocks_per_mp = 1
+
+        return dict(
+            cluster_size=cluster_size,
+            num_threads=num_threads,
+            use_256bit_load=use_256bit_load,
+            min_blocks_per_mp=min_blocks_per_mp,
+            enable_warp_parallel_reduce=enable_warp_parallel_reduce,
+        )
+
+    @classmethod
+    def launch(
+        cls,
+        logits,
+        pre_idx,
+        seq_lens,
+        output_indices,
+        top_k: int,
+        next_n: int = 1,
+        compress_ratio: int = 1,
+        max_seq_len: Optional[int] = None,
+        num_sms: Optional[int] = None,
+        **kernel_overrides,
+    ) -&gt; None:
+        &quot;&quot;&quot;Compile-and-launch with ``pick_config`` shapes (indices-only path).
+
+        Owns a class-level compiled-variant cache keyed by every ctor knob,
+        so repeated calls at any (BS, N, dtype) reuse the right variant.
+        ``kernel_overrides`` (e.g. ``enable_r0=False``, ``cluster_size=8``)
+        override the picked config and participate in the cache key.
+        Mirrors the custom op&#x27;s compile contract: sym_int shapes, tvm-ffi
+        env stream (launches on the ambient torch stream), fixed
+        ``return_output_values=False`` / ``seqlen_sorted=False``.
+        &quot;&quot;&quot;
+        ...
+
+```</pre></details></td></tr>
+</table></div><div class="card" id="frb">
+<h3>gvr-topk-fresh-banded(fork 再战) <span class="chip">Running</span></h3>
+<table class="kv">
+<tr><th>ID</th><td class="mono">xp49vmaw193c90sthdzyk0av9c</td></tr>
+<tr><th>轮次 / 内部 speedup</th><td>4-8 / 0.87(起步)</td></tr>
+<tr><th>本地 nsys 复核</th><td>—(进行中)</td></tr>
+<tr><th>起止(UTC)</th><td>07-24 ~06:2x → —</td></tr>
+<tr><th>花费</th><td>进行中</td></tr>
+<tr><th>发起目标</th><td>分带 bar 重定标: Band A(ISL 32K-1M) gm≥1.60 且 ≥0.95/格;Band B(4K-32K) gm≥1.00 且 ≥0.95/格</td></tr>
+<tr><th>约束</th><td>fork 冻结继承 fresh 的 pool(2 fable-5 死槽随行,有效 4/轮)与 workloads;--append-prompt steering: 勿碰 4k 平台地板格 / 大 N 1.6× 唯一杠杆 = 砍行流量到 ~1 遍 / r1-3 GO+dead-end 清单</td></tr>
+<tr><th>代码位置</th><td class="mono">—(进行中)</td></tr>
+<tr><th>性能数据位置</th><td class="mono">indexer_topk_op_bench/op26_r0_upstream_port_report/kf_campaign/gvr-topk-pr16457-fresh/fork_steering_banded.md · indexer_topk_op_bench/op26_r0_upstream_port_report/kf_campaign/ACCEPTANCE_DELTA_20260723.md</td></tr>
+<tr><th>备注</th><td>forked from round 4, rounds 4-8, stagnation 4;终判分带判卷(外部 nsys cold-L2)</td></tr>
+<tr><th>发出 prompt</th><td><details><summary>继承 fresh prompt(不变) — <code>gvr-topk-pr16457-fresh/prompt.md</code> (27001 B, 点击展开)</summary><pre class='pmt'># DeepSeek Indexer Top-K Decode (BS 1-1024, fp32, B200) — Optimize the Production GVR Kernel, Fresh Start
+
+## Problem
+
+Sparse-attention indexer top-K selection at decode time, batched.
+`logits[b, npad]` fp32 holds REAL captured production indexer rows, valid
+length `n_valid`, tail padded so pad never enters the top-k. For b &gt; 1
+every batch row is a materialized copy of the same captured row (distinct
+memory — no L2-aliasing shortcuts). Return `indices[b, k]` int32: per-row
+indices of the k largest values, any order; ties at the k-th value
+boundary may be resolved either way (the correctness checker is
+index-SET based and tie-robust, applied to EVERY row). Exactness is
+non-negotiable: every index whose value is strictly greater than the
+k-th value must appear, on every run, on every row.
+
+`pre_idx[b, k]` int32 is the PREVIOUS decode step&#x27;s top-k (temporal warm
+hint; identical copies across rows). Overlap with the true top-k ranges
+0.02-1.0 across workloads (typically &gt;0.5). Exploiting it is REQUIRED
+(see skeleton below), but correctness and the no-regression bar must
+hold even at 0.02 overlap. You may NOT branch on any estimate of hint
+quality computed outside the kernel (hit-rate is unknowable at
+inference); in-kernel admission escape / lagged feedback is fine.
+
+Workloads are REAL production captures from three models, n up to ~1.05M:
+- V4-Flash: k=512,  ISL rungs 4K-1M
+- V4-Pro:   k=1024, ISL rungs 4K-1M   (HIGHEST priority)
+- V3.2:     k=2048, ISL rungs 4K-256K
+b spans {1, 4, 32, 128, 256, 1024} on the platform; the external
+acceptance grid covers BS 2-1024 densely, so treat b as fully dynamic.
+The logits distribution is NOT random — heavy-tailed real indexer scores
+(near-exponential CCDF); algorithms that look good on `randn` behave
+differently here. Priority for effort allocation:
+V4-Pro &gt; V4-Flash ≈ V3.2; n in 32K-1M &gt; n in 4K-32K.
+
+## Baseline &amp; starting point
+
+The baseline you must beat is the CURRENT PRODUCTION kernel: the
+guess-verify-refine (GVR) top-K from TensorRT-LLM PR#16457 (latest head,
+including its K=2048 tail-ladder tuning), run NATIVELY BATCHED
+([b, npad] in one launch). Its structure: seed a threshold guess from
+`pre_idx`, verify/refine the threshold with a secant solve in log space,
+then exactly collect the surviving candidates. It is written in CuTe DSL
+(Python); a verbatim source digest — full config/dispatch/orchestration
+layers plus the signature and docstring of every phase primitive — is in
+the APPENDIX at the bottom of this brief. Read it first — your job is to
+make THIS algorithm faster (re-expressed in CUDA C++), not to replace
+it. This is a FRESH-START campaign: no prior optimized variant is
+provided, and you must find the profitable directions yourself by
+profiling and analysis.
+
+The per-workload baseline timings (your speedup denominator) are
+EXTERNAL nsys cold-L2 pure-kernel-time medians of exactly that
+production kernel on an idle B200 — they contain none of the ~15µs
+harness floor your own platform measurements include. Consequence: at
+true kernel parity your platform speedup will read ~0.5-0.9x on
+small-BS/small-n cells, NOT 1.0x. Do not be discouraged by sub-1.0
+readings early on — track RELATIVE progress across submissions; at
+BS&gt;=32 the floor is negligible and platform numbers are close to truth.
+
+Two measured facts about the production kernel you may rely on (from the
+external report on the full 865-cell BS=1 grid):
+- The FINAL-COLLECT block (threshold handoff + refine + writeback, &quot;P4&quot;)
+  dominates: largest phase on 827 of 865 cells, median ~37% of kernel
+  time (range 23-58%). The mid scan/count passes are second.
+- Real data is UNDERSHOOT-biased for hint-seeded thresholds (the seeded
+  count almost always comes in below k, not above): guards that only
+  fire on overshoot are dead code here.
+How to attack is yours to work out.
+
+## Target — two external acceptance bars
+
+Bar 1 (BS=1): geomean speedup &gt;= 1.60x over the production baseline on
+the FULL external 865-cell BS=1 grid (the BS=1 cells here are a
+stratified subset), with NO case slower than the baseline anywhere
+(no-regression is a hard acceptance bar — a kernel that wins big on
+average but loses any cell will be rejected downstream).
+
+Bar 2 (BS&gt;1): geomean speedup &gt;= 2.0x over the natively-batched
+production baseline across the external BS 2-1024 grid (all models, all
+ISL rungs), again with no per-case regression.
+
+The production baseline itself batches natively and amortizes launch
+overhead well — your denominator is strongest at mid/high BS. Expect the
+required curve shape: win latency at BS=1, win throughput at BS&gt;=32.
+Final acceptance re-measures externally with nsys cold-L2 (L2 flushed
+between iterations). Do not overfit to the exact n values here: n is
+dynamic (up to ~1.05M), k in {512, 1024, 2048} and b in {1..1024} at
+runtime, hint quality is dynamic.
+
+## Required algorithmic skeleton — HARD compliance rule
+
+Keep the GVR skeleton per row: (a) `pre_idx` as the threshold prior,
+(b) a secant+log-transform style exact threshold solve (or an equivalent
+threshold-refinement structure), (c) an exact refine of the surviving
+candidates. Any per-stage restructuring that preserves exactness is
+allowed — in particular P1 (prior/seed) and P4 (final collect) may be
+re-engineered freely as long as the stage contract holds. Mature
+primitives (histogram ladders, radix digit passes, CUB block/warp
+primitives) may be absorbed INTO stages.
+
+**Non-negotiable:** a submission that abandons the `pre_idx` prior, or
+replaces the threshold-prior structure wholesale with a prior-free
+selection algorithm (plain radix-select, full sort, sampling-based
+selection), is NON-COMPLIANT and will be rejected even if it is faster.
+Likewise, do not build a per-case dispatcher across unrelated top-k
+operators. The goal of this campaign is a better GVR, not a different
+algorithm.
+
+## Correctness traps
+
+- The k-th-value tie boundary: the checker requires ALL indices with
+  value strictly greater than the k-th value, plus any tie subset to
+  fill the remainder. Arrival-order races on the boundary bin under
+  concurrent compaction are the classic silent bug — never drop a
+  strictly-greater element. At b &gt; 1 the same race can fire on some rows
+  only; the checker checks every row.
+- Batch rows are independent copies: never share per-row state (counts,
+  thresholds, candidate buffers) across rows without per-row isolation.
+
+## Requirements
+
+- CUDA C++ (sm_100a Blackwell B200). fp32 in, int32 indices out.
+- Exact per the tie-robust set semantics above — no approximation.
+- Dynamic n (up to ~1.05M, padded width `npad = ceil(n/64)*64`), dynamic
+  b (1..1024), dynamic hint quality, k in {512, 1024, 2048} at runtime.
+- Deterministic output not required (any tie resolution accepted), but
+  the index set must be exactly right on every run.
+- Few kernel launches preferred; launch overhead is material at BS=1
+  (3-29 µs scale). CUDA graphs / framework kernels are banned by the
+  compliance judge — win inside the kernel.
+
+---
+
+## APPENDIX — baseline kernel source digest (verbatim spans from the production CuTe DSL file, PR#16457 pinned head)
+
+The production kernel is a 5,000-line CuTe DSL (Python) file; it cannot be shipped whole. Below are VERBATIM spans: full text of the per-K constants, constructor (every tuning knob + tuned default), launch-time config dispatch, and the per-row orchestration body; plus signature + docstring of every phase primitive. Timings in baselines.jsonl were measured from exactly this code (see Baseline section).
+
+```python
+class GvrParams:
+    kFTarget: int
+    kC: int  # candidate buffer cap
+    kNumBins: int  # histogram bin count
+
+    @staticmethod
+    def get(dtype_name: str, top_k: int, compress_ratio: int = 1) -&gt; &quot;GvrParams&quot;:
+        &quot;&quot;&quot;Per-(dtype, K, cr) tuning constants, mirroring CUDA&#x27;s
+        ``GvrParams&lt;T, K&gt;`` template specialization. For K ∈ {512, 1024}
+        cr=1 (DSv3.2) and cr=4 (DSv4, PR #14413) use different kFTarget —
+        V4 aligns kFTarget with kK to avoid upper-clamp saturation on
+        tight-sigma layers (1.5-2.2x fewer P2 iters on swe-bench). K=2048 is
+        identical across cr (V4 doesn&#x27;t natively use it).
+        &quot;&quot;&quot;
+        TABLE = {
+            # --- cr = 1 (DSv3.2): tuned on V3.2 swe-bench data ---
+            (&quot;float32&quot;, 512, 1): GvrParams(kFTarget=384, kC=5120, kNumBins=1024),
+            (&quot;float32&quot;, 1024, 1): GvrParams(kFTarget=2560, kC=5120, kNumBins=1024),
+            (&quot;float32&quot;, 2048, 1): GvrParams(kFTarget=3072, kC=6144, kNumBins=2048),
+            (&quot;bfloat16&quot;, 512, 1): GvrParams(kFTarget=384, kC=5120, kNumBins=512),
+            (&quot;bfloat16&quot;, 1024, 1): GvrParams(kFTarget=2560, kC=5120, kNumBins=512),
+            (&quot;bfloat16&quot;, 2048, 1): GvrParams(kFTarget=4096, kC=5120, kNumBins=2048),
+            (&quot;float16&quot;, 512, 1): GvrParams(kFTarget=384, kC=5120, kNumBins=512),
+            (&quot;float16&quot;, 1024, 1): GvrParams(kFTarget=2560, kC=5120, kNumBins=1024),
+            (&quot;float16&quot;, 2048, 1): GvrParams(kFTarget=4096, kC=5120, kNumBins=2048),
+            # --- cr = 4 (DSv4): tuned on V4 Flash/Pro swe-bench data ---
+            (&quot;float32&quot;, 512, 4): GvrParams(kFTarget=512, kC=5120, kNumBins=1024),
+            (&quot;float32&quot;, 1024, 4): GvrParams(kFTarget=1024, kC=5120, kNumBins=1024),
+            (&quot;float32&quot;, 2048, 4): GvrParams(kFTarget=3072, kC=6144, kNumBins=2048),
+            (&quot;bfloat16&quot;, 512, 4): GvrParams(kFTarget=512, kC=5120, kNumBins=512),
+            (&quot;bfloat16&quot;, 1024, 4): GvrParams(kFTarget=1024, kC=5120, kNumBins=512),
+            (&quot;bfloat16&quot;, 2048, 4): GvrParams(kFTarget=4096, kC=5120, kNumBins=2048),
+            (&quot;float16&quot;, 512, 4): GvrParams(kFTarget=512, kC=5120, kNumBins=512),
+            (&quot;float16&quot;, 1024, 4): GvrParams(kFTarget=1024, kC=5120, kNumBins=1024),
+            (&quot;float16&quot;, 2048, 4): GvrParams(kFTarget=4096, kC=5120, kNumBins=2048),
+        }
+        key = (dtype_name, top_k, compress_ratio)
+        if key not in TABLE:
+            raise ValueError(f&quot;Unsupported GvrParams&lt;{dtype_name}, {top_k}, cr={compress_ratio}&gt;&quot;)
+        return TABLE[key]
+
+class GvrTopKKernel:
+    def __init__(
+        self,
+        ...
+
+    @cute.jit
+    def phase1_preidx_stats(
+        self,
+        input_row,  # cute.Tensor [N] fp32 (post-cast for half-prec)
+        N,  # length of input_row
+        pre_idx_row,  # cute.Tensor [M] int32
+        pre_idx_count,
+        pre_idx_offset,
+        smem_wmin_f32,  # cute.Tensor [NUM_WARPS] float32
+        smem_wmax_f32,  # cute.Tensor [NUM_WARPS] float32
+        smem_wsum_f32,  # cute.Tensor [NUM_WARPS] float32
+        smem_wcnt_i32,  # cute.Tensor [NUM_WARPS] int32
+        s_thr,  # cute.Tensor [3] float32: [threshold, val_lo, val_hi]
+        s_iscalars,  # cute.Tensor [6] int32: [cand_count, done, cnt_lo, cnt_hi, out_count, local_cand_count]
+        tidx,
+        warp_id,
+        lane,
+        smem_gath=None,  # cute.Tensor [top_k] f32 or None (p1b_cache): stash
+        # the gathered value per preIdx slot so P1b skips a 2nd GMEM gather.
+        s_mt_thr=None,  # r0_vseed: P1 also parks pmean in the last rung
+        # column (visibility via P1&#x27;s own trailing barrier -&gt; zero extra sync).
+    ):
+        &quot;&quot;&quot;preIdx scan + warp reduce + block aggregate + initial threshold.
+
+        Smem layout split: floats kept in fp32 buffers, ints kept in int32
+        buffers (no bit-cast tricks needed — avoids ArithValue/ir_value
+        coupling and keeps types clean for the MLIR codegen).
+        &quot;&quot;&quot;
+        ...
+
+    @cute.jit
+    def phase1b_hspace_rungs(
+        self,
+        ...
+
+    @cute.jit
+    def block_count_ge(
+        self,
+        input_row,  # cute.Tensor [N] fp32 (full row; this CTA only scans its slice)
+        slice_start,  # int32: index in input_row where this CTA&#x27;s slice starts
+        slice_end,  # int32: index in input_row where this CTA&#x27;s slice ends
+        threshold,  # cutlass.Float32 scalar
+        smem_ptcnt,  # cute.Tensor [BLOCK_SIZE] int32 (P3 cache)
+        smem_wcnt,  # cute.Tensor [NUM_WARPS] int32 (block reduce scratch)
+        s_iscalars,  # cute.Tensor [6] int32 (writes [0] = cand_count)
+        s_cluster_partial,  # cute.Tensor [1] int32 (per-CTA partial scratch for DSMEM)
+        tidx,
+        warp_id,
+        lane,
+        do_cluster_sync,  # bool: False = skip DSMEM aggregation (cs=1 / short-row degrade)
+        smem_input=None,  # optional SMEM-cached slice (smem_input[i] == input_row[slice_start+i])
+        redundant=False,  # trace-time: every-warp reduce, return the total
+        wcnt_off=None,  # int32 staging bank offset into smem_wcnt (parity)
+    ):
+        &quot;&quot;&quot;Count input[i] &gt;= threshold across this CTA&#x27;s row slice, then
+        DSMEM-aggregate across the cluster.
+
+        ``redundant=True`` (p2_warp_redundant, cluster_size == 1 only):
+        after the staging barrier EVERY warp reduces the warp counts
+        lane-parallel and the block total RETURNS in a register —
+        bit-identical across warps — instead of a leader writing
+        s_iscalars[0] for a barrier-published broadcast. ``wcnt_off``
+        parity-banks the smem_wcnt staging so a warp that has moved on
+        to the next Phase-2 round cannot clobber a slot a slower warp is
+        still reading (the per-round staging barrier bounds the drift to
+        one round).
+
+        Vectorized scan: each thread loads vec_w elements per iter (128 or
+        256 bits) over ``input_row[slice_start : slice_end)``; scalar tail
+        handles the remainder.
+
+        Cluster aggregation (cluster_size &gt; 1): every CTA stages its
+        slice-local count into ``s_cluster_partial[call &amp; 1]`` (parity
+        double-buffer; slot 2 is the tid0-private call counter), syncs the
+        cluster, then DSMEM-reads every peer&#x27;s slot and sums into
+        ``s_iscalars[0]``.
+        After this every CTA&#x27;s ``s_iscalars[0]`` holds the same
+        cluster-wide cand_count, so Phase 2&#x27;s secant update stays a
+        leader-only scalar op on a value all CTAs agree on.
+        &quot;&quot;&quot;
+        ...
+
+    @cute.jit
+    def phase2_secant_search(
+        self,
+        input_row,
+        N,
+        slice_start,
+        slice_end,
+        smem_ptcnt,
+        smem_wcnt,
+        s_thr,  # [threshold, val_lo, val_hi]
+        s_iscalars,  # [cand_count, done, cnt_lo, cnt_hi, out_count]
+        s_cluster_partial,  # [3] int32 cluster scratch (parity slots + counter)
+        tidx,
+        warp_id,
+        lane,
+        do_cluster_sync,  # bool: False = cs=1 / short-row degrade (skip cluster sync)
+        smem_input=None,  # optional SMEM-cached slice
+    ):
+        &quot;&quot;&quot;Refine s_thr[0] until cand_count lands in [kK, kCC].
+
+        Each iter calls block_count_ge at the candidate threshold and
+        updates the bracket (val_lo, val_hi, cnt_lo, cnt_hi). Sets
+        s_iscalars[1] (done) = 1 on convergence, 2 on bracket exhaustion.
+        &quot;&quot;&quot;
+        ...
+
+    @cute.jit
+    def phase3_collect_candidates(
+        self,
+        input_row,
+        N,
+        slice_start,
+        slice_end,
+        smem_keys,
+        smem_vals,
+        smem_ptcnt,
+        smem_wcnt,
+        s_thr,
+        s_iscalars,
+        s_cluster_partial,
+        tidx,
+        warp_id,
+        lane,
+        do_cluster_sync,  # bool: False = cs=1 / short-row degrade (skip cluster sync)
+        smem_input=None,  # optional SMEM-cached slice
+    ):
+        &quot;&quot;&quot;Retry-shrink (when P2 didn&#x27;t converge) + prefix sum + stream-write.
+
+        On exit, smem_keys[0 : cand_count] / smem_vals[0 : cand_count]
+        hold every (value, index) pair with value &gt;= threshold, in the
+        scan order each thread produces them. Uses smem_ptcnt cached by
+        the last block_count_ge in Phase 2 (or by the retry-shrink below).
+        &quot;&quot;&quot;
+        ...
+
+    @cute.jit
+    def block_fused_snap_iter(
+        self,
+        keys_base,  # hoisted SMEM window base of smem_keys (iterator.toint())
+        smem_wcnt,
+        smem_hist,  # reused as scratch for s_up/s_down warp aggregates
+        s_thr,
+        s_iscalars,
+        count,
+        tidx,
+        warp_id,
+        lane,
+    ):
+        &quot;&quot;&quot;One iteration of histogram snap. Updates s_iscalars[2]=cnt_lo (cge),
+        s_iscalars[3]=cnt_hi (cgt), and s_thr[0]=threshold (moves toward
+        the cnt-in-(kK_GT, kK_GE) bracket).
+        &quot;&quot;&quot;
+        ...
+
+    @cute.jit
+    def _hist_build(self, keys_base, smem_hist, cand_count, lo, inv, tidx):
+        &quot;&quot;&quot;Zero smem_hist[0:kBins], then histogram keys[0:cand_count] with
+        bin = clamp(int((v - lo) * inv), 0, kBins-1). Out-of-window values
+        clamp into the edge bins, which keeps cumulative counts from the
+        top exact for the k-th search (everything above the window lands
+        in the top bin). Barrier after the zero pass and after the build.&quot;&quot;&quot;
+        ...
+
+    @cute.jit
+    def _kth_bin_search(
+        self, smem_hist, smem_wcnt, s_thr, s_iscalars, lo, binw, tidx, warp_id, lane
+    ):
+        &quot;&quot;&quot;Parallel k-th bin search (3-step, high→low). Writes
+        s_thr[0] = lower edge of the selected bin (lo + bidx*binw) and
+        s_iscalars[4] = selected bin&#x27;s count (gates the level-2 histogram
+        refinement). Clobbers s_iscalars[2]/[3] as staging (both are
+        rewritten by the snap loop before anyone else reads them).
+        Trailing barrier.&quot;&quot;&quot;
+        ...
+
+    @cute.jit
+    def phase4_rank_scatter(
+        self,
+        ...
+
+    @cute.jit
+    def phase4_histogram_snap(
+        self,
+        smem_keys,
+        smem_vals,
+        smem_hist,
+        smem_wcnt,
+        s_thr,
+        s_iscalars,
+        output_values_row,
+        output_indices_row,
+        cand_count,
+        tidx,
+        warp_id,
+        lane,
+    ):
+        &quot;&quot;&quot;Three branches by cand_count vs kK:
+        == kK: direct emit (fast path)
+        &gt;  kK: histogram k-th bin search → snap → 2-pass writeback
+        &lt;  kK: emit cand_count + pad with -FLT_MAX
+        &quot;&quot;&quot;
+        ...
+
+    @cute.kernel
+    def gvr_topk_kernel(
+        self,
+        input_data: cute.Tensor,  # [numRows, stride0] dtype
+        pre_idx: cute.Tensor,  # [numRows / next_n, pre_idx_stride] int32
+        seq_lens: cute.Tensor,  # [numRows / next_n] int32
+        output_values: cute.Tensor,  # [numRows, top_k] dtype
+        output_indices: cute.Tensor,  # [numRows, top_k] int32
+        order_row: cute.Tensor,  # [batch_size] int32 (or None when seqlen_sorted=False)
+    ):
+        &quot;&quot;&quot;Thin entry: bidx → row_idx → run_one_row.
+
+        grid = (num_rows * cluster_size,) where num_rows = batch_size *
+        next_n. cluster_id = bidx // cluster_size, cta_in_cluster ∈
+        [0, cluster_size). CTA r scans row[r * N / cs : (r+1) * N / cs]
+        in Phase 2, so the per-row GE-count scales as 1 / cs. At
+        cluster_size == 1 this collapses to one CTA per row scanning
+        the whole row.
+
+        When ``self.seqlen_sorted`` is True, the LJF dispatch order
+        operates at REQUEST granularity (``order_row`` has length
+        batch_size = num_rows / next_n). The owning row is resolved as
+        ``order_row[cluster_id // next_n] * next_n + cluster_id % next_n``
+        so the ``next_n`` rows of one request stay contiguous in
+        dispatch order. All ``cluster_size`` CTAs within a cluster see
+        the same ``cluster_id`` and therefore the same row, preserving
+        cluster-sync semantics.
+
+        Body is extracted into :meth:`run_one_row` so other entries (e.g.
+        the LB load-balance variant) can resolve ``row_idx`` differently
+        from the mappings used here.
+        &quot;&quot;&quot;
+        ...
+
+    @cute.jit
+    def run_one_row(
+        self,
+        row_idx,  # int32, owning row in [0, num_rows)
+        input_data: cute.Tensor,  # [numRows, stride0] dtype
+        pre_idx: cute.Tensor,  # [numRows / next_n, pre_idx_stride] int32
+        seq_lens: cute.Tensor,  # [numRows / next_n] int32
+        output_values: cute.Tensor,  # [numRows, top_k] dtype, optional
+        output_indices: cute.Tensor,  # [numRows, top_k] int32
+    ):
+        &quot;&quot;&quot;Dispatch: compute per-row slice + cluster sync mode, call _run_phases.
+
+        ``run_one_row`` only handles row resolution, SMEM allocation, and
+        the per-row long-vs-short decision. Phase 1-4 are in
+        :meth:`_run_phases`.
+
+        Short-row degrade: when the actual row workload fits within ONE
+        CTA&#x27;s design slice (``ceil(max_seq_len / cluster_size)``), CTA 0
+        solo-scans the row (do_cluster_sync=False, no cluster sync) and
+        the other cluster CTAs fall through ``run_one_row`` without
+        calling ``_run_phases``. CuTe DSL doesn&#x27;t support runtime
+        ``return``, so non-leader CTAs naturally reach
+        ``griddepcontrol_launch_dependents`` at the end.
+        &quot;&quot;&quot;
+        ...
+
+    @cute.jit
+    def _run_phases(
+        self,
+        input_row,
+        pre_idx_row,
+        output_values_row,
+        output_indices_row,
+        N,
+        pre_idx_offset,
+        pre_idx_count,
+        slice_start,
+        slice_end,
+        do_cluster_sync,
+        cta_in_cluster,
+        smem_keys,
+        smem_vals,
+        smem_hist,
+        smem_ptcnt,
+        smem_wcnt,
+        smem_wmin,
+        smem_wmax,
+        smem_wsum,
+        smem_wcnt_p1,
+        s_thr,
+        s_iscalars,
+        s_cluster_partial,
+        smem_input,
+        s_mt_thr,
+        smem_ptcnt_multi,
+        smem_wcnt_multi,
+        s_mt_cnt,
+        s_r0col,
+        s_cluster_partial_m,
+        smem_gath,
+        tidx,
+        warp_id,
+        lane,
+    ):
+        &quot;&quot;&quot;Run Phase 1-4 + final cluster barrier on a given row slice.
+
+        Caller (``run_one_row``) decides slice + do_cluster_sync per row:
+          - cs=1                 → slice=[0,N), do_cluster_sync=False
+          - cs&gt;1, long row       → slice=N/cs per CTA, do_cluster_sync=True
+          - cs&gt;1, short row      → slice=[0,N), do_cluster_sync=False, CTA 0 only
+
+        Non-leader CTAs in short-row mode never call this helper.
+        &quot;&quot;&quot;
+        ...
+
+    def pick_config(
+        torch_dtype,
+        num_rows: int,
+        num_candidates: int,
+        max_seq_len: Optional[int] = None,
+        num_sms: Optional[int] = None,
+    ) -&gt; dict:
+        &quot;&quot;&quot;Pick the launch-shape ctor kwargs for ``(dtype, BS, N)``.
+
+        Mirrors the production runner policy (cluster_size auto-pick +
+        ``_pick_tuning``) so any caller instantiating the kernel directly
+        gets the same shapes the custom op would use. Rationale (B200,
+        nsys cold-L2, 2026-07-15 big-BS triage): a config frozen at the
+        BS=1 optimum (cs = N&gt;=65536 ? 4 : 1, T=1024, mbpm=1) is geomean
+        2.27x slower (max 6.0x) than the op-bench anchor at BS in
+        {64, 256, 1024}, while this policy is 0.95x (parity/better).
+        Multi-CTA splitting only pays while the grid is a single wave
+        (num_rows * cluster_size &lt;= num_sms); past that, row parallelism
+        already saturates the SMs and per-row splitting is pure overhead.
+
+        ``max_seq_len``: pass the peak runtime N under CUDA-graph capture
+        so the variant is picked for the replay shape, not the capture
+        shape (same contract as the custom op&#x27;s ``_pick_tuning``).
+
+        Returns kwargs for ``GvrTopKKernel(...)``: ``cluster_size``,
+        ``num_threads``, ``use_256bit_load``, ``min_blocks_per_mp``,
+        ``enable_warp_parallel_reduce``.
+        &quot;&quot;&quot;
+        import torch  # local: keep the module importable without torch
+
+        if num_sms is None:
+            num_sms = GvrTopKKernel._device_num_sms()
+        n_row = max_seq_len if max_seq_len is not None else num_candidates
+        is_fp32 = torch_dtype == torch.float32
+
+        # cluster_size: B200 SXM5 synth-data tuning (matches the custom
+        # op&#x27;s auto-pick): N &lt; 64K -&gt; 1 (sync unrecouped); tiny grid at
+        # large N -&gt; 8; single-wave -&gt; 4/2; multi-wave -&gt; 1.
+        if n_row &lt; 65536:
+            cluster_size = 1
+        elif num_rows &lt;= 4 and n_row &gt;= 131072:
+            cluster_size = 8
+        elif num_rows * 4 &lt;= num_sms:
+            cluster_size = 4
+        elif num_rows * 2 &lt;= num_sms:
+            cluster_size = 2
+        else:
+            cluster_size = 1
+
+        # Cluster CTAs split the row, so tuning targets per-CTA work.
+        n_per_cta = n_row // cluster_size
+        # T=1024 needs 1 CTA/SM grid AND enough per-CTA vec work. Under
+        # graph capture, raise the half-prec bar so a small capture-N
+        # doesn&#x27;t force T=1024 on small-N replays.
+        n_thresh_t = 131072 if (max_seq_len is not None and not is_fp32) else 65536
+        num_threads = 1024 if (num_rows &lt;= num_sms and n_per_cta &gt;= n_thresh_t) else 512
+        # V=256-bit only helps fp32 at large N; half-prec cvt doubles reg
+        # pressure. Caller must hand a 32B-aligned contiguous tensor
+        # (``launch`` downgrades on misalignment).
+        use_256bit_load = is_fp32 and n_per_cta &gt;= 16384
+        enable_warp_parallel_reduce = num_threads == 1024
+
+        # min_blocks_per_mp: reg-vs-occupancy 3-tier (fp32 wants ~70 regs
+        # for 4-LDG ILP -&gt; mb&lt;=2; half-prec fits 40 regs -&gt; mb=3 packs
+        # 3 CTA/SM when rows oversubscribe the device).
+        vec_bits = 256 if use_256bit_load else 128
+        vec_w = vec_bits // (32 if is_fp32 else 16)
+        n_vec_iters = max(1, n_per_cta // (num_threads * vec_w))
+        if is_fp32:
+            if n_vec_iters &lt; 4:
+                min_blocks_per_mp = 0
+            elif num_rows &lt;= num_sms:
+                min_blocks_per_mp = 1
+            elif num_sms * 2 &lt; num_rows &lt;= num_sms * 3 and n_per_cta &lt;= 32768:
+                min_blocks_per_mp = 3
+            else:
+                min_blocks_per_mp = 2
+        else:
+            if num_rows &gt; num_sms:
+                min_blocks_per_mp = 3
+            elif n_vec_iters &lt; 4:
+                min_blocks_per_mp = 0
+            else:
+                min_blocks_per_mp = 1
+
+        return dict(
+            cluster_size=cluster_size,
+            num_threads=num_threads,
+            use_256bit_load=use_256bit_load,
+            min_blocks_per_mp=min_blocks_per_mp,
+            enable_warp_parallel_reduce=enable_warp_parallel_reduce,
+        )
+
+    @classmethod
+    def launch(
+        cls,
+        logits,
+        pre_idx,
+        seq_lens,
+        output_indices,
+        top_k: int,
+        next_n: int = 1,
+        compress_ratio: int = 1,
+        max_seq_len: Optional[int] = None,
+        num_sms: Optional[int] = None,
+        **kernel_overrides,
+    ) -&gt; None:
+        &quot;&quot;&quot;Compile-and-launch with ``pick_config`` shapes (indices-only path).
+
+        Owns a class-level compiled-variant cache keyed by every ctor knob,
+        so repeated calls at any (BS, N, dtype) reuse the right variant.
+        ``kernel_overrides`` (e.g. ``enable_r0=False``, ``cluster_size=8``)
+        override the picked config and participate in the cache key.
+        Mirrors the custom op&#x27;s compile contract: sym_int shapes, tvm-ffi
+        env stream (launches on the ambient torch stream), fixed
+        ``return_output_values=False`` / ``seqlen_sorted=False``.
+        &quot;&quot;&quot;
+        ...
+
+```</pre></details><details><summary>fork --append-prompt(分带 steering) — <code>gvr-topk-pr16457-fresh/fork_steering_banded.md</code> (3073 B, 点击展开)</summary><pre class='pmt'># RE-SCOPED TARGET (banded bar) + steering from rounds 1-3
+
+## New acceptance bar (replaces the flat gm&gt;=1.60 / 0-regression goal)
+
+Split the workload envelope into two ISL bands and satisfy BOTH:
+
+- **Band A (PRIMARY, where the money is): ISL 32K-1M** (i.e. n = seq_len &gt;=
+  8192 for V4 Flash/Pro, &gt;= 32768 for V3.2 — every workload whose uuid names
+  isl 32k/128k/512k/1024k, and the bs-extension workloads at those sizes):
+  **geomean &gt;= 1.60x vs baseline, every case &gt;= 0.95x.**
+- **Band B (guard): ISL 4K-32K** (uuid isl 4k):
+  **geomean &gt;= 1.00x, every case &gt;= 0.95x.**
+
+Regression tolerance is now 5% per case (was: zero). Use it: a &lt;=5% loss on a
+small-n case that buys a big Band-A win is a GOOD trade. Priority within Band
+A: V4-Pro (k=1024) &gt; V4-Flash ~= V3.2; larger n first.
+
+## Hard lessons from rounds 1-3 (do not re-learn these with GPU time)
+
+1. **Stop optimizing the 4k cells.** Platform timing on small-n BS=1 is
+   harness-floor-bound (~15-23us measured; the true kernel is &lt;1us) — wins
+   there are mispriced by the floor and are Band-B guard cases now, not
+   targets. Round-3&#x27;s champion won mostly 4k cells and still scored 0.84
+   overall. Every hour spent there is wasted.
+2. **The baseline is strong at large n.** It streams near DRAM roofline for
+   its 2-pass structure. To clear 1.6x in Band A you must CUT ROW TRAFFIC,
+   not just tune: the baseline reads ~2.05x the row; a true single-read
+   pipeline (threshold estimate + candidate collect fused into ONE pass over
+   the row, second pass only over candidates) is the only lever with 1.6x+
+   headroom at DRAM-bound sizes. Think: per-CTA streaming histogram/quantile
+   sketch of the row WHILE collecting above a conservative floor, then refine
+   from the collected superset — never touch the full row again.
+3. Confirmed-productive primitives from your own rounds (reuse, don&#x27;t
+   rediscover): two-level radix histogram for k=2048 heavy tails;
+   1024-thread coop blocks on bandwidth-bound batched cases; runtime
+   candidate-cap smem + batch-aware occupancy; shape-dispatched hybrid;
+   measured prior-min endpoint to cut undershoot scans; smem-cached exact
+   radix ONLY for n&lt;=8192 (fails beyond).
+4. Confirmed dead ends: warp-aggregated histogram atomics at k=2048;
+   multi-probe secant (2-point wins); cooperative-groups grid.sync (judge
+   non-compliant) — use plain multi-launch or manual barriers;
+   redundant cluster reductions; whole-row smem caching past 8192.
+5. GVR skeleton stays mandatory (preIdx prior -&gt; threshold estimate -&gt;
+   secant/log-style refine on exact counts -&gt; exact refine of candidates),
+   but P1/P4 are free: radix/histogram primitives inside phases are
+   encouraged. Exactness (tie-robust value multiset, every row) is
+   non-negotiable — an inexact 2x is worth nothing.
+6. BS&gt;1 rows are identical copies: per-row work is identical, so batch wins
+   come from occupancy/wave shaping, not per-row algorithm changes. Band-A
+   bs-extension workloads (bs32-1024 at large n) reward kernels whose grid
+   scales with b without occupancy collapse.
+</pre></details></td></tr>
+</table></div><div class="card" id="ra">
+<h3>gvr-topk-bs1-recal(战役 A) <span class="chip">Running</span></h3>
+<table class="kv">
+<tr><th>ID</th><td class="mono">rd06zd9zf55jdfxfr5z077t6wg</td></tr>
+<tr><th>轮次 / 内部 speedup</th><td>1/10 / 0.35(r1 早期,种子 floor 未立)</td></tr>
+<tr><th>本地 nsys 复核</th><td>—(进行中)</td></tr>
+<tr><th>起止(UTC)</th><td>07-24 06:07 → —</td></tr>
+<tr><th>花费</th><td>cap $1200</td></tr>
+<tr><th>发起目标</th><td>bar 重定标: BS=1 865 格 gm≥1.60 + 单格回退 ≤5% + 全 exact;战役 B(gvr-topk-bsx-recal, BS2-1024 gm≥1.25 — oracle≈1.44 之下)待 A 收口后启动</td></tr>
+<tr><th>约束</th><td>GVR 骨架;**R4 champion 28dc11f6 种子放开(用户 07-24 批准)** — 源码经 --asset 附入(平台 prompt 上限 32KB);弱区攻击序 32K-64K 全模型 > V3.2 K2048@8K-16K > 128K-256K;禁回吐 4k-8k/512K-1M 强区</td></tr>
+<tr><th>代码位置</th><td class="mono">indexer_topk_op_bench/op26_r0_upstream_port_report/kf_campaign/gvr-topk-bs1-recal/(seed_r4_champion.cu + prompt.md)</td></tr>
+<tr><th>性能数据位置</th><td class="mono">indexer_topk_op_bench/op26_r0_upstream_port_report/kf_campaign/gvr-topk-bs1-recal/RESUME_RECAL.md · monitor_recal.jsonl</td></tr>
+<tr><th>备注</th><td>pool 换血修 fresh 死槽教训(2×claude opus-4.8 high + 2×codex gpt-5.6-sol high + 2×n3 opus-4.8, 无 fable-5);10 轮/stagnation 5(fresh 3 轮即停的修正);fresh 战役 6 条 nsys 验证技术事实注入 prompt</td></tr>
+<tr><th>发出 prompt</th><td><details><summary>campaign prompt(cold60 基底 + bar 放宽补丁 + R4 种子章节;源码走 --asset) — <code>gvr-topk-bs1-recal/prompt.md</code> (30807 B, 点击展开)</summary><pre class='pmt'># DeepSeek-V4 Indexer Top-K Decode (BS=1, fp32, B200) — Optimize the Production GVR Kernel
+
+## Problem
+
+Sparse-attention indexer top-K selection at decode time. One row of real
+captured indexer logits (`logits[1, npad]`, fp32, valid length `n_valid`,
+tail padded so pad never enters the top-k). Return the `int32` indices of
+the `k` largest values, any order; ties at the k-th value boundary may be
+resolved either way (the correctness checker is index-SET based and
+tie-robust). Exactness is non-negotiable: every index whose value is
+strictly greater than the k-th value must appear, on every run.
+
+`pre_idx[1, k]` is the PREVIOUS decode step&#x27;s top-k (temporal warm hint).
+Overlap with the true top-k ranges 0.02–1.0 across workloads (typically
+&gt;0.5). Exploiting it is REQUIRED (see skeleton below), but correctness and
+the no-regression bar must hold even at 0.02 overlap. You may NOT branch
+on any estimate of hint quality computed outside the kernel (hit-rate is
+unknowable at inference); in-kernel admission escape / lagged feedback is
+fine.
+
+Workloads are REAL production captures from three models, n up to ~1.05M:
+- V4-Flash: k=512,  n rungs 4K / 32K / 128K / 512K / 1M
+- V4-Pro:   k=1024, n rungs 4K / 32K / 128K / 512K / 1M  (highest priority)
+- V3.2:     k=2048, n rungs 4K / 32K / 128K / 256K
+
+Two workloads per (model, rung): a low-hint-overlap layer and a
+high-overlap layer. The logits distribution is NOT random — heavy-tailed
+real indexer scores (near-exponential CCDF); algorithms that look good on
+`randn` behave differently here. Priority for effort allocation:
+V4-Pro &gt; others; n ≥ 32K &gt; small n.
+
+## Baseline
+
+The baseline you must beat is the CURRENT PRODUCTION kernel: the
+guess-verify-refine (GVR) top-K from TensorRT-LLM PR#16457 (latest head,
+including its K=2048 tail-ladder tuning). Its structure: seed a threshold
+guess from `pre_idx`, verify/refine the threshold with a secant solve in
+log space, then exactly collect the surviving candidates. It is written in
+CuTe DSL (Python); a verbatim source digest — full config/dispatch/
+orchestration layers plus the signature and docstring of every phase
+primitive — is in the APPENDIX at the bottom of this brief. Read it first —
+your job is to make THIS algorithm faster (re-expressed in CUDA C++), not
+to replace it. You must find the profitable directions yourself by
+profiling and analysis.
+
+The per-workload baseline timings (your speedup denominator) are EXTERNAL
+nsys cold-L2 pure-kernel-time medians of exactly that production kernel on
+an idle B200 — they contain none of the ~15µs harness floor your own
+platform measurements include. Consequence: at true kernel parity your
+platform speedup will read ~0.5-0.9x, NOT 1.0x; the compression is
+strongest on the smallest workloads. Do not be discouraged by sub-1.0
+readings early on — track your RELATIVE progress across submissions, and
+judge absolute wins by how much kernel time you save on the large-n cells
+where the floor is a smaller fraction.
+
+One measured fact about where its time goes (from the external report on
+the full 865-cell grid): the FINAL-COLLECT block (threshold handoff +
+refine + writeback, &quot;P4&quot;) dominates — it is the largest phase on 827 of
+865 cells, median ~37% of kernel time (range 23–58%). The mid scan/count
+passes are second. How to attack that is yours to work out.
+
+## Target
+
+- **Required:** beat the SEED solution (see the SEED section below — it
+  already sits at ~1.65× external geomean). No workload may fall below
+  0.95× of baseline (max 5% per-cell regression is the hard acceptance
+  bar; a kernel that wins big on average but loses &gt;5% on any cell will
+  be rejected downstream).
+  The external acceptance goal is +60% geomean on the full 865-cell grid;
+  every incremental win counts toward it.
+- Final acceptance re-measures externally with nsys cold-L2 on all 865
+  real cells (the cells here are a stratified subset). Platform timings
+  have a ~15µs floor that compresses your true speedup roughly 1.3–1.4× —
+  do not tune to the harness floor; win in kernel time. Do not overfit to
+  these exact n values: `n` is dynamic (up to ~1.05M), `k ∈ {512, 1024,
+  2048}` at runtime, hint quality is dynamic.
+
+## Required algorithmic skeleton — HARD compliance rule
+
+Keep the GVR skeleton: (a) `pre_idx` as the threshold prior, (b) a
+secant+log-transform style exact threshold solve (or an equivalent
+threshold-refinement structure), (c) an exact refine of the surviving
+candidates. Any per-stage restructuring that preserves exactness is
+allowed. Mature primitives (histogram ladders, radix digit passes) may be
+absorbed INTO stages.
+
+**Non-negotiable:** a submission that abandons the `pre_idx` prior, or
+replaces the threshold-prior structure wholesale with a prior-free
+selection algorithm (plain radix-select, full sort, sampling-based
+selection), is NON-COMPLIANT and will be rejected even if it is faster.
+Likewise, do not build a per-case dispatcher across unrelated top-k
+operators. The goal of this campaign is a better GVR, not a different
+algorithm.
+
+## Dead ends — measured net-negative on THIS workload/hardware; do not re-discover
+
+1. BS=1 is latency-bound, not bandwidth-bound (24% occupancy, &lt;1% DRAM at
+   small n). Bandwidth-oriented rewrites miss the bottleneck.
+2. `pre_idx` warm-hint grafted onto radix-select: no win (hint only helps
+   threshold-style skeletons) — and prior-free pivots are banned anyway.
+3. Private per-warp histograms to avoid smem atomics: loses (SM100
+   pipelines same-address atomics fine).
+4. Multi-CTA for SMALL n (&lt; ~8K): launch/sync overhead dominates;
+   single-CTA wins there.
+5. More than 8–32 CTAs at large n: merge cost eats the scan win.
+6. Per-element ballot/popc slot-reservation to fuse count+collect into
+   one pass: coordination ≈ a full extra pass.
+7. Staging the row into shared memory first: row re-reads are cheap L2
+   hits.
+8. Extra secant/interpolation refinement rounds: each is a
+   barrier-separated pass; keep passes ≤2.
+9. CUB DeviceRadixSort / full sort: ~10× too slow at these sizes (and
+   banned as a wholesale replacement).
+10. Fusing the final-collect histogram into the P3 scan loop: pollutes
+    the scan inner loop, −15%.
+11. Shrinking histogram bins below 512 for k=2048: exact-tail scratch
+    overflows (silent UB); kNumBins=512 at k=2048 is already in the
+    baseline.
+12. Launch-config-only retuning: ceiling measured at ~1.025×.
+13. CUDA graphs / replay amortization are banned by the compliance judge —
+    win inside the kernel.
+
+## Correctness traps
+
+- The k-th-value tie boundary: the checker requires ALL indices with
+  value strictly greater than the k-th value, plus any tie subset to fill
+  the remainder. Arrival-order races on the boundary bin under concurrent
+  compaction are the classic silent bug — never drop a strictly-greater
+  element.
+- Real data is UNDERSHOOT-biased for hint-seeded thresholds (the seeded
+  count almost always comes in below k, not above): guards that only fire
+  on overshoot are dead code here.
+- On cluster launches, `cluster.arrive_relaxed()` has no release
+  semantics: a DSMEM read of a just-written scalar can observe stale
+  data. Use `cluster_arrive()` (release) or an acq_rel cluster fence on
+  the write side. Symptom: wrong indices clustered by CTA slice.
+
+## Requirements
+
+- CUDA C++ (sm_100a Blackwell). fp32 in, int32 indices out.
+- Exact per the tie-robust set semantics above — no approximation.
+- Dynamic `n` (up to ~1.05M, padded width `npad = ceil(n/64)*64`), dynamic
+  hint quality, `k ∈ {512, 1024, 2048}` at runtime.
+- Deterministic output not required (any tie resolution accepted), but
+  the index set must be exactly right on every run.
+- One kernel launch preferred (or 2 with programmatic dependent launch);
+  launch overhead is material at 3–29 µs.
+
+---
+
+## APPENDIX — baseline kernel source digest (verbatim spans from the production CuTe DSL file, PR#16457 pinned head)
+
+The production kernel is a 5,000-line CuTe DSL (Python) file; it cannot be shipped whole. Below are VERBATIM spans: full text of the per-K constants, constructor (every tuning knob + tuned default), launch-time config dispatch, and the per-row orchestration body; plus signature + docstring of every phase primitive. Timings in baselines.jsonl were measured from exactly this code (see Baseline section).
+
+```python
+class GvrParams:
+    kFTarget: int
+    kC: int  # candidate buffer cap
+    kNumBins: int  # histogram bin count
+
+    @staticmethod
+    def get(dtype_name: str, top_k: int, compress_ratio: int = 1) -&gt; &quot;GvrParams&quot;:
+        &quot;&quot;&quot;Per-(dtype, K, cr) tuning constants, mirroring CUDA&#x27;s
+        ``GvrParams&lt;T, K&gt;`` template specialization. For K ∈ {512, 1024}
+        cr=1 (DSv3.2) and cr=4 (DSv4, PR #14413) use different kFTarget —
+        V4 aligns kFTarget with kK to avoid upper-clamp saturation on
+        tight-sigma layers (1.5-2.2x fewer P2 iters on swe-bench). K=2048 is
+        identical across cr (V4 doesn&#x27;t natively use it).
+        &quot;&quot;&quot;
+        TABLE = {
+            # --- cr = 1 (DSv3.2): tuned on V3.2 swe-bench data ---
+            (&quot;float32&quot;, 512, 1): GvrParams(kFTarget=384, kC=5120, kNumBins=1024),
+            (&quot;float32&quot;, 1024, 1): GvrParams(kFTarget=2560, kC=5120, kNumBins=1024),
+            (&quot;float32&quot;, 2048, 1): GvrParams(kFTarget=3072, kC=6144, kNumBins=2048),
+            (&quot;bfloat16&quot;, 512, 1): GvrParams(kFTarget=384, kC=5120, kNumBins=512),
+            (&quot;bfloat16&quot;, 1024, 1): GvrParams(kFTarget=2560, kC=5120, kNumBins=512),
+            (&quot;bfloat16&quot;, 2048, 1): GvrParams(kFTarget=4096, kC=5120, kNumBins=2048),
+            (&quot;float16&quot;, 512, 1): GvrParams(kFTarget=384, kC=5120, kNumBins=512),
+            (&quot;float16&quot;, 1024, 1): GvrParams(kFTarget=2560, kC=5120, kNumBins=1024),
+            (&quot;float16&quot;, 2048, 1): GvrParams(kFTarget=4096, kC=5120, kNumBins=2048),
+            # --- cr = 4 (DSv4): tuned on V4 Flash/Pro swe-bench data ---
+            (&quot;float32&quot;, 512, 4): GvrParams(kFTarget=512, kC=5120, kNumBins=1024),
+            (&quot;float32&quot;, 1024, 4): GvrParams(kFTarget=1024, kC=5120, kNumBins=1024),
+            (&quot;float32&quot;, 2048, 4): GvrParams(kFTarget=3072, kC=6144, kNumBins=2048),
+            (&quot;bfloat16&quot;, 512, 4): GvrParams(kFTarget=512, kC=5120, kNumBins=512),
+            (&quot;bfloat16&quot;, 1024, 4): GvrParams(kFTarget=1024, kC=5120, kNumBins=512),
+            (&quot;bfloat16&quot;, 2048, 4): GvrParams(kFTarget=4096, kC=5120, kNumBins=2048),
+            (&quot;float16&quot;, 512, 4): GvrParams(kFTarget=512, kC=5120, kNumBins=512),
+            (&quot;float16&quot;, 1024, 4): GvrParams(kFTarget=1024, kC=5120, kNumBins=1024),
+            (&quot;float16&quot;, 2048, 4): GvrParams(kFTarget=4096, kC=5120, kNumBins=2048),
+        }
+        key = (dtype_name, top_k, compress_ratio)
+        if key not in TABLE:
+            raise ValueError(f&quot;Unsupported GvrParams&lt;{dtype_name}, {top_k}, cr={compress_ratio}&gt;&quot;)
+        return TABLE[key]
+
+class GvrTopKKernel:
+    def __init__(
+        self,
+        ...
+
+    @cute.jit
+    def phase1_preidx_stats(
+        self,
+        input_row,  # cute.Tensor [N] fp32 (post-cast for half-prec)
+        N,  # length of input_row
+        pre_idx_row,  # cute.Tensor [M] int32
+        pre_idx_count,
+        pre_idx_offset,
+        smem_wmin_f32,  # cute.Tensor [NUM_WARPS] float32
+        smem_wmax_f32,  # cute.Tensor [NUM_WARPS] float32
+        smem_wsum_f32,  # cute.Tensor [NUM_WARPS] float32
+        smem_wcnt_i32,  # cute.Tensor [NUM_WARPS] int32
+        s_thr,  # cute.Tensor [3] float32: [threshold, val_lo, val_hi]
+        s_iscalars,  # cute.Tensor [6] int32: [cand_count, done, cnt_lo, cnt_hi, out_count, local_cand_count]
+        tidx,
+        warp_id,
+        lane,
+        smem_gath=None,  # cute.Tensor [top_k] f32 or None (p1b_cache): stash
+        # the gathered value per preIdx slot so P1b skips a 2nd GMEM gather.
+        s_mt_thr=None,  # r0_vseed: P1 also parks pmean in the last rung
+        # column (visibility via P1&#x27;s own trailing barrier -&gt; zero extra sync).
+    ):
+        &quot;&quot;&quot;preIdx scan + warp reduce + block aggregate + initial threshold.
+
+        Smem layout split: floats kept in fp32 buffers, ints kept in int32
+        buffers (no bit-cast tricks needed — avoids ArithValue/ir_value
+        coupling and keeps types clean for the MLIR codegen).
+        &quot;&quot;&quot;
+        ...
+
+    @cute.jit
+    def phase1b_hspace_rungs(
+        self,
+        ...
+
+    @cute.jit
+    def block_count_ge(
+        self,
+        input_row,  # cute.Tensor [N] fp32 (full row; this CTA only scans its slice)
+        slice_start,  # int32: index in input_row where this CTA&#x27;s slice starts
+        slice_end,  # int32: index in input_row where this CTA&#x27;s slice ends
+        threshold,  # cutlass.Float32 scalar
+        smem_ptcnt,  # cute.Tensor [BLOCK_SIZE] int32 (P3 cache)
+        smem_wcnt,  # cute.Tensor [NUM_WARPS] int32 (block reduce scratch)
+        s_iscalars,  # cute.Tensor [6] int32 (writes [0] = cand_count)
+        s_cluster_partial,  # cute.Tensor [1] int32 (per-CTA partial scratch for DSMEM)
+        tidx,
+        warp_id,
+        lane,
+        do_cluster_sync,  # bool: False = skip DSMEM aggregation (cs=1 / short-row degrade)
+        smem_input=None,  # optional SMEM-cached slice (smem_input[i] == input_row[slice_start+i])
+        redundant=False,  # trace-time: every-warp reduce, return the total
+        wcnt_off=None,  # int32 staging bank offset into smem_wcnt (parity)
+    ):
+        &quot;&quot;&quot;Count input[i] &gt;= threshold across this CTA&#x27;s row slice, then
+        DSMEM-aggregate across the cluster.
+
+        ``redundant=True`` (p2_warp_redundant, cluster_size == 1 only):
+        after the staging barrier EVERY warp reduces the warp counts
+        lane-parallel and the block total RETURNS in a register —
+        bit-identical across warps — instead of a leader writing
+        s_iscalars[0] for a barrier-published broadcast. ``wcnt_off``
+        parity-banks the smem_wcnt staging so a warp that has moved on
+        to the next Phase-2 round cannot clobber a slot a slower warp is
+        still reading (the per-round staging barrier bounds the drift to
+        one round).
+
+        Vectorized scan: each thread loads vec_w elements per iter (128 or
+        256 bits) over ``input_row[slice_start : slice_end)``; scalar tail
+        handles the remainder.
+
+        Cluster aggregation (cluster_size &gt; 1): every CTA stages its
+        slice-local count into ``s_cluster_partial[call &amp; 1]`` (parity
+        double-buffer; slot 2 is the tid0-private call counter), syncs the
+        cluster, then DSMEM-reads every peer&#x27;s slot and sums into
+        ``s_iscalars[0]``.
+        After this every CTA&#x27;s ``s_iscalars[0]`` holds the same
+        cluster-wide cand_count, so Phase 2&#x27;s secant update stays a
+        leader-only scalar op on a value all CTAs agree on.
+        &quot;&quot;&quot;
+        ...
+
+    @cute.jit
+    def phase2_secant_search(
+        self,
+        input_row,
+        N,
+        slice_start,
+        slice_end,
+        smem_ptcnt,
+        smem_wcnt,
+        s_thr,  # [threshold, val_lo, val_hi]
+        s_iscalars,  # [cand_count, done, cnt_lo, cnt_hi, out_count]
+        s_cluster_partial,  # [3] int32 cluster scratch (parity slots + counter)
+        tidx,
+        warp_id,
+        lane,
+        do_cluster_sync,  # bool: False = cs=1 / short-row degrade (skip cluster sync)
+        smem_input=None,  # optional SMEM-cached slice
+    ):
+        &quot;&quot;&quot;Refine s_thr[0] until cand_count lands in [kK, kCC].
+
+        Each iter calls block_count_ge at the candidate threshold and
+        updates the bracket (val_lo, val_hi, cnt_lo, cnt_hi). Sets
+        s_iscalars[1] (done) = 1 on convergence, 2 on bracket exhaustion.
+        &quot;&quot;&quot;
+        ...
+
+    @cute.jit
+    def phase3_collect_candidates(
+        self,
+        input_row,
+        N,
+        slice_start,
+        slice_end,
+        smem_keys,
+        smem_vals,
+        smem_ptcnt,
+        smem_wcnt,
+        s_thr,
+        s_iscalars,
+        s_cluster_partial,
+        tidx,
+        warp_id,
+        lane,
+        do_cluster_sync,  # bool: False = cs=1 / short-row degrade (skip cluster sync)
+        smem_input=None,  # optional SMEM-cached slice
+    ):
+        &quot;&quot;&quot;Retry-shrink (when P2 didn&#x27;t converge) + prefix sum + stream-write.
+
+        On exit, smem_keys[0 : cand_count] / smem_vals[0 : cand_count]
+        hold every (value, index) pair with value &gt;= threshold, in the
+        scan order each thread produces them. Uses smem_ptcnt cached by
+        the last block_count_ge in Phase 2 (or by the retry-shrink below).
+        &quot;&quot;&quot;
+        ...
+
+    @cute.jit
+    def block_fused_snap_iter(
+        self,
+        keys_base,  # hoisted SMEM window base of smem_keys (iterator.toint())
+        smem_wcnt,
+        smem_hist,  # reused as scratch for s_up/s_down warp aggregates
+        s_thr,
+        s_iscalars,
+        count,
+        tidx,
+        warp_id,
+        lane,
+    ):
+        &quot;&quot;&quot;One iteration of histogram snap. Updates s_iscalars[2]=cnt_lo (cge),
+        s_iscalars[3]=cnt_hi (cgt), and s_thr[0]=threshold (moves toward
+        the cnt-in-(kK_GT, kK_GE) bracket).
+        &quot;&quot;&quot;
+        ...
+
+    @cute.jit
+    def _hist_build(self, keys_base, smem_hist, cand_count, lo, inv, tidx):
+        &quot;&quot;&quot;Zero smem_hist[0:kBins], then histogram keys[0:cand_count] with
+        bin = clamp(int((v - lo) * inv), 0, kBins-1). Out-of-window values
+        clamp into the edge bins, which keeps cumulative counts from the
+        top exact for the k-th search (everything above the window lands
+        in the top bin). Barrier after the zero pass and after the build.&quot;&quot;&quot;
+        ...
+
+    @cute.jit
+    def _kth_bin_search(
+        self, smem_hist, smem_wcnt, s_thr, s_iscalars, lo, binw, tidx, warp_id, lane
+    ):
+        &quot;&quot;&quot;Parallel k-th bin search (3-step, high→low). Writes
+        s_thr[0] = lower edge of the selected bin (lo + bidx*binw) and
+        s_iscalars[4] = selected bin&#x27;s count (gates the level-2 histogram
+        refinement). Clobbers s_iscalars[2]/[3] as staging (both are
+        rewritten by the snap loop before anyone else reads them).
+        Trailing barrier.&quot;&quot;&quot;
+        ...
+
+    @cute.jit
+    def phase4_rank_scatter(
+        self,
+        ...
+
+    @cute.jit
+    def phase4_histogram_snap(
+        self,
+        smem_keys,
+        smem_vals,
+        smem_hist,
+        smem_wcnt,
+        s_thr,
+        s_iscalars,
+        output_values_row,
+        output_indices_row,
+        cand_count,
+        tidx,
+        warp_id,
+        lane,
+    ):
+        &quot;&quot;&quot;Three branches by cand_count vs kK:
+        == kK: direct emit (fast path)
+        &gt;  kK: histogram k-th bin search → snap → 2-pass writeback
+        &lt;  kK: emit cand_count + pad with -FLT_MAX
+        &quot;&quot;&quot;
+        ...
+
+    @cute.kernel
+    def gvr_topk_kernel(
+        self,
+        input_data: cute.Tensor,  # [numRows, stride0] dtype
+        pre_idx: cute.Tensor,  # [numRows / next_n, pre_idx_stride] int32
+        seq_lens: cute.Tensor,  # [numRows / next_n] int32
+        output_values: cute.Tensor,  # [numRows, top_k] dtype
+        output_indices: cute.Tensor,  # [numRows, top_k] int32
+        order_row: cute.Tensor,  # [batch_size] int32 (or None when seqlen_sorted=False)
+    ):
+        &quot;&quot;&quot;Thin entry: bidx → row_idx → run_one_row.
+
+        grid = (num_rows * cluster_size,) where num_rows = batch_size *
+        next_n. cluster_id = bidx // cluster_size, cta_in_cluster ∈
+        [0, cluster_size). CTA r scans row[r * N / cs : (r+1) * N / cs]
+        in Phase 2, so the per-row GE-count scales as 1 / cs. At
+        cluster_size == 1 this collapses to one CTA per row scanning
+        the whole row.
+
+        When ``self.seqlen_sorted`` is True, the LJF dispatch order
+        operates at REQUEST granularity (``order_row`` has length
+        batch_size = num_rows / next_n). The owning row is resolved as
+        ``order_row[cluster_id // next_n] * next_n + cluster_id % next_n``
+        so the ``next_n`` rows of one request stay contiguous in
+        dispatch order. All ``cluster_size`` CTAs within a cluster see
+        the same ``cluster_id`` and therefore the same row, preserving
+        cluster-sync semantics.
+
+        Body is extracted into :meth:`run_one_row` so other entries (e.g.
+        the LB load-balance variant) can resolve ``row_idx`` differently
+        from the mappings used here.
+        &quot;&quot;&quot;
+        ...
+
+    @cute.jit
+    def run_one_row(
+        self,
+        row_idx,  # int32, owning row in [0, num_rows)
+        input_data: cute.Tensor,  # [numRows, stride0] dtype
+        pre_idx: cute.Tensor,  # [numRows / next_n, pre_idx_stride] int32
+        seq_lens: cute.Tensor,  # [numRows / next_n] int32
+        output_values: cute.Tensor,  # [numRows, top_k] dtype, optional
+        output_indices: cute.Tensor,  # [numRows, top_k] int32
+    ):
+        &quot;&quot;&quot;Dispatch: compute per-row slice + cluster sync mode, call _run_phases.
+
+        ``run_one_row`` only handles row resolution, SMEM allocation, and
+        the per-row long-vs-short decision. Phase 1-4 are in
+        :meth:`_run_phases`.
+
+        Short-row degrade: when the actual row workload fits within ONE
+        CTA&#x27;s design slice (``ceil(max_seq_len / cluster_size)``), CTA 0
+        solo-scans the row (do_cluster_sync=False, no cluster sync) and
+        the other cluster CTAs fall through ``run_one_row`` without
+        calling ``_run_phases``. CuTe DSL doesn&#x27;t support runtime
+        ``return``, so non-leader CTAs naturally reach
+        ``griddepcontrol_launch_dependents`` at the end.
+        &quot;&quot;&quot;
+        ...
+
+    @cute.jit
+    def _run_phases(
+        self,
+        input_row,
+        pre_idx_row,
+        output_values_row,
+        output_indices_row,
+        N,
+        pre_idx_offset,
+        pre_idx_count,
+        slice_start,
+        slice_end,
+        do_cluster_sync,
+        cta_in_cluster,
+        smem_keys,
+        smem_vals,
+        smem_hist,
+        smem_ptcnt,
+        smem_wcnt,
+        smem_wmin,
+        smem_wmax,
+        smem_wsum,
+        smem_wcnt_p1,
+        s_thr,
+        s_iscalars,
+        s_cluster_partial,
+        smem_input,
+        s_mt_thr,
+        smem_ptcnt_multi,
+        smem_wcnt_multi,
+        s_mt_cnt,
+        s_r0col,
+        s_cluster_partial_m,
+        smem_gath,
+        tidx,
+        warp_id,
+        lane,
+    ):
+        &quot;&quot;&quot;Run Phase 1-4 + final cluster barrier on a given row slice.
+
+        Caller (``run_one_row``) decides slice + do_cluster_sync per row:
+          - cs=1                 → slice=[0,N), do_cluster_sync=False
+          - cs&gt;1, long row       → slice=N/cs per CTA, do_cluster_sync=True
+          - cs&gt;1, short row      → slice=[0,N), do_cluster_sync=False, CTA 0 only
+
+        Non-leader CTAs in short-row mode never call this helper.
+        &quot;&quot;&quot;
+        ...
+
+    def pick_config(
+        torch_dtype,
+        num_rows: int,
+        num_candidates: int,
+        max_seq_len: Optional[int] = None,
+        num_sms: Optional[int] = None,
+    ) -&gt; dict:
+        &quot;&quot;&quot;Pick the launch-shape ctor kwargs for ``(dtype, BS, N)``.
+
+        Mirrors the production runner policy (cluster_size auto-pick +
+        ``_pick_tuning``) so any caller instantiating the kernel directly
+        gets the same shapes the custom op would use. Rationale (B200,
+        nsys cold-L2, 2026-07-15 big-BS triage): a config frozen at the
+        BS=1 optimum (cs = N&gt;=65536 ? 4 : 1, T=1024, mbpm=1) is geomean
+        2.27x slower (max 6.0x) than the op-bench anchor at BS in
+        {64, 256, 1024}, while this policy is 0.95x (parity/better).
+        Multi-CTA splitting only pays while the grid is a single wave
+        (num_rows * cluster_size &lt;= num_sms); past that, row parallelism
+        already saturates the SMs and per-row splitting is pure overhead.
+
+        ``max_seq_len``: pass the peak runtime N under CUDA-graph capture
+        so the variant is picked for the replay shape, not the capture
+        shape (same contract as the custom op&#x27;s ``_pick_tuning``).
+
+        Returns kwargs for ``GvrTopKKernel(...)``: ``cluster_size``,
+        ``num_threads``, ``use_256bit_load``, ``min_blocks_per_mp``,
+        ``enable_warp_parallel_reduce``.
+        &quot;&quot;&quot;
+        import torch  # local: keep the module importable without torch
+
+        if num_sms is None:
+            num_sms = GvrTopKKernel._device_num_sms()
+        n_row = max_seq_len if max_seq_len is not None else num_candidates
+        is_fp32 = torch_dtype == torch.float32
+
+        # cluster_size: B200 SXM5 synth-data tuning (matches the custom
+        # op&#x27;s auto-pick): N &lt; 64K -&gt; 1 (sync unrecouped); tiny grid at
+        # large N -&gt; 8; single-wave -&gt; 4/2; multi-wave -&gt; 1.
+        if n_row &lt; 65536:
+            cluster_size = 1
+        elif num_rows &lt;= 4 and n_row &gt;= 131072:
+            cluster_size = 8
+        elif num_rows * 4 &lt;= num_sms:
+            cluster_size = 4
+        elif num_rows * 2 &lt;= num_sms:
+            cluster_size = 2
+        else:
+            cluster_size = 1
+
+        # Cluster CTAs split the row, so tuning targets per-CTA work.
+        n_per_cta = n_row // cluster_size
+        # T=1024 needs 1 CTA/SM grid AND enough per-CTA vec work. Under
+        # graph capture, raise the half-prec bar so a small capture-N
+        # doesn&#x27;t force T=1024 on small-N replays.
+        n_thresh_t = 131072 if (max_seq_len is not None and not is_fp32) else 65536
+        num_threads = 1024 if (num_rows &lt;= num_sms and n_per_cta &gt;= n_thresh_t) else 512
+        # V=256-bit only helps fp32 at large N; half-prec cvt doubles reg
+        # pressure. Caller must hand a 32B-aligned contiguous tensor
+        # (``launch`` downgrades on misalignment).
+        use_256bit_load = is_fp32 and n_per_cta &gt;= 16384
+        enable_warp_parallel_reduce = num_threads == 1024
+
+        # min_blocks_per_mp: reg-vs-occupancy 3-tier (fp32 wants ~70 regs
+        # for 4-LDG ILP -&gt; mb&lt;=2; half-prec fits 40 regs -&gt; mb=3 packs
+        # 3 CTA/SM when rows oversubscribe the device).
+        vec_bits = 256 if use_256bit_load else 128
+        vec_w = vec_bits // (32 if is_fp32 else 16)
+        n_vec_iters = max(1, n_per_cta // (num_threads * vec_w))
+        if is_fp32:
+            if n_vec_iters &lt; 4:
+                min_blocks_per_mp = 0
+            elif num_rows &lt;= num_sms:
+                min_blocks_per_mp = 1
+            elif num_sms * 2 &lt; num_rows &lt;= num_sms * 3 and n_per_cta &lt;= 32768:
+                min_blocks_per_mp = 3
+            else:
+                min_blocks_per_mp = 2
+        else:
+            if num_rows &gt; num_sms:
+                min_blocks_per_mp = 3
+            elif n_vec_iters &lt; 4:
+                min_blocks_per_mp = 0
+            else:
+                min_blocks_per_mp = 1
+
+        return dict(
+            cluster_size=cluster_size,
+            num_threads=num_threads,
+            use_256bit_load=use_256bit_load,
+            min_blocks_per_mp=min_blocks_per_mp,
+            enable_warp_parallel_reduce=enable_warp_parallel_reduce,
+        )
+
+    @classmethod
+    def launch(
+        cls,
+        logits,
+        pre_idx,
+        seq_lens,
+        output_indices,
+        top_k: int,
+        next_n: int = 1,
+        compress_ratio: int = 1,
+        max_seq_len: Optional[int] = None,
+        num_sms: Optional[int] = None,
+        **kernel_overrides,
+    ) -&gt; None:
+        &quot;&quot;&quot;Compile-and-launch with ``pick_config`` shapes (indices-only path).
+
+        Owns a class-level compiled-variant cache keyed by every ctor knob,
+        so repeated calls at any (BS, N, dtype) reuse the right variant.
+        ``kernel_overrides`` (e.g. ``enable_r0=False``, ``cluster_size=8``)
+        override the picked config and participate in the cache key.
+        Mirrors the custom op&#x27;s compile contract: sym_int shapes, tvm-ffi
+        env stream (launches on the ambient torch stream), fixed
+        ``return_output_values=False`` / ``seqlen_sorted=False``.
+        &quot;&quot;&quot;
+        ...
+
+```
+
+## SEED SOLUTION — START FROM THIS, DO NOT START FROM SCRATCH
+
+A previous campaign already produced a strong CUDA C++ solution from this
+exact brief. Its complete source ships with the workload data in the
+evaluation staging directory (same place as the `cell_*.safetensors`):
+**`seed_r4_champion.cu`** (the whole kernel, compiles as-is with
+`-std=c++17 -O3 --use_fast_math`, sm_100a) and **`seed_r4_main.cpp`**
+(torch-extension binding). Read them FIRST. Submit the seed essentially
+unchanged as your first candidate to establish your floor, then improve
+it. Any submission that does not beat the seed&#x27;s internal score is wasted
+work.
+
+Seed&#x27;s EXTERNAL verdict on the full 865-cell nsys cold-L2 grid vs the same
+baseline: **geomean 1.6531x, 865/865 exact, zero real regressions**
+(p5 1.221 / median 1.593 / max 3.516). Per-(model, n-rung) speedups — your
+map of where the remaining money is:
+
+| | 4k | 8k | 16k | 32k | 64k | 128k | 256k | 512k | 1M |
+|---|---|---|---|---|---|---|---|---|---|
+| Flash K=512 | 2.069 | 1.901 | 1.628 | 1.320 | 1.285 | 1.586 | 1.444 | 1.735 | 1.846 |
+| Pro K=1024 | 2.653 | 2.060 | 1.700 | 1.357 | 1.279 | 1.568 | 1.476 | 1.808 | 1.974 |
+| V3.2 K=2048 | 1.935 | 1.465 | 1.292 | 1.474 | 1.530 | 1.794 | 1.982 | — | — |
+
+Seed algorithm sketch (details in the source): P1 hint-CCDF two-level
+histogram 8-quantile threshold ladder -&gt; P2 single-pass 8-threshold count +
+log-secant bracket (~9x/pass shrink) with exact plateau fallback -&gt; P3
+DSMEM collect (odd/even dual bank) -&gt; P4 CTA0 4x8-bit radix + tie ticket.
+Dispatch on (npad, K) only: &lt;=12288 direct single-block path.
+
+**Weak bands to attack (in priority order):**
+1. n = 32K-64K, ALL models (1.28-1.36) — the seed&#x27;s worst zone and the
+   deployment sweet spot. The seed&#x27;s single-CTA/cluster crossover sits here.
+2. V3.2 K=2048 at n = 8K-16K (1.29-1.47) — heavy-tail K=2048 rungs.
+3. Mid-N 128K-256K (1.44-1.59) — solid but below the 512K-1M level.
+
+**Do NOT give back the strongholds** (4k-8k &gt;=1.9, 512K-1M &gt;=1.7): check
+every candidate on the full workload set, not just the band you tune.
+
+Verified facts from a LATER independent campaign on the same problem (its
+best never beat this seed, but these per-technique findings were
+nsys-verified and are safe to reuse):
+- Multi-threshold single-pass probing beats 2-point secant on barrier-heavy
+  iterations — the seed already does this in P2; widening the bracket
+  further REGRESSED (saturated).
+- SMEM-cached whole-row radix works for n &lt;= ~8192 only; it failed at 8195.
+- 1024 threads on single-block latency-bound cells (grid &lt;= #SMs) shortens
+  the serial scan chain; 256 threads doubles occupancy at high grid counts.
+- ILP double-buffering in collect is NEUTRAL (scans are L2-served).
+- 16-CTA clusters do NOT beat tuned 8-CTA DSMEM; distributed cluster radix
+  LOSES to rank-0 P4; fusing radix pass-0 into collect REGRESSES.
+- Identical-row output broadcast and cooperative-groups grid.sync are both
+  COMPLIANCE-REJECTED — do not attempt.
+</pre></details></td></tr>
+</table></div><div class="card" id="b40">
+<h3>gvr-topk-bs40 v1 + v2 <span class="chip">v1 Cancelled / v2 Running</span></h3>
+<table class="kv">
+<tr><th>ID</th><td class="mono">gspn6jvr…(v1) / pq3hwx7eh94k…(v2)</td></tr>
+<tr><th>轮次 / 内部 speedup</th><td>1 / 0.82 / 0.45</td></tr>
+<tr><th>本地 nsys 复核</th><td>—</td></tr>
+<tr><th>起止(UTC)</th><td>07-24 ~03:3x / ~05:0x → —</td></tr>
+<tr><th>花费</th><td>进行中</td></tr>
+<tr><th>发起目标</th><td>BS 侧新线(bs40 系;详情归属另一会话)</td></tr>
 <tr><th>约束</th><td>未知(另一会话)</td></tr>
-<tr><th>代码位置</th><td class="mono">未知(另一会话)</td></tr>
-<tr><th>性能数据位置</th><td class="mono">未知(另一会话)</td></tr>
-<tr><th>备注</th><td>内部 0.84 未过平价;如需盘点可接管</td></tr>
+<tr><th>代码位置</th><td class="mono">未知</td></tr>
+<tr><th>性能数据位置</th><td class="mono">未知</td></tr>
+<tr><th>备注</th><td>v1 跑 1h22m 止损重发 v2</td></tr>
+<tr><th>发出 prompt</th><td class="dim">无(prepare 期评测无 prompt)或归另一会话本地,平台 API 不暴露 prompt 原文</td></tr>
+</table></div><div class="card" id="d3">
+<h3>dsl-fp4/fp8-paged-mqa-logits(二批) <span class="chip">Running ×2</span></h3>
+<table class="kv">
+<tr><th>ID</th><td class="mono">tbk1d2yhks46…(fp4) / 1expg9bm4x6m…(fp8)</td></tr>
+<tr><th>轮次 / 内部 speedup</th><td>1 / — / 0.31</td></tr>
+<tr><th>本地 nsys 复核</th><td>—</td></tr>
+<tr><th>起止(UTC)</th><td>07-24 ~06:1x → —</td></tr>
+<tr><th>花费</th><td>进行中</td></tr>
+<tr><th>发起目标</th><td>DSL MQA-logits 线二批重跑(一批 fp4 1.04 / fp8 0.83 收口后)</td></tr>
+<tr><th>约束</th><td>未知</td></tr>
+<tr><th>代码位置</th><td class="mono">未知</td></tr>
+<tr><th>性能数据位置</th><td class="mono">未知</td></tr>
+<tr><th>备注</th><td></td></tr>
 <tr><th>发出 prompt</th><td class="dim">无(prepare 期评测无 prompt)或归另一会话本地,平台 API 不暴露 prompt 原文</td></tr>
 </table></div><div class="card" id="d1">
 <h3>dsl-fp4-paged-mqa-logits <span class="chip">Completed</span></h3>
