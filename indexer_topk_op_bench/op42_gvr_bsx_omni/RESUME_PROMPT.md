@@ -23,11 +23,11 @@ nsys cold-L2 = only arbiter. Full objective: PLAN.md. Contract: AUTONOMY.md.
 - iter7 DONE: tp CS in {1,2,4,8} clusters; dispatch (bs,npad) bands BAKED into
   launcher. Portfolio: direct(<=12288)->bs<256; latency bs<8; dense [8,16)
   big-npad / [64,128) small-npad; tp elsewhere. CS1 for bs>=128.
-- M1 82-cell screen (tag m1, cells results/screen_cells.txt, full BS ladder,
-  baked dispatch): first launch died with prior session @22/82; RELAUNCHED
-  09:08 on this shell's node (hostname reads umbriel-b200-048 — anchor cell
-  flash_128k_L02 re-run matched 073 data within 0.5% on head arm, mixing OK).
-  4 shards x 15 cells, setsid, idempotent via .done markers.
+- M1 82-cell screen DONE (82/82 exact, 902 pairs; relaunched on -048 after
+  anchor matched -073 within 0.5%): gm 1.3198 vs bar 1.40 — miss ~6%.
+  5 patho cells (pro_1024k_L32 + v32 L03/L41 cells, 0.30-0.49 flat across
+  BS>=16) cost 5pp: ex-patho gm 1.3700. Verdict + iter8 targets in
+  ITERATIONS.md M1 entry; data results/m1_data.csv, scripts/analyze_m1.py.
 - GOTCHA: parse_ab.py dedups by (cell,BS,arm) WITHOUT tag — never parse a
   probe/anchor rep before the canonical m1 rep, or the canonical rows get
   dropped. (Happened once; anchor rows stripped + m1 rep re-parsed, CSV clean.)
