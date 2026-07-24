@@ -1,0 +1,22 @@
+{
+ "flash_1024k_L16|BS1|bsx": [
+  true,
+  ""
+ ],
+ "flash_1024k_L16|BS16|bsx": [
+  true,
+  ""
+ ],
+ "flash_1024k_L16|BS48|bsx": [
+  true,
+  ""
+ ],
+ "flash_1024k_L16|BS96|bsx": [
+  true,
+  ""
+ ],
+ "flash_1024k_L16|BS1024|bsx": [
+  true,
+  ""
+ ]
+}

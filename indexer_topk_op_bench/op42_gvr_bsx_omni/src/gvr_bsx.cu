@@ -1059,7 +1059,8 @@ __device__ __forceinline__ void sample_count(SM* s, const float4* base, int v0, 
 }
 
 template <int TB, int R, class SM>
-__device__ __forceinline__ void fused_count_collect(SM* s, const float4* base, int v0, int v1,
+__device__ __forceinline__ void fused_count_collect(SM* s, unsigned long long* dst, int* dcnt,
+                                                    const float4* base, int v0, int v1,
                                                     float tpush, int kcap, int tid) {
   constexpr int T = TB;
   constexpr int U = 4;
@@ -1083,9 +1084,9 @@ __device__ __forceinline__ void fused_count_collect(SM* s, const float4* base, i
 #pragma unroll
         for (int r = 0; r < R; ++r) c[r] += (int)(vv[q] >= tr[r]);
         if (vv[q] >= tpush) {
-          int p = atomicAdd(&s->cnt_c, 1);
+          int p = atomicAdd(dcnt, 1);
           if (p < kcap)
-            s->cand[p] = ((unsigned long long)__float_as_uint(vv[q]) << 32) | (unsigned)(gi + q);
+            dst[p] = ((unsigned long long)__float_as_uint(vv[q]) << 32) | (unsigned)(gi + q);
         }
       }
     }
@@ -1099,9 +1100,9 @@ __device__ __forceinline__ void fused_count_collect(SM* s, const float4* base, i
 #pragma unroll
       for (int r = 0; r < R; ++r) c[r] += (int)(vv[q] >= tr[r]);
       if (vv[q] >= tpush) {
-        int p = atomicAdd(&s->cnt_c, 1);
+        int p = atomicAdd(dcnt, 1);
         if (p < kcap)
-          s->cand[p] = ((unsigned long long)__float_as_uint(vv[q]) << 32) | (unsigned)(gi + q);
+          dst[p] = ((unsigned long long)__float_as_uint(vv[q]) << 32) | (unsigned)(gi + q);
       }
     }
   }
@@ -1111,9 +1112,11 @@ __device__ __forceinline__ void fused_count_collect(SM* s, const float4* base, i
 
 // plain streaming collect at thr (pass 2 / secant path), atomic push
 template <int TB, class SM>
-__device__ __forceinline__ void collect_at(SM* s, const float4* base, int v0, int v1, float thr,
+__device__ __forceinline__ void collect_at(SM* s, unsigned long long* dst, int* dcnt,
+                                           const float4* base, int v0, int v1, float thr,
                                            int tid) {
   constexpr int T = TB;
+  (void)s;
   for (int i = v0 + tid; i < v1; i += T) {
     float4 a = __ldg(base + i);
     int gi = i << 2;
@@ -1121,13 +1124,13 @@ __device__ __forceinline__ void collect_at(SM* s, const float4* base, int v0, in
 #pragma unroll
     for (int q = 0; q < 4; ++q)
       if (vv[q] >= thr) {
-        int p = atomicAdd(&s->cnt_c, 1);
-        s->cand[p] = ((unsigned long long)__float_as_uint(vv[q]) << 32) | (unsigned)(gi + q);
+        int p = atomicAdd(dcnt, 1);
+        dst[p] = ((unsigned long long)__float_as_uint(vv[q]) << 32) | (unsigned)(gi + q);
       }
   }
 }
 
-template <int TB, int AR = RUNGS>
+template <int TB, int CS = 1, int AR = RUNGS>
 __global__ void __launch_bounds__(TB, 2) gvr_topk_tp(
     const float* __restrict__ logits, const int* __restrict__ pre_idx,
     int* __restrict__ out, int npad, int K, int kC, TpParams tp) {
@@ -1142,7 +1145,19 @@ __global__ void __launch_bounds__(TB, 2) gvr_topk_tp(
     pre_idx += (long long)row_ * K;
     out += (long long)row_ * K;
   }
-  int V4 = npad >> 2;
+  int rank = 0;
+  Smem<TB>* s0 = s;
+  if constexpr (CS > 1) {
+    rank = (int)cg::this_cluster().block_rank();
+    s0 = (Smem<TB>*)cg::this_cluster().map_shared_rank(s, 0);
+  }
+  unsigned long long* dst = s0->cand;
+  int* dcnt = &s0->cnt_c;
+  // slice in 64-float units (npad multiple of 64)
+  int units = npad >> 6;
+  int u0 = (int)(((long long)units * rank) / CS);
+  int u1 = (int)(((long long)units * (rank + 1)) / CS);
+  int v0 = u0 << 4, v1 = u1 << 4;
   const float4* base = reinterpret_cast<const float4*>(logits);
 
   int xch = 0;
@@ -1150,17 +1165,18 @@ __global__ void __launch_bounds__(TB, 2) gvr_topk_tp(
   int chosen = -1, C = 0;
   int m_gt = -1;
 
-  if (tid == 0) s->cnt_c = 0;
+  if (rank == 0 && tid == 0) s->cnt_c = 0;
+  if constexpr (CS > 1) cg::this_cluster().sync();  // publish cnt_c=0
   if (npad <= kC) {
     if (tid < RUNGS) s->rungs[tid] = -FLT_MAX;
     __syncthreads();
-    count_pass<TB, 1>(s, base, 0, V4, tid);
-    exchange_counts<TB, 1>(s, 0, tid, 0);
+    count_pass<TB, 1>(s, base, v0, v1, tid);
+    exchange_counts<TB, CS>(s, 0, tid, rank);
     xch++;
     thr = -FLT_MAX;
     chosen = 0;
     C = s->rcnt[0];
-    collect_at<TB>(s, base, 0, V4, thr, tid);
+    collect_at<TB>(s, dst, dcnt, base, v0, v1, thr, tid);
     __syncthreads();
   } else {
     phase1<TB, AR>(s, logits, pre_idx, K, npad, tid);  // trailing barrier publishes cnt_c=0 too
@@ -1168,8 +1184,8 @@ __global__ void __launch_bounds__(TB, 2) gvr_topk_tp(
     // P2a: sampled ladder count -> pick pivot rung with extrapolated count in
     // the sweet band (>=1.5K certain-side margin, <=0.6*kC overflow margin).
     constexpr int SS = 32;
-    sample_count<TB, AR, SS>(s, base, 0, V4, tid);
-    exchange_counts<TB, 1, AR>(s, xch & 1, tid, 0);
+    sample_count<TB, AR, SS>(s, base, v0, v1, tid);
+    exchange_counts<TB, CS, AR>(s, xch & 1, tid, rank);
     xch++;
     __syncthreads();
     if (tid == 0) {
@@ -1194,8 +1210,8 @@ __global__ void __launch_bounds__(TB, 2) gvr_topk_tp(
     }
     __syncthreads();
     float tpush = s->rungs[0];
-    fused_count_collect<TB, 2>(s, base, 0, V4, tpush, kC, tid);
-    exchange_counts<TB, 1, 2>(s, xch & 1, tid, 0);
+    fused_count_collect<TB, 2>(s, dst, dcnt, base, v0, v1, tpush, kC, tid);
+    exchange_counts<TB, CS, 2>(s, xch & 1, tid, rank);
     xch++;
 
     float t_lo = -FLT_MAX, t_hi = INFINITY;
@@ -1238,21 +1254,21 @@ __global__ void __launch_bounds__(TB, 2) gvr_topk_tp(
       __syncthreads();
       if (tid < AR) s->rungs[tid] = nr[tid];
       __syncthreads();
-      count_pass<TB, AR>(s, base, 0, V4, tid);
-      exchange_counts<TB, 1, AR>(s, xch & 1, tid, 0);
+      count_pass<TB, AR>(s, base, v0, v1, tid);
+      exchange_counts<TB, CS, AR>(s, xch & 1, tid, rank);
       xch++;
       Rcur = AR;
     }
 
     if (chosen < 0) {
       while (true) {
-        float vstar = max_below_pass<TB, 1>(s, base, 0, V4, t_hi, xch & 1, tid);
+        float vstar = max_below_pass<TB, CS>(s, base, v0, v1, t_hi, xch & 1, tid);
         xch++;
         __syncthreads();
         if (tid == 0) s->rungs[0] = vstar;
         __syncthreads();
-        count_pass<TB, 1>(s, base, 0, V4, tid);
-        exchange_counts<TB, 1>(s, xch & 1, tid, 0);
+        count_pass<TB, 1>(s, base, v0, v1, tid);
+        exchange_counts<TB, CS>(s, xch & 1, tid, rank);
         xch++;
         int c = s->rcnt[0];
         if (c >= K && c <= kC) {
@@ -1274,33 +1290,37 @@ __global__ void __launch_bounds__(TB, 2) gvr_topk_tp(
 
     if (m_gt < 0) {
       // candidates valid from the fused pass only if thr == pivot rung value
-      // AND no overflow occurred (cnt_c == C <= kC).
-      __syncthreads();
-      bool reuse = (thr == tpush) && (s->cnt_c == C);
+      // AND no overflow occurred (cluster cnt_c == C <= kC).
+      if constexpr (CS > 1) cg::this_cluster().sync();  // pushes visible
+      else __syncthreads();
+      bool reuse = (thr == tpush) && (*dcnt == C);
       if (!reuse) {
-        __syncthreads();
-        if (tid == 0) s->cnt_c = 0;
-        __syncthreads();
-        collect_at<TB>(s, base, 0, V4, thr, tid);
+        if constexpr (CS > 1) cg::this_cluster().sync();
+        else __syncthreads();
+        if (rank == 0 && tid == 0) s->cnt_c = 0;
+        if constexpr (CS > 1) cg::this_cluster().sync();
+        else __syncthreads();
+        collect_at<TB>(s, dst, dcnt, base, v0, v1, thr, tid);
       }
       __syncthreads();
     }
   }
 
   if (m_gt >= 0) {
-    if (tid == 0) { s->cnt_m = 0; s->cnt_t = 0; }
-    __syncthreads();
+    if (rank == 0 && tid == 0) { s->cnt_m = 0; s->cnt_t = 0; }
+    if constexpr (CS > 1) cg::this_cluster().sync();
+    else __syncthreads();
     int nt = K - m_gt;
-    for (int i = tid; i < V4; i += T) {
+    for (int i = v0 + tid; i < v1; i += T) {
       float4 a = __ldg(base + i);
       int gi = i << 2;
       float vv[4] = {a.x, a.y, a.z, a.w};
 #pragma unroll
       for (int q = 0; q < 4; ++q) {
         if (vv[q] > thr) {
-          out[atomicAdd(&s->cnt_m, 1)] = gi + q;
+          out[atomicAdd(&s0->cnt_m, 1)] = gi + q;
         } else if (vv[q] == thr) {
-          int p = atomicAdd(&s->cnt_t, 1);
+          int p = atomicAdd(&s0->cnt_t, 1);
           if (p < nt) out[m_gt + p] = gi + q;
         }
       }
@@ -1308,7 +1328,11 @@ __global__ void __launch_bounds__(TB, 2) gvr_topk_tp(
     return;
   }
 
-  // ---- P4: exact K-th key via 4x8-bit radix select (keys f2u'd in place) ----
+  // ---- P4 (CTA0 solo when CS>1): exact top-K among collected candidates ----
+  if constexpr (CS > 1) {
+    cg::this_cluster().sync();
+    if (rank != 0) return;
+  }
   if (C == K) {
     for (int i = tid; i < C; i += T) out[i] = (int)(unsigned)(s->cand[i] & 0xFFFFFFFFull);
     return;
@@ -1734,24 +1758,50 @@ static void launch_dense(const float* logits, const int* pre_idx, int* out, int 
     launch_gvr<16, 512>(logits, pre_idx, out, npad, K, kC, bs, stream);
 }
 
-template <int TB>
-static void launch_tp(const float* logits, const int* pre_idx, int* out, int npad, int K, int kC,
-                      int bs, cudaStream_t stream) {
+template <int TB, int CS>
+static void launch_tp_cs(const float* logits, const int* pre_idx, int* out, int npad, int K,
+                         int kC, int bs, cudaStream_t stream) {
   static bool inited = false;
   if (!inited) {
-    cudaFuncSetAttribute(gvr_topk_tp<TB>, cudaFuncAttributeMaxDynamicSharedMemorySize,
+    cudaFuncSetAttribute(gvr_topk_tp<TB, CS>, cudaFuncAttributeMaxDynamicSharedMemorySize,
                          (int)sizeof(Smem<TB>));
     inited = true;
   }
   TpParams tp;
-  static int pv = -2;
-  if (pv == -2) {
-    const char* e = getenv("GVR_BSX_TP_PIVOT");
-    pv = e ? atoi(e) : -1;
+  tp.pivot = RUNGS - 1;
+  if constexpr (CS == 1) {
+    gvr_topk_tp<TB, 1><<<dim3(1, bs), TB, sizeof(Smem<TB>), stream>>>(logits, pre_idx, out, npad,
+                                                                      K, kC, tp);
+  } else {
+    cudaLaunchConfig_t cfg = {};
+    cfg.gridDim = dim3(CS, bs, 1);
+    cfg.blockDim = dim3(TB, 1, 1);
+    cfg.dynamicSmemBytes = sizeof(Smem<TB>);
+    cfg.stream = stream;
+    cudaLaunchAttribute attrs[1];
+    attrs[0].id = cudaLaunchAttributeClusterDimension;
+    attrs[0].val.clusterDim.x = CS;
+    attrs[0].val.clusterDim.y = 1;
+    attrs[0].val.clusterDim.z = 1;
+    cfg.attrs = attrs;
+    cfg.numAttrs = 1;
+    cudaLaunchKernelEx(&cfg, gvr_topk_tp<TB, CS>, logits, pre_idx, out, npad, K, kC, tp);
   }
-  tp.pivot = (pv >= 0) ? pv : RUNGS - 1;  // hmin floor: count >= K by construction
-  gvr_topk_tp<TB><<<dim3(1, bs), TB, sizeof(Smem<TB>), stream>>>(logits, pre_idx, out, npad, K,
-                                                                 kC, tp);
+}
+
+template <int TB>
+static void launch_tp(const float* logits, const int* pre_idx, int* out, int npad, int K, int kC,
+                      int bs, cudaStream_t stream) {
+  // CS by co-residency (tp = 2 CTAs/SM -> ~296 slots): keep bs*CS <= ~296 and
+  // the whole GPU busy in one wave for the mid-BS band.
+  if (bs >= 256)
+    launch_tp_cs<TB, 1>(logits, pre_idx, out, npad, K, kC, bs, stream);
+  else if (bs >= 128)
+    launch_tp_cs<TB, 2>(logits, pre_idx, out, npad, K, kC, bs, stream);
+  else if (bs >= 64)
+    launch_tp_cs<TB, 4>(logits, pre_idx, out, npad, K, kC, bs, stream);
+  else
+    launch_tp_cs<TB, 8>(logits, pre_idx, out, npad, K, kC, bs, stream);
 }
 
 static int tp_bs_threshold() {
