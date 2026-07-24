@@ -332,3 +332,11 @@ Updated 2026-07-22 (会话暂停：用户要求迁移到另一台机器)。
 - 工装: workload_bs3.jsonl(45 条, 353MB, 补 valley/盲区/bs1 覆盖),
   baselines = grid_r4pr2 + grid_r5pr 本地现测;判决 = 1615 格
   (nsys_ab 865 + nsys_bs 750)。
+- **R6 v1 投机解事件 → v2 重开**: round-1 内部 best 0.822 = `indexer_topk_bcast_v1`
+  (row0 radix-select + 结果广播到相同行)— 双重违例(prior-free 核心 +
+  利用基准同行构造,未逐行选择),操作员收割 DQ;且 insight
+  "Broadcast trick" 已发布、变体成形 → 立即 cancel(round1 未完成,
+  fork 不可用)。**v2 = gvr-topk-bs40-v2 @pq3hwx7eh94k1arcf0hwmn7wem**
+  (05:10Z STARTED): prompt 增设"跨行复用精确合规线"—— P1 先验/阈值梯可
+  跨行摊销(带逐行逃逸);阈值验证/收集/refine 必须逐行对本行数据;
+  结果广播(含验证式)与行等价测试跳选择 = auto-DQ。
