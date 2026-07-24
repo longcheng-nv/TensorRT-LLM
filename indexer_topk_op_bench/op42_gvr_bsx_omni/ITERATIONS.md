@@ -84,3 +84,27 @@ iter8 targets (ordered): (1) fix patho-layer collapse (re-stream escape /
 pivot calibration robustness) — worth +4pp gm alone; (2) mid-npad x mid-BS
 band (tp fused U=8 batch loads + __ldcs, 3 CTA/SM at K<=1024, ncu BW attrib).
 Data: results/m1_data.csv (fresh parse), analyzer scripts/analyze_m1.py.
+
+## iter 8 — 2026-07-24 — PATHO-CELL FIX SHIPPED (band-first + 2-sigma escape)
+Hypothesis (M1 verdict item a): patho collapse = fixed pivot band [1.5K,0.6kC]
+rejecting rungs whose TRUE count is inside [K,kC] (ladder coarse on low-hr
+layers) -> hmin fallback (count up to 25x kC) -> overflow -> secant re-stream.
+Attribution: offline exact replay (scripts/probe_patho.py) of P1 ladder + P2a
+sampled pivot on real rows: 4/5 patho cells = secant 4-5 full-row passes vs 1
+healthy; est accuracy <10% (NOT sampling noise); worst miss = 32 counts (one
+sample) from band edge. Fix evolution:
+  iter8a sym-2sigma acceptance: patho fixed, BUT 3 cells regressed (hmin
+  est closer to tgt outbid the band pick -> larger C -> heavier P4).
+  iter8b band-first + 2-sigma escape only when band EMPTY: offline 0/82
+  failures, picks change ONLY on the 4 patho cells.
+nsys 10-cell verdict (iter8b vs M1): patho cell-gm 0.607->1.219 (pro_1024k_L32),
+0.725->1.070, 0.719->1.023, 0.637->1.013; the 3 iter8a regressors restored to
+old (1.258->1.262, 1.067->1.073, 1.199->1.201); controls unchanged (1.737,
+1.090). All exact. PROJECTED 82-cell gm 1.3198 -> 1.3531 (min 0.705), weak
+142->134 of 902. Bar 1.40 gap now ~3.3%.
+WATCH-ITEM: v32_256k_L03 BS16/32 was 0.46-0.49 in M1 but 0.99-1.01 in BOTH
+iter8a and iter8b reruns with an (offline-verified) unchanged pick — M1
+measurement anomalous or sporadic CS8 DSMEM exchange flakiness; exactness
+never failed. Re-check under iter9 (cf reference: cluster_arrive_relaxed race).
+Next (iter9): structural band 32-512k x BS16-128 (tp fused U=8 batch loads +
+__ldcs, 3 CTA/SM smem diet at K<=1024, ncu BW attribution).
