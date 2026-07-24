@@ -1,0 +1,204 @@
+<!DOCTYPE html><html><head><meta charset="utf-8">
+<title>KF campaigns 台账索引</title>
+<style>
+body { font: 13.5px/1.55 -apple-system,"Segoe UI",Roboto,"Noto Sans CJK SC",sans-serif;
+       max-width: 1160px; margin: 24px auto; padding: 0 16px; color: #1a2233; }
+h1 { font-size: 21px; } h2 { font-size: 16.5px; margin-top: 30px; }
+.mono { font-family: ui-monospace, monospace; font-size: 12px; }
+table { border-collapse: collapse; margin: 10px 0; }
+th, td { border: 1px solid #d6dde8; padding: 4px 9px; text-align: left; vertical-align: top; }
+th { background: #f0f3f8; }
+.card { border: 1px solid #d6dde8; border-radius: 10px; padding: 6px 16px 12px; margin: 14px 0; }
+.card:target { border-color: #1a2233; box-shadow: 0 0 0 2px #dbe7fb; }
+.card h3 { font-size: 15px; }
+.kv th { width: 150px; background: #f7f9fc; font-weight: 600; }
+.chip { font-size: 11.5px; background: #f0f3f8; border: 1px solid #b9c4d6; border-radius: 10px; padding: 1px 9px; margin-left: 8px; }
+.legend span { margin-right: 18px; }
+.sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 4px; vertical-align: -1px; }
+</style></head><body>
+<h1>KernelFactory campaigns 台账索引(loncheng@nvidia.com,2026-07-21 → 07-24)</h1>
+<p>共 18 个 campaign(本会话系 8 + 另一会话 10)。判决口径:内部 speedup = KF 平台
+(含 ~15µs eval 地板,只作轮内排序);<b>本地 nsys 复核 = B200 cold-L2 配对纯 kernel
+时间(ship 判据)</b>。KF 总花费(本会话系,终账):<b>$3196.93</b>
+(第一期 ≈$690 + R3 $761 + R4 $1110.62 + R5 $1325.31)。</p>
+
+<h2>① 任务关系图(可点击节点跳转对应卡片;hover 高亮;虚线 = 知识/材料流)</h2>
+<p class="legend"><span><span class="sw" style="background:#eef3fb;border:1px solid #7f93b3"></span>campaign</span>
+<span><span class="sw" style="background:#fdeee3;border:1px solid #c98a4b"></span>失败/止损</span>
+<span><span class="sw" style="background:#e7f5ec;border:1px solid #5c9a74"></span>产出(champion/分支/报告)</span>
+<span><span class="sw" style="background:#f2eefb;border:1px solid #8d7fb3"></span>另一会话</span></p>
+<svg viewBox="0 0 1080 740" xmlns="http://www.w3.org/2000/svg" style="width:100%"><style>.n rect{fill:#eef3fb;stroke:#7f93b3;stroke-width:1.3}.n text{font:12.5px sans-serif;fill:#1a2233}.n:hover rect{fill:#dbe7fb;stroke:#1a2233;stroke-width:2}.n.bad rect{fill:#fdeee3;stroke:#c98a4b}.n.other rect{fill:#f2eefb;stroke:#8d7fb3}.o rect{fill:#e7f5ec;stroke:#5c9a74;stroke-width:1.2}.o text{font:12px sans-serif;fill:#173d27}.e{fill:none;stroke:#8fa0ba;stroke-width:1.5}.lane{font:600 13px sans-serif;fill:#55627a}</style><text x="12" y="30" class="lane">第一 lineage(BS=1)</text><text x="12" y="208" class="lane">第二 lineage R4(BS=1 冷启动)</text><text x="12" y="386" class="lane">R5(BS=2-1024)</text><text x="12" y="596" class="lane">另一会话</text><a href="#c1" class="n"><rect x="30" y="44" width="190" height="56" rx="9"/><text x="125.0" y="68.0" text-anchor="middle"><tspan x="125.0" dy="0">campaign-1</tspan><tspan x="125.0" dy="1.2em">bs1-real · 1.34 内部</tspan></text></a><a href="#kf1" class="n bad"><rect x="280" y="44" width="140" height="44" rx="9"/><text x="350.0" y="62.0" text-anchor="middle"><tspan x="350.0" dy="0">r3 baseline</tspan><tspan x="350.0" dy="1.2em">Failed(D1)</tspan></text></a><a href="#r3" class="n"><rect x="470" y="44" width="180" height="56" rx="9"/><text x="560.0" y="68.0" text-anchor="middle"><tspan x="560.0" dy="0">gvr-topk-r3</tspan><tspan x="560.0" dy="1.2em">4轮 · 1.11 内部</tspan></text></a><g class="o"><rect x="720" y="44" width="220" height="56" rx="9"/><text x="830.0" y="68.0" text-anchor="middle"><tspan x="830.0" dy="0">产出: compB 1.8267×</tspan><tspan x="830.0" dy="1.2em">(865 格 · 0 回退)</tspan></text></g><path d="M220,72 C250,72 250,66 280,66" class="e" stroke-dasharray="5,4"/><path d="M220,72 C345,72 345,72 470,72" class="e"/><path d="M650,72 C685,72 685,72 720,72" class="e"/><a href="#r4f" class="n bad"><rect x="30" y="222" width="190" height="56" rx="9"/><text x="125.0" y="246.0" text-anchor="middle"><tspan x="125.0" dy="0">R4 baseline-eval</tspan><tspan x="125.0" dy="1.2em">Failed(D1 复现)</tspan></text></a><a href="#r4" class="n"><rect x="280" y="222" width="200" height="56" rx="9"/><text x="380.0" y="246.0" text-anchor="middle"><tspan x="380.0" dy="0">gvr-topk-cold60</tspan><tspan x="380.0" dy="1.2em">3轮 · 1.3701 内部</tspan></text></a><g class="o"><rect x="560" y="210" width="230" height="46" rx="9"/><text x="675.0" y="229.0" text-anchor="middle"><tspan x="675.0" dy="0">champion 28dc11f6</tspan><tspan x="675.0" dy="1.2em">865格 1.6531× · 0 回退</tspan></text></g><g class="o"><rect x="560" y="268" width="230" height="40" rx="9"/><text x="675.0" y="292.0" text-anchor="middle"><tspan x="675.0" dy="0">fork: kf/r4-champion-final-bs1</tspan></text></g><g class="o"><rect x="820" y="210" width="220" height="46" rx="9"/><text x="930.0" y="229.0" text-anchor="middle"><tspan x="930.0" dy="0">R4_CLOSEOUT.md ·</tspan><tspan x="930.0" dy="1.2em">R4_CHAMPION_BS1_REPORT.html</tspan></text></g><path d="M230,250 C255,250 255,250 280,250" class="e" stroke-dasharray="5,4"/><path d="M480,250 C520,250 520,233 560,233" class="e"/><path d="M480,250 C520,250 520,288 560,288" class="e"/><path d="M790,233 C805,233 805,233 820,233" class="e"/><path d="M720,100 C535,100 535,210 350,210" class="e" stroke-dasharray="5,4"/><a href="#r5a" class="n bad"><rect x="30" y="400" width="190" height="56" rx="9"/><text x="125.0" y="424.0" text-anchor="middle"><tspan x="125.0" dy="0">bs2x v1</tspan><tspan x="125.0" dy="1.2em">custom_inputs 0%</tspan></text></a><a href="#r5b" class="n"><rect x="280" y="400" width="190" height="56" rx="9"/><text x="375.0" y="424.0" text-anchor="middle"><tspan x="375.0" dy="0">bs2x v2</tspan><tspan x="375.0" dy="1.2em">3轮 · 0.98 · DQ</tspan></text></a><a href="#r5c" class="n"><rect x="530" y="400" width="200" height="56" rx="9"/><text x="630.0" y="424.0" text-anchor="middle"><tspan x="630.0" dy="0">bs2x-v3 fork</tspan><tspan x="630.0" dy="1.2em">rounds3-5 · 1.0756</tspan></text></a><g class="o"><rect x="800" y="388" width="240" height="46" rx="9"/><text x="920.0" y="407.0" text-anchor="middle"><tspan x="920.0" dy="0">champion 156ab438</tspan><tspan x="920.0" dy="1.2em">750格 0.9862 · 全 exact</tspan></text></g><g class="o"><rect x="800" y="446" width="240" height="40" rx="9"/><text x="920.0" y="470.0" text-anchor="middle"><tspan x="920.0" dy="0">fork: kf/r5-champion-bs-combined</tspan></text></g><g class="o"><rect x="800" y="498" width="240" height="40" rx="9"/><text x="920.0" y="522.0" text-anchor="middle"><tspan x="920.0" dy="0">R5_CLOSEOUT.md · grid_r5g_final.csv</tspan></text></g><path d="M220,428 C250,428 250,428 280,428" class="e"/><path d="M470,428 C500,428 500,428 530,428" class="e"/><path d="M730,428 C765,428 765,411 800,411" class="e"/><path d="M730,428 C765,428 765,466 800,466" class="e"/><path d="M730,428 C765,428 765,518 800,518" class="e"/><path d="M660,256 C520,256 520,398 380,398" class="e" stroke-dasharray="5,4"/><path d="M430,456 C480,456 480,445 530,445" class="e" stroke-dasharray="5,4"/><a href="#d0" class="n other"><rect x="30" y="612" width="250" height="50" rx="9"/><text x="155.0" y="633.0" text-anchor="middle"><tspan x="155.0" dy="0">dsl-fp4/fp8 ×7(调试)</tspan><tspan x="155.0" dy="1.2em">Failed×5 · r0×2</tspan></text></a><a href="#d2" class="n other"><rect x="340" y="612" width="200" height="50" rx="9"/><text x="440.0" y="641.0" text-anchor="middle"><tspan x="440.0" dy="0">dsl-fp8 · 3轮 · 0.83</tspan></text></a><a href="#d1" class="n other"><rect x="340" y="674" width="200" height="50" rx="9"/><text x="440.0" y="703.0" text-anchor="middle"><tspan x="440.0" dy="0">dsl-fp4 · 3轮 · 1.04</tspan></text></a><a href="#fr" class="n other"><rect x="620" y="612" width="240" height="50" rx="9"/><text x="740.0" y="633.0" text-anchor="middle"><tspan x="740.0" dy="0">gvr-topk-pr16457-fresh</tspan><tspan x="740.0" dy="1.2em">3轮 · 0.84</tspan></text></a><path d="M280,637 C310,637 310,637 340,637" class="e"/><path d="M280,637 C310,637 310,699 340,699" class="e"/></svg>
+
+<h2>② 总表</h2>
+<table><tr><th>名称</th><th>ID</th><th>状态</th><th>轮</th><th>内部</th><th>本地 nsys 复核</th>
+<th>开始</th><th>结束</th><th>花费</th><th>归属</th></tr>
+<tr id="row-c1"><td><a href="#c1">gvr-topk-bs1-real(第一期)</a></td><td class="mono">tfb91bvwm972kf…</td><td>Cancelled</td><td>2</td><td>1.3385</td><td>champion c74f_sbx <b>1.6828</b>(865 格, 0 回退)</td><td>07-21 10:15</td><td>07-21 ~18:11</td><td>≈$690</td><td>本会话系(第一 lineage)</td></tr><tr id="row-kf1"><td><a href="#kf1">gvr-topk-r3(baseline 验证失败)</a></td><td class="mono">k7rhy79h015gn3…</td><td>Failed</td><td>0</td><td>—</td><td>—</td><td>07-21 13:36</td><td>+40s</td><td>~0</td><td>本会话系</td></tr><tr id="row-r3"><td><a href="#r3">gvr-topk-r3</a></td><td class="mono">e5q1zgrfhs0z57…</td><td>Cancelled</td><td>4</td><td>1.1111</td><td>operator 复合 compB <b>1.8267</b>(865 格, 0 回退)</td><td>07-22 03:15</td><td>07-22 ~15:49</td><td>$761</td><td>本会话系(第一 lineage R3)</td></tr><tr id="row-r4f"><td><a href="#r4f">R4 baseline-eval(失败)</a></td><td class="mono">6qfpzj957x01z2…</td><td>Failed</td><td>0</td><td>—</td><td>—</td><td>07-22 02:40</td><td>+40s</td><td>~0</td><td>本会话</td></tr><tr id="row-r4"><td><a href="#r4">gvr-topk-cold60(R4 冷启动)</a></td><td class="mono">pra6srbd7h4pqe…</td><td>Cancelled(预算)</td><td>3</td><td>1.3701</td><td>champion 28dc11f6 <b>1.6531</b>(865 格, 865 exact, 0 真实回退)→ 三 Bar 全达成</td><td>07-22 02:48</td><td>07-23 ~14:2x</td><td>$1110.62</td><td>本会话(R4)</td></tr><tr id="row-r5a"><td><a href="#r5a">gvr-topk-bs2x(R5 v1)</a></td><td class="mono">rngnxv95cx5qfd…</td><td>Cancelled(止损)</td><td>2</td><td>—(全 0%)</td><td>—</td><td>07-22 22:04</td><td>07-23 ~05:0x</td><td>$9.38</td><td>本会话(R5)</td></tr><tr id="row-r5b"><td><a href="#r5b">gvr-topk-bs2x-v2(R5 v2)</a></td><td class="mono">vk9m3tetqh165a…</td><td>Cancelled(DQ→fork)</td><td>3</td><td>0.9799</td><td>v23/v39 全格 0.9348/0.9426 + <b>8 例盲区 inexact(DQ)</b></td><td>07-23 06:59</td><td>07-23 ~13:1x</td><td>$719.02</td><td>本会话(R5)</td></tr><tr id="row-r5c"><td><a href="#r5c">gvr-topk-bs2x-v3(R5 fork)</a></td><td class="mono">befh5fh2595es8…</td><td>Cancelled(预算, r5 完成)</td><td>5</td><td>1.0756</td><td>champion 156ab438: <b>全 exact</b>(750+865)但 750 格 gm <b>0.9862</b>/391 回退; BS=1 1.2233(=R4champ×0.743)→ 目标未达成</td><td>07-23 19:23(rounds 3-5)</td><td>07-24 ~07:4x</td><td>$596.91</td><td>本会话(R5)</td></tr><tr id="row-fr"><td><a href="#fr">gvr-topk-pr16457-fresh</a></td><td class="mono">6em6mf55g11g76…</td><td>Completed</td><td>3</td><td>0.84</td><td>未复核(本会话外)</td><td>07-23 21:48</td><td>07-24 ~10:1x</td><td>未核</td><td><b>另一会话</b></td></tr><tr id="row-d1"><td><a href="#d1">dsl-fp4-paged-mqa-logits</a></td><td class="mono">9dprgt29j515d7…</td><td>Completed</td><td>3</td><td>1.04</td><td>未复核(本会话外)</td><td>07-23 15:58</td><td>07-23 ~22:2x</td><td>未核</td><td><b>另一会话</b></td></tr><tr id="row-d2"><td><a href="#d2">dsl-fp8-paged-mqa-logits</a></td><td class="mono">66mcp39jf15g38…</td><td>Completed</td><td>3</td><td>0.83</td><td>未复核(本会话外)</td><td>07-23 15:53</td><td>07-23 ~22:1x</td><td>未核</td><td><b>另一会话</b></td></tr><tr id="row-d0"><td><a href="#d0">dsl-fp4/fp8 早期 7 次(round-0 ×2 + Failed ×5)</a></td><td class="mono">0mv4xsw7… / 3a…</td><td>Completed×2 / Failed×5</td><td>0</td><td>1.00 / —</td><td>—</td><td>07-23 08:22-08:32</td><td>即刻~短</td><td>未核</td><td><b>另一会话</b></td></tr>
+</table>
+
+<h2>③ 逐 campaign 卡片</h2>
+<div class="card" id="c1">
+<h3>gvr-topk-bs1-real(第一期) <span class="chip">Cancelled</span></h3>
+<table class="kv">
+<tr><th>ID</th><td class="mono">tfb91bvwm972kfyf1bc1trj5e0</td></tr>
+<tr><th>轮次 / 内部 speedup</th><td>2 / 1.3385</td></tr>
+<tr><th>本地 nsys 复核</th><td>champion c74f_sbx <b>1.6828</b>(865 格, 0 回退)</td></tr>
+<tr><th>起止(UTC)</th><td>07-21 10:15 → 07-21 ~18:11</td></tr>
+<tr><th>花费</th><td>≈$690</td></tr>
+<tr><th>发起目标</th><td>BS=1 865 真实格 beat 旧 PR head(e6fdbfac3d),nsys 冷判</td></tr>
+<tr><th>约束</th><td>GVR 骨架;无 coldstart 限制</td></tr>
+<tr><th>代码位置</th><td class="mono">indexer_topk_op_bench/op26_r0_upstream_port_report/kf_campaign/harvest/r2_c74fb3c0 + c74f_sbx(graft)</td></tr>
+<tr><th>性能数据位置</th><td class="mono">indexer_topk_op_bench/op26_r0_upstream_port_report/kf_campaign/grid_c74fsbx.csv 等</td></tr>
+<tr><th>备注</th><td>round-harvest-verdict 流程首建;两次 grid 因双 driver 作废(纪律起源)</td></tr>
+</table></div><div class="card" id="kf1">
+<h3>gvr-topk-r3(baseline 验证失败) <span class="chip">Failed</span></h3>
+<table class="kv">
+<tr><th>ID</th><td class="mono">k7rhy79h015gn3fpqv5cs154w8</td></tr>
+<tr><th>轮次 / 内部 speedup</th><td>0 / —</td></tr>
+<tr><th>本地 nsys 复核</th><td>—</td></tr>
+<tr><th>起止(UTC)</th><td>07-21 13:36 → +40s</td></tr>
+<tr><th>花费</th><td>~0</td></tr>
+<tr><th>发起目标</th><td>R3 起跑(baseline-solution 现测)</td></tr>
+<tr><th>约束</th><td>—</td></tr>
+<tr><th>代码位置</th><td class="mono">—</td></tr>
+<tr><th>性能数据位置</th><td class="mono">—</td></tr>
+<tr><th>备注</th><td>平台缺口 D1 首次发现: baseline evaluator 不 stage 资产</td></tr>
+</table></div><div class="card" id="r3">
+<h3>gvr-topk-r3 <span class="chip">Cancelled</span></h3>
+<table class="kv">
+<tr><th>ID</th><td class="mono">e5q1zgrfhs0z57dj6850kc444r</td></tr>
+<tr><th>轮次 / 内部 speedup</th><td>4 / 1.1111</td></tr>
+<tr><th>本地 nsys 复核</th><td>operator 复合 compB <b>1.8267</b>(865 格, 0 回退)</td></tr>
+<tr><th>起止(UTC)</th><td>07-22 03:15 → 07-22 ~15:49</td></tr>
+<tr><th>花费</th><td>$761</td></tr>
+<tr><th>发起目标</th><td>从 champion c74f_sbx 再推高(baselines=平台 champion 时延)</td></tr>
+<tr><th>约束</th><td>骨架放宽(campaign-1 先例)</td></tr>
+<tr><th>代码位置</th><td class="mono">indexer_topk_op_bench/op26_r0_upstream_port_report/kf_campaign/harvest/(aef33fac/becd/30e7 系)+ compB</td></tr>
+<tr><th>性能数据位置</th><td class="mono">indexer_topk_op_bench/op26_r0_upstream_port_report/kf_campaign/grid_r3grid*.csv</td></tr>
+<tr><th>备注</th><td>平台 4 轮未超 harvested aef33fac;compB 为 operator 收口拼装</td></tr>
+</table></div><div class="card" id="r4f">
+<h3>R4 baseline-eval(失败) <span class="chip">Failed</span></h3>
+<table class="kv">
+<tr><th>ID</th><td class="mono">6qfpzj957x01z2epbyr51srp68</td></tr>
+<tr><th>轮次 / 内部 speedup</th><td>0 / —</td></tr>
+<tr><th>本地 nsys 复核</th><td>—</td></tr>
+<tr><th>起止(UTC)</th><td>07-22 02:40 → +40s</td></tr>
+<tr><th>花费</th><td>~0</td></tr>
+<tr><th>发起目标</th><td>R4 prepare 的 cute_dsl baseline 现测</td></tr>
+<tr><th>约束</th><td>—</td></tr>
+<tr><th>代码位置</th><td class="mono">—</td></tr>
+<tr><th>性能数据位置</th><td class="mono">—</td></tr>
+<tr><th>备注</th><td>D1 复现(0/28 safetensors missing)→ 改走 baselines.jsonl</td></tr>
+</table></div><div class="card" id="r4">
+<h3>gvr-topk-cold60(R4 冷启动) <span class="chip">Cancelled(预算)</span></h3>
+<table class="kv">
+<tr><th>ID</th><td class="mono">pra6srbd7h4pqecqbgxgm15rgg</td></tr>
+<tr><th>轮次 / 内部 speedup</th><td>3 / 1.3701</td></tr>
+<tr><th>本地 nsys 复核</th><td>champion 28dc11f6 <b>1.6531</b>(865 格, 865 exact, 0 真实回退)→ 三 Bar 全达成</td></tr>
+<tr><th>起止(UTC)</th><td>07-22 02:48 → 07-23 ~14:2x</td></tr>
+<tr><th>花费</th><td>$1110.62</td></tr>
+<tr><th>发起目标</th><td>第二 lineage 冷启动: 以 PR#16457 pinned head 04a0900ff7 为唯一起点, 865 格 geomean ≥1.60 + 0 回退 + exact</td></tr>
+<tr><th>约束</th><td>骨架硬锁(preIdx 先验+secant-log+refine);禁注入第一 lineage 解法;死路/陷阱/REPORT 事实可注入</td></tr>
+<tr><th>代码位置</th><td class="mono">indexer_topk_op_bench/op26_r0_upstream_port_report/kf_campaign/harvest/r3_28dc11f6 · fork:kf/r4-champion-final-bs1 @e1049bca</td></tr>
+<tr><th>性能数据位置</th><td class="mono">indexer_topk_op_bench/op26_r0_upstream_port_report/kf_campaign/grid_r4r3cg.csv(判决)· grid_r4pr2.csv(分母)· R4_CLOSEOUT.md · R4_CHAMPION_BS1_REPORT.html</td></tr>
+<tr><th>备注</th><td>判决链 v5→v14→r2wd→v25→v27→r3a003→28dc(1.295→1.653);prompt=32KB 限内源码 digest</td></tr>
+</table></div><div class="card" id="r5a">
+<h3>gvr-topk-bs2x(R5 v1) <span class="chip">Cancelled(止损)</span></h3>
+<table class="kv">
+<tr><th>ID</th><td class="mono">rngnxv95cx5qfdmte69vz0b0n8</td></tr>
+<tr><th>轮次 / 内部 speedup</th><td>2 / —(全 0%)</td></tr>
+<tr><th>本地 nsys 复核</th><td>—</td></tr>
+<tr><th>起止(UTC)</th><td>07-22 22:04 → 07-23 ~05:0x</td></tr>
+<tr><th>花费</th><td>$9.38</td></tr>
+<tr><th>发起目标</th><td>BS=2-1024 §7b 750 格 avg ≥2.0× vs head 原生批 + 全格≥1.0 + BS=1 守 R4 水位</td></tr>
+<tr><th>约束</th><td>GVR 骨架;custom_inputs 按 cell 物化 [BS,npad]</td></tr>
+<tr><th>代码位置</th><td class="mono">—(无有效产出)</td></tr>
+<tr><th>性能数据位置</th><td class="mono">indexer_topk_op_bench/op26_r0_upstream_port_report/kf_campaign/r5_bs/(工装)</td></tr>
+<tr><th>备注</th><td>平台 submit 评测对 custom_inputs 全判 0%(bugs 26583-26602)→ 止损重开</td></tr>
+</table></div><div class="card" id="r5b">
+<h3>gvr-topk-bs2x-v2(R5 v2) <span class="chip">Cancelled(DQ→fork)</span></h3>
+<table class="kv">
+<tr><th>ID</th><td class="mono">vk9m3tetqh165a5y01j7nnrns0</td></tr>
+<tr><th>轮次 / 内部 speedup</th><td>3 / 0.9799</td></tr>
+<tr><th>本地 nsys 复核</th><td>v23/v39 全格 0.9348/0.9426 + <b>8 例盲区 inexact(DQ)</b></td></tr>
+<tr><th>起止(UTC)</th><td>07-23 06:59 → 07-23 ~13:1x</td></tr>
+<tr><th>花费</th><td>$719.02</td></tr>
+<tr><th>发起目标</th><td>同 R5 v1(改物化 safetensors 30 workloads/210MB)</td></tr>
+<tr><th>约束</th><td>同上;平台盲区 = 512k×bs2-16 / bs64</td></tr>
+<tr><th>代码位置</th><td class="mono">indexer_topk_op_bench/op26_r0_upstream_port_report/kf_campaign/harvest/r5_7bea12c6 · r5_5a1431a5</td></tr>
+<tr><th>性能数据位置</th><td class="mono">indexer_topk_op_bench/op26_r0_upstream_port_report/kf_campaign/r5_bs/grid_r5g_v23.csv · grid_r5g_v39.csv</td></tr>
+<tr><th>备注</th><td>lineage 遗传 row0 竞态(cs>1 cluster × b>1)→ cancel + fork 注入 steering</td></tr>
+</table></div><div class="card" id="r5c">
+<h3>gvr-topk-bs2x-v3(R5 fork) <span class="chip">Cancelled(预算, r5 完成)</span></h3>
+<table class="kv">
+<tr><th>ID</th><td class="mono">befh5fh2595es8ztpcg0nmq6q8</td></tr>
+<tr><th>轮次 / 内部 speedup</th><td>5 / 1.0756</td></tr>
+<tr><th>本地 nsys 复核</th><td>champion 156ab438: <b>全 exact</b>(750+865)但 750 格 gm <b>0.9862</b>/391 回退; BS=1 1.2233(=R4champ×0.743)→ 目标未达成</td></tr>
+<tr><th>起止(UTC)</th><td>07-23 19:23(rounds 3-5) → 07-24 ~07:4x</td></tr>
+<tr><th>花费</th><td>$596.91</td></tr>
+<tr><th>发起目标</th><td>继承 v2 44 candidates + steering(bug 图谱/自测清单/bs128 洞/吞吐方向), rounds 3-5</td></tr>
+<tr><th>约束</th><td>同 R5;append-prompt 不可改 workloads</td></tr>
+<tr><th>代码位置</th><td class="mono">indexer_topk_op_bench/op26_r0_upstream_port_report/kf_campaign/harvest/r5final_156ab438 · fork:kf/r5-champion-bs-combined @3e04d248</td></tr>
+<tr><th>性能数据位置</th><td class="mono">indexer_topk_op_bench/op26_r0_upstream_port_report/kf_campaign/r5_bs/grid_r5g_final.csv · grid_r5bs1guard.csv · R5_CLOSEOUT.md</td></tr>
+<tr><th>备注</th><td>exactness 战役成功(8→0);吞吐域(bs16-256 中大N)为结构墙;部署建议 = (b,npad,K) 三路分派</td></tr>
+</table></div><div class="card" id="fr">
+<h3>gvr-topk-pr16457-fresh <span class="chip">Completed</span></h3>
+<table class="kv">
+<tr><th>ID</th><td class="mono">6em6mf55g11g767p5wcepgy07w</td></tr>
+<tr><th>轮次 / 内部 speedup</th><td>3 / 0.84</td></tr>
+<tr><th>本地 nsys 复核</th><td>未复核(本会话外)</td></tr>
+<tr><th>起止(UTC)</th><td>07-23 21:48 → 07-24 ~10:1x</td></tr>
+<tr><th>花费</th><td>未核</td></tr>
+<tr><th>发起目标</th><td>artifact indexer-topk-decode-fresh-full(推测: 全格 fresh 分母重跑)</td></tr>
+<tr><th>约束</th><td>未知(另一会话)</td></tr>
+<tr><th>代码位置</th><td class="mono">未知(另一会话)</td></tr>
+<tr><th>性能数据位置</th><td class="mono">未知(另一会话)</td></tr>
+<tr><th>备注</th><td>内部 0.84 未过平价;如需盘点可接管</td></tr>
+</table></div><div class="card" id="d1">
+<h3>dsl-fp4-paged-mqa-logits <span class="chip">Completed</span></h3>
+<table class="kv">
+<tr><th>ID</th><td class="mono">9dprgt29j515d75q1b6gyyqw1g</td></tr>
+<tr><th>轮次 / 内部 speedup</th><td>3 / 1.04</td></tr>
+<tr><th>本地 nsys 复核</th><td>未复核(本会话外)</td></tr>
+<tr><th>起止(UTC)</th><td>07-23 15:58 → 07-23 ~22:2x</td></tr>
+<tr><th>花费</th><td>未核</td></tr>
+<tr><th>发起目标</th><td>cuteDSL FP4 paged-MQA logits 算子</td></tr>
+<tr><th>约束</th><td>未知</td></tr>
+<tr><th>代码位置</th><td class="mono">未知</td></tr>
+<tr><th>性能数据位置</th><td class="mono">未知</td></tr>
+<tr><th>备注</th><td></td></tr>
+</table></div><div class="card" id="d2">
+<h3>dsl-fp8-paged-mqa-logits <span class="chip">Completed</span></h3>
+<table class="kv">
+<tr><th>ID</th><td class="mono">66mcp39jf15g38gnn54y46nc7w</td></tr>
+<tr><th>轮次 / 内部 speedup</th><td>3 / 0.83</td></tr>
+<tr><th>本地 nsys 复核</th><td>未复核(本会话外)</td></tr>
+<tr><th>起止(UTC)</th><td>07-23 15:53 → 07-23 ~22:1x</td></tr>
+<tr><th>花费</th><td>未核</td></tr>
+<tr><th>发起目标</th><td>cuteDSL FP8 paged-MQA logits 算子</td></tr>
+<tr><th>约束</th><td>未知</td></tr>
+<tr><th>代码位置</th><td class="mono">未知</td></tr>
+<tr><th>性能数据位置</th><td class="mono">未知</td></tr>
+<tr><th>备注</th><td></td></tr>
+</table></div><div class="card" id="d0">
+<h3>dsl-fp4/fp8 早期 7 次(round-0 ×2 + Failed ×5) <span class="chip">Completed×2 / Failed×5</span></h3>
+<table class="kv">
+<tr><th>ID</th><td class="mono">0mv4xsw7… / 3adykw9p… / 79q6bd0j… / mbcva85f… / ex0e6fp0… / ewhqkn25… / xc71bent…</td></tr>
+<tr><th>轮次 / 内部 speedup</th><td>0 / 1.00 / —</td></tr>
+<tr><th>本地 nsys 复核</th><td>—</td></tr>
+<tr><th>起止(UTC)</th><td>07-23 08:22-08:32 → 即刻~短</td></tr>
+<tr><th>花费</th><td>未核</td></tr>
+<tr><th>发起目标</th><td>同上(起跑调试)</td></tr>
+<tr><th>约束</th><td>未知</td></tr>
+<tr><th>代码位置</th><td class="mono">未知</td></tr>
+<tr><th>性能数据位置</th><td class="mono">未知</td></tr>
+<tr><th>备注</th><td>连续失败后 round-0 冒烟成功,再起 3 轮正式跑</td></tr>
+</table></div>
+
+<h2>④ 公共工装 / 纪律速查</h2>
+<ul>
+<li>工装: indexer_topk_op_bench/op26_r0_upstream_port_report/kf_campaign/(export_cells*.py · nsys_ab.py/nsys_bs.py · drive_grid_*.sh · aggregate_*.py · monitor_campaign.sh)</li>
+<li>分母: grid_r4pr2.csv(BS=1 865)· r5_bs/grid_r5pr.csv(BS 批式 750)— 均 pinned head 04a0900ff7 本地现测</li>
+<li>平台已知缺口: D1 baseline evaluator 不 stage 资产;custom_inputs 在 submit 评测端全判 0%;custom 与非 custom 输入不可混</li>
+<li>纪律: 平台分数仅轮内排序;ship 判决 = 本地全格 + 逐行 exact + 锚检查;launch 前后 pgrep+GPU 双查;tag 不复用</li>
+</ul>
+</body></html>
