@@ -18,7 +18,7 @@ C = [  # (anchor, id, name, status, rounds, internal, local, start, end, cost, o
       internal="1.3385", local="champion c74f_sbx **1.6828**(865 格, 0 回退)", t0="07-21 10:15", t1="07-21 ~18:11",
       cost="≈$690", own="本会话系(第一 lineage)",
       goal="BS=1 865 真实格 beat 旧 PR head(e6fdbfac3d),nsys 冷判", cons="GVR 骨架(执行中放宽 — 见备注)",
-      code=f"{KFP}/harvest/r2_c74fb3c0 + c74f_sbx(graft)", data=f"{KFP}/grid_c74fsbx.csv 等",
+      code=f"{KFP}/harvest/r2_c74fb3c0 + c74f_sbx(graft) · **fork:kf/gvr-topk-c74fsbx** @193156c8", data=f"{KFP}/grid_c74fsbx.csv 等",
       note="round-harvest-verdict 流程首建;两次 grid 因双 driver 作废(纪律起源)。**⚠ champion c74f_sbx 源码 0 次引用 pre_idx — preIdx 先验被放弃**(实测证伪 hint 收益后 Bar-first 取向)"),
  dict(a="kf1", id="k7rhy79h015gn3fpqv5cs154w8", name="gvr-topk-r3(baseline 验证失败)", st="Failed", rd=0,
       internal="—", local="—", t0="07-21 13:36", t1="+40s", cost="~0", own="本会话系",
@@ -28,7 +28,7 @@ C = [  # (anchor, id, name, status, rounds, internal, local, start, end, cost, o
       internal="1.1111", local="operator 复合 compB **1.8267**(865 格, 0 回退)", t0="07-22 03:15", t1="07-22 ~15:49",
       cost="$761", own="本会话系(第一 lineage R3)",
       goal="从 champion c74f_sbx 再推高(baselines=平台 champion 时延)", cons="**骨架放宽(R3_LEDGER D4, 用户 2026-07-22 裁定)**: (a) preIdx 先验由实测证据废止(12 项证伪 + hint 挂载 WASH 1.0001);(b) 保留为直方图前缀阈值精化;(c) 精确 refine 完整保留;禁装饰性 hint 路径,报告须连证据链明示",
-      code=f"{KFP}/harvest/(aef33fac/becd/30e7 系)+ compB", data=f"{KFP}/grid_r3grid*.csv",
+      code=f"{KFP}/harvest/(aef33fac/becd/30e7 系)+ compB · **fork:kf/gvr-topk-compB** @9dbd6ee2(= c74fsbx 直系升级: +topk_mid&lt;3|4&gt;@1024 中段 rung 治 8195≤n≤16387 弱带 +19%、+v30::topk_coop K2048 专用 3-pass 梯 16896&lt;n≤140k、+aefm::topk_fast 非协作快尾;对 c74fsbx +8.1%;kernel.cu diff +1230 行)", data=f"{KFP}/grid_r3grid*.csv",
       note="平台 4 轮未超 harvested aef33fac;compB 为 operator 收口拼装。**⚠ compB 属 直方图+radix 系(无 pre_idx),其 1.8267× 为放宽骨架口径;R4 因此立项硬锁骨架,真 GVR 达 1.6531×(差 ~10% = 先验约束实测代价)**"),
  dict(a="r4f", id="6qfpzj957x01z2epbyr51srp68", name="R4 baseline-eval(失败)", st="Failed", rd=0,
       internal="—", local="—", t0="07-22 02:40", t1="+40s", cost="~0", own="本会话",
@@ -164,71 +164,122 @@ def edge(x1, y1, x2, y2, dash=False):
     return f'<path d="M{x1},{y1} C{(x1+x2)//2},{y1} {(x1+x2)//2},{y2} {x2},{y2}" class="e"{d}/>'
 
 
-G = []
-# Lane labels
-for y, lab in [(30, "第一 lineage(BS=1)"), (208, "第二 lineage R4(BS=1 冷启动)"),
-               (386, "R5(BS=2-1024)"), (596, "另一会话")]:
-    G.append(f'<text x="12" y="{y}" class="lane">{lab}</text>')
-# Lane-1 skeleton-compliance annotation (D4 loose-skeleton adjudication)
-G.append('<g class="warn"><rect x="30" y="112" width="1010" height="62" rx="8"/>'
-         '<text x="42" y="130">⚠ 骨架合规注记: 第一 lineage 终版算子(c74f_sbx / compA / compB)源码 0 次引用 pre_idx —'
-         '<tspan font-weight="700">preIdx 先验被整体放弃</tspan>,实际走向 直方图前缀阈值梯 + radix 精确尾(GVR 三要素仅存 b 变体 + c)。</text>'
-         '<text x="42" y="147">依据 R3_LEDGER D4(用户 2026-07-22 裁定): Bar-first 放宽骨架,(a) 先验由实测证据废止(12 项证伪 + hint 挂载 WASH 1.0001),须连证据链明示。</text>'
-         '<text x="42" y="164">⇒ 其 1.8267× 是"放宽骨架"口径;正因此 R4 立项为骨架硬锁的第二 lineage(28dc11f6 真 GVR: P1 消费 pre_idx,1.6531×,差值 ~10% = 先验约束实测代价)。</text></g>')
-# Lineage 1
-G.append(node(30, 44, 190, 56, "c1", ["campaign-1", "bs1-real · 1.34 内部"]))
-G.append(node(280, 44, 140, 44, "kf1", ["r3 baseline", "Failed(D1)"], cls="n bad"))
-G.append(node(470, 44, 180, 56, "r3", ["gvr-topk-r3", "4轮 · 1.11 内部"]))
-G.append(onode(720, 44, 260, 56, ["产出: compB 1.8267×(865 格 · 0 回退)", "⚠ 放宽骨架: 无 pre_idx, 直方图+radix 系"]))
-G.append(edge(220, 72, 280, 66, dash=True))
-G.append(edge(220, 72, 470, 72))
-G.append(edge(650, 72, 720, 72))
-# Lineage 2 (R4)
-G.append(node(30, 222, 190, 56, "r4f", ["R4 baseline-eval", "Failed(D1 复现)"], cls="n bad"))
-G.append(node(280, 222, 200, 56, "r4", ["gvr-topk-cold60", "3轮 · 1.3701 内部"]))
-G.append(onode(560, 210, 230, 46, ["champion 28dc11f6", "865格 1.6531× · 0 回退"]))
-G.append(onode(560, 268, 230, 40, ["fork: kf/r4-champion-final-bs1"]))
-G.append(onode(820, 210, 220, 46, ["R4_CLOSEOUT.md ·", "R4_CHAMPION_BS1_REPORT.html"]))
-G.append(edge(230, 250, 280, 250, dash=True))
-G.append(edge(480, 250, 560, 233))
-G.append(edge(480, 250, 560, 288))
-G.append(edge(790, 233, 820, 233))
-G.append(edge(720, 100, 350, 210, dash=True))  # 死路/陷阱注入(限清单)
-# R5 chain
-G.append(node(30, 400, 190, 56, "r5a", ["bs2x v1", "custom_inputs 0%"], cls="n bad"))
-G.append(node(280, 400, 190, 56, "r5b", ["bs2x v2", "3轮 · 0.98 · DQ"]))
-G.append(node(530, 400, 200, 56, "r5c", ["bs2x-v3 fork", "rounds3-5 · 1.0756"]))
-G.append(onode(800, 388, 240, 46, ["champion 156ab438", "750格 0.9862 · 全 exact"]))
-G.append(onode(800, 446, 240, 40, ["fork: kf/r5-champion-bs-combined"]))
-G.append(onode(800, 498, 240, 40, ["R5_CLOSEOUT.md · grid_r5g_final.csv"]))
-G.append(edge(220, 428, 280, 428))
-G.append(edge(470, 428, 530, 428))
-G.append(edge(730, 428, 800, 411))
-G.append(edge(730, 428, 800, 466))
-G.append(edge(730, 428, 800, 518))
-G.append(edge(660, 256, 380, 398, dash=True))  # R4 champion digest -> R5 prompt
-G.append(edge(430, 456, 530, 445, dash=True))  # steering fork
-# other session
-G.append(node(30, 612, 250, 50, "d0", ["dsl-fp4/fp8 ×7(调试)", "Failed×5 · r0×2"], cls="n other"))
-G.append(node(340, 612, 200, 50, "d2", ["dsl-fp8 · 3轮 · 0.83"], cls="n other"))
-G.append(node(340, 674, 200, 50, "d1", ["dsl-fp4 · 3轮 · 1.04"], cls="n other"))
-G.append(node(620, 612, 240, 50, "fr", ["gvr-topk-pr16457-fresh", "3轮 · 0.84"], cls="n other"))
-G.append(edge(280, 637, 340, 637))
-G.append(edge(280, 637, 340, 699))
+def hedge(x1, y, x2, dash=False, lab=None):
+    """Straight horizontal arrow at height y."""
+    d = ' class="e d"' if dash else ' class="e"'
+    s = f'<line x1="{x1}" y1="{y}" x2="{x2 - 6}" y2="{y}"{d} marker-end="url(#arr)"/>'
+    if lab:
+        s += f'<text x="{(x1 + x2) // 2}" y="{y - 7}" class="elab" text-anchor="middle">{lab}</text>'
+    return s
 
-SVG = ('<svg viewBox="0 0 1080 740" xmlns="http://www.w3.org/2000/svg" style="width:100%">'
+
+def vedge(x, y1, y2, dash=False, lab=None):
+    """Straight vertical arrow at column x."""
+    d = ' class="e d"' if dash else ' class="e"'
+    dy = -6 if y2 < y1 else 6
+    s = f'<line x1="{x}" y1="{y1}" x2="{x}" y2="{y2 - dy}"{d} marker-end="url(#arr)"/>'
+    if lab:
+        s += (f'<text x="{x + 8}" y="{(y1 + y2) // 2 + 4}" class="elab">{lab}</text>')
+    return s
+
+
+def ledge(x1, y1, xm, y2, x2, dash=False, lab=None):
+    """L-shaped arrow: horizontal to xm, vertical to y2, horizontal to x2."""
+    d = ' class="e d"' if dash else ' class="e"'
+    s = (f'<path d="M{x1},{y1} L{xm},{y1} L{xm},{y2} L{x2 - 6},{y2}"{d} '
+         f'marker-end="url(#arr)"/>')
+    if lab:
+        s += f'<text x="{xm + 8}" y="{(y1 + y2) // 2 + 4}" class="elab">{lab}</text>'
+    return s
+
+
+G = []
+LANE_BG = [(16, 148, "#f8fafd", "第一 lineage(BS=1)· 07-21 → 07-22"),
+           (356, 128, "#f8fafd", "第二 lineage R4(BS=1 冷启动, 骨架硬锁)· 07-22 → 07-23"),
+           (516, 190, "#f8fafd", "R5(BS=2-1024)· 07-22 → 07-24"),
+           (738, 118, "#faf8fd", "另一会话")]
+for y, h, col, lab in LANE_BG:
+    G.append(f'<rect x="8" y="{y}" width="1104" height="{h}" rx="10" fill="{col}" stroke="#e3e9f2"/>')
+    G.append(f'<text x="20" y="{y + 20}" class="lane">{lab}</text>')
+
+# ---- Lane 1: campaign-1 -> c74f_sbx -> R3 -> compB (one clean left-to-right chain)
+Y1 = 66
+G.append(node(28, Y1, 168, 62, "c1", ["campaign-1 bs1-real", "2轮 · 内部 1.34", "$690"]))
+G.append(onode(252, Y1, 210, 62, ["c74f_sbx 1.6828×(865格)", "⚠ 无 pre_idx(放宽骨架)", "fork: kf/gvr-topk-c74fsbx"]))
+G.append(node(518, Y1, 168, 62, "r3", ["gvr-topk-r3", "4轮 · 内部 1.11", "$761"]))
+G.append(onode(742, Y1, 246, 62, ["compB 1.8267×(865格 · 0回退)", "= c74fsbx + topk_mid/coop/fast", "fork: kf/gvr-topk-compB"]))
+G.append(node(518, Y1 - 44, 168, 34, "kf1", ["baseline 验证 Failed(D1)"], cls="n bad"))
+G.append(hedge(196, Y1 + 31, 252, lab="产出+graft"))
+G.append(hedge(462, Y1 + 31, 518, lab="作 baseline"))
+G.append(hedge(686, Y1 + 31, 742, lab="复合+graft"))
+G.append(vedge(602, Y1 - 10, Y1, dash=True))
+
+# ---- Lane 2: R4
+Y2 = 406
+G.append(node(28, Y2, 168, 62, "r4f", ["baseline-eval", "Failed(D1 复现)"], cls="n bad"))
+G.append(node(252, Y2, 210, 62, "r4", ["gvr-topk-cold60(R4)", "3轮 · 内部 1.3701 · $1110"]))
+G.append(onode(518, Y2, 220, 62, ["champion 28dc11f6", "865格 1.6531× · 0 回退 · 真 GVR", "fork: kf/r4-champion-final-bs1"]))
+G.append(onode(794, Y2, 246, 62, ["R4_CLOSEOUT.md", "R4_CHAMPION_BS1_REPORT.html", "grid_r4r3cg.csv / grid_r4pr2.csv"]))
+G.append(hedge(196, Y2 + 31, 252, dash=True, lab="改走 baselines.jsonl"))
+G.append(hedge(462, Y2 + 31, 518, lab="round-3 收割"))
+G.append(hedge(738, Y2 + 31, 794))
+# knowledge flow lane1 -> lane2 (single clean vertical, right side, no crossings)
+G.append(vedge(1060, Y1 + 31, Y2 - 6, dash=True))
+G.append(f'<path d="M988,{Y1 + 31} L1060,{Y1 + 31}" class="e d"/>')
+G.append(f'<path d="M1060,{Y2 - 6} L1052,{Y2 - 6}" class="e d" marker-end="url(#arr)"/>')
+G.append(f'<text x="1066" y="{(Y1 + Y2) // 2}" class="elab" writing-mode="tb">仅死路清单/陷阱/REPORT 事实(禁解法)</text>')
+
+# ---- Lane 3: R5 (chain + fan-out done with L-edges at distinct heights)
+Y3 = 566
+G.append(node(28, Y3, 168, 56, "r5a", ["bs2x v1 · $9", "custom_inputs 全 0%"], cls="n bad"))
+G.append(node(252, Y3, 210, 56, "r5b", ["bs2x-v2 · 3轮 · $719", "内部 0.98 · lineage DQ"]))
+G.append(node(518, Y3, 220, 56, "r5c", ["bs2x-v3 fork(rounds3-5)", "内部 1.0756 · $597"]))
+G.append(onode(794, Y3 - 6, 246, 46, ["champion 156ab438(全 exact)", "750格 0.9862 → 目标未达成"]))
+G.append(onode(794, Y3 + 48, 246, 36, ["fork: kf/r5-champion-bs-combined"]))
+G.append(onode(794, Y3 + 92, 246, 36, ["R5_CLOSEOUT.md · grid_r5g_final.csv"]))
+G.append(hedge(196, Y3 + 28, 252, lab="重构 workloads"))
+G.append(hedge(462, Y3 + 28, 518, lab="cancel+fork+steering"))
+G.append(hedge(738, Y3 + 20, 794))
+G.append(ledge(738, Y3 + 40, 766, Y3 + 66, 794))
+G.append(ledge(738, Y3 + 40, 760, Y3 + 110, 794))
+# R4 champion -> R5 prompt digest (single vertical at champion column)
+G.append(vedge(560, Y2 + 62, Y3 - 6, dash=True, lab="champion digest → prompt 起点"))
+
+# ---- Lane 4: other session
+Y4 = 786
+G.append(node(28, Y4, 210, 52, "d0", ["dsl-fp4/fp8 起跑 ×7", "Failed×5 · round0×2"], cls="n other"))
+G.append(node(294, Y4, 190, 52, "d2", ["dsl-fp8 · 3轮 · 0.83"], cls="n other"))
+G.append(node(540, Y4, 190, 52, "d1", ["dsl-fp4 · 3轮 · 1.04"], cls="n other"))
+G.append(node(794, Y4, 246, 52, "fr", ["gvr-topk-pr16457-fresh", "3轮 · 0.84 · 未本地复核"], cls="n other"))
+G.append(hedge(238, Y4 + 26, 294))
+G.append(hedge(484, Y4 + 26, 540))
+
+# ---- skeleton-compliance annotation between lane1 and lane2
+G.append('<g class="warn"><rect x="8" y="180" width="1104" height="158" rx="10"/>'
+         '<text x="24" y="204" font-weight="700">⚠ 骨架合规注记(第一 lineage)</text>'
+         '<text x="24" y="228">· 终版算子 c74f_sbx / compA / compB 源码 0 次引用 pre_idx — preIdx 先验被整体放弃,实际走向 直方图前缀阈值梯 + radix 精确尾(GVR 三要素仅存 b 变体 + c)。</text>'
+         '<text x="24" y="252">· 依据 R3_LEDGER D4(用户 2026-07-22 裁定): Bar-first 放宽骨架 — (a) 先验由实测证据废止(12 项证伪 + hint 挂载 WASH 1.0001),(b) 保留为直方图前缀阈值精化,(c) 精确 refine 完整保留。</text>'
+         '<text x="24" y="276">· 两分支代际关系: compB = c74fsbx 直系升级(+topk_mid 中段 rung 治 N=16387 弱带 +19% · K2048 专用 v30::topk_coop 梯 · aefm::topk_fast 非协作快尾),对 c74fsbx +8.1%。</text>'
+         '<text x="24" y="300">· ⇒ 1.8267× 与 1.6828× 均为"放宽骨架"口径,不可与硬锁骨架的 R4 1.6531× 直接混比;R4 因此立项(真 GVR: P1 消费 pre_idx),差值 ~10% = 先验约束实测代价。</text>'
+         '<text x="24" y="324">· 两分支分母亦不同: c74fsbx vs 旧 head e6fdbfac3d;compB vs R3 时点 head(已含 #16424 优化)。</text></g>')
+
+SVG = ('<svg viewBox="0 0 1120 858" xmlns="http://www.w3.org/2000/svg" style="width:100%">'
+       '<defs><marker id="arr" markerWidth="9" markerHeight="9" refX="7" refY="4.5" '
+       'orient="auto"><path d="M0,0 L8,4.5 L0,9 z" fill="#7f93b3"/></marker></defs>'
        '<style>'
        '.n rect{fill:#eef3fb;stroke:#7f93b3;stroke-width:1.3}'
-       '.n text{font:12.5px sans-serif;fill:#1a2233}'
+       '.n text{font:12px sans-serif;fill:#1a2233}'
        '.n:hover rect{fill:#dbe7fb;stroke:#1a2233;stroke-width:2}'
        '.n.bad rect{fill:#fdeee3;stroke:#c98a4b}'
        '.n.other rect{fill:#f2eefb;stroke:#8d7fb3}'
        '.o rect{fill:#e7f5ec;stroke:#5c9a74;stroke-width:1.2}'
-       '.o text{font:12px sans-serif;fill:#173d27}'
-       '.e{fill:none;stroke:#8fa0ba;stroke-width:1.5}'
+       '.o text{font:11.5px sans-serif;fill:#173d27}'
+       '.e{fill:none;stroke:#7f93b3;stroke-width:1.6}'
+       '.e.d{stroke-dasharray:5,4;stroke:#a9b6ca}'
+       '.elab{font:10.5px sans-serif;fill:#55627a}'
        '.lane{font:600 13px sans-serif;fill:#55627a}'
        '.warn rect{fill:#fff8ec;stroke:#c98a4b;stroke-width:1.2}'
-       '.warn text{font:11.5px sans-serif;fill:#6b4a1b}'
+       '.warn text{font:12px sans-serif;fill:#6b4a1b}'
        '</style>' + "".join(G) + "</svg>")
 
 PAGE = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
