@@ -228,10 +228,12 @@ G.append(f'<path d="M123,{Y1+84} L123,{Y1+72} L560,{Y1+72} L560,{Y1+68}" class="
 # post-close BS-scaling extension of compB (two parallel follow-ups)
 G.append(onode(742, Y1 + 84, 246, 62, ["§7.8 BS-scaling 实测(收口即测)", "BS=1 全胜; crossover@BS=2;", "bs1024 批式臂快 45-125× ⇒ BS==1 门"]))
 G.append(vedge(865, Y1 + 62, Y1 + 84))
-G.append('<g class="n other"><rect x="252" y="{y}" width="236" height="62" rx="9"/>'
+G.append('<g class="n other"><rect x="252" y="{y}" width="236" height="90" rx="9"/>'
          '<text x="370" y="{t1}" text-anchor="middle">kf/compb-bs-ext(另一会话)</text>'
-         '<text x="571" y="{t2}" text-anchor="middle">tp4 mid-BS 融合直方图臂 + 统一 dispatcher</text></g>'.format(y=Y1+84, t1=Y1+104, t2=Y1+120))
-G.append(f'<a href="{GH}kf/compb-bs-ext" target="_blank" class="gh"><text x="370" y="{Y1+136}" text-anchor="middle">⧉ github: kf/compb-bs-ext</text></a>')
+         '<text x="370" y="{t2}" text-anchor="middle">tp4 mid-BS 融合臂 + 统一 dispatcher</text>'
+         '<text x="370" y="{t3}" text-anchor="middle">baseline 实测 gm 1.597×(BS8-1024, 48/48 exact)</text>'
+         '<text x="370" y="{t4}" text-anchor="middle">stage2 终局留另一会话(门 gm≥2.0/min≥1.2)</text></g>'.format(y=Y1+84, t1=Y1+101, t2=Y1+116, t3=Y1+131, t4=Y1+146))
+G.append(f'<a href="{GH}kf/compb-bs-ext" target="_blank" class="gh"><text x="370" y="{Y1+162}" text-anchor="middle">⧉ github: kf/compb-bs-ext</text></a>')
 G.append(f'<line x1="742" y1="{Y1+115}" x2="494" y2="{Y1+115}" class="e" marker-end="url(#arr)"/>')
 G.append(f'<text x="615" y="{Y1+108}" class="elab" text-anchor="middle">扩 BS>1</text>')
 
