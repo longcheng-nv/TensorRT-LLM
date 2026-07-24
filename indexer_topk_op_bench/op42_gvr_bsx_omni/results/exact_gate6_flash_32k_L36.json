@@ -1,0 +1,14 @@
+{
+ "flash_32k_L36|BS1|bsx": [
+  true,
+  ""
+ ],
+ "flash_32k_L36|BS64|bsx": [
+  true,
+  ""
+ ],
+ "flash_32k_L36|BS1024|bsx": [
+  true,
+  ""
+ ]
+}

@@ -1041,8 +1041,13 @@ __device__ __forceinline__ void sample_count(SM* s, const float4* base, int v0, 
   int c[R];
 #pragma unroll
   for (int r = 0; r < R; ++r) c[r] = 0;
-  for (int i = v0 + tid; i < v1; i += T * SS) {
-    float4 a = __ldg(base + i);
+  // UNIFORM every-SS-th float4 over the WHOLE row (iter5 bug: `i += T*SS`
+  // sampled the first T contiguous float4s = the attention-sink region of
+  // real decode rows -> estimates overshot -> pivot too high -> re-stream).
+  for (int j = tid;; j += T) {
+    int idx = v0 + j * SS;
+    if (idx >= v1) break;
+    float4 a = __ldg(base + idx);
     float vv[4] = {a.x, a.y, a.z, a.w};
 #pragma unroll
     for (int q = 0; q < 4; ++q)
@@ -1171,7 +1176,9 @@ __global__ void __launch_bounds__(TB, 2) gvr_topk_tp(
       int lo = (3 * K) / 2, hi = (6 * kC) / 10;
       int best = AR - 1;
       long long bestd = 0x7fffffffffffLL;
-      long long tgt = (long long)(K + kC) / 2;
+      long long tgt = (long long)3 * K;
+      if (tgt > hi) tgt = hi;
+      if (tgt < lo) tgt = lo;
       for (int j = 0; j < AR; ++j) {
         long long est = (long long)s->rcnt[j] * SS;
         if (est >= lo && est <= hi) {
