@@ -31,9 +31,13 @@ nsys cold-L2 = only arbiter. Full objective: PLAN.md. Contract: AUTONOMY.md.
 - GOTCHA: parse_ab.py dedups by (cell,BS,arm) WITHOUT tag — never parse a
   probe/anchor rep before the canonical m1 rep, or the canonical rows get
   dropped. (Happened once; anchor rows stripped + m1 rep re-parsed, CSV clean.)
-- After M1: (a) gm projection vs 1.40 bar; (b) weak-cell clustering -> iter8
-  levers: BW efficiency (ncu), tail-trim K2048, tp fused U=8 batch loads +
-  __ldcs, 3 CTA/SM via smaller smem at K<=1024.
+- iter8 DONE (patho fix): band-first pivot + 2-sigma escape when band empty.
+  4 patho cells 0.61-0.73 -> 1.01-1.22, no regressions, projected 82-cell
+  gm 1.3531 (bar 1.40, gap 3.3%). probe_patho.py = offline ladder replayer.
+  WATCH: v32_256k_L03 BS16/32 M1 anomaly (CS8 DSMEM flakiness suspect).
+- iter9 target: structural band 32-512k x BS16-128 (weak 62/144 ex-patho):
+  tp fused U=8 batch loads + __ldcs, 3 CTA/SM smem diet at K<=1024, ncu BW
+  attribution first.
 
 ## Older state
 - iter0: node anchored; head event-axis artifact documented (nsys only).
