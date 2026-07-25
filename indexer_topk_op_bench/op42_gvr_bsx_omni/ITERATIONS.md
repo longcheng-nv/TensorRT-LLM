@@ -218,3 +218,20 @@ FEASIBLE ROUTE TO 1.40: portfolio-dispatch the weak (bs,npad) bands to a
 head-identical row path inside the operator (parity by construction; op17/
 op25 portfolio precedent) — but this touches the champion-lineage constraint
 => per AUTONOMY.md, human decision required. Campaign paused here.
+
+## iter 11 — 2026-07-25 — new-lever round (user-directed): 2 falsified, idea space CLOSED
+P4-2048 (reuse direct-tier radix_select_emit, incl f2u-at-push + Smem
+side-union): smoke +4-10% — fixed 2048-bin costs beat 4-round byte radix's
+early exit at tp's C~2-4K. REVERTED (helpers' SM-generalization kept in
+FALSIFIED context only).
+LB(TB,1): BS>=256 +37-50% — PROVES 2-CTA/SM co-residency is real and
+load-bearing at BS>=256 (see FALSIFIED i11-R corollaries). REVERTED.
+Full attack ledger over iter9-11: every tp phase has now been attacked —
+P1 (fusion: reg-dead), sample (removal: 142/865 restreams; fusion: reg-dead),
+fused (U-tuning: SHIPPED), P4 (round-0 skip: atomic-dead; 2048-bin:
+fixed-cost-dead), dispatch (tiers: SHIPPED where wins existed), occupancy
+(both directions dead), pivot economics (ladder-coarseness-dead).
+Register headroom, icache headroom, and occupancy are all pinned by
+load-bearing constraints. The R4 row path is at its local optimum.
+STATE UNCHANGED: verified grid gm 1.3716 (src = iter9+iter10E). The
+remaining 2.1% to bar == the weak pairs == head's leaner row economics.

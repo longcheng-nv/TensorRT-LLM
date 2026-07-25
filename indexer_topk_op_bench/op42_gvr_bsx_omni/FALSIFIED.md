@@ -49,3 +49,21 @@ cells incl flash_128k_L42 (C=477 < K=512 undershoot). probe_tgt.py, 865 cells.
 
 ## i10-c capn 8192->4096 (2026-07-25) — NO EFFECT
 CS8 at npad 32832: DSMEM exchange growth offsets the extra fill. Noise-flat.
+
+## i11-P4 2048-bin radix_select_emit in tp (2026-07-25) — FALSIFIED
+Reusing the direct tier's 11/11/10 radix for tp's P4: +4-10% everywhere.
+Fixed costs (2048-bin zero + bin_select scan) dominate at tp's C~2-4K;
+the byte-radix's early exit averages ~1.5 effective rounds. 2048-bin only
+pays at direct-tier C~npad. All exact; smoke-falsified, no silicon.
+
+## i11-R launch_bounds (TB,2)->(TB,1) (2026-07-25) — FALSIFIED, KEY PHYSICS
+BS>=256 CATASTROPHIC: +37-50% (flash_128k BS512 47->70us, v32_128k BS1024
+184->253us); BS128 flat. INVERTS the i10-F reading: 2-CTA/SM co-residency
+IS REAL at BS>=256 (64-reg cap + 83KB smem x2 both fit) and worth 35-50% —
+the SM overlaps two rows' phases there. ncu's 25% occupancy was a BS128
+artifact (grid 128 < 148 SMs: no second CTA EXISTS to co-reside).
+COROLLARY 1: the 64-reg cap is load-bearing -> every reg-hungry idea
+(C' prefetch, row-pairing interleave) is structurally dead.
+COROLLARY 2: BS>=256 weakness is pure per-row WORK (overlap already active);
+BS16-128 weakness is unfixable underfill (bs*CS < 148, no co-residency
+partner possible; CS2@BS128 falsified iter7).
