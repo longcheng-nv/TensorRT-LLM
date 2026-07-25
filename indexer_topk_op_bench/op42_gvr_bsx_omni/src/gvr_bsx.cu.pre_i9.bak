@@ -54,13 +54,10 @@ __device__ __forceinline__ unsigned f2u(float f) {
 // Count elements >= rungs[r] over this CTA's slice for R thresholds in one read.
 // Caches per-thread counts in s->ptcnt and accumulates CTA totals in s->rcnt_local.
 // Caller must zero s->rcnt_local and __syncthreads() before; call exchange after.
-template <int TB, int R, int UOVR = 0, class SM = Smem<TB>>
+template <int TB, int R, class SM = Smem<TB>>
 __device__ __forceinline__ void count_pass(SM* s, const float4* base, int v0, int v1, int tid) {
   constexpr int T = TB;
-  // i9-B3: batch width by slice size — CS1 full rows take U=8 (deep ILP wins
-  // on the latency-bound hot path), CS>1 slices keep U=4 (slice < 8*T would
-  // fall to the scalar tail and lose all batching).
-  constexpr int U = UOVR ? UOVR : ((R > 1) ? 4 : 8);
+  constexpr int U = (R > 1) ? 4 : 8;  // batched independent loads to cover DRAM/L2 latency
   float tr[R];
 #pragma unroll
   for (int r = 0; r < R; ++r) tr[r] = s->rungs[r];
@@ -1061,12 +1058,12 @@ __device__ __forceinline__ void sample_count(SM* s, const float4* base, int v0, 
   for (int r = 0; r < R; ++r) s->ptcnt[r * T + tid] = c[r];
 }
 
-template <int TB, int R, int UOVR = 0, class SM = Smem<TB>>
+template <int TB, int R, class SM>
 __device__ __forceinline__ void fused_count_collect(SM* s, unsigned long long* dst, int* dcnt,
                                                     const float4* base, int v0, int v1,
                                                     float tpush, int kcap, int tid) {
   constexpr int T = TB;
-  constexpr int U = UOVR ? UOVR : 4;  // i9-B3: CS1 callers pass 8
+  constexpr int U = 4;
   float tr[R];
 #pragma unroll
   for (int r = 0; r < R; ++r) tr[r] = s->rungs[r];
@@ -1133,7 +1130,7 @@ __device__ __forceinline__ void collect_at(SM* s, unsigned long long* dst, int* 
   }
 }
 
-template <int TB, int CS = 1, int AR = RUNGS, int UF = 4>
+template <int TB, int CS = 1, int AR = RUNGS>
 __global__ void __launch_bounds__(TB, 2) gvr_topk_tp(
     const float* __restrict__ logits, const int* __restrict__ pre_idx,
     int* __restrict__ out, int npad, int K, int kC, TpParams tp) {
@@ -1232,9 +1229,7 @@ __global__ void __launch_bounds__(TB, 2) gvr_topk_tp(
     }
     __syncthreads();
     float tpush = s->rungs[0];
-    // i9-B5: UF chosen at LAUNCH time (CS1 deep rows -> 8, else 4); a runtime
-    // branch here doubles the instantiated body and loses to icache pressure.
-    fused_count_collect<TB, 2, UF>(s, dst, dcnt, base, v0, v1, tpush, kC, tid);
+    fused_count_collect<TB, 2>(s, dst, dcnt, base, v0, v1, tpush, kC, tid);
     exchange_counts<TB, CS, 2>(s, xch & 1, tid, rank);
     xch++;
 
@@ -1278,7 +1273,7 @@ __global__ void __launch_bounds__(TB, 2) gvr_topk_tp(
       __syncthreads();
       if (tid < AR) s->rungs[tid] = nr[tid];
       __syncthreads();
-      count_pass<TB, AR, UF>(s, base, v0, v1, tid);
+      count_pass<TB, AR>(s, base, v0, v1, tid);
       exchange_counts<TB, CS, AR>(s, xch & 1, tid, rank);
       xch++;
       Rcur = AR;
@@ -1782,20 +1777,20 @@ static void launch_dense(const float* logits, const int* pre_idx, int* out, int 
     launch_gvr<16, 512>(logits, pre_idx, out, npad, K, kC, bs, stream);
 }
 
-template <int TB, int CS, int UF = 4>
+template <int TB, int CS>
 static void launch_tp_cs(const float* logits, const int* pre_idx, int* out, int npad, int K,
                          int kC, int bs, cudaStream_t stream) {
   static bool inited = false;
   if (!inited) {
-    cudaFuncSetAttribute(gvr_topk_tp<TB, CS, RUNGS, UF>, cudaFuncAttributeMaxDynamicSharedMemorySize,
+    cudaFuncSetAttribute(gvr_topk_tp<TB, CS>, cudaFuncAttributeMaxDynamicSharedMemorySize,
                          (int)sizeof(Smem<TB>));
     inited = true;
   }
   TpParams tp;
   tp.pivot = RUNGS - 1;
   if constexpr (CS == 1) {
-    gvr_topk_tp<TB, 1, RUNGS, UF><<<dim3(1, bs), TB, sizeof(Smem<TB>), stream>>>(logits, pre_idx,
-                                                                                  out, npad, K, kC, tp);
+    gvr_topk_tp<TB, 1><<<dim3(1, bs), TB, sizeof(Smem<TB>), stream>>>(logits, pre_idx, out, npad,
+                                                                      K, kC, tp);
   } else {
     cudaLaunchConfig_t cfg = {};
     cfg.gridDim = dim3(CS, bs, 1);
@@ -1809,7 +1804,7 @@ static void launch_tp_cs(const float* logits, const int* pre_idx, int* out, int 
     attrs[0].val.clusterDim.z = 1;
     cfg.attrs = attrs;
     cfg.numAttrs = 1;
-    cudaLaunchKernelEx(&cfg, gvr_topk_tp<TB, CS, RUNGS, UF>, logits, pre_idx, out, npad, K, kC, tp);
+    cudaLaunchKernelEx(&cfg, gvr_topk_tp<TB, CS>, logits, pre_idx, out, npad, K, kC, tp);
   }
 }
 
@@ -1824,7 +1819,7 @@ static void launch_tp(const float* logits, const int* pre_idx, int* out, int npa
   int cs = 1;
   if (bs < 128) {
     cs = p2floor(296 / bs);
-    int capn = p2floor(npad / 8192 > 0 ? npad / 8192 : 1);  // i9-A: slice floor 32KB (was 64KB)
+    int capn = p2floor(npad / 16384 > 0 ? npad / 16384 : 1);
     if (cs > capn) cs = capn;
     if (cs > 8) cs = 8;
   }
@@ -1832,12 +1827,7 @@ static void launch_tp(const float* logits, const int* pre_idx, int* out, int npa
     case 8: launch_tp_cs<TB, 8>(logits, pre_idx, out, npad, K, kC, bs, stream); break;
     case 4: launch_tp_cs<TB, 4>(logits, pre_idx, out, npad, K, kC, bs, stream); break;
     case 2: launch_tp_cs<TB, 2>(logits, pre_idx, out, npad, K, kC, bs, stream); break;
-    default:
-      if (npad >= 16384)  // i9-B5: deep CS1 rows take the U=8 body
-        launch_tp_cs<TB, 1, 8>(logits, pre_idx, out, npad, K, kC, bs, stream);
-      else
-        launch_tp_cs<TB, 1, 4>(logits, pre_idx, out, npad, K, kC, bs, stream);
-      break;
+    default: launch_tp_cs<TB, 1>(logits, pre_idx, out, npad, K, kC, bs, stream); break;
   }
 }
 

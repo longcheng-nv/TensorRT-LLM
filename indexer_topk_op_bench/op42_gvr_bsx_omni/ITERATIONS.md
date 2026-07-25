@@ -152,3 +152,11 @@ REMAINING WEAK (post-iter9): pro_64k family (npad 16448) BS64-1024 0.77-0.83
 pro_1024k BS16-64 0.76-0.88. Next lever (iter10): per-row critical path on
 mid-npad tp/dense (barrier diet, pass fusion, P4 overlap) or npad-16448
 dedicated tier.
+
+## iter 9 addendum — 2026-07-25 — pro_32k watch CLOSED (anchor drift)
+BASE-src control rep today on -048 GPU0: pro_32k_L02 BS256+ gm 0.983 ==
+b5 0.984 == b5r2 0.981, vs M1 1.030 -> the "-5%" was M1-day measurement
+drift, NOT a B5 regression (code path is instruction-identical there).
+Reinforces per-batch anchor discipline (cf op26 lesson). B5 CLEAN.
+PROMOTED src_i9 -> src (pre-iter9 champion kept at src/gvr_bsx.cu.pre_i9.bak).
+M2 82-cell full re-screen launched (tag m2) for the true grid gm.
