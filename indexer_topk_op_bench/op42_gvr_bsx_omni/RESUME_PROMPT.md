@@ -17,7 +17,21 @@ nsys cold-L2 = only arbiter. Full objective: PLAN.md. Contract: AUTONOMY.md.
   `scripts/parse_ab.py` → `results/ab_data.csv`.
 - Env knob: `GVR_BSX_DENSE_BS=<n>` dense-tier BS threshold (0=off, default 32).
 
-## State (2026-07-25)
+## State (2026-07-25, PAUSED AT DECISION POINT)
+- iter10-E SHIPPED on top of iter9: npad<=20480 dense-tight reg<1,1024,5>,
+  tpb 256. M2 82-cell full grid MEASURED gm 1.3687; +iter10e verified
+  projection 1.3716. Bar 1.40 gap 2.1%; pro model alone 1.406 (bar met).
+- DOUBLE-LOCK (ITERATIONS.md iter10 closeout): bar == lose-nowhere (raising
+  all 118 weak pairs to exactly 1.0 -> gm 1.4000). Local edits to the R4 row
+  path exhausted: c/C'/D/F/G/H all falsified (FALSIFIED.md has mechanisms);
+  H proved the sample pass mandatory (142/865 restreams without).
+- PENDING USER DECISION: portfolio-dispatch weak (bs,npad) bands to a
+  head-identical row path (parity by construction => 1.40) — touches the
+  champion-lineage constraint (AUTONOMY.md "must stop for human").
+- Phase-budget tooling: src_i9p (GVR_TP_STOP early-exit) + probe_tgt.py +
+  probe_nosample.py; ncu recipe in ITERATIONS iter9/10 entries.
+
+## Older state (2026-07-25 morning)
 - iter9 DONE + PROMOTED to src/ (pre-iter9 champion at src/gvr_bsx.cu.pre_i9.bak):
   A = tp CS cap capn 16384->8192 (npad-32832 family got 2x CTAs; SM idling
   was the wall, NOT BW: ncu DRAM<=10%, stalls icache22/gmem21/barrier18).
