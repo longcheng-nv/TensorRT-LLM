@@ -160,3 +160,21 @@ drift, NOT a B5 regression (code path is instruction-identical there).
 Reinforces per-batch anchor discipline (cf op26 lesson). B5 CLEAN.
 PROMOTED src_i9 -> src (pre-iter9 champion kept at src/gvr_bsx.cu.pre_i9.bak).
 M2 82-cell full re-screen launched (tag m2) for the true grid gm.
+
+## M2 — 2026-07-25 — 82-cell FULL re-screen DONE (promoted iter9 src, 8-GPU shard)
+82/82 cells, 902 pairs, ALL exact, 0 FAIL. Second half ran 8-way (user
+directive: use all 8 GPUs); paired arms make the ratio robust to shard load.
+VERDICT vs bar 1.40: TRUE grid gm = 1.3687 (M1 1.3198, iter9 projection
+1.3581 — family effect materialized as predicted). min 0.759 max 3.209,
+weak(<0.95) 127/902 (M1: 142). Gap to bar: 2.3%.
+By BS: 1-8 = 1.72/1.66/1.64/1.49; 16-128 = 1.22-1.28; 256-1024 = 1.23-1.24.
+By model: flash 1.345 / pro 1.406 (bar met per-model) / v32 1.356.
+Weak mass now decomposes into:
+(a) npad-16448 family (flash/pro 64k-ISL) BS64-1024: 0.77-0.90 flat — THE
+    dominant weak family post-iter9 (4 of 6 worst cells). Tier map there:
+    BS64 dense reg<1,1024,8>, BS128+ tp CS1 U4 — neither beats head.
+(b) small-npad (8256) BS256+: flash_32k_L02 0.76-0.81 (tp CS1 U4 band).
+(c) 128k-ISL family BS16-128 residual 0.79-0.86 (was 0.72; iter9 halved it).
+(d) v32_64k_L41 BS16-64 0.77-0.82 (low-hr layer, K=2048).
+iter10 target = (a)+(b): the BS>=64 mid/small-npad tp/dense per-row path.
+Data: results/m2_data.csv.
