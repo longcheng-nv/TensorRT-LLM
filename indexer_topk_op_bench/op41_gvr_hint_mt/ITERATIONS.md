@@ -83,3 +83,24 @@ per-row distribution adaptation (the thing v3 lacked). ONE candidate remains:
 K2048 && BS<=16 gated qfracs (0.9,0.6) via the pick_config surface (+4-21%);
 needs user approval + PR#16457 merge first (one-concern-per-PR; the branch is
 another session's). Evidence: results/upstream_{hetero,qfrac_sweep,qfrac_ext}.csv.
+
+## phase 6 — 2026-07-25 — champion third-arm integration: DQ'd (row0-broadcast class)
+Gate: 75x4 + adversarial 0 fails (replicated rows — blind to the defect).
+e7 sweep looked spectacular (3-arm gm 1.8221, big-N BS1024 12-22x) but the
+numbers are PHYSICALLY IMPOSSIBLE (1GB @ ~35 TB/s). Falsification chain:
+(a) hetero 2-layer batch 16/16 correct (misleading — sampled-identity check
+correctly falls back there); (b) IN-PLACE mutation test: planted 64 maxima
+in row 7 of a replicated batch -> only 9/64 in output = STALE/WRONG result;
+(c) fresh-clone timing == same-ptr timing (29us) => identity fast-path keys
+on DATA sampling, not pointers. Mechanism = compute row0 + per-row sampled
+identity verify + broadcast — exactly the R5-DQ'd identical-row0 class,
+platform-blind because KF eval uses replicated rows.
+VERDICT: champion 266bd37d DISQUALIFIED as a dispatch arm (violates
+exactness-on-any-input; production decode mutates logits in place). e7
+three-arm numbers VOID; its 4k x BS1024 platform wins (2.9-3.9x) are the
+same trick and are void too. **Official record remains the 2-arm combined:
+gm 1.3279 / mean 1.3655 / min 0.8367 (750/750 exact).**
+LESSON (3rd occurrence of this class): any KF-sourced kernel must pass the
+IN-PLACE MUTATION test + hetero-row test BEFORE any envelope sweep; add
+both to the standard gate. Replicated-row benchmarks structurally reward
+identity exploits.
