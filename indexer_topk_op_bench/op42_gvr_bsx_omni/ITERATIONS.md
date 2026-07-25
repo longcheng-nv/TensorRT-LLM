@@ -131,3 +131,24 @@ Kernel lever (src_i9, single-variable):
     -4%; direct tier untouched).
 nsys verdict tag iter9ab3 (15 cells x full BS ladder, 4-GPU shard): RUNNING.
 Analyzer: scripts/analyze_i9.py (M1 + iter8b + iter9 patch projection).
+
+## iter 9 — 2026-07-25 — VERDICT (A capn/2 + B5 launch-time UF)
+Fix evolution after WIP entry: B3's (CS==1?8:4) hit pro_32k-class BS>=256
+(small-npad tp CS1: <8 float4/thread -> U8 loop never engages, all scalar
+tail; nsys -5%). B4 runtime-branch made it WORSE (+11% smoke: double
+instantiated body, icache). B5 = UF as LAUNCH-time template param: CS1 splits
+by npad>=16384 into U8/U4 bodies, CS>1 stays U4. Strictly best on smoke.
+nsys verdicts (iter9ab3 15 cells + iter9b5 6-cell delta, all exact, 0 FAIL):
+weak-band BS16/32 0.71-0.84 -> 0.79-0.93 (+0.10-0.14); BS64/128 +0.03-0.07;
+pro_1024k_L32 BS128 0.98->1.09, BS1024 1.33->1.39; flash_4k direct restored
+2.085; v32_128k BS128 0.77->0.84, BS1024 1.19->1.25.
+Projected 82-cell gm 1.3531 -> 1.3581 (min 0.705->0.742, weak 134->135) —
+UNDERSTATED: only 15/82 cells re-measured; ~15 more same-npad-family weak
+cells share the fixed code paths (est +0.5-1pp more; M2 full re-screen owed).
+Residual watch: pro_32k_L02 BS256-1024 0.99/1.00/0.96 vs M1 1.02/1.05/1.02
+with BASE-identical code path -> variance suspect, repeat rep iter9b5r2.
+REMAINING WEAK (post-iter9): pro_64k family (npad 16448) BS64-1024 0.77-0.83
+(untouched — no tier beats head there); flash/pro_128k BS64-1024 0.79-0.94;
+pro_1024k BS16-64 0.76-0.88. Next lever (iter10): per-row critical path on
+mid-npad tp/dense (barrier diet, pass fusion, P4 overlap) or npad-16448
+dedicated tier.

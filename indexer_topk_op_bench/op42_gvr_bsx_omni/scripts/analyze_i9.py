@@ -72,11 +72,22 @@ def main():
     m1 = sp_table(list(csv.DictReader(open(OP42 / "results" / "m1_data.csv"))))
     i8 = sp_table(reparse_tag("iter8b"))
     i9 = sp_table(list(csv.DictReader(open(CSV))))
+    b5 = sp_table(reparse_tag("iter9b5"))  # B5 delta reps override iter9ab3
 
     proj = dict(m1)
     proj.update(i8)
     pre_i9 = dict(proj)          # iter8-projected state (the 1.3531 table)
     proj.update(i9)
+    if b5:
+        cells_b5 = sorted({c for c, _ in b5})
+        print(f"\n== iter9b5 delta cells (override AB3): {cells_b5}")
+        for c in cells_b5:
+            pairs = sorted(bs for cc, bs in b5 if cc == c)
+            print(f"  {c:18s} " + " ".join(
+                f"BS{bs}:{proj.get((c, bs), float('nan')):.2f}->{b5[(c, bs)]:.2f}"
+                for bs in pairs))
+        i9.update(b5)
+        proj.update(b5)
 
     print(f"\n== iter9 re-measured cells (nsys cold, vs pre-iter9 state) ==")
     cells = sorted({c for c, _ in i9})
