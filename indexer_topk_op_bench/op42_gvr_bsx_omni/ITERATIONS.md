@@ -194,3 +194,27 @@ fused 7.8 / P4+tail 5.6. Event-axis floor 10us = ~7us HOST launch latency
 (known gotcha, invisible to nsys ratio). => iter10-C' (fuse sample into P1,
 save ~1.5-2us on every tp row) + P4 diet are the remaining tp levers for
 BS>=256 weak bands (64k/32k family BS256+ 0.76-0.85, 128k BS16-128 residual).
+
+## iter 10 closeout — 2026-07-25 — E shipped; c/C'/D/F/G/H falsified; DECISION POINT
+Levers tried this round (all offline-gated or smoke-gated before silicon):
+E SHIPPED (+0.3pp, dense-tight npad<=20480). c (capn/4096) flat. C' (sample
+prefetch fusion) reg-spill loss. D (tgt 3K->2K) offline: ladder too coarse.
+F (max-shared carveout 2CTA/SM) +8-13% loss. G (push-time f2u+hist, P4
+round-0 skip) DSMEM-atomic loss. H (no-sample prior pick) offline: 142/865
+restreams vs 12/865 -> sample pass is mandatory in this row path.
+STATE: M2-verified grid gm 1.3687, +iter10e verified projection 1.3716.
+Bar 1.40, gap 2.1%.
+DOUBLE-LOCK ANALYSIS (bar reachability under current constraints):
+ Lock 1 (structural): raising every weak pair to exactly 1.0 gives gm
+ 1.4000 — the bar is EQUIVALENT to "lose nowhere" (118 weak pairs remain,
+ floor 0.76, spanning 128k BS16-128, 32k/64k/128k BS256-1024, 1024k BS16-64).
+ Lock 2 (path exhaustion): within the R4-champion row path, the mandatory
+ phase floor (entry 3.1 + P1 3.5 + sample 2.1 [proved mandatory by H] +
+ fused + P4) exceeds head's leaner row cost on the weak bands; 6/7 local
+ levers this round falsified with understood mechanisms (icache, 64-reg cap,
+ DSMEM atomics, 8-rung coarseness). BS1-8 dominance (1.49-1.72) is the same
+ machinery that costs the BS>=16 parity.
+FEASIBLE ROUTE TO 1.40: portfolio-dispatch the weak (bs,npad) bands to a
+head-identical row path inside the operator (parity by construction; op17/
+op25 portfolio precedent) — but this touches the champion-lineage constraint
+=> per AUTONOMY.md, human decision required. Campaign paused here.
