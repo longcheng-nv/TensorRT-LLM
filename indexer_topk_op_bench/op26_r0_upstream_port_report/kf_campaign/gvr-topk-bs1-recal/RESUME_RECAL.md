@@ -10,3 +10,12 @@
 - **收割纪律**: 每轮 champion 先 `quick_ab.py` smoke (已修: 强制 TORCH_CUDA_ARCH_LIST=10.0a) 再 `run_nsys_ab.sh` 探针 (本机 overlay 满 → 必须 `TMPDIR=/dev/shm/loncheng_tmp`); 终判 = drive_grid_shards.sh 865 格 + per-rung pr_cold 锚检查 + 禁并发探针; CUDA-event 大 n 数字不可信 (PR 头 cuteDSL host 税 ~1.1ms/call, 只认 nsys)。
 - **接续**: `kf campaign show rd06zd9zf55jdfxfr5z077t6wg`; 收割 `kf campaign kernel list rd06zd9zf55jdfxfr5z077t6wg --top 10`; 不达标 fork `--append-prompt` 纠偏 (pool 健康, fork 有意义)。
 - **同库其他战役**: gvr-topk-pr16457-fresh (6em6mf55…, 已收口 CLOSED, 判决见其 RESUME_FRESH.md); gvr-topk-bs2x-v3 (befh5fh…, R5 旧战役)。
+
+## 终局 (2026-07-25 01:47 UTC Completed, 5 轮, $1083.68)
+
+- champion `gvr_topk_cap4096_pmin_cs1_direct_hist` (6d9fe9e4, r5-a003), 内部 1.1502。
+- **本地 nsys 双探针判决 (8 格, GPU0 背靠背, 锚差 <3%)**: champion cold gm **1.3951** (0 回退, 8/8 exact) vs 种子 r3_28dc11f6 cold gm **1.6867** — **种子 8/8 全胜, champion 无合并价值 → 不采纳**。
+- **战役 A 验收结论**: bar (gm≥1.60 + 回退≤5% + exact) 由**种子本身**满足 (R4 全网格判决 gm 1.6531, 865/865 exact, 0 真实回退, grid_r4r3cg.csv) — A 的交付物 = R4 champion 原样;KF 增量为负。
+- **模式实锤 (两次战役重复)**: KF swarm 无法超越强种子 — fresh 冷启动 5 轮 0.95×, recal 种子加持 5 轮 1.15 内部 (nsys 1.40) 仍距种子 -17%。内部计分尺跨战役漂移 (种子在 R4 harness 读 1.37, 在 recal 世代读数未复现) 疑似 agents 未成功以种子立板 — 但外判已足以裁决, 不再深挖。
+- 探针数据: `ab_recal6d9f.json` / `ab_seedr4chk.json`; champion 源码 `harvest/recal_6d9fe9e4/`。
+- **战役 B 决策待用户**: B 原案 (BS2-1024 gm≥1.25, R4 种子) 的前提 "种子加持的 swarm 能加值" 已两连败;且 BS>1 域 R5/R6 histor gm 0.99/0.67。启动前建议重议。
