@@ -1,0 +1,69 @@
+{"ts":"2026-07-25T06:56:08Z","show":{
+  "name": "gkreb2rzas2gh99hx1xczd4gym",
+  "display_name": "gvr-topk-weakrung",
+  "tenant": "genpop",
+  "tags": [],
+  "namespace": "kernel-factory",
+  "phase": "Running",
+  "current_round": 1,
+  "completed_rounds": 0,
+  "total_agents": {
+    "launched": 6,
+    "completed": 0,
+    "failed": 0,
+    "cancelled": 0
+  },
+  "best_fitness_score": null,
+  "best_candidate_id": null,
+  "best_speedup": null,
+  "baseline_time_ms": 0.020186153742997794,
+  "generations_without_improvement": 0,
+  "forked_from_campaign_id": null,
+  "forked_from_round": null,
+  "started_at": "2026-07-25T06:55:01.225617214+00:00",
+  "completed_at": null,
+  "failure_reason": null,
+  "mr_url": null,
+  "created_at": "2026-07-25T06:55:01Z",
+  "spec": {
+    "artifact_id": "indexer-topk-decode-weakrung",
+    "agent_image": null,
+    "batch_size": 5,
+    "max_rounds": 8,
+    "max_duration_seconds": 28800,
+    "max_cost_usd": 8000.0,
+    "stagnation_limit": 3,
+    "agent_code_url": "local://embedded",
+    "gpu_spec": "b200",
+    "agent_pool": [
+      {
+        "runtime": "claude",
+        "model": "opus-4.8",
+        "count": 2,
+        "reasoning_effort": "high"
+      },
+      {
+        "runtime": "codex",
+        "model": "gpt-5.6-sol",
+        "count": 2,
+        "reasoning_effort": "high"
+      },
+      {
+        "runtime": "n3",
+        "model": "claude-opus-4-8",
+        "count": 2
+      }
+    ],
+    "agent_timeout_seconds": 14700,
+    "eval_timeout": 1800,
+    "convergence_threshold": 0.0001
+  },
+  "version": "476743643",
+  "bug_report_counts": {
+    "critical": 0,
+    "error": 0,
+    "warning": 0,
+    "info": 0
+  },
+  "latest_round_summary": null
+}}

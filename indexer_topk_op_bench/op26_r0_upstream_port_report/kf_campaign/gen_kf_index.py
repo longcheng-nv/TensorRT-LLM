@@ -96,13 +96,16 @@ C = [  # (anchor, id, name, status, rounds, internal, local, start, end, cost, o
       code=f"{KFP}/gvr-topk-bs1-recal/(seed_r4_champion.cu + prompt.md)",
       data=f"{KFP}/gvr-topk-bs1-recal/RESUME_RECAL.md · monitor_recal.jsonl",
       note="pool 换血修 fresh 死槽教训(无 fable-5,本战役 0 系统性槽死);**模式实锤: KF swarm 两连败于强种子**(fresh 0.95 / recal 1.40 vs 种子 1.69);内部计分尺跨战役漂移(种子 R4 世代读 1.37, recal 世代未复现);战役 B 启动前需重议"),
- dict(a="b40", id="gspn6jvr…(v1) / pq3hwx7eh94k…(v2)", name="gvr-topk-bs40 v1 + v2", st="v1 Cancelled / v2 Running", rd="1",
-      internal="0.82 / 0.45", local="—", t0="07-24 ~03:3x / ~05:0x", t1="—", cost="进行中", own="**另一会话**",
-      goal="BS 侧新线(bs40 系;详情归属另一会话)", cons="未知(另一会话)", code="未知", data="未知",
-      note="v1 跑 1h22m 止损重发 v2"),
- dict(a="d3", id="tbk1d2yhks46…(fp4) / 1expg9bm4x6m…(fp8)", name="dsl-fp4/fp8-paged-mqa-logits(二批)", st="Running ×2", rd="1",
-      internal="— / 0.31", local="—", t0="07-24 ~06:1x", t1="—", cost="进行中", own="**另一会话**",
-      goal="DSL MQA-logits 线二批重跑(一批 fp4 1.04 / fp8 0.83 收口后)", cons="未知", code="未知", data="未知", note=""),
+ dict(a="wk", id="gkreb2rzas2gh99hx1xczd4gym", name="gvr-topk-weakrung(战役 B, 方向 iii)", st="Running", rd="1/8",
+      internal="—(r1 起步)", local="—(进行中)", t0="07-25 06:55", t1="—", cost="cap $400(止损盘)", own="本会话(recal 线)",
+      goal="只啃复合包络的 **28 个 PR 回退 rung**(BS 256-1024 × 16k-256k 吞吐墙 + pro_512k@128 / pro_1024k@16);内部 bar: 14 格 gm>1.0 且单格 ≥0.95, stretch 1.15;任何 rung 上 exact 且 >1.0 的胜利按 rung 并入分派表",
+      cons="GVR 骨架;种子 = v3mt(op41) + e6(op39 arm_v2) 全源码 --asset;反 broadcast 合规线(R6 教训) + 跨行摊销仅限 P1 先验共享;op39 已证伪清单注入(ILP by BS / cp.async / CDP2)",
+      code=f"{KFP}/gvr-topk-weakrung/(prompt.md + seed_v3mt/e6)",
+      data=f"{KFP}/gvr-topk-weakrung/RESUME_WEAKRUNG.md · r5_bs/assets_weak(294MB, 物化 export_cells_weak.py)",
+      note="结构判断: 该域 op39 双锁(基线原生批摊销 scan pass), $400 止损防翻车。**新平台坑: 单资产 >64MiB 上传 500** — 4 个大格降 BS 128/64 代理(proxy 组合均有 grid_r5pr 基线), BS512-1024 大 npad 角落只能本地终判"),
+ dict(a="d3", id="tbk1d2yh…/1expg9bm…(二批) → 8e6vrhpd…/mzsqy139…(v2) → wzg4wjnh…/af428b19…(v3)", name="dsl-fp4/fp8 logits(二批/v2/v3)", st="二批+v2 Failed·Completed / v3 Running", rd="—",
+      internal="fp4 1.09 / fp8 1.03(v2 最佳)", local="—", t0="07-24 ~06:1x →", t1="—", cost="进行中", own="**另一会话**",
+      goal="DSL MQA-logits 线迭代重跑", cons="未知", code="未知", data="未知", note="归属另一会话,仅记状态"),
  dict(a="d1", id="9dprgt29j515d75q1b6gyyqw1g", name="dsl-fp4-paged-mqa-logits", st="Completed", rd=3,
       internal="1.04", local="未复核(本会话外)", t0="07-23 15:58", t1="07-23 ~22:2x", cost="未核", own="**另一会话**",
       goal="cuteDSL FP4 paged-MQA logits 算子", cons="未知", code="未知", data="未知", note=""),
@@ -129,6 +132,7 @@ PROMPTS = {  # anchor -> [(label, path)]
     "frb": [("继承 fresh prompt(不变)", "gvr-topk-pr16457-fresh/prompt.md"),
             ("fork --append-prompt(分带 steering)", "gvr-topk-pr16457-fresh/fork_steering_banded.md")],
     "ra": [("campaign prompt(cold60 基底 + bar 放宽补丁 + R4 种子章节;源码走 --asset)", "gvr-topk-bs1-recal/prompt.md")],
+    "wk": [("campaign prompt(弱 rung 专啃版;v3mt+e6 种子走 --asset)", "gvr-topk-weakrung/prompt.md")],
 }
 
 
@@ -325,16 +329,19 @@ G.append(f'<a href="{GH}kf/gvr-topk-r3v11-bs" target="_blank" class="gh"><text x
 
 # ---- Lane 5: 07-24 re-scoped campaigns
 Y5 = 890
-G.append(node(28, Y5, 230, 62, "ra", ["gvr-topk-bs1-recal(战役A)", "R4 种子 + bar 重定标(≤5% 回退)", "Running · 10 轮 · cap $1200"]))
-G.append(node(318, Y5, 220, 62, "frb", ["gvr-topk-fresh-banded", "fork r4-8 · 分带 bar", "Running(2 死槽随行)"], cls="n other"))
-G.append(node(598, Y5, 200, 62, "b40", ["bs40 v1→v2", "v1 止损 · v2 Running r1"], cls="n other"))
-G.append(node(858, Y5, 182, 62, "d3", ["dsl 二批 fp4/fp8", "Running r1 ×2"], cls="n other"))
+G.append(node(20, Y5, 204, 62, "ra", ["gvr-topk-bs1-recal(战役A)", "R4 种子 · 5轮 $1084", "champion 输种子 → 不采纳"]))
+G.append(onode(252, Y5, 252, 62, ["复合包络(方向 iii 工程臂)", "1615 格全 bar PASS · gm 1.4961", "COMPOSITE_ENVELOPE/SCHEME.md"]))
+G.append(node(536, Y5, 210, 62, "wk", ["gvr-topk-weakrung(战役B)", "28 PR 回退 rung 专啃", "Running · cap $400"]))
+G.append(node(776, Y5, 168, 62, "frb", ["fresh-banded fork", "分带 bar(fresh 会话)"], cls="n other"))
+G.append(node(964, Y5, 148, 62, "d3", ["dsl logits 线", "v3 Running"], cls="n other"))
+G.append(hedge(224, Y5 + 31, 252, lab="收口判决"))
+G.append(hedge(504, Y5 + 31, 536, lab="弱 rung 工单"))
 # R4 champion --seed--> bs1-recal (dashed, routed along right margin between lanes)
 G.append(f'<path d="M738,390 L1108,390 L1108,856 L143,856 L143,{Y5 - 6}" class="e d" marker-end="url(#arr)"/>')
 G.append(f'<text x="200" y="852" class="elab">R4 champion 28dc11f6 作种子(用户 07-24 批准, --asset 附入)</text>')
 # fresh -> fresh-banded fork (dashed)
-G.append(f'<path d="M917,764 L917,872 L428,872 L428,{Y5 - 6}" class="e d" marker-end="url(#arr)"/>')
-G.append(f'<text x="620" y="868" class="elab">收口判读(nsys 0.952)→ fork + 分带 steering</text>')
+G.append(f'<path d="M917,764 L917,872 L860,872 L860,{Y5 - 6}" class="e d" marker-end="url(#arr)"/>')
+G.append(f'<text x="640" y="868" class="elab">收口判读(nsys 0.952)→ fork + 分带 steering</text>')
 
 # ---- skeleton-compliance annotation between lane1 and lane2
 G.append('<g class="warn"><rect x="8" y="1030" width="1104" height="158" rx="10"/>'
@@ -391,11 +398,12 @@ pre.pmt {{ background: #f6f8fb; border: 1px solid #d6dde8; border-radius: 8px;
 .sw {{ display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 4px; vertical-align: -1px; }}
 </style></head><body>
 <h1>KernelFactory campaigns 台账索引(loncheng@nvidia.com,2026-07-21 → 07-24)</h1>
-<p>共 24 个 campaign(GVR 四条血统: 第一 lineage / R4 冷启动 / R5 BS / fresh 冷启动→banded fork + recal 再战;另有 DSL 与 bs40 并行线)。
+<p>共 25+ 个 campaign(GVR 血统: 第一 lineage / R4 冷启动 / R5 BS / R6 bs40 / fresh 冷启动→banded fork / recal→weakrung;另有 DSL 并行线)。
 判决口径:内部 speedup = KF 平台(含 ~15µs eval 地板,只作轮内排序);<b>本地 nsys 复核 = B200 cold-L2 配对纯 kernel
-时间(ship 判据)</b>。KF 花费:已收口 <b>$3833.36</b>
-(第一期 ≈$690 + R3 $761 + R4 $1110.62 + R5 $1325.31 + fresh $636.43),另有 4 场 Running 累积中(bs1-recal cap $1200)。
-<span class="dim">更新: 2026-07-24(战役 A gvr-topk-bs1-recal 启动 + fresh 收口判读 + banded fork)</span></p>
+时间(ship 判据)</b>。KF 花费:已收口 <b>$5955.47</b>
+(第一期 ≈$690 + R3 $761 + R4 $1110.62 + R5 $1325.31 + R6 $1038.43 + fresh $636.43 + recal $1083.68),weakrung Running(cap $400)。
+<b>用户 07-25 定向 = 方向 (iii)</b>: 工程复合包络已立(<a href="COMPOSITE_ENVELOPE_20260725.md">COMPOSITE_ENVELOPE_20260725.md</a> — BS=1 gm 1.6531 / BS>1 gm 1.3334 / min 0.951, 1615 格全 bar PASS;算法方案 <a href="COMPOSITE_ALGORITHM_SCHEME.md">COMPOSITE_ALGORITHM_SCHEME.md</a>),KF 只啃 28 个 PR 回退 rung(战役 B gvr-topk-weakrung)。
+<span class="dim">更新: 2026-07-25(战役 A 收口: champion 输种子不采纳 · 复合包络交付 · 战役 B weakrung 启动)</span></p>
 
 <h2>① 任务关系图(可点击节点跳转对应卡片;hover 高亮;虚线 = 知识/材料流)</h2>
 <p class="legend"><span><span class="sw" style="background:#eef3fb;border:1px solid #7f93b3"></span>campaign</span>
