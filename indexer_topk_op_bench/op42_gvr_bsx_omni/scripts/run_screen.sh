@@ -12,7 +12,7 @@ for CELL in "$@"; do
     nsys profile -o results/nsys/${TAG}_${CELL} --force-overwrite true \
     -t cuda,nvtx --capture-range=cudaProfilerApi --capture-range-end=stop \
     python3 scripts/ab.py --cell $CELL --tag ${TAG}_${CELL} \
-      --reps-cold 10 --reps-warm 5 \
+      --reps-cold 10 --reps-warm 5 ${AB_EXTRA:-} \
       > results/nsys/${TAG}_${CELL}.log 2>&1 \
   && touch $M && echo "[done] $CELL" || echo "[FAIL] $CELL"
 done

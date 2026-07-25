@@ -108,3 +108,26 @@ measurement anomalous or sporadic CS8 DSMEM exchange flakiness; exactness
 never failed. Re-check under iter9 (cf reference: cluster_arrive_relaxed race).
 Next (iter9): structural band 32-512k x BS16-128 (tp fused U=8 batch loads +
 __ldcs, 3 CTA/SM smem diet at K<=1024, ncu BW attribution).
+
+## iter 9 — 2026-07-25 — IN PROGRESS (structural band 32-512k x BS16-128)
+ncu attribution (flash_128k_L22/pro_64k_L32 BS32-128, full set + stall ratios):
+band is NOT BW-bound — DRAM<=10%, SM<=16%, occ ~25% (1 CTA/SM, smem-capped).
+tp kernel duration FLAT vs BS (22-23us at BS32 and BS128) => per-row serial
+multi-pass latency is the wall. Stalls split three ways: no_instruction 22%
+(icache, big unrolled body) / long_scoreboard 21% (gmem latency) / barrier 18%
+/ wait+short_sb 25%. Same-cell tier contrast: pro_64k BS32 reg<4,512,4> 12.8us
+vs tp-CS1 22.6us (1.8x per-row path gap).
+Dispatch probes (env-only, smoke bsx-only): FALLTHRU (reg tiers at BS>=32)
+BLOWS UP (launch_bounds(TB,1) co-residency waves); DENSE16 marginal (2-3% on
+128k-ISL only) => dispatch lever EXHAUSTED with existing tiers.
+Kernel lever (src_i9, single-variable):
+  A capn 16384->8192 (tp CS cap by npad): npad-32832 family BS16-64 -9..-15%
+    (32->64+ CTAs; SM idling was the wall there). v32 unaffected (cap 8 hit).
+  B U=8 everywhere: wins CS1 big rows (v32_128k BS128 -7%) but LOSES CS>1
+    small slices (+5-6%: slice < 8*T falls to scalar tail, zero batching).
+  B2 cascaded 8/4/2 tails: recovers some, adds icache, mixed.
+  B3 U by CS (CS1->8, CS>1->4) TEMPLATE-PARAMed: combines A+B wins cleanly,
+    no regressions on smoke (weak band -4..-15%; big-BS sentinels flat or
+    -4%; direct tier untouched).
+nsys verdict tag iter9ab3 (15 cells x full BS ladder, 4-GPU shard): RUNNING.
+Analyzer: scripts/analyze_i9.py (M1 + iter8b + iter9 patch projection).
