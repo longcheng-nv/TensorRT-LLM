@@ -1030,6 +1030,7 @@ __global__ void __launch_bounds__(TB, 1) gvr_topk_reg(
 // bare smem atomics (hits ~C/npad are rare); no per-thread offsets needed.
 struct TpParams {
   int pivot;  // rung index for the fused collect (default AR-1 = hmin floor)
+  int stop_after;  // PROBE ONLY: 1=P1, 2=sample+pick, 3=fused+exchange, 0=full
 };
 
 // P2a: sampled multi-rung count (uniform stride SS float4s) -> ptcnt rows.
@@ -1137,7 +1138,6 @@ template <int TB, int CS = 1, int AR = RUNGS, int UF = 4>
 __global__ void __launch_bounds__(TB, 2) gvr_topk_tp(
     const float* __restrict__ logits, const int* __restrict__ pre_idx,
     int* __restrict__ out, int npad, int K, int kC, TpParams tp) {
-  (void)tp;
   extern __shared__ __align__(16) unsigned char smem_raw[];
   constexpr int T = TB;
   Smem<TB>* s = reinterpret_cast<Smem<TB>*>(smem_raw);
@@ -1168,6 +1168,7 @@ __global__ void __launch_bounds__(TB, 2) gvr_topk_tp(
   int chosen = -1, C = 0;
   int m_gt = -1;
 
+  if (tp.stop_after == 9) return;  // PROBE: launch+entry floor
   if (rank == 0 && tid == 0) s->cnt_c = 0;
   if constexpr (CS > 1) cg::this_cluster().sync();  // publish cnt_c=0
   if (npad <= kC) {
@@ -1183,6 +1184,7 @@ __global__ void __launch_bounds__(TB, 2) gvr_topk_tp(
     __syncthreads();
   } else {
     phase1<TB, AR>(s, logits, pre_idx, K, npad, tid);  // trailing barrier publishes cnt_c=0 too
+    if (tp.stop_after == 1) return;
     float hmin_floor = s->rungs[AR - 1];
     // P2a: sampled ladder count -> pick pivot rung with extrapolated count in
     // the sweet band (>=1.5K certain-side margin, <=0.6*kC overflow margin).
@@ -1231,12 +1233,14 @@ __global__ void __launch_bounds__(TB, 2) gvr_topk_tp(
       s->rungs[1] = hmin_floor;
     }
     __syncthreads();
+    if (tp.stop_after == 2) return;
     float tpush = s->rungs[0];
     // i9-B5: UF chosen at LAUNCH time (CS1 deep rows -> 8, else 4); a runtime
     // branch here doubles the instantiated body and loses to icache pressure.
     fused_count_collect<TB, 2, UF>(s, dst, dcnt, base, v0, v1, tpush, kC, tid);
     exchange_counts<TB, CS, 2>(s, xch & 1, tid, rank);
     xch++;
+    if (tp.stop_after == 3) return;
 
     float t_lo = -FLT_MAX, t_hi = INFINITY;
     int c_hi = 0;
@@ -1797,6 +1801,7 @@ static void launch_tp_cs(const float* logits, const int* pre_idx, int* out, int 
   }
   TpParams tp;
   tp.pivot = RUNGS - 1;
+  { const char* e = getenv("GVR_TP_STOP"); tp.stop_after = e ? atoi(e) : 0; }
   if constexpr (CS == 1) {
     gvr_topk_tp<TB, 1, RUNGS, UF><<<dim3(1, bs), TB, sizeof(Smem<TB>), stream>>>(logits, pre_idx,
                                                                                   out, npad, K, kC, tp);

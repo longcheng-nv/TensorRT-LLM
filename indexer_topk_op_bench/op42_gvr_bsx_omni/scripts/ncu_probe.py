@@ -20,9 +20,10 @@ def main():
     ap.add_argument("--cell", required=True)
     ap.add_argument("--bs", type=int, required=True)
     ap.add_argument("--arm", choices=["bsx", "gvr_pr"], default="bsx")
+    ap.add_argument("--src", default=None)
     args = ap.parse_args()
 
-    mod = build_bsx() if args.arm == "bsx" else None
+    mod = build_bsx(args.src) if args.arm == "bsx" else None
     stack = Repl(args.cell, args.bs)
     call, out = (bsx_call(stack, mod, args.bs) if args.arm == "bsx"
                  else head_call(stack, args.bs))

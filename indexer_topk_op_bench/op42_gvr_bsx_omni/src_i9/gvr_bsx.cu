@@ -1770,7 +1770,11 @@ static void launch_reg(const float* logits, const int* pre_idx, int* out, int np
 // paid once per WAVE, so waves = bs*CS/148 must be minimized at large BS.
 static void launch_dense(const float* logits, const int* pre_idx, int* out, int npad, int K,
                          int kC, int bs, cudaStream_t stream) {
-  if (npad < 32768)
+  if (npad <= 20480)
+    // i10-E: tight MAXV for the npad-16448 family (4.02 f4/thread) — MAXV=8
+    // pays 3 dummy slots (predicated loads + dead compares) on every pass.
+    launch_reg<1, 1024, 5>(logits, pre_idx, out, npad, K, kC, bs, stream);   // vpc <= 5120
+  else if (npad < 32768)
     launch_reg<1, 1024, 8>(logits, pre_idx, out, npad, K, kC, bs, stream);   // vpc <= 8191
   else if (npad <= 65536)
     launch_reg<2, 1024, 8>(logits, pre_idx, out, npad, K, kC, bs, stream);   // vpc <= 8192
@@ -1871,7 +1875,9 @@ void gvr_topk_launch_batched(const float* logits, const int* pre_idx, int* out, 
   //                (CS16 tiers degrade from bs8); tp >=16.
   // Env overrides (probes): GVR_BSX_TP_BS / GVR_BSX_DENSE_BS.
   int tpb = tp_bs_threshold();
-  if (tpb < 0) tpb = (npad <= DKCMAX) ? 256 : (npad < 32768 ? 128 : 16);
+  // i10-E: npad<=20480 keeps dense to BS255 (tight reg<1,1024,5> beats tp
+  // CS1 by 13-17% at BS128); tp takes over at 256 (wave quantization).
+  if (tpb < 0) tpb = (npad <= 20480) ? 256 : (npad < 32768 ? 128 : 16);
   int dnb = dense_bs_threshold();
   if (dnb < 0) dnb = (npad >= 163840) ? 8 : (npad < 32768 ? 64 : 1 << 30);
   if (bs >= tpb) {

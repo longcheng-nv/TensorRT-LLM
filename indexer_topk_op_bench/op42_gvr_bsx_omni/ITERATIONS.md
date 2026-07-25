@@ -178,3 +178,19 @@ Weak mass now decomposes into:
 (d) v32_64k_L41 BS16-64 0.77-0.82 (low-hr layer, K=2048).
 iter10 target = (a)+(b): the BS>=64 mid/small-npad tp/dense per-row path.
 Data: results/m2_data.csv.
+
+## iter 10-E — 2026-07-25 — npad-16448 dense-tight tier SHIPPED
+Hypothesis (M2 weak family a): dense reg<1,1024,8> at npad 16448 pays 3 dummy
+MAXV slots; tp CS1 at BS128 pays the ladder. Fix: (1) tight tier npad<=20480
+-> reg<1,1024,5>; (2) tpb 128->256 for npad<=20480 (dense-tight beats tp CS1
+by 13-17% at BS128; tp keeps BS>=256 — dense loses there to wave
+quantization, and small-npad (8256) dense probe E2 LOST to tp at BS>=256,
+reverted). nsys 7 cells all exact: 64k family BS64/128 0.77-0.85 -> 0.97-1.00,
+v32_16k 0.96/0.87 -> 1.13/1.10; sentinels bit-flat. Projected grid gm
+1.3687 -> 1.3716, weak 127->118. PROMOTED to src.
+Phase-budget probe (src_i9p, GVR_TP_STOP early-exit + ncu GPU time,
+flash_128k BS128, kernel 22.0us): entry 3.1 / P1 3.5 / sample+pick 2.1 /
+fused 7.8 / P4+tail 5.6. Event-axis floor 10us = ~7us HOST launch latency
+(known gotcha, invisible to nsys ratio). => iter10-C' (fuse sample into P1,
+save ~1.5-2us on every tp row) + P4 diet are the remaining tp levers for
+BS>=256 weak bands (64k/32k family BS256+ 0.76-0.85, 128k BS16-128 residual).
