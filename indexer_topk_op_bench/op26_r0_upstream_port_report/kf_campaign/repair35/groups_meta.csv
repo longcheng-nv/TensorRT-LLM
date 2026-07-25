@@ -1,0 +1,9 @@
+gid,model,isl,K,N,npad,n_layers,prim,guard,asset,mb
+0,flash,16k,512,4099,4160,21,256 512 1024,64,grp_flash_16k.safetensors,0.3
+1,flash,32k,512,8195,8256,21,256 512 1024,64,grp_flash_32k.safetensors,0.7
+2,flash,128k,512,32771,32832,21,256,64,grp_flash_128k.safetensors,2.8
+3,flash,256k,512,65538,65600,21,32 128 256 512 1024,16,grp_flash_256k.safetensors,5.5
+4,pro,128k,1024,32771,32832,30,256 512,64,grp_pro_128k.safetensors,3.9
+5,pro,256k,1024,65539,65600,30,128 256 512,64,grp_pro_256k.safetensors,7.9
+6,pro,1024k,1024,262127,262144,30,16,64,grp_pro_1024k.safetensors,31.5
+7,v32,64k,2048,65551,65600,58,256 512 1024,64,grp_v32_64k.safetensors,15.2

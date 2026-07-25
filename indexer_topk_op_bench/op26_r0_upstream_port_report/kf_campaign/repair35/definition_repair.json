@@ -1,0 +1,59 @@
+{
+ "name": "indexer_topk_repair35_hetero",
+ "description": "GVR top-K decode, HETEROGENEOUS-row repair band: the 35 combined-dispatch loser cases (mid-N x high-BS) on real DSv4/V3.2 decode captures, fp32, B200",
+ "op_type": "topk",
+ "axes": {
+  "b": {
+   "type": "var",
+   "description": "batch size; rows CYCLE over the group's layers (heterogeneous)"
+  },
+  "n": {
+   "type": "var",
+   "description": "valid row length"
+  },
+  "k": {
+   "type": "var",
+   "description": "top-k: 512/1024/2048"
+  },
+  "npad": {
+   "type": "expr",
+   "expression": "(n + 63) // 64 * 64"
+  },
+  "cell": {
+   "type": "var",
+   "description": "group id (input-generator key; not a tensor dim)"
+  }
+ },
+ "inputs": {
+  "logits": {
+   "shape": [
+    "b",
+    "npad"
+   ],
+   "dtype": "float32"
+  },
+  "pre_idx": {
+   "shape": [
+    "b",
+    "k"
+   ],
+   "dtype": "int32"
+  },
+  "n_valid": {
+   "shape": null,
+   "dtype": "int32"
+  }
+ },
+ "outputs": {
+  "indices": {
+   "shape": [
+    "b",
+    "k"
+   ],
+   "dtype": "int32"
+  }
+ },
+ "custom_inputs_entrypoint": "gen_inputs",
+ "custom_correctness_entrypoint": "check_topk",
+ "reference": "import os\nimport torch\n\n_GRP_FILES = [\"grp_flash_16k.safetensors\", \"grp_flash_32k.safetensors\", \"grp_flash_128k.safetensors\", \"grp_flash_256k.safetensors\", \"grp_pro_128k.safetensors\", \"grp_pro_256k.safetensors\", \"grp_pro_1024k.safetensors\", \"grp_v32_64k.safetensors\"]\n_CACHE = {}\n\n\ndef _load_grp(gid, device):\n    key = (int(gid), str(device))\n    if key in _CACHE:\n        return _CACHE[key]\n    from safetensors.torch import load_file\n    fn = _GRP_FILES[int(gid)]\n    bases = [\".\", os.environ.get(\"CUDAGYM_STAGING_DIR\", \".\")]\n    try:\n        bases.append(os.path.dirname(os.path.abspath(__file__)))\n    except NameError:\n        pass\n    for base in bases:\n        p = os.path.join(base, fn)\n        if os.path.exists(p):\n            d = load_file(p)\n            out = tuple(d[k].to(device) for k in\n                        (\"logits\", \"pre_idx\", \"mand\", \"tie\"))\n            _CACHE[key] = out\n            return out\n    raise FileNotFoundError(fn)\n\n\ndef gen_inputs(axes_and_scalars, device, seed):\n    \"\"\"HETEROGENEOUS batch: row i is layer (i mod L) of the group capture \u2014\n    rows genuinely differ (production decode batches are heterogeneous).\"\"\"\n    b = int(axes_and_scalars[\"b\"])\n    gid = int(axes_and_scalars[\"cell\"])\n    n = int(axes_and_scalars[\"n\"])\n    lg, pre, _, _ = _load_grp(gid, device)\n    L = lg.shape[0]\n    idx = torch.arange(b, device=device) % L\n    return {\"logits\": lg[idx].contiguous().float(),\n            \"pre_idx\": pre[idx].contiguous().to(torch.int32),\n            \"n_valid\": n}\n\n\ndef run(logits, pre_idx, n_valid):\n    k = pre_idx.shape[1]\n    vals = logits[:, :n_valid].float()\n    return torch.topk(vals, k, dim=1, largest=True,\n                      sorted=True).indices.to(torch.int32)\n\n\ndef check_topk(ref_outputs, user_outputs, *, gid, b, k, n):\n    \"\"\"Tie-robust per-row top-k index-set check; row i is checked against\n    ITS OWN layer's reference set (mand/tie loaded from the group asset).\"\"\"\n    out = user_outputs[\"indices\"].to(torch.int64).cpu()\n    _, _, mand_t, tie_t = _load_grp(gid, \"cpu\")\n    L = mand_t.shape[0]\n    problems = []\n    if out.shape != (b, k):\n        problems.append(f\"shape {tuple(out.shape)} != ({b},{k})\")\n    else:\n        for i in range(b):\n            li = i % L\n            mand = mand_t[li]\n            mand = mand[mand >= 0]\n            tie = tie_t[li]\n            tie = tie[tie >= 0]\n            allowed = torch.cat([mand, tie])\n            idx = out[i]\n            if int(idx.min()) < 0 or int(idx.max()) >= n:\n                problems.append(f\"row {i}: index out of range\")\n                break\n            if torch.unique(idx).numel() != k:\n                problems.append(f\"row {i}: duplicate indices\")\n                break\n            if not bool(torch.isin(idx, allowed).all()):\n                problems.append(f\"row {i}: index outside true top-k set\")\n                break\n            if not bool(torch.isin(mand, idx).all()):\n                problems.append(f\"row {i}: missing mandatory index\")\n                break\n    passed = len(problems) == 0\n    return {\"indices\": {\"passed\": passed,\n                          \"message\": \"; \".join(problems) or \"ok\"}}\n"
+}
