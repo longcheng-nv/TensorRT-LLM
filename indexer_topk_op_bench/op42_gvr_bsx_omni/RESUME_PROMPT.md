@@ -17,7 +17,26 @@ nsys cold-L2 = only arbiter. Full objective: PLAN.md. Contract: AUTONOMY.md.
   `scripts/parse_ab.py` → `results/ab_data.csv`.
 - Env knob: `GVR_BSX_DENSE_BS=<n>` dense-tier BS threshold (0=off, default 32).
 
-## State (2026-07-24, session resumed ~09:10 UTC)
+## State (2026-07-25)
+- iter9 DONE + PROMOTED to src/ (pre-iter9 champion at src/gvr_bsx.cu.pre_i9.bak):
+  A = tp CS cap capn 16384->8192 (npad-32832 family got 2x CTAs; SM idling
+  was the wall, NOT BW: ncu DRAM<=10%, stalls icache22/gmem21/barrier18).
+  B5 = launch-time UF template (tp CS1 & npad>=16384 -> U=8 else U=4; CS>1
+  stays 4). LESSONS: U=8 with slice<8*T falls entirely to scalar tail;
+  runtime-branching U doubles the body and loses to icache (B4 +11%).
+  nsys: weak band BS16/32 0.71-0.84 -> 0.79-0.93; patched projection gm
+  1.3581 (UNDERSTATED, 15/82 cells re-measured). All exact, 0 regressions
+  (pro_32k BS256+ "-5%" was M1-day anchor drift — BASE-today control matched
+  B5 bit-for-bit; cross-day compares need same-day BASE control).
+- M2 82-cell full re-screen RUNNING (tag m2, shards m2sh0-3.log, run_m1.sh,
+  promoted src). Parse: analyze_i9.py reparse_tag('m2') pattern -> fresh CSV,
+  NOT ab_data.csv (dedup gotcha).
+- iter10 targets (post-M2 confirm): pro_64k family (npad 16448) BS64-1024
+  0.77-0.83 (no existing tier beats head; needs per-row critical-path cut or
+  dedicated tier); flash/pro_128k BS64-1024 0.79-0.94; pro_1024k BS16-64
+  0.76-0.88. Leads: barrier diet (18% stalls), pass fusion, P4 overlap.
+
+## Older state (2026-07-24, session resumed ~09:10 UTC)
 - iter6 DONE: uniform sample stride fix — 9-cell nsys: BS256-1024 gm 1.20-1.23
   (min 0.89), BS128 1.01, BS32-64 0.80-0.87; pro_1024k 1.98, flash_1024k 1.38.
 - iter7 DONE: tp CS in {1,2,4,8} clusters; dispatch (bs,npad) bands BAKED into
