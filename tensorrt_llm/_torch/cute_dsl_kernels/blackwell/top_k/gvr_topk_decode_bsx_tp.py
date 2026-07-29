@@ -75,6 +75,12 @@ from cutlass.cutlass_dsl import T, dsl_user_op
 from cutlass.utils.distributed import atomicAdd
 from cutlass.utils.smem_allocator import SmemAllocator
 
+from ..utils import (  # PDL (programmatic dependent launch) plumbing
+    TRTLLM_ENABLE_PDL,
+    griddepcontrol_launch_dependents,
+    griddepcontrol_wait,
+)
+
 RUNGS = 8
 MAXPASS = 8
 SS = 32  # P2a sample stride (float4s)
@@ -1036,6 +1042,10 @@ class GvrTpKernel:
         out_row = out_idx[row, None]
         row_addr = logits_row.iterator.toint()
 
+        # PDL: safe to run the prologue in the previous grid's overlap
+        # window; block here before the first dependent global read.
+        griddepcontrol_wait()
+
         # Ragged N: per-row valid length from seq_lens (see _row_n_eff).
         n_eff = self._row_n_eff(seq_lens, row)
 
@@ -1795,6 +1805,10 @@ class GvrTpKernel:
             cute.arch.cluster_arrive()
             cute.arch.cluster_wait()
 
+        # PDL: hint the dependent grid launch once this row's work (and
+        # for clustered variants, the trailing DSMEM rendezvous) is done.
+        griddepcontrol_launch_dependents()
+
     # ------------------------------------------------------------------
     # host launcher
     # ------------------------------------------------------------------
@@ -1814,6 +1828,7 @@ class GvrTpKernel:
             block=(self.num_threads, 1, 1),
             cluster=(CS, 1, 1) if cutlass.const_expr(CS > 1) else None,
             stream=stream,
+            use_pdl=TRTLLM_ENABLE_PDL,
             min_blocks_per_mp=2,
         )
 

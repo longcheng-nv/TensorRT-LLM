@@ -45,6 +45,12 @@ import torch
 from cutlass._mlir.dialects import llvm
 from cutlass.utils.smem_allocator import SmemAllocator
 
+from ..utils import (  # PDL (programmatic dependent launch) plumbing
+    TRTLLM_ENABLE_PDL,
+    griddepcontrol_launch_dependents,
+    griddepcontrol_wait,
+)
+
 FLT_MAX = 3.4028234663852886e38
 DKCMAX = 12288  # direct-path candidate capacity (mirrors gvr_bsx.cu)
 
@@ -295,6 +301,10 @@ class DirectTopKKernel:
         logits_row = logits[bidx, None]
         out_row = out[bidx, None]
 
+        # PDL: safe to run the prologue in the previous grid's overlap
+        # window; block here before the first dependent global read.
+        griddepcontrol_wait()
+
         # Ragged N: per-row valid length from seq_lens.
         n_eff = self._row_n_eff(seq_lens, bidx)
 
@@ -507,6 +517,10 @@ class DirectTopKKernel:
                         kth = (p01 << cutlass.Uint32(10)) | cutlass.Uint32(b2)
                         self._emit_final(npad, kth, m, want, s_cand, s_cnt, out_row, tidx, lane)
 
+        # PDL: hint the dependent grid launch once this row's work (and
+        # for clustered variants, the trailing DSMEM rendezvous) is done.
+        griddepcontrol_launch_dependents()
+
     # ------------------------------------------------------------------
     # Host launcher
     # ------------------------------------------------------------------
@@ -517,6 +531,7 @@ class DirectTopKKernel:
             grid=(num_rows, 1, 1),
             block=(self.num_threads, 1, 1),
             stream=stream,
+            use_pdl=TRTLLM_ENABLE_PDL,
             min_blocks_per_mp=1,  # __launch_bounds__(TB, 1)
         )
 
