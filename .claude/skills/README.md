@@ -156,6 +156,27 @@ fresh host login / container restart / reboot, before launching benchmarks.
 
 ---
 
+## 6 · Paper & writing tooling
+
+### `de-ai-flavor-paper`
+Detects and removes **LLM-flavored prose** from systems/architecture paper
+manuscripts (LaTeX/Markdown) by comparing against quantitative style
+baselines distilled from six pre-2022 PPoPP Best Papers (~74k words of
+human-expert prose). Two detection families: classic lexical markers
+(`comprehensive/novel/moreover/…` — target 0) and the harder structural
+tells (mantra repetition, "X, not Y" antithesis chains, template sentences,
+low first-person density, uniform caption/bullet geometry, Title-Case
+concept branding). Style-only revisions — never changes numbers, claims, or
+evidence scope, and keeps venue-required generative-AI disclosure intact.
+
+```bash
+SKILL=.claude/skills/de-ai-flavor-paper
+$SKILL/scripts/detect_ai_flavor.sh path/to/main.tex   # scorecard w/ targets
+# full corpus norms + quoted examples: $SKILL/reference.md
+```
+
+---
+
 ## Conventions & gotchas
 
 - **Never commit nsys artifacts** (`*.sqlite`, `*.nsys-rep`): they embed the
