@@ -2716,9 +2716,13 @@ static inline void launch_main(int gx, int gy, size_t smem, cudaStream_t stream,
     int dev_ = 0; cudaGetDevice(&dev_);
     bool& in_ = init[dev_ & (GVR_MAX_DEV - 1)];
     if (!in_) {
+        // 168KB: the KBIG (k=2048) non-split R==1 variant carries
+        // (16384+4)*8 + (4096+1)*8 = 163.9KB of dynamic shared -- the old
+        // 160KB cap made every v32 cell at b in (32,148] die with
+        // cudaErrorInvalidValue (BS 64/128 band, wbv32p2 first launch).
         cudaFuncSetAttribute(gvr_main<BLK, U, MINB, NBS_, KPT, SPLIT>,
                              cudaFuncAttributeMaxDynamicSharedMemorySize,
-                             (BLK >= 1024 ? 160 : 100) * 1024);
+                             (BLK >= 1024 ? 168 : 100) * 1024);
         in_ = true;
     }
     gvr_main<BLK, U, MINB, NBS_, KPT, SPLIT><<<dim3(gx, gy), BLK, smem, stream>>>(
