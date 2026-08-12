@@ -2898,6 +2898,10 @@ cudaError_t gvr_topk_launch(const float* logits, const int* pre_idx, int* out,
                 return cudaGetLastError();
             }
         }
+        // (knife3 iter1 reverted: `wide` here means b <= 148 -- SMALL batch,
+        // not large; routing it to streaming cost 1.65-1.77x on the 4k/8k
+        // small-BS band and bought nothing.  The real k=2048 dense-corner fix
+        // is the small_dense sampling gate on the !big streaming path below.)
         if (n4 <= 4096 && wide) {
             LAUNCH_REG(1024, 4, 1, 2 * NB);
             return cudaGetLastError(); }
@@ -3039,7 +3043,13 @@ cudaError_t gvr_topk_launch(const float* logits, const int* pre_idx, int* out,
 
     const int n4s = n >> 2;
     int SMP = 0, SS2 = 1, TGT = 0, TGT2 = 0;
-    if (n > SCAP && n4s >= 4) {
+    // k > 1024 small rows (v32 4k band): with n <= SCAP no sample rung forms,
+    // so EVERY row pays the eager k=2048-gather hint and T=GMIN stages nearly
+    // the whole row (k/n ~ 0.5 makes the hint floor worthless) -- measured
+    // 0.61-0.86x vs SGLang v2 at BS>=256.  Let the sample rung form whenever
+    // aim < n has room (n > 2k); k <= 1024 dispatches keep the old gate.
+    const bool small_dense = (k > 1024) && !big && n <= SCAP && n > 2 * k;
+    if ((n > SCAP || small_dense) && n4s >= 4) {
         // the sample is read as 32B-aligned float4 PAIRS: the second float4
         // rides in the same sector as the first, so it is free traffic.
         long long sel = (long long)SFAC * (long long)n / (long long)aim;
