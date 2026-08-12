@@ -402,8 +402,26 @@ gvr_main(const float* __restrict__ logits, const int* __restrict__ pre_idx,
     // Non-split 1024-thread staging doubled to 16K words: the accept window's
     // upper edge is what turns a LOW rung into a full-row P5 re-sweep, and at
     // 1 CTA/SM the extra 32KB of dynamic shared is free (80KB of 100KB budget).
-    constexpr int SCPB = (BLK >= 1024) ? (SPLIT ? 8192 : 16384) : 4096;
-    constexpr int CMPB  = (BLK >= 1024) ? 2048 : 1024;
+    // KBIG marks the k>1024 (v32 K=2048) instantiations: KPT*BLK >= 2048 with
+    // KPT >= 2 holds exactly for (1024,2), (512,4), (256,8) -- every dispatch
+    // that reaches them has k > 1024, and no k <= 1024 dispatch does, so the
+    // V4-domain shapes keep their tuned buffers bit-identically.  At k=2048
+    // the k-th value sits ~2x deeper into the dense part of the histogram, so
+    // the crossing bin and the staged-candidate population both scale ~2x:
+    // without 2x CMPB/SCPB nearly every row overflows into the whole-row
+    // key-space narrowing (measured 2.7-3.2x vs baseline on v32_256k bs>=256).
+    constexpr bool KBIG = (KPT >= 2) && (KPT * BLK >= 2048);
+    // iter3b: at k=2048 the old SCPB=4096 clamps aim to exactly k -- a ZERO
+    // accept margin, so rows cascade att0 -> TSH -> GMIN and detonate
+    // (measured 0.31-0.37x on v32_256k bs>=256).  SCPB=8192 restores the
+    // 1.375x margin (aim 11k/8).  CMPB stays 1024 at BLK <= 512: doubling it
+    // pushed the BLK=256 CTA to 65.6KB shared, 4 CTAs/SM = 262KB > 227KB, and
+    // the occupancy drop cost 20-25% on healthy 128k cells (iter2), while
+    // measured crossing bins at k=2048 stay ~100 (iter3a: CMPB x2 alone moved
+    // nothing).  8192*4B + 1025*8B = 41KB keeps 4 CTAs/SM.
+    constexpr int SCPB = (BLK >= 1024) ? (SPLIT ? 8192 : 16384)
+                                       : (KBIG ? 8192 : 4096);
+    constexpr int CMPB  = (BLK >= 1024) ? (KBIG ? 4096 : 2048) : 1024;
     // RUNG LADDER: the non-split 1024-thread variant retries a failed attempt 0
     // at TSH -- the sample's rank-(2*TGT) floor, available for free from the
     // same scan -- before collapsing to GMIN.  A sample-bias overshoot at the
@@ -2937,8 +2955,12 @@ cudaError_t gvr_topk_launch(const float* logits, const int* pre_idx, int* out,
     // shared-memory offsets throughout the kernel.
     // R==1 big staging doubled to 16K words (see the SCPB note in gvr_main):
     // must stay consistent with the kernel-side constexpr.
-    const int SCAP = big ? ((R == 1) ? 16384 : 8192) : 4096;
-    const int CMP  = big ? 2048 : 1024;
+    // k > 1024 (v32 K=2048): must mirror the kernel-side KBIG constexpr
+    // exactly -- the KPT the dispatch below picks satisfies KPT*BLK >= 2048
+    // precisely when k > 1024, and SCPB/CMPB double there.
+    const int SCAP = big ? ((R == 1) ? 16384 : 8192)
+                         : ((k > 1024) ? 8192 : 4096);
+    const int CMP  = big ? (((k > 1024) ? 4096 : 2048)) : 1024;
     // Sample cost ~ hits*n/aim, collect cost ~ aim: the balance point is
     // aim ~ sqrt(c*n), floored at 1.5k so an undershoot needs a 3.5-sigma miss.
     // r8-a004: the survivor WALK and the P5 candidate pass are both O(aim), and
@@ -2994,7 +3016,13 @@ cudaError_t gvr_topk_launch(const float* logits, const int* pre_idx, int* out,
     // aim 3.5k -> 3k and SFAC 48 -> 32 keep TGT ~32 hits: a rung overshoot to
     // below k needs a ~3x (6 sigma) miss, and the staged-candidate budget
     // (SCAP 8192) keeps 2.5x slack.
-    const int SFAC = (R > 1) ? (R == 2 ? 32 : 16) : ((k >= 1024) ? 64 : 32);
+    // k > 1024 deep splits (v32): SFAC=16 leaves the rung estimate ~16 sample
+    // hits (25% relative error) -- on flat-tail layers (128k L50/L51) the
+    // estimate deterministically overshoots and every row cascades to the
+    // GMIN backstop through the R-way slab (0.21x).  48 keeps ~3x the
+    // evidence for a few KB of extra sample reads per CTA against a 512KB row.
+    const int SFAC = (R > 1) ? (R == 2 ? 32 : ((k > 1024) ? 48 : 16))
+                             : ((k >= 1024) ? 64 : 32);
     // r5 (a005): the R==2 floor trim 3k -> 2.5k measured -0.05..-0.10us/cell
     // under the PAIRED sample, but COMPOSED with the QUAD 64B-line sample it
     // detonates the L60 retry cell (15.58 -> 22.9us): the trimmed rung plus
@@ -3073,8 +3101,16 @@ cudaError_t gvr_topk_launch(const float* logits, const int* pre_idx, int* out,
         else if (k <= 2 * (BLKV))                                                       \
             launch_main<BLKV, UV, MINBV, SNB, 2, SPV>(R, b, smem, stream,               \
                 logits, pre_idx, out, n, npad, k, SCAP, CMP, R, SMP, TGT, Q, SS2, TGT2, workspace); \
-        else                                                                            \
+        else if (k <= 4 * (BLKV))                                                       \
             launch_main<BLKV, UV, MINBV, SNB, 4, SPV>(R, b, smem, stream,               \
+                logits, pre_idx, out, n, npad, k, SCAP, CMP, R, SMP, TGT, Q, SS2, TGT2, workspace); \
+        else                                                                            \
+            /* k=2048-only (v32): KPT covers all k hint slots; at BLK=256 the   */      \
+            /* old KPT=4 read only 1024 of them, so GMIN was a SUBSET min --    */      \
+            /* biased HIGH -- and every hint-floored row undershot into the     */      \
+            /* retry ladder.  k <= 1024 never reaches this branch (V4 domain    */      \
+            /* dispatch is bit-identical).                                      */      \
+            launch_main<BLKV, UV, MINBV, SNB, 8, SPV>(R, b, smem, stream,               \
                 logits, pre_idx, out, n, npad, k, SCAP, CMP, R, SMP, TGT, Q, SS2, TGT2, workspace); \
     } while (0)
     // The unconditional loads only pay when the slice is deep enough to fill
