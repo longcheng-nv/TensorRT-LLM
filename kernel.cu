@@ -2899,9 +2899,27 @@ cudaError_t gvr_topk_launch(const float* logits, const int* pre_idx, int* out,
             int amax = 1; while ((amax << 1) <= av && amax < 8) amax <<= 1;
             int vsel = 0, cs = 0;
             if (amax >= 2) {
-                for (int v = 1; v <= 4; v <<= 1) {
-                    int c = 1; while ((long long)c * BLKC * v < n4) c <<= 1;
-                    if (c <= amax) { vsel = v; cs = c; break; }
+                // knife4-L2w: the cs=8 co-residency veto is a PREFERENCE,
+                // not a prohibition.  cs=8 clusters need 8 SMs inside ONE
+                // GPC; B200's ~18-SM GPCs co-host at most 2 of them, so at
+                // most 15 cs=8 clusters are resident machine-wide, and
+                // b=16..18 x cs=8 spills to a SECOND cluster wave
+                // (measured: flash_512k b15 10.1us -> b16 16.3us, +62%,
+                // same kernel).  Pass 0 skips one-wave-exceeding cs=8 fits
+                // so 128k/256k land on a deeper-VPT/smaller-cs single wave.
+                // But where NO smaller-cs geometry exists (512k: pass 0
+                // finds nothing), falling through to streaming is data-
+                // dependent: 49/51 512k cells win 1.4-1.7x, yet retry-heavy
+                // rows (pro_512k L46/L52, k4f verdict) explode 5x
+                // (16 -> 79us).  Pass 1 re-runs the scan without the veto,
+                // keeping the spilled-but-bounded cs=8 cluster exactly as
+                // the shipped v32t dispatch would.
+                for (int pass = 0; pass < 2 && !vsel; pass++) {
+                    for (int v = 1; v <= 4; v <<= 1) {
+                        int c = 1; while ((long long)c * BLKC * v < n4) c <<= 1;
+                        if (pass == 0 && c == 8 && b > 15) continue;
+                        if (c <= amax) { vsel = v; cs = c; break; }
+                    }
                 }
             }
             if (vsel && cs >= 2) {

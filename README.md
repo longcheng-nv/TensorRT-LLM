@@ -43,5 +43,6 @@ Build: standard `torch.utils.cpp_extension` load with `-arch=sm_100a`.
 3. launcher shared-memory cap fix (160 -> 168 KB)
 4. `small_dense` self-sampling gate for the small-n / large-batch corner
 5. partial-slice iteration-0 L2 prefetch on sampled-rung dispatches
+6. two-pass cs=8 co-residency veto in the clustered register dispatch
 
 Tuning constants are B200 (148-SM, 228KB smem carveout) calibrated.
