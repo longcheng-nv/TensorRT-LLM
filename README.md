@@ -46,5 +46,6 @@ Build: standard `torch.utils.cpp_extension` load with `-arch=sm_100a`.
 6. two-pass cs=8 co-residency veto in the clustered register dispatch
 7. TSH-floor staging on the slab split path (runtime-gated)
 8. cs=8 co-residency veto in the streaming cluster merge (`gvr_clus`)
+9. unconditional cs=8 co-residency veto (pass-1 exception deleted)
 
 Tuning constants are B200 (148-SM, 228KB smem carveout) calibrated.
