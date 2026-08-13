@@ -56,6 +56,95 @@ size_t gvr_topk_workspace_bytes() {
 #else
 #define GVR_GDC_WAIT() do { } while (0)
 #endif
+/* Layer-10 dispatch-equivalence harness hook (same pattern as
+   GVR_ENABLE_PDL): under -DGVR_DISPATCH_TRACE every launch wrapper records
+   (kernel family, template args, grid, smem, scalar args) into the
+   harness-provided sink and returns before touching the driver.  Compiles
+   to an empty statement otherwise. */
+#if defined(GVR_DISPATCH_TRACE)
+void gvr_trace_sink(const char* fam, const long long* v, int nv);
+#define GVR_TRACE(FAM, ...)                                                   \
+    do { const long long gvr_tv_[] = { __VA_ARGS__ };                        \
+         gvr_trace_sink(FAM, gvr_tv_,                                        \
+                        (int)(sizeof(gvr_tv_) / sizeof(gvr_tv_[0])));        \
+         return; } while (0)
+#else
+#define GVR_TRACE(FAM, ...) do { } while (0)
+#endif
+
+/* ==== Layer-10 (A+) hardware / tuning parameter tables =====================
+   Names only: every value is bit-identical to the pre-refactor literal and
+   the compiled SASS is verified unchanged by the layer's harness (per-
+   instantiation cubin diff + exhaustive host-dispatch equivalence sweep).
+   Classification (H hardware identity / D derived / T measured / M
+   host<->kernel mirror) with per-constant sentinel cells and re-probe
+   recipes: op44_gvr40/APLUS_CONST_CLASSIFICATION.md.  New-arch bring-up
+   (B300/Rubin) = add a row, re-run the probe set, then the full-grid
+   verdict; nothing here retunes silently. */
+namespace gvr_hw {
+/* -- H: hardware identity (B200, sm_100a) -- */
+constexpr int NSM = 148;                     /* SMs per device */
+constexpr int MAX_PORTABLE_CLUSTER = 8;      /* portable cluster width cap */
+/* dynamic-smem opt-in caps per kernel family (>= family max request) */
+constexpr int SMEM_CAP_REG_KB        = 120;  /* reg / regimg / regclus */
+constexpr int SMEM_CAP_CLUS_KB       = 100;  /* gvr_clus */
+constexpr int SMEM_CAP_MAIN_BIG_KB   = 168;  /* gvr_main BLK>=1024 (163.9KB KBIG R==1) */
+constexpr int SMEM_CAP_MAIN_SMALL_KB = 100;  /* gvr_main BLK<1024 */
+/* -- T: measured walls (probe-authoritative; formulas are priors only) -- */
+constexpr int CS8_CORES = 15;   /* cs=8 clusters co-resident machine-wide.
+                                   ~18-SM GPCs hosting 2 each is only a PRIOR;
+                                   the binding value is the measured b15->b16
+                                   second-wave cliff (flash_512k +62%). */
+constexpr int TSH_K_MAX  = 1024;   /* TSH-floor staging gate: k  <= this */
+constexpr int TSH_N4_MAX = 32768;  /* TSH-floor staging gate: n4 <= this */
+/* -- D: derived (asserted against the shipped B200 literals) -- */
+constexpr int WIDE_B_MAX      = NSM;       /* <=1 CTA/SM latency-bound band */
+constexpr int MIDBAND_B_MAX   = 2 * NSM;   /* 512-thread 2-CTA/SM one-wave cover */
+constexpr int HALF_IDLE_B_MAX = NSM / 2;   /* r11 shallow-cluster-split band */
+static_assert(WIDE_B_MAX == 148 && MIDBAND_B_MAX == 296
+              && HALF_IDLE_B_MAX == 74,
+              "B200 anchors moved: this is a new-arch bring-up, not an edit "
+              "-- re-run the probe set + full-grid verdict");
+static_assert(CS8_CORES == 15 && TSH_K_MAX == 1024 && TSH_N4_MAX == 32768,
+              "measured walls are re-probed on silicon, never derived");
+/* -- M: host<->kernel mirrored buffer tables (single source).  Host keys
+   (big, R==1, k>1024) and kernel keys (BLK>=1024, SPLIT, KBIG) are the same
+   predicates by dispatch construction (see the KBIG note in gvr_main). -- */
+__host__ __device__ constexpr int scap_words(bool blk_ge_1024, bool split,
+                                             bool kbig) {
+    return blk_ge_1024 ? (split ? 8192 : 16384) : (kbig ? 8192 : 4096);
+}
+__host__ __device__ constexpr int cmp_words(bool blk_ge_1024, bool kbig) {
+    return blk_ge_1024 ? (kbig ? 4096 : 2048) : 1024;
+}
+__host__ __device__ constexpr bool kbig_of(int kpt, int blk) {
+    return (kpt >= 2) && (kpt * blk >= 2048);
+}
+static_assert(scap_words(true, false, false) == 16384
+              && scap_words(true, true, false) == 8192
+              && scap_words(true, false, true) == 16384
+              && scap_words(true, true, true) == 8192
+              && scap_words(false, false, true) == 8192
+              && scap_words(false, false, false) == 4096
+              && cmp_words(true, false) == 2048 && cmp_words(true, true) == 4096
+              && cmp_words(false, false) == 1024 && cmp_words(false, true) == 1024,
+              "mirrored tables must stay bit-identical to the shipped literals");
+}  /* namespace gvr_hw */
+static_assert(MAXC >= gvr_hw::NSM / 2 + 8,
+              "SPLIT-slab workspace rows: max b on the slab path is NSM/2 "
+              "(the r11 R=2 k>1024 band) -- MAXC must keep headroom as NSM "
+              "grows on future architectures");
+
+/* knife5 TSH-floor staging gate (grid-uniform): exactly the veto
+   fall-through population -- b > CS8_CORES slab users at V4 k and <=512k
+   depth.  Spelled once; the three sites in gvr_main branch on this.
+   A MACRO, not a bool-returning function: materialising the predicate as a
+   value flips ptxas's branch polarity (De Morgan-equivalent SASS, not
+   bit-identical) and the register-allocation ripple breaks the layer-10
+   cubin-identity contract.  Textual expansion + constexpr names keeps the
+   token stream -- and the SASS -- exactly the shipped form. */
+#define GVR_TSH_GATE(k_, n_)                                                      (gridDim.y > gvr_hw::CS8_CORES && (k_) <= gvr_hw::TSH_K_MAX                   && ((n_) >> 2) <= gvr_hw::TSH_N4_MAX)
+
 /* redux.sync: a SINGLE instruction for the whole 32-lane min/max, replacing a
    5-deep dependent __shfl_down chain (SM80+). */
 __device__ __forceinline__ uint32_t warp_min_u32(uint32_t v) { return __reduce_min_sync(0xffffffffu, v); }
@@ -410,7 +499,7 @@ gvr_main(const float* __restrict__ logits, const int* __restrict__ pre_idx,
     // the crossing bin and the staged-candidate population both scale ~2x:
     // without 2x CMPB/SCPB nearly every row overflows into the whole-row
     // key-space narrowing (measured 2.7-3.2x vs baseline on v32_256k bs>=256).
-    constexpr bool KBIG = (KPT >= 2) && (KPT * BLK >= 2048);
+    constexpr bool KBIG = gvr_hw::kbig_of(KPT, BLK);
     // iter3b: at k=2048 the old SCPB=4096 clamps aim to exactly k -- a ZERO
     // accept margin, so rows cascade att0 -> TSH -> GMIN and detonate
     // (measured 0.31-0.37x on v32_256k bs>=256).  SCPB=8192 restores the
@@ -419,9 +508,8 @@ gvr_main(const float* __restrict__ logits, const int* __restrict__ pre_idx,
     // the occupancy drop cost 20-25% on healthy 128k cells (iter2), while
     // measured crossing bins at k=2048 stay ~100 (iter3a: CMPB x2 alone moved
     // nothing).  8192*4B + 1025*8B = 41KB keeps 4 CTAs/SM.
-    constexpr int SCPB = (BLK >= 1024) ? (SPLIT ? 8192 : 16384)
-                                       : (KBIG ? 8192 : 4096);
-    constexpr int CMPB  = (BLK >= 1024) ? (KBIG ? 4096 : 2048) : 1024;
+    constexpr int SCPB = gvr_hw::scap_words(BLK >= 1024, SPLIT, KBIG);
+    constexpr int CMPB  = gvr_hw::cmp_words(BLK >= 1024, KBIG);
     // RUNG LADDER: the non-split 1024-thread variant retries a failed attempt 0
     // at TSH -- the sample's rank-(2*TGT) floor, available for free from the
     // same scan -- before collapsing to GMIN.  A sample-bias overshoot at the
@@ -663,7 +751,7 @@ gvr_main(const float* __restrict__ logits, const int* __restrict__ pre_idx,
         // by arm-order swap, self-vs-self probe clean).  The gate is grid-
         // uniform, so branch between two instantiations: the ungated branch
         // is the exact pre-knife5 scan.
-        if (SPLIT && gridDim.y > 15 && k <= 1024 && (n >> 2) <= 32768)
+        if (SPLIT && GVR_TSH_GATE(k, n))
             scan_cross0<NBS, true, true, true>(hist, TGT, tid, lane, &s_B, &s_m, &s_above, &s_tot,
                                           TGT2, &s_B2, 2 * TGT, &s_B3);
         else
@@ -729,7 +817,7 @@ gvr_main(const float* __restrict__ logits, const int* __restrict__ pre_idx,
     // knife5: SPLIT arms it too -- not for a retry (SPLIT has none) but for
     // the TSH-floor staging below.
     if constexpr (SHD || SPLIT) {
-        if (!SPLIT || (gridDim.y > 15 && k <= 1024 && (n >> 2) <= 32768)) {
+        if (!SPLIT || GVR_TSH_GATE(k, n)) {
             if (tid == 0) {
                 float t5 = -INFINITY;
                 if (sok && s_tot >= 2 * TGT && s_B3 >= 0 && T > GMIN) {
@@ -769,7 +857,7 @@ gvr_main(const float* __restrict__ logits, const int* __restrict__ pre_idx,
     // grid-uniform, so the barrier lives inside it: ungated dispatches
     // execute nothing at all here.
     if constexpr (SPLIT) {
-        if (gridDim.y > 15 && k <= 1024 && (n >> 2) <= 32768) {
+        if (GVR_TSH_GATE(k, n)) {
             __syncthreads();
             const float t5s = s_TSH;
             if (t5s > -INFINITY && t5s < T) T = t5s;
@@ -2698,21 +2786,58 @@ gvr_reg_clus(const float* __restrict__ logits, const int* __restrict__ pre_idx,
     clus.sync();                                   // rank 0 done with DSMEM
 }
 
-template <int BLK, int VPT, int CS>
-static inline void launch_regclus(int b, size_t smem, cudaStream_t stream,
-                                  const float* logits, const int* pre_idx, int* out,
-                                  int n, int npad, int k) {
+/* One lazily-initialised attribute opt-in per kernel INSTANTIATION per
+   device (B1c).  Keyed on the instantiation VALUE (auto NTTP): all
+   instantiations of one kernel template share a function-pointer TYPE, so
+   keying on the type would collapse every latch into one. */
+template <auto Kern>
+static inline void gvr_optin_once(int cap_kb, bool nonportable_cs) {
     static bool init[GVR_MAX_DEV] = {};   /* attr is PER-DEVICE (B1c) */
     int dev_ = 0; cudaGetDevice(&dev_);
     bool& in_ = init[dev_ & (GVR_MAX_DEV - 1)];
     if (!in_) {
-        cudaFuncSetAttribute(gvr_reg_clus<BLK, VPT, CS>,
-                             cudaFuncAttributeMaxDynamicSharedMemorySize, 120 * 1024);
-        if (CS > 8)
-            cudaFuncSetAttribute(gvr_reg_clus<BLK, VPT, CS>,
-                                 cudaFuncAttributeNonPortableClusterSizeAllowed, 1);
+        cudaFuncSetAttribute(Kern, cudaFuncAttributeMaxDynamicSharedMemorySize,
+                             cap_kb * 1024);
+        if (nonportable_cs)
+            cudaFuncSetAttribute(Kern,
+                                 cudaFuncAttributeNonPortableClusterSizeAllowed,
+                                 1);
         in_ = true;
     }
+}
+
+/* Streaming-path quantile-sample geometry.  PAIR form (gvr_main: 32B-aligned
+   float4 pairs, 8 elements/location over HALF the row's float4) and QUAD
+   form (gvr_clus r5: one 64B line, 16 elements/location over a QUARTER)
+   share the arithmetic; only the granularity differs.  Integer sequence is
+   exactly the two pre-layer-10 inlined originals.  TGT2 is the second rung:
+   the sample count corresponding to ~k row elements, i.e. an estimate of
+   where rank k sits inside the candidate set. */
+static inline void gvr_sample_geom(bool quad, int SFAC, int n, int n4s,
+                                   int aim, int k, int* SMP, int* SS2,
+                                   int* TGT, int* TGT2) {
+    long long sel = (long long)SFAC * (long long)n / (long long)aim;
+    if (sel < 256) sel = 256;
+    if (sel > n / 2) sel = n / 2;
+    int units = (int)(sel >> (quad ? 4 : 3)); if (units < 1) units = 1;
+    int base = n4s >> (quad ? 2 : 1); if (base < 1) base = 1;
+    if (units > base) units = base;
+    *SS2 = base / units; if (*SS2 < 1) *SS2 = 1;
+    *SMP = base / *SS2; if (*SMP < 1) *SMP = 1;
+    const int m = quad ? 16 : 8;
+    *TGT = (int)(((long long)aim * (long long)(*SMP * m)) / (long long)n);
+    if (*TGT < 1) *TGT = 1;
+    *TGT2 = (int)(((long long)k * (long long)(*SMP * m)) / (long long)n);
+    if (*TGT2 < 1) *TGT2 = 1;
+}
+
+template <int BLK, int VPT, int CS>
+static inline void launch_regclus(int b, size_t smem, cudaStream_t stream,
+                                  const float* logits, const int* pre_idx, int* out,
+                                  int n, int npad, int k) {
+    GVR_TRACE("regclus", BLK, VPT, CS, b, (long long)smem, n, npad, k);
+    gvr_optin_once<&gvr_reg_clus<BLK, VPT, CS>>(
+        gvr_hw::SMEM_CAP_REG_KB, CS > 8);
     gvr_reg_clus<BLK, VPT, CS><<<dim3(CS, b), BLK, smem, stream>>>(
         logits, pre_idx, out, n, npad, k);
 }
@@ -2723,14 +2848,10 @@ template <int BLK, int VPT, int MINB, int NBV = NB, int KPTV = 1>
 static inline void launch_regimg(int b, size_t smem, cudaStream_t stream,
                                  const float* logits, const int* pre_idx, int* out,
                                  int n, int npad, int k, int CMP, int IMGOFF, int QC) {
-    static bool init[GVR_MAX_DEV] = {};   /* attr is PER-DEVICE (B1c) */
-    int dev_ = 0; cudaGetDevice(&dev_);
-    bool& in_ = init[dev_ & (GVR_MAX_DEV - 1)];
-    if (!in_) {
-        cudaFuncSetAttribute(gvr_topk_reg<BLK, VPT, MINB, KPTV, true, false, true, NBV>,
-                             cudaFuncAttributeMaxDynamicSharedMemorySize, 120 * 1024);
-        in_ = true;
-    }
+    GVR_TRACE("regimg", BLK, VPT, MINB, NBV, KPTV, b, (long long)smem,
+              n, npad, k, CMP, IMGOFF, QC);
+    gvr_optin_once<&gvr_topk_reg<BLK, VPT, MINB, KPTV, true, false, true,
+                                 NBV>>(gvr_hw::SMEM_CAP_REG_KB, false);
     gvr_topk_reg<BLK, VPT, MINB, KPTV, true, false, true, NBV><<<b, BLK, smem, stream>>>(
         logits, pre_idx, out, n, npad, k, CMP, IMGOFF, QC);
 }
@@ -2740,17 +2861,10 @@ static inline void launch_clus(int b, size_t smem, cudaStream_t stream,
                                const float* logits, const int* pre_idx, int* out,
                                int n, int npad, int k, int SCAP, int CMP,
                                int SMP, int TGT, int Q, int SS2, int TGT2) {
-    static bool init[GVR_MAX_DEV] = {};   /* attr is PER-DEVICE (B1c) */
-    int dev_ = 0; cudaGetDevice(&dev_);
-    bool& in_ = init[dev_ & (GVR_MAX_DEV - 1)];
-    if (!in_) {
-        cudaFuncSetAttribute(gvr_clus<BLK, U, MINB, NBS_, CS>,
-                             cudaFuncAttributeMaxDynamicSharedMemorySize, 100 * 1024);
-        if (CS > 8)
-            cudaFuncSetAttribute(gvr_clus<BLK, U, MINB, NBS_, CS>,
-                                 cudaFuncAttributeNonPortableClusterSizeAllowed, 1);
-        in_ = true;
-    }
+    GVR_TRACE("clus", BLK, U, MINB, NBS_, CS, b, (long long)smem,
+              n, npad, k, SCAP, CMP, SMP, TGT, Q, SS2, TGT2);
+    gvr_optin_once<&gvr_clus<BLK, U, MINB, NBS_, CS>>(
+        gvr_hw::SMEM_CAP_CLUS_KB, CS > 8);
     gvr_clus<BLK, U, MINB, NBS_, CS><<<dim3(CS, b), BLK, smem, stream>>>(
         logits, pre_idx, out, n, npad, k, SCAP, CMP, SMP, TGT, Q, SS2, TGT2);
 }
@@ -2765,14 +2879,11 @@ template <int BLK, int VPT, int MINB, int KPT, bool CUR, bool DEG, bool IMGF, in
 static inline void launch_reg_any(int b, size_t smem, cudaStream_t stream,
                                   const float* logits, const int* pre_idx, int* out,
                                   int n, int npad, int k, int CMP, int IMGOFF, int QC) {
-    static bool init[GVR_MAX_DEV] = {};   /* attr is PER-DEVICE (B1c) */
-    int dev_ = 0; cudaGetDevice(&dev_);
-    bool& in_ = init[dev_ & (GVR_MAX_DEV - 1)];
-    if (!in_) {
-        cudaFuncSetAttribute(gvr_topk_reg<BLK, VPT, MINB, KPT, CUR, DEG, IMGF, NBH>,
-                             cudaFuncAttributeMaxDynamicSharedMemorySize, 120 * 1024);
-        in_ = true;
-    }
+    GVR_TRACE("reg", BLK, VPT, MINB, KPT, (long long)CUR, (long long)DEG,
+              (long long)IMGF, NBH, b, (long long)smem, n, npad, k,
+              CMP, IMGOFF, QC);
+    gvr_optin_once<&gvr_topk_reg<BLK, VPT, MINB, KPT, CUR, DEG, IMGF,
+                                 NBH>>(gvr_hw::SMEM_CAP_REG_KB, false);
     gvr_topk_reg<BLK, VPT, MINB, KPT, CUR, DEG, IMGF, NBH><<<b, BLK, smem, stream>>>(
         logits, pre_idx, out, n, npad, k, CMP, IMGOFF, QC);
 }
@@ -2784,19 +2895,16 @@ static inline void launch_main(int gx, int gy, size_t smem, cudaStream_t stream,
                                int n, int npad, int k, int SCAP, int CMP, int R,
                                int SMP, int TGT, int Q, int SS2, int TGT2,
                                void* slabws) {
-    static bool init[GVR_MAX_DEV] = {};   /* attr is PER-DEVICE (B1c) */
-    int dev_ = 0; cudaGetDevice(&dev_);
-    bool& in_ = init[dev_ & (GVR_MAX_DEV - 1)];
-    if (!in_) {
-        // 168KB: the KBIG (k=2048) non-split R==1 variant carries
-        // (16384+4)*8 + (4096+1)*8 = 163.9KB of dynamic shared -- the old
-        // 160KB cap made every v32 cell at b in (32,148] die with
-        // cudaErrorInvalidValue (BS 64/128 band, wbv32p2 first launch).
-        cudaFuncSetAttribute(gvr_main<BLK, U, MINB, NBS_, KPT, SPLIT>,
-                             cudaFuncAttributeMaxDynamicSharedMemorySize,
-                             (BLK >= 1024 ? 168 : 100) * 1024);
-        in_ = true;
-    }
+    GVR_TRACE("main", BLK, U, MINB, NBS_, KPT, (long long)SPLIT, gx, gy,
+              (long long)smem, n, npad, k, SCAP, CMP, R, SMP, TGT, Q,
+              SS2, TGT2);
+    // 168KB: the KBIG (k=2048) non-split R==1 variant carries
+    // (16384+4)*8 + (4096+1)*8 = 163.9KB of dynamic shared -- the old
+    // 160KB cap made every v32 cell at b in (32,148] die with
+    // cudaErrorInvalidValue (BS 64/128 band, wbv32p2 first launch).
+    gvr_optin_once<&gvr_main<BLK, U, MINB, NBS_, KPT, SPLIT>>(
+        BLK >= 1024 ? gvr_hw::SMEM_CAP_MAIN_BIG_KB
+                    : gvr_hw::SMEM_CAP_MAIN_SMALL_KB, false);
     gvr_main<BLK, U, MINB, NBS_, KPT, SPLIT><<<dim3(gx, gy), BLK, smem, stream>>>(
         logits, pre_idx, out, n, npad, k, SCAP, CMP, R, SMP, TGT, Q, SS2, TGT2, slabws);
 }
@@ -2804,25 +2912,23 @@ static inline void launch_main(int gx, int gy, size_t smem, cudaStream_t stream,
 cudaError_t gvr_topk_launch(const float* logits, const int* pre_idx, int* out,
                             int b, int n, int npad, int k, void* workspace,
                             cudaStream_t stream) {
-    const bool wide = (b <= 148);
+    const bool wide = (b <= gvr_hw::WIDE_B_MAX);
     {
         int n4 = n >> 2;
-        // 2560 keeps dynamic smem at 24.6KB so 5 CTAs/SM fit in the 135KB
-        // carveout; the crossing bin measures ~250 entries, far below it.
         // 2560 keeps dynamic smem at 24.6KB so 5 CTAs/SM fit in the 135KB
         // carveout; the crossing bin measures ~250 entries, far below it.
         int CMP = n < 2560 ? n : 2560;
         // The image aliases the not-yet-live crossing-bin buffer when it fits;
         // otherwise it is appended (only the 1-CTA/SM variant ever needs that).
         int IMGOFF = NB;   // set from NBSEL below
-        const int QC = (b > 148) ? 1024 : QUADC;
+        const int QC = (b > gvr_hw::WIDE_B_MAX) ? 1024 : QUADC;
         size_t smem;
         // KPT = ceil(k/BLK) hint slots per thread, resolved at compile time so
         // the prefetch array stays in registers.
         // Near-degenerate rows (n < 2k) at wide batch are the one place the
         // cursor emit loses: almost every element issues a shared atomic and the
         // machine is already saturated, so those keep the two-mask ballot emit.
-        const bool CURE = !(n < 2 * k && b > 148);
+        const bool CURE = !(n < 2 * k && b > gvr_hw::WIDE_B_MAX);
         // Once the whole row already fits the candidate budget the pre_idx guess
         // cannot shrink the candidate set below that budget, so it is pure cost
         // -- k words of pre_idx plus k scattered gathers, or k shared atomicOr
@@ -2945,8 +3051,9 @@ cudaError_t gvr_topk_launch(const float* logits, const int* pre_idx, int* out,
         // the cluster barriers + per-rank eager hint exceed the halved row
         // load at this size.  Keep the strict gate.)
         if (n4 > 4096 && n4 <= 8 * BLKC * 4 && k <= BLKC) {
-            int av = 148 / (b > 0 ? b : 1);
-            int amax = 1; while ((amax << 1) <= av && amax < 8) amax <<= 1;
+            int av = gvr_hw::NSM / (b > 0 ? b : 1);
+            int amax = 1; while ((amax << 1) <= av
+                                 && amax < gvr_hw::MAX_PORTABLE_CLUSTER) amax <<= 1;
             int vsel = 0, cs = 0;
             if (amax >= 2) {
                 // knife4-L2v / knife5: cs=8 clusters need 8 SMs inside ONE
@@ -2962,7 +3069,7 @@ cudaError_t gvr_topk_launch(const float* logits, const int* pre_idx, int* out,
                 // uniform again.
                 for (int v = 1; v <= 4; v <<= 1) {
                     int c = 1; while ((long long)c * BLKC * v < n4) c <<= 1;
-                    if (c == 8 && b > 15) continue;
+                    if (c == 8 && b > gvr_hw::CS8_CORES) continue;
                     if (c <= amax) { vsel = v; cs = c; break; }
                 }
             }
@@ -3002,7 +3109,7 @@ cudaError_t gvr_topk_launch(const float* logits, const int* pre_idx, int* out,
     // other source of parallelism so it still pays, above it never does.
     int R = 1;
     if (b <= 32) {
-        int r1 = 148 / b; if (r1 < 1) r1 = 1;
+        int r1 = gvr_hw::NSM / b; if (r1 < 1) r1 = 1;
         // The depth cap used to be n/2048 == n4/512, i.e. HALF a 1024-thread CTA
         // of float4 per slice -- the worst possible landing.  A CTA issues its
         // row-pass loads, its compares, its 5-step slot-reservation shuffle scan
@@ -3026,7 +3133,8 @@ cudaError_t gvr_topk_launch(const float* logits, const int* pre_idx, int* out,
     // doubled fixed cost is just the sample (~85 sectors) and the DSMEM
     // merge, which the halved 64KB row pass dwarfs -- gate at n4 >= 16384.
     // A formula of (n, k, b) only.
-    else if (b <= 74 && (n >> 2) >= 16384 && k <= 1024) R = 2;
+    else if (b <= gvr_hw::HALF_IDLE_B_MAX && (n >> 2) >= 16384
+             && k <= 1024) R = 2;
     // A SHALLOW split (R <= 8) can live inside one thread-block cluster, where
     // the cross-CTA histogram merge is CS distributed-shared reads and two
     // hardware cluster barriers instead of a global slab write, a threadfence,
@@ -3035,17 +3143,17 @@ cudaError_t gvr_topk_launch(const float* logits, const int* pre_idx, int* out,
     // DEPTH is worth more than the cheap merge (R=127 through the slab beats
     // R=8 through a cluster by 20%), so the slab keeps the deep splits.
     bool useclus = false;
-    if (R >= 2 && R <= 8 && k <= 1024) {
+    if (R >= 2 && R <= gvr_hw::MAX_PORTABLE_CLUSTER && k <= 1024) {
         int p2 = 1; while ((p2 << 1) <= R) p2 <<= 1;
         // knife5: gvr_clus cs=8 hits the same ~18-SM-GPC packing wall as the
         // clustered register path (2 clusters/GPC, 15 co-resident machine-wide)
         // -- at b in [17,18] the spill to a second cluster wave measured
         // 31-32us vs 20us-class alternatives on 512k.  Same veto, same b>15
         // threshold: drop to cs=4 (4/GPC, no packing wall).
-        if (p2 == 8 && b > 15) p2 = 4;
+        if (p2 == 8 && b > gvr_hw::CS8_CORES) p2 = 4;
         R = p2; useclus = true;
     }
-    const bool big = (b * R <= 148);          // 1024-thread variant, 1 CTA/SM
+    const bool big = (b * R <= gvr_hw::NSM);  // 1024-thread variant, 1 CTA/SM
     // A WIDE accept window is what makes the quantile sample cheap: with
     // [k, SCAP] spanning >8x, a rung fed by ~40 sample hits never leaves it,
     // so the sample can be ~8x smaller than a narrow window needs.
@@ -3059,9 +3167,8 @@ cudaError_t gvr_topk_launch(const float* logits, const int* pre_idx, int* out,
     // k > 1024 (v32 K=2048): must mirror the kernel-side KBIG constexpr
     // exactly -- the KPT the dispatch below picks satisfies KPT*BLK >= 2048
     // precisely when k > 1024, and SCPB/CMPB double there.
-    const int SCAP = big ? ((R == 1) ? 16384 : 8192)
-                         : ((k > 1024) ? 8192 : 4096);
-    const int CMP  = big ? (((k > 1024) ? 4096 : 2048)) : 1024;
+    const int SCAP = gvr_hw::scap_words(big, R != 1, k > 1024);
+    const int CMP  = gvr_hw::cmp_words(big, k > 1024);
     // Sample cost ~ hits*n/aim, collect cost ~ aim: the balance point is
     // aim ~ sqrt(c*n), floored at 1.5k so an undershoot needs a 3.5-sigma miss.
     // r8-a004: the survivor WALK and the P5 candidate pass are both O(aim), and
@@ -3142,43 +3249,15 @@ cudaError_t gvr_topk_launch(const float* logits, const int* pre_idx, int* out,
     // 0.61-0.86x vs SGLang v2 at BS>=256.  Let the sample rung form whenever
     // aim < n has room (n > 2k); k <= 1024 dispatches keep the old gate.
     const bool small_dense = (k > 1024) && !big && n <= SCAP && n > 2 * k;
-    if ((n > SCAP || small_dense) && n4s >= 4) {
-        // the sample is read as 32B-aligned float4 PAIRS: the second float4
-        // rides in the same sector as the first, so it is free traffic.
-        long long sel = (long long)SFAC * (long long)n / (long long)aim;
-        if (sel < 256) sel = 256;
-        if (sel > n / 2) sel = n / 2;
-        int pairs = (int)(sel >> 3); if (pairs < 1) pairs = 1;
-        int half = n4s >> 1; if (half < 1) half = 1;
-        if (pairs > half) pairs = half;
-        SS2 = half / pairs; if (SS2 < 1) SS2 = 1;
-        SMP = half / SS2; if (SMP < 1) SMP = 1;
-        TGT = (int)(((long long)aim * (long long)(SMP * 8)) / (long long)n);
-        if (TGT < 1) TGT = 1;
-        // second rung: the sample count that corresponds to ~k row elements,
-        // i.e. an estimate of where rank k sits inside the candidate set.
-        TGT2 = (int)(((long long)k * (long long)(SMP * 8)) / (long long)n);
-        if (TGT2 < 1) TGT2 = 1;
-    }
+    if ((n > SCAP || small_dense) && n4s >= 4)
+        gvr_sample_geom(false, SFAC, n, n4s, aim, k, &SMP, &SS2, &TGT, &TGT2);
     int Q = (n4s + R - 1) / R;
     if (useclus) {
         // r5 (peer ab6a7302): clus-only QUAD sample geometry (see gvr_clus):
         // each location is one 64B line (4 float4, 16 elements) served by two
         // threads -- half the random-page activations at unchanged TGT.
-        if (n > SCAP && n4s >= 4) {
-            long long sel = (long long)SFAC * (long long)n / (long long)aim;
-            if (sel < 256) sel = 256;
-            if (sel > n / 2) sel = n / 2;
-            int quads = (int)(sel >> 4); if (quads < 1) quads = 1;
-            int quarter = n4s >> 2; if (quarter < 1) quarter = 1;
-            if (quads > quarter) quads = quarter;
-            SS2 = quarter / quads; if (SS2 < 1) SS2 = 1;
-            SMP = quarter / SS2; if (SMP < 1) SMP = 1;
-            TGT = (int)(((long long)aim * (long long)(SMP * 16)) / (long long)n);
-            if (TGT < 1) TGT = 1;
-            TGT2 = (int)(((long long)k * (long long)(SMP * 16)) / (long long)n);
-            if (TGT2 < 1) TGT2 = 1;
-        }
+        if (n > SCAP && n4s >= 4)
+            gvr_sample_geom(true, SFAC, n, n4s, aim, k, &SMP, &SS2, &TGT, &TGT2);
         // hist(NBS) | cbuf(SCAP) | ck64(CMP) | mrg(NBS)   (r5: hoff folded into merge_scan0)
         size_t smc = (size_t)SNB * 8 + (size_t)(SCAP + 4) * 8 + (size_t)CMP * 8;   // r4: int2 staging
         const int per = Q >> 10;
@@ -3243,7 +3322,7 @@ cudaError_t gvr_topk_launch(const float* logits, const int* pre_idx, int* out,
     // regs exactly); b > 296 keeps the 256-thread variant, whose 4 CTAs/SM x
     // 148 = 592 slots still cover b=512 in ONE wave where 512-thread CTAs
     // would take two.
-    else if (b <= 296) LAUNCH_MAIN(512, 2, 8, false);
+    else if (b <= gvr_hw::MIDBAND_B_MAX) LAUNCH_MAIN(512, 2, 8, false);
     else               LAUNCH_MAIN(256, 4, 8, false);
 #undef LAUNCH_MAIN
     return cudaGetLastError();
