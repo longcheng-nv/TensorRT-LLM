@@ -590,6 +590,28 @@ gvr_main(const float* __restrict__ logits, const int* __restrict__ pre_idx,
 #pragma unroll
             for (int u = 0; u < U; u++)
                 asm volatile("prefetch.global.L2 [%0];" :: "l"(X4 + c0 + tid + u * BLK));
+        } else if (SMP > 0) {
+            // knife4-L1: PARTIAL slice on a SAMPLED-RUNG dispatch (SMP > 0 --
+            // i.e. exactly the small_dense k>1024 corner: n4 ~ 1027 < BLK*U;
+            // large-n sampled rows are never partial at this variant).  Here
+            // the whole row read used to sit naked behind the T-chain
+            // (sample randoms + reduce barriers + warp-0 rung scan) because
+            // the full-iteration gate above never fires.  The fill is
+            // bounded by the slice itself (<= 16KB at 4k) -- it is exactly
+            // this CTA's own iteration-0 loads, so the pro_64k "doubled
+            // fill floods the queue" hazard does not apply.  Clamped
+            // addressing mirrors the register-prefetch tail idiom.  SMP==0
+            // (eager-hint small rows, all k<=1024 V4 dispatches) keeps the
+            // old no-prefetch behavior: their head is the hint gather, not
+            // the sample chain, and the measured effect there was a small
+            // regression (flash_4k +1-3%) -- zero-harm gate.
+            const int lim4p = (npad >> 2) - 1;
+#pragma unroll
+            for (int u = 0; u < U; u++) {
+                const int i = c0 + tid + u * BLK;
+                asm volatile("prefetch.global.L2 [%0];"
+                             :: "l"(X4 + ((i < c1) ? i : lim4p)));
+            }
         }
     }
     float SMIN, SMAX;
