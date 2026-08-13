@@ -656,7 +656,18 @@ gvr_main(const float* __restrict__ logits, const int* __restrict__ pre_idx,
         // ZERO=true: the sample's cursors are never used, so leaving the bins
         // cleared hands the row pass a zeroed histogram for free -- one clear
         // pass and one barrier removed from the hot path.
-        scan_cross0<NBS, true, true, SHD>(hist, TGT, tid, lane, &s_B, &s_m, &s_above, &s_tot,
+        // knife5: SPLIT needs s_B3 too (the TSH-floor staging below), but ONLY
+        // on the veto fall-through band -- compiling the third crossing into
+        // every SPLIT dispatch cost a REAL 6-12% at 1024k/v32 BS1/2 (64-reg
+        // wall: same REG count, fatter live set, inflated T-chain; confirmed
+        // by arm-order swap, self-vs-self probe clean).  The gate is grid-
+        // uniform, so branch between two instantiations: the ungated branch
+        // is the exact pre-knife5 scan.
+        if (SPLIT && gridDim.y > 15 && k <= 1024 && (n >> 2) <= 32768)
+            scan_cross0<NBS, true, true, true>(hist, TGT, tid, lane, &s_B, &s_m, &s_above, &s_tot,
+                                          TGT2, &s_B2, 2 * TGT, &s_B3);
+        else
+            scan_cross0<NBS, true, true, SHD>(hist, TGT, tid, lane, &s_B, &s_m, &s_above, &s_tot,
                                           TGT2, &s_B2, 2 * TGT, &s_B3);
         // The eager-gather consume block used to carry the barrier that
         // publishes warp 0's scan (s_B/s_tot/s_B2/s_B3); without it every
@@ -715,14 +726,53 @@ gvr_main(const float* __restrict__ logits, const int* __restrict__ pre_idx,
     // r4 (a000): register-free -- the floor lives in ONE shared word instead
     // of a float+bool pair held across the whole row pass at the 64-reg wall.
     // -INFINITY means "not armed"; read only on the cold retry path.
-    if constexpr (SHD) {
-        if (tid == 0) {
-            float t5 = -INFINITY;
-            if (sok && s_tot >= 2 * TGT && s_B3 >= 0 && T > GMIN) {
-                float T3 = fmaf((float)s_B3, w, SMIN);
-                if (T3 < T) t5 = T3;
+    // knife5: SPLIT arms it too -- not for a retry (SPLIT has none) but for
+    // the TSH-floor staging below.
+    if constexpr (SHD || SPLIT) {
+        if (!SPLIT || (gridDim.y > 15 && k <= 1024 && (n >> 2) <= 32768)) {
+            if (tid == 0) {
+                float t5 = -INFINITY;
+                if (sok && s_tot >= 2 * TGT && s_B3 >= 0 && T > GMIN) {
+                    float T3 = fmaf((float)s_B3, w, SMIN);
+                    if (T3 < T) t5 = T3;
+                }
+                s_TSH = t5;
             }
-            s_TSH = t5;
+        }
+    }
+    // knife5 TSH-FLOOR STAGING (SPLIT only): SPLIT has no retry ladder, so a
+    // rung overshoot (count(>=T) < k) used to hand the LAST CTA a single-CTA
+    // whole-row key-space narrowing -- 3.7-3.9x on the retry-heavy rows that
+    // killed cand_L2v (pro_512k_L46/L52 x BS16: 84us vs 22.5us).  Pay the
+    // ladder's insurance in SPACE instead of a second pass: lower the staging
+    // threshold from the rung T to the sample's rank-(2*TGT) floor TSH.  The
+    // staged population goes ~aim -> ~2*aim (the same bound the non-split TSH
+    // retry's "bounded emit" relies on) -- ~+11KB of slab traffic against a
+    // 512KB row read -- and the merged histogram then contains the k-crossing
+    // whenever count(>=TSH) >= k, which is exactly the event the non-split
+    // ladder's second rung catches.  TSH misses too -> GMIN/degen backstop
+    // unchanged (rare^2).  The window base, mask predicate, histogram, cursor
+    // and refine all derive from T, so one lowering does the whole job; the
+    // machinery is threshold-agnostic (the GMIN-floor flood runs this same
+    // shape today).
+    // Scope: ONLY the veto fall-through population (b > 15 slab = the 512k
+    // b16 family; every b <= 15 / KBIG / 1M-deep slab user predates the veto,
+    // was full-grid green in wbp3, and measured a real always-on tax here
+    // (v32_256k 0.64-0.80: doubled staging overflows SCPB into per-slice
+    // re-sweeps; 1M BS1/8 0.86-0.94).  gridDim.y == b: shape-blind gate.
+    // ... and the fall-through population is exactly "would have fit the
+    // clustered register path" (k <= BLKC && n4 <= 8*BLKC*4) at b > 15:
+    // 1M rows (n4 > 32768, no cluster option ever) and KBIG v32 rows
+    // (k > 1024) are pre-veto slab natives, wbp3-green unarmed, and
+    // measured the always-on tax hardest (v32 b16/32 0.64-0.76: doubled
+    // staging overflows SCPB into per-slice re-sweeps).  The gate is
+    // grid-uniform, so the barrier lives inside it: ungated dispatches
+    // execute nothing at all here.
+    if constexpr (SPLIT) {
+        if (gridDim.y > 15 && k <= 1024 && (n >> 2) <= 32768) {
+            __syncthreads();
+            const float t5s = s_TSH;
+            if (t5s > -INFINITY && t5s < T) T = t5s;
         }
     }
 
