@@ -3041,7 +3041,16 @@ cudaError_t gvr_topk_launch(const float* logits, const int* pre_idx, int* out,
     // DEPTH is worth more than the cheap merge (R=127 through the slab beats
     // R=8 through a cluster by 20%), so the slab keeps the deep splits.
     bool useclus = false;
-    if (R >= 2 && R <= 8 && k <= 1024) { int p2 = 1; while ((p2 << 1) <= R) p2 <<= 1; R = p2; useclus = true; }
+    if (R >= 2 && R <= 8 && k <= 1024) {
+        int p2 = 1; while ((p2 << 1) <= R) p2 <<= 1;
+        // knife5: gvr_clus cs=8 hits the same ~18-SM-GPC packing wall as the
+        // clustered register path (2 clusters/GPC, 15 co-resident machine-wide)
+        // -- at b in [17,18] the spill to a second cluster wave measured
+        // 31-32us vs 20us-class alternatives on 512k.  Same veto, same b>15
+        // threshold: drop to cs=4 (4/GPC, no packing wall).
+        if (p2 == 8 && b > 15) p2 = 4;
+        R = p2; useclus = true;
+    }
     const bool big = (b * R <= 148);          // 1024-thread variant, 1 CTA/SM
     // A WIDE accept window is what makes the quantile sample cheap: with
     // [k, SCAP] spanning >8x, a rung fed by ~40 sample hits never leaves it,
