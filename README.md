@@ -45,3 +45,25 @@ semantics are identical because the gate is uniform over the grid.
 Tuning constants are B200 (148-SM) calibrated, mirroring the CUDA source.
 
 Requires: `nvidia-cutlass-dsl` 4.5.0, `torch` >= 2.12, CUDA 13.x, sm_100a.
+
+## Validation record (2026-08-17)
+
+- Shipping-binary grid (ct46k5b, all four perf fixes applied): 9,746/9,746
+  real-capture cases, **0 INEXACT**, face-value gm 0.9743 (DSL ~2.6% faster
+  on average, cold-L2 kernel-only, B200), p50 0.977. Arbitrated per-case
+  verdict lands in the ops branch (`CT46K5B_FINAL_VERDICT.md`).
+- Cross-host replication: dual-arm exactness smokes green on three
+  independent B200 hosts (umbriel-b200-027 / -044 / -094).
+
+## Known performance exception (filed 2026-08-15)
+
+A family-level exception is on record for **v32_8k + flash_32k at BS >= 256**
+(~60-85 cells, isolated-retest upper bound ~1.065 vs the 1.02 per-case bar).
+ncu ground truth attributes the residual to compiler codegen quality —
+barrier-arrival raggedness in the R0 count-round cross-warp reduction
+(+20% stall_barrier while executing ~4% FEWER dynamic instructions); four
+discrete fix eras (see commit history) each removed a real machine-code
+difference and reached SASS parity without moving this band. Remediation is
+tracked as a codegen campaign (ops branch:
+`op46_selfsampling_cutedsl/notes/BACKLOG_CODEGEN_CAMPAIGN.md`), including a
+free re-check on every `nvidia-cutlass-dsl` version bump.
