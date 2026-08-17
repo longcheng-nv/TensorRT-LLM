@@ -707,10 +707,18 @@ class GvrMainKernel:
                 wdok = cutlass.Int32(1)
             if wdok == cutlass.Int32(0):
                 WD = cutlass.Float32(1e-30)
-            # NOT rcp_approx: on (256,8,4,·,4) the single-inst rcp shifts SC's
-            # live range and spills 5 LDL/STL at the 64-reg wall (bisected);
-            # div.rn here is the original validated-exact spelling
-            SC = cutlass.Float32(1.0) / WD
+            # fix-4: CUDA compiles its own `1.0f / WD` here to a bare
+            # MUFU.RCP (approximate) — div.rn's dependent rcp+Newton+CALL
+            # chain serializes the attempt prologue and is the last
+            # CALL-class divergence (era-3 ncu: DSL executes ~4% FEWER
+            # instructions yet runs ~5% slower = latency-shaped, so the
+            # cost is the chain, not the instruction count). blk==512
+            # ONLY: the fix-1 spill-5 revert was bisected on (256,8,4,·,4)
+            # — that family keeps the original div.rn spelling below.
+            if cutlass.const_expr(self.blk == 512):
+                SC = cute.arch.rcp_approx(WD)
+            else:
+                SC = cutlass.Float32(1.0) / WD
 
             # ---- P3 row pass (L763-908) ----
             span = c1 - c0
