@@ -139,6 +139,29 @@ def _pin_i32(v, *, loc=None, ip=None):
             asm_dialect=mlir_llvm.AsmDialect.AD_ATT, loc=loc, ip=ip))
 
 
+def _ldg_f32_rs(base_addr, idx, sc4):
+    """__ldg(X + idx) with the byte stride riding a register (fix-3 P1d).
+
+    Identical to ct_common.ldg_f32 except `* 4` multiplies a caller-held
+    Int32: the row base is uniformized into URx by ptxas, IMAD.WIDE cannot
+    encode an immediate stride next to a UR addend, and a constant stride
+    register gets re-materialized INSIDE the survivor walk (its 26th
+    instruction; CUDA parity = 25). The caller loads the 4 from smem
+    (LDS results are opaque to ptxas value-tracking — asm movs and shfl
+    are NOT, see FIX2_CPU_VERIFY.md P1c falsification), so the register
+    stays live and the remat disappears."""
+    atom = C.g2r_atom_f32(32, invariant=True)
+    p = cute.make_ptr(
+        cutlass.Float32,
+        base_addr + cutlass.Int64(idx) * cutlass.Int64(sc4),
+        cute.AddressSpace.gmem,
+        assumed_align=4,
+    )
+    frag = cute.make_fragment((1,), cutlass.Float32)
+    cute.copy(atom, cute.make_tensor(p, cute.make_layout((1,))), frag)
+    return frag[0]
+
+
 @dsl_user_op
 def _smem_addr_reg(addr, *, loc=None, ip=None):
     """Pin a CTA-shared 32-bit byte address in ONE register (ct_reg A1 donor).
@@ -338,6 +361,13 @@ class GvrMainKernel:
         s_tsh = smem.allocate_tensor(                    # L462
             cutlass.Float32, cute.make_ordered_layout((1,), order=(0,)),
             byte_alignment=4)
+        # fix-3 P1d: STATIC smem word for the walk's byte stride — kept out
+        # of the blob so dyn_bytes stays equal to the CUDA dispatch's smem
+        # (test_main_smoke dispatch-parity assert). blk==512 VSTG only.
+        if cutlass.const_expr(self.vstg and self.blk == 512):
+            s_x4 = smem.allocate_tensor(
+                cutlass.Int32, cute.make_ordered_layout((1,), order=(0,)),
+                byte_alignment=4)
         s_kmm = smem.allocate_tensor(                    # L463 [0]=kmin [1]=kmax
             cutlass.Uint32, cute.make_ordered_layout((2,), order=(0,)),
             byte_alignment=8)
@@ -370,6 +400,19 @@ class GvrMainKernel:
         if cutlass.const_expr(self.vstg):
             hb_pin = _smem_addr_reg(s_hist.iterator.toint())
             cb2_pin = _smem_addr_reg(s_cbuf2.iterator.toint())
+        # fix-3 P1d: park 4 in the dedicated smem word and load it back —
+        # the LDS result is opaque to ptxas, so the walk's stride register
+        # cannot be re-materialized in-loop (P1c's asm-mov and shfl forms
+        # were both folded by ptxas value-tracking). blk==512 family ONLY:
+        # the (256,8,4,·) arm is bit-frozen and 1024/SPLIT sit at the
+        # 64-reg wall. Threads are converged here (kernel prologue), so
+        # the one extra barrier is safe and costs ~nothing once per launch.
+        x4_pin = cutlass.Int32(4)
+        if cutlass.const_expr(self.vstg and self.blk == 512):
+            if tidx == cutlass.Int32(0):
+                s_x4[0] = cutlass.Int32(4)
+            cute.arch.barrier()
+            x4_pin = s_x4[0]
 
         # ---- row bases (L472-475) ----
         row64 = cutlass.Int64(row)
@@ -763,13 +806,19 @@ class GvrMainKernel:
                     M = M & (M - cutlass.Int32(1))
                     idx = ((i0 + (bp >> cutlass.Int32(2)) * cutlass.Int32(BLK))
                            << cutlass.Int32(2)) + (bp & cutlass.Int32(3))
-                    xv = C.ldg_f32(x_addr, idx)
+                    if cutlass.const_expr(self.vstg and self.blk == 512):
+                        xv = _ldg_f32_rs(x_addr, idx, x4_pin)
+                    else:
+                        xv = C.ldg_f32(x_addr, idx)
                     while M != cutlass.Int32(0):
                         bp2 = C.ffs_m1(M)
                         M = M & (M - cutlass.Int32(1))
                         idx2 = ((i0 + (bp2 >> cutlass.Int32(2)) * cutlass.Int32(BLK))
                                 << cutlass.Int32(2)) + (bp2 & cutlass.Int32(3))
-                        xv2 = C.ldg_f32(x_addr, idx2)
+                        if cutlass.const_expr(self.vstg and self.blk == 512):
+                            xv2 = _ldg_f32_rs(x_addr, idx2, x4_pin)
+                        else:
+                            xv2 = C.ldg_f32(x_addr, idx2)
                         pos = self._emitc(xv, idx, pos, TF, SC, hb_pin,
                                           cb2_pin, s_hist, s_cbuf, s_cbuf2)
                         idx = idx2
