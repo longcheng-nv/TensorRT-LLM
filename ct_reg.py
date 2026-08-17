@@ -120,6 +120,45 @@ def _submul_asm(v, t, sc, *, loc=None, ip=None):
         asm_dialect=llvm.AsmDialect.AD_ATT, loc=loc, ip=ip))
 
 
+@dsl_user_op
+def _smem_addr_reg(addr, *, loc=None, ip=None):
+    """Pin a CTA-shared 32-bit byte address in ONE register (SASS audit fix).
+
+    Identity `mov` behind an asm boundary: without it LLVM re-folds the
+    `mov.b32 %r, __dynamic_shmem__0` symbol materialisation into EVERY use
+    site, and ptxas then re-derives the CGA shared window (S2UR SR_CgaCtaId
+    + UMOV + ULEA, 3 instructions) inside each divergent classify block —
+    measured +24 warp-instructions/warp vs the CUDA arm, which keeps the
+    base in one UR. The asm result is not duplicable, so the window is
+    materialised exactly once. Value-identical: a plain register copy.
+    """
+    return cutlass.Int32(llvm.inline_asm(
+        T.i32(),
+        [addr.ir_value(loc=loc, ip=ip)],
+        "mov.u32 $0, $1;",
+        "=r,r", has_side_effects=False, is_align_stack=False,
+        asm_dialect=llvm.AsmDialect.AD_ATT, loc=loc, ip=ip))
+
+
+@dsl_user_op
+def _red_shared_add1(addr, *, loc=None, ip=None):
+    """CUDA classify `atomicAdd(&hist[bin], 1u)` with the result unused.
+
+    `red` (not `atom`) is the result-less spelling — ptxas lowers it to the
+    same ATOMS.POPC.INC.32 RZ the CUDA arm emits (kernel.cu L1521-1526).
+    Same ordering contract as atomic_add_cta: .relaxed scope .cta. Takes the
+    final shared byte address as a plain Int32 so the address datapath stays
+    ordinary IR (ptxas fuses the shl+add into one LEA against the pinned
+    `_smem_addr_reg` base).
+    """
+    llvm.inline_asm(
+        res=None,
+        operands_=[addr.ir_value(loc=loc, ip=ip)],
+        asm_string="red.relaxed.cta.shared.add.u32 [$0], 1;",
+        constraints="r", has_side_effects=True,
+        asm_dialect=llvm.AsmDialect.AD_ATT, loc=loc, ip=ip)
+
+
 @cute.jit
 def _umin_u32(a, b):
     """unsigned min(a, b) — CUDA min() on the bin clamp (IMNMX)."""
@@ -494,7 +533,13 @@ class GvrTopkRegKernel:
         wsel = cutlass.Float32(1e-30)
         if WD > cutlass.Float32(0.0):
             wsel = WD
-        SC = cutlass.Float32(1.0) / wsel
+        # rcp.approx (single MUFU.RCP) — the CUDA arm's exact lowering of
+        # `1.0f / wsel`; the previous `1.0 / wsel` spelling emitted the IEEE
+        # div.rn Newton triple + slowpath CALL on the barrier-bounded chain
+        # feeding all S classify FMULs. Output exactness is SC-invariant
+        # (any SC > 0 preserves the sign/monotonicity invariants, L1485-1511)
+        # and the WD > 0 arm is now bit-identical to CUDA's MUFU.RCP.
+        SC = cute.arch.rcp_approx(wsel)
         QCAPf = cutlass.Float32(float(self.nbh - 1))
         CQ0 = OFFf - Tv * SC
         CQ = CQ0 + cutlass.Float32(1e-6) * (_fabsf(CQ0) + cutlass.Float32(1.0))
@@ -510,16 +555,20 @@ class GvrTopkRegKernel:
             bnt = _umin_u32(f2u_rz(qt), cutlass.Uint32(self.nbh - 1))
             atomic_add_cta(s_hist.iterator + cutlass.Int32(bnt), cutlass.Int32(1))
         else:
+            # hist base pinned ONCE (byte addr, +STATIC_BYTES = word 128 map);
+            # each site below is then LEA + ATOMS exactly like the CUDA arm
+            # instead of re-deriving the shared window per divergent block.
+            hb = _smem_addr_reg(sbase + cutlass.Int32(STATIC_WORDS * 4))
             for s in cutlass.range_constexpr(S):
                 q = _submul_asm(_val(frags, s), Tv, SC)           # anti-CSE classify
                 if q >= cutlass.Float32(0.0):
-                    atomic_add_cta(
-                        s_hist.iterator + f2s_rz(fmin_f32(q, QCAPf)),
-                        cutlass.Int32(1))
+                    _red_shared_add1(
+                        hb + (f2s_rz(fmin_f32(q, QCAPf))
+                              << cutlass.Int32(2)))
             qt = _submul_asm(tval, Tv, SC)
             if qt >= cutlass.Float32(0.0):
-                atomic_add_cta(s_hist.iterator + f2s_rz(fmin_f32(qt, QCAPf)),
-                               cutlass.Int32(1))
+                _red_shared_add1(
+                    hb + (f2s_rz(fmin_f32(qt, QCAPf)) << cutlass.Int32(2)))
         cute.arch.barrier()                               # L1527
 
         # ---- crossing-bin find (L1528-1538)

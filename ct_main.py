@@ -43,8 +43,9 @@ import sys
 import cutlass
 import cutlass.cute as cute
 from cutlass._mlir.dialects import arith as mlir_arith
+from cutlass._mlir.dialects import llvm as mlir_llvm
 from cutlass._mlir.dialects import math as mlir_math
-from cutlass.cutlass_dsl import dsl_user_op
+from cutlass.cutlass_dsl import T, dsl_user_op
 from cutlass.utils.smem_allocator import SmemAllocator
 from cutlass.cute import runtime as _crt
 
@@ -91,6 +92,51 @@ def _st_g_u32(addr_i64, val_i32):
                       assumed_align=4)
     t = cute.make_tensor(p, cute.make_layout((1,)))
     t[0] = val_i32
+
+
+@dsl_user_op
+def _st_s_v2_u32(saddr_i32, lo_u32, hi_u32, *, loc=None, ip=None):
+    """st.shared.v2.u32 [saddr], {lo, hi} — the CUDA make_int2 STS.64 spelling
+    (kernel.cu L1018-1019). Byte-identical to the little-endian u64 pack
+    ((hi << 32) | lo) but keeps the two words as independent 32-bit registers,
+    so ptxas can coalesce the emission bit-walk's loop-carried (xv, idx) pair
+    straight into the store pair (drops 2 IMAD.MOV/iter; op46 SASS diff)."""
+    mlir_llvm.inline_asm(
+        res=None,
+        operands_=[saddr_i32.ir_value(loc=loc, ip=ip),
+                   lo_u32.ir_value(loc=loc, ip=ip),
+                   hi_u32.ir_value(loc=loc, ip=ip)],
+        asm_string="st.shared.v2.u32 [$0], {$1, $2};",
+        constraints="r,r,r",
+        has_side_effects=True,
+        asm_dialect=mlir_llvm.AsmDialect.AD_ATT,
+        loc=loc, ip=ip)
+
+
+@dsl_user_op
+def _pin_i64(v, *, loc=None, ip=None):
+    """Opaque identity mov.b64: pins a loop-invariant Int64 so NVVM cannot
+    rematerialize its defining chain (param ld.const + %ctaid reads + mul/add)
+    into every scf region body (PTX $L__BB0_123 evidence, op46 SASS diff)."""
+    return cutlass.Int64(
+        mlir_llvm.inline_asm(
+            T.i64(),
+            [v.ir_value(loc=loc, ip=ip)],
+            "mov.b64 $0, $1;",
+            "=l,l", has_side_effects=False, is_align_stack=False,
+            asm_dialect=mlir_llvm.AsmDialect.AD_ATT, loc=loc, ip=ip))
+
+
+@dsl_user_op
+def _pin_i32(v, *, loc=None, ip=None):
+    """Opaque identity mov.b32 (Int32 twin of _pin_i64)."""
+    return cutlass.Int32(
+        mlir_llvm.inline_asm(
+            T.i32(),
+            [v.ir_value(loc=loc, ip=ip)],
+            "mov.b32 $0, $1;",
+            "=r,r", has_side_effects=False, is_align_stack=False,
+            asm_dialect=mlir_llvm.AsmDialect.AD_ATT, loc=loc, ip=ip))
 
 
 class GvrMainKernel:
@@ -155,9 +201,11 @@ class GvrMainKernel:
             ps = pos
             if ps > cutlass.Int32(SCPB):
                 ps = cutlass.Int32(SCPB)
-            s_cbuf2[ps] = ((cutlass.Uint64(cutlass.Uint32(idx))
-                            << cutlass.Uint64(32))
-                           | cutlass.Uint64(C.u32_of_f32(xv)))
+            # int2 {value bits, idx} via st.shared.v2.u32 — same bytes as the
+            # former (idx << 32) | bits u64 pack (+0=bits, +4=idx), but no i64
+            # materialization inside the bit-walk (kernel.cu L1018-1019 parity)
+            _st_s_v2_u32(s_cbuf2.iterator.toint() + ps * cutlass.Int32(8),
+                         C.u32_of_f32(xv), cutlass.Uint32(idx))
         return pos + cutlass.Int32(1)
 
     # ------------------------------------------------------------------
@@ -270,7 +318,10 @@ class GvrMainKernel:
 
         # ---- row bases (L472-475) ----
         row64 = cutlass.Int64(row)
-        x_addr = logits.iterator.toint() + row64 * cutlass.Int64(npad) * cutlass.Int64(4)
+        # _pin_i64: keep the row base a REGISTER across the attempt/tile scf
+        # regions (NVVM otherwise re-derives ld.param+%ctaid.y+mul per region)
+        x_addr = _pin_i64(logits.iterator.toint()
+                          + row64 * cutlass.Int64(npad) * cutlass.Int64(4))
         p_addr = pre_idx.iterator.toint() + row64 * cutlass.Int64(k) * cutlass.Int64(4)
         out_row = out[row, None]
         ws_addr = ws.iterator.toint()
@@ -405,7 +456,9 @@ class GvrMainKernel:
                 sok = cutlass.Int32(1)
         if sok != cutlass.Int32(0):                      # L635-654 sample histogram
             w = (SMAX - SMIN) * cutlass.Float32(1.0 / 256.0)
-            sc_s = cutlass.Float32(1.0) / w
+            # rcp.approx.ftz.f32 = the CUDA arm's --use_fast_math 1.0f/w
+            # (bare MUFU.RCP, no Newton refinement) — bitwise-aligned scale
+            sc_s = cute.arch.rcp_approx(w)
             if shas != cutlass.Int32(0):
                 for t in cutlass.range_constexpr(4):
                     bq = C.f2s_rz((fsa[t] - SMIN) * sc_s)
@@ -545,6 +598,9 @@ class GvrMainKernel:
                 wdok = cutlass.Int32(1)
             if wdok == cutlass.Int32(0):
                 WD = cutlass.Float32(1e-30)
+            # NOT rcp_approx: on (256,8,4,·,4) the single-inst rcp shifts SC's
+            # live range and spills 5 LDL/STL at the 64-reg wall (bisected);
+            # div.rn here is the original validated-exact spelling
             SC = cutlass.Float32(1.0) / WD
 
             # ---- P3 row pass (L763-908) ----
@@ -555,9 +611,16 @@ class GvrMainKernel:
             if span > cutlass.Int32(0):                  # L776-779 peel
                 nFull = span // step
                 rem = span - nFull * step
+            # _pin_i32: the isfull peel predicate reads nFull every tile iter;
+            # unpinned, NVVM re-derives the whole ld.param+shr/sel div chain
+            # at the loop head (v3 SASS evidence)
+            nFull = _pin_i32(nFull)
             nIt = nFull
             if rem > cutlass.Int32(0):
                 nIt = nIt + cutlass.Int32(1)
+            # _pin_i32: stop NVVM re-deriving the ceil-div bound (ld.param n +
+            # shr/sel chain) inside the tile-loop condition region per iter
+            nIt = _pin_i32(nIt)
 
             it = cutlass.Int32(0)
             while it < nIt:

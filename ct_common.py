@@ -186,11 +186,14 @@ def hi_bit_or_zero(msk):
 # ---------------------------------------------------------------------------
 @cute.jit
 def _shfl_up_add(val, lane, offset: cutlass.Constexpr):
-    """Inclusive-scan step: val += shfl_up(val, offset) gated lane >= offset."""
-    src = lane - cutlass.Int32(offset)
-    if src < 0:
-        src = cutlass.Int32(0)
-    other = cute.arch.shuffle_sync(val, src)
+    """Inclusive-scan step: val += shfl_up(val, offset) gated lane >= offset.
+
+    Native shfl.sync.up (mask_and_clamp=0, the __shfl_up_sync lowering):
+    hardware clamps the source lane, deleting the VIMNMX+VIADD software
+    clamp of the previous idx-kind spelling. Lanes < offset receive an
+    undefined-but-discarded value (the gate keeps the result identical).
+    """
+    other = cute.arch.shuffle_sync_up(val, offset, mask_and_clamp=0)
     if lane >= cutlass.Int32(offset):
         val = val + other
     return val
@@ -198,11 +201,12 @@ def _shfl_up_add(val, lane, offset: cutlass.Constexpr):
 
 @cute.jit
 def _shfl_down_add(val, lane, offset: cutlass.Constexpr):
-    """Suffix-scan step: val += shfl_down(val, offset) gated lane+offset < 32."""
-    src = lane + cutlass.Int32(offset)
-    if src > 31:
-        src = cutlass.Int32(31)
-    other = cute.arch.shuffle_sync(val, src)
+    """Suffix-scan step: val += shfl_down(val, offset) gated lane+offset < 32.
+
+    Native shfl.sync.down (mask_and_clamp=31 = __shfl_down_sync lowering);
+    hardware clamps, gate discards out-of-range lanes as before.
+    """
+    other = cute.arch.shuffle_sync_down(val, offset, mask_and_clamp=31)
     if lane + cutlass.Int32(offset) < cutlass.Int32(32):
         val = val + other
     return val
@@ -225,13 +229,10 @@ def warp_incl_scan_add2(v1, v2, lane):
     exactly as the CUDA dual-scan loop does.
     """
     for o in [1, 2, 4, 8, 16]:
-        src = lane - cutlass.Int32(o)
-        if src < 0:
-            src = cutlass.Int32(0)
-        z1 = cute.arch.shuffle_sync(v1, src)
+        z1 = cute.arch.shuffle_sync_up(v1, o, mask_and_clamp=0)
         if lane >= cutlass.Int32(o):
             v1 = v1 + z1
-        z2 = cute.arch.shuffle_sync(v2, src)
+        z2 = cute.arch.shuffle_sync_up(v2, o, mask_and_clamp=0)
         if lane >= cutlass.Int32(o):
             v2 = v2 + z2
     return v1, v2
