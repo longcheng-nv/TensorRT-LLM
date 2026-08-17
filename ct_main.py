@@ -139,6 +139,41 @@ def _pin_i32(v, *, loc=None, ip=None):
             asm_dialect=mlir_llvm.AsmDialect.AD_ATT, loc=loc, ip=ip))
 
 
+@dsl_user_op
+def _smem_addr_reg(addr, *, loc=None, ip=None):
+    """Pin a CTA-shared 32-bit byte address in ONE register (ct_reg A1 donor).
+
+    Identity `mov` behind an asm boundary: without it LLVM re-folds the
+    `mov.b32 %r, __dynamic_shmem__0` symbol materialisation into EVERY use
+    site inside the divergent emission bit-walk — the residual +1 IMAD.MOV
+    per survivor at BS256 (VIOLATION_TRIAGE_20260814 §3). The asm result is
+    not duplicable, so the shared window is materialised exactly once.
+    Value-identical: a plain register copy."""
+    return cutlass.Int32(mlir_llvm.inline_asm(
+        T.i32(),
+        [addr.ir_value(loc=loc, ip=ip)],
+        "mov.u32 $0, $1;",
+        "=r,r", has_side_effects=False, is_align_stack=False,
+        asm_dialect=mlir_llvm.AsmDialect.AD_ATT, loc=loc, ip=ip))
+
+
+@dsl_user_op
+def _red_shared_add1(addr, *, loc=None, ip=None):
+    """CUDA `atomicAdd(&hist[bin], 1u)` with the result unused (ct_reg A1).
+
+    `red` (not `atom`) is the result-less spelling — ptxas lowers it to the
+    same ATOMS.POPC.INC.32 RZ the CUDA arm emits. Same ordering contract as
+    ct_common.atomic_add_cta (.relaxed scope .cta). Takes the final shared
+    byte address as a plain Int32 so ptxas fuses the shl+add into one LEA
+    against the pinned `_smem_addr_reg` base."""
+    mlir_llvm.inline_asm(
+        res=None,
+        operands_=[addr.ir_value(loc=loc, ip=ip)],
+        asm_string="red.relaxed.cta.shared.add.u32 [$0], 1;",
+        constraints="r", has_side_effects=True,
+        asm_dialect=mlir_llvm.AsmDialect.AD_ATT, loc=loc, ip=ip)
+
+
 class GvrMainKernel:
     """CuTeDSL port of gvr_main<BLK, U, MINB, NBS, KPT, SPLIT> (kernel.cu L377)."""
 
@@ -182,7 +217,7 @@ class GvrMainKernel:
     # Returns pos+1. Branchless trash slot min(pos, SCPB) (L866-868).
     # ------------------------------------------------------------------
     @cute.jit
-    def _emitc(self, xv, idx, pos, TF, SC, s_hist, s_cbuf, s_cbuf2):
+    def _emitc(self, xv, idx, pos, TF, SC, hb, cb2, s_hist, s_cbuf, s_cbuf2):
         SCPB = self.scpb
         NBS = self.nbs
         if cutlass.const_expr(not self.split):
@@ -190,7 +225,14 @@ class GvrMainKernel:
             if bn_u > cutlass.Uint32(NBS - 1):
                 bn_u = cutlass.Uint32(NBS - 1)
             bn = cutlass.Int32(bn_u)
-            C.atomic_add_cta(s_hist.iterator + bn, cutlass.Int32(1))
+            if cutlass.const_expr(self.vstg):
+                # fix-2 P1: result unused -> resultless red off the pinned
+                # hist base (ct_reg A1 idiom) — no per-site smem-base refold
+                _red_shared_add1(hb + (bn << cutlass.Int32(2)))
+            else:
+                # VSTG=False tuples sit at the 64-reg wall (fix-1 spill-5
+                # lesson): keep the original spelling, no pinned base here
+                C.atomic_add_cta(s_hist.iterator + bn, cutlass.Int32(1))
             if cutlass.const_expr(not self.vstg):
                 ps = pos
                 if ps > cutlass.Int32(SCPB):
@@ -204,7 +246,8 @@ class GvrMainKernel:
             # int2 {value bits, idx} via st.shared.v2.u32 — same bytes as the
             # former (idx << 32) | bits u64 pack (+0=bits, +4=idx), but no i64
             # materialization inside the bit-walk (kernel.cu L1018-1019 parity)
-            _st_s_v2_u32(s_cbuf2.iterator.toint() + ps * cutlass.Int32(8),
+            # fix-2 P1: address = one LEA off the pinned cb2 base
+            _st_s_v2_u32(cb2 + ps * cutlass.Int32(8),
                          C.u32_of_f32(xv), cutlass.Uint32(idx))
         return pos + cutlass.Int32(1)
 
@@ -316,6 +359,18 @@ class GvrMainKernel:
                           assumed_align=16),
             cute.make_layout((CMPB + 1,)))
 
+        # fix-2 P1: emission smem bases pinned ONCE, outside the attempt/tile
+        # loops (asm identity mov, ct_reg A1 donor) — LLVM otherwise refolds
+        # the shared-window materialisation into every _emitc site inside the
+        # divergent bit-walk (residual +1 IMAD.MOV, VIOLATION_TRIAGE §3).
+        # VSTG-only: the (256,8,4,·) VSTG=False tuples keep their original
+        # spellings untouched (64-reg wall, fix-1 spill-5 lesson).
+        hb_pin = cutlass.Int32(0)
+        cb2_pin = cutlass.Int32(0)
+        if cutlass.const_expr(self.vstg):
+            hb_pin = _smem_addr_reg(s_hist.iterator.toint())
+            cb2_pin = _smem_addr_reg(s_cbuf2.iterator.toint())
+
         # ---- row bases (L472-475) ----
         row64 = cutlass.Int64(row)
         # _pin_i64: keep the row base a REGISTER across the attempt/tile scf
@@ -328,6 +383,17 @@ class GvrMainKernel:
         gdon_addr = ws_addr                              # L386-388 slab views
         goff_addr = ws_addr + cutlass.Int64(C.GVR_WS_OFF_OFF)
         gbuf_addr = ws_addr + cutlass.Int64(C.GVR_WS_BUF_OFF)
+        # fix-2 P2 (SPLIT only): row-slab base pinned like x_addr above; the
+        # publish/gather/P5/degen consumers spell gbuf_row + i*8 instead of
+        # re-deriving gbuf_addr + (row64*GCAP + i)*8 per candidate (value-
+        # identical by i64 distributivity). CUDA parity: the (1024,4,1,256,2,
+        # SPLIT) SASS keeps this base in UR8/UR9 with ONE IMAD.WIDE.U32 per
+        # candidate (cand_K5a_l10 cuobjdump); DSL-side remat signature is
+        # hypothesis-driven — SASS verify pending drain window.
+        gbuf_row = cutlass.Int64(0)
+        if cutlass.const_expr(self.split):
+            gbuf_row = _pin_i64(gbuf_addr
+                                + row64 * cutlass.Int64(GCAP) * cutlass.Int64(8))
 
         n4 = n >> cutlass.Int32(2)                       # L477
         c0 = cutlass.Int32(0)
@@ -704,12 +770,12 @@ class GvrMainKernel:
                         idx2 = ((i0 + (bp2 >> cutlass.Int32(2)) * cutlass.Int32(BLK))
                                 << cutlass.Int32(2)) + (bp2 & cutlass.Int32(3))
                         xv2 = C.ldg_f32(x_addr, idx2)
-                        pos = self._emitc(xv, idx, pos, TF, SC,
-                                          s_hist, s_cbuf, s_cbuf2)
+                        pos = self._emitc(xv, idx, pos, TF, SC, hb_pin,
+                                          cb2_pin, s_hist, s_cbuf, s_cbuf2)
                         idx = idx2
                         xv = xv2
-                    pos = self._emitc(xv, idx, pos, TF, SC,
-                                      s_hist, s_cbuf, s_cbuf2)
+                    pos = self._emitc(xv, idx, pos, TF, SC, hb_pin,
+                                      cb2_pin, s_hist, s_cbuf, s_cbuf2)
                 it = it + cutlass.Int32(1)
             # scalar tail, part 0 only (L900-906)
             i = tidx
@@ -717,8 +783,8 @@ class GvrMainKernel:
                 x = C.ldg_f32(x_addr, tail0 + i)
                 if x >= TF:
                     post = C.atomic_add_cta(s_scal.iterator + 0, cutlass.Int32(1))
-                    post = self._emitc(x, tail0 + i, post, TF, SC,
-                                       s_hist, s_cbuf, s_cbuf2)
+                    post = self._emitc(x, tail0 + i, post, TF, SC, hb_pin,
+                                       cb2_pin, s_hist, s_cbuf, s_cbuf2)
                 i = i + cutlass.Int32(BLK)
             cute.arch.barrier()                          # ---- barrier L909 ----
             myn = s_scal[0]                              # L911
@@ -737,8 +803,7 @@ class GvrMainKernel:
                     while i < myn:
                         p = base + i
                         if p < cutlass.Int32(GCAP):
-                            _st_g_u64(gbuf_addr + (row64 * cutlass.Int64(GCAP)
-                                                   + cutlass.Int64(p)) * cutlass.Int64(8),
+                            _st_g_u64(gbuf_row + cutlass.Int64(p) * cutlass.Int64(8),
                                       s_cbuf2[i])
                         i = i + cutlass.Int32(BLK)
                 else:                                    # L931-955 overflow re-sweep
@@ -755,8 +820,7 @@ class GvrMainKernel:
                                                   cutlass.Int32(1))
                             p = base + pq
                             if p < cutlass.Int32(GCAP):
-                                _st_g_u64(gbuf_addr + (row64 * cutlass.Int64(GCAP)
-                                                       + cutlass.Int64(p)) * cutlass.Int64(8),
+                                _st_g_u64(gbuf_row + cutlass.Int64(p) * cutlass.Int64(8),
                                           (cutlass.Uint64(cutlass.Uint32(i))
                                            << cutlass.Uint64(32))
                                           | cutlass.Uint64(C.u32_of_f32(x)))
@@ -769,8 +833,7 @@ class GvrMainKernel:
                                                   cutlass.Int32(1))
                             p = base + pq
                             if p < cutlass.Int32(GCAP):
-                                _st_g_u64(gbuf_addr + (row64 * cutlass.Int64(GCAP)
-                                                       + cutlass.Int64(p)) * cutlass.Int64(8),
+                                _st_g_u64(gbuf_row + cutlass.Int64(p) * cutlass.Int64(8),
                                           (cutlass.Uint64(cutlass.Uint32(tail0 + i))
                                            << cutlass.Uint64(32))
                                           | cutlass.Uint64(C.u32_of_f32(x)))
@@ -803,8 +866,7 @@ class GvrMainKernel:
                         i = tidx
                         while i < listN:
                             gvx, gvy = C._ldcg_v2_i32(
-                                gbuf_addr + (row64 * cutlass.Int64(GCAP)
-                                             + cutlass.Int64(i)) * cutlass.Int64(8))
+                                gbuf_row + cutlass.Int64(i) * cutlass.Int64(8))
                             if fromg == cutlass.Int32(0):
                                 s_cbuf2[i] = ((cutlass.Uint64(cutlass.Uint32(gvy))
                                                << cutlass.Uint64(32))
@@ -812,7 +874,8 @@ class GvrMainKernel:
                             bq = C.f2s_rz((C.f32_of_i32(gvx) - TF) * SC)
                             if bq > cutlass.Int32(NBS - 1):
                                 bq = cutlass.Int32(NBS - 1)
-                            C.atomic_add_cta(s_hist.iterator + bq, cutlass.Int32(1))
+                            # fix-2 P2: resultless red off the P1 hist pin
+                            _red_shared_add1(hb_pin + (bq << cutlass.Int32(2)))
                             i = i + cutlass.Int32(BLK)
                         cute.arch.barrier()              # ---- barrier L983 ----
                         C.scan_cross0(s_hist, k, tidx, s_res, cutlass.Int32(0),
@@ -908,8 +971,7 @@ class GvrMainKernel:
                             if cutlass.const_expr(self.split):
                                 if fromg != cutlass.Int32(0):
                                     vx, vy = C._ldcg_v2_i32(
-                                        gbuf_addr + (row64 * cutlass.Int64(GCAP)
-                                                     + cutlass.Int64(i)) * cutlass.Int64(8))
+                                        gbuf_row + cutlass.Int64(i) * cutlass.Int64(8))
                                 else:
                                     pk64 = s_cbuf2[i]
                                     vx = cutlass.Int32(cutlass.Uint32(
@@ -1152,9 +1214,8 @@ class GvrMainKernel:
                                     if cutlass.const_expr(self.split):
                                         if fromg != cutlass.Int32(0):
                                             vx, vy = C._ldcg_v2_i32(
-                                                gbuf_addr
-                                                + (row64 * cutlass.Int64(GCAP)
-                                                   + cutlass.Int64(i))
+                                                gbuf_row
+                                                + cutlass.Int64(i)
                                                 * cutlass.Int64(8))
                                         else:
                                             pk64 = s_cbuf2[i]
@@ -1218,9 +1279,8 @@ class GvrMainKernel:
                                 if cutlass.const_expr(self.split):
                                     if fromg != cutlass.Int32(0):
                                         vx, vy = C._ldcg_v2_i32(
-                                            gbuf_addr
-                                            + (row64 * cutlass.Int64(GCAP)
-                                               + cutlass.Int64(i))
+                                            gbuf_row
+                                            + cutlass.Int64(i)
                                             * cutlass.Int64(8))
                                     else:
                                         pk64 = s_cbuf2[i]

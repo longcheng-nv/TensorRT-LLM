@@ -546,14 +546,25 @@ class GvrTopkRegKernel:
 
         # ---- histogram (L1513-1526)
         if cutlass.const_expr(self.brl):
+            # fix-2 P4 (GATED, removable as one hunk): A1 ported to the BRL
+            # classify arm — hist base pinned ONCE via the same
+            # _smem_addr_reg identity-mov used in the !BRL arm below, and the
+            # result-discarded classify atomics spelled as resultless
+            # red.shared (_red_shared_add1). Value-identical: same +1 to the
+            # same byte address (hb + 4*bn == &s_hist[bn]), same .relaxed.cta
+            # ordering; the q/bn computations are untouched so classify/emit
+            # bit-identity (BRL requirement) is preserved. Emit-path hist
+            # atomics (results used, L1630+) are NOT touched.
+            hb = _smem_addr_reg(sbase + cutlass.Int32(STATIC_WORDS * 4))
             for s in cutlass.range_constexpr(S):
                 q = _fmaf(_val(frags, s), SC, CQ)
                 bn = _umin_u32(f2u_rz(q), cutlass.Uint32(self.nbh - 1))
-                atomic_add_cta(s_hist.iterator + cutlass.Int32(bn),
-                               cutlass.Int32(1))
+                _red_shared_add1(
+                    hb + (cutlass.Int32(bn) << cutlass.Int32(2)))
             qt = _fmaf(tval, SC, CQ)                      # unconditional (L1517)
             bnt = _umin_u32(f2u_rz(qt), cutlass.Uint32(self.nbh - 1))
-            atomic_add_cta(s_hist.iterator + cutlass.Int32(bnt), cutlass.Int32(1))
+            _red_shared_add1(
+                hb + (cutlass.Int32(bnt) << cutlass.Int32(2)))
         else:
             # hist base pinned ONCE (byte addr, +STATIC_BYTES = word 128 map);
             # each site below is then LEA + ATOMS exactly like the CUDA arm
