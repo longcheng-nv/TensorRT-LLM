@@ -4458,6 +4458,11 @@ class GvrTopkRegKernel:
                     bnt = _umin_u32(f2u_rz(qt), cutlass.Uint32(self.nbh - 1))
                     _red_shared_add1__reg(hb + (cutlass.Int32(bnt) << cutlass.Int32(2)))
                 else:
+                    # fix1 (op54, 2026-09-11): pre-bind the names written inside the
+                    # dynamic `if` so the scf.if join is type-stable (the file's own
+                    # qt2/qt3 idiom); both are dead after the region -> value-neutral.
+                    qt = cutlass.Float32(0.0)
+                    bnt = cutlass.Uint32(0)
                     if tid < ntail:
                         qt = _fmaf__reg(tval, SC, CQ)
                         bnt = _umin_u32(f2u_rz(qt), cutlass.Uint32(self.nbh - 1))
