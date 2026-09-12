@@ -1,0 +1,14 @@
+{
+  "candidate_id": "c6af0bf6251e655133500582e832898faa92fff8e2fe841bf31bac846a1f4cbd",
+  "language": "cute_dsl",
+  "campaign_id": "y2tnvsfgvx1vkb1xpc1vp1bt3g",
+  "round_number": 9,
+  "composite_score": 0.732774523008136,
+  "performance_score": 0.5819363075203399,
+  "correctness_score": 1.0,
+  "efficiency_score": 1.0,
+  "novelty_score": 0.0,
+  "speedup": 1.391980021198929,
+  "execution_time_ms": 0.006661651896952903,
+  "baseline_time_ms": 0.009272886348740388
+}
