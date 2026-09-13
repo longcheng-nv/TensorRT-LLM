@@ -105,6 +105,57 @@ QUADC = 96  # crossing-bin O(mc^2) rank gate (streaming/reg paths, every registe
 SNB = 256  # streaming-path bin count
 CMPC = 4096  # crossing-bin slots per CTA, clustered register path
 BLKC = 1024  # CTA size of the clustered register path
+# DSV4 512K/1M service envelopes after 4:1 indexer compression.
+_LONG_STREAMING_MIN_N = 1 << 17
+_LONG_STREAMING_MAX_N = 1 << 18
+# Admit the small valid-length slack below the aligned 1M envelope.
+_LONG_STREAMING_1M_MIN_N = (1 << 18) - 256
+_SM100_LONG_MAIN_CONFIGS = {
+    128: (1024, 1, 4),
+    256: (512, 2, 4),
+    512: (512, 2, 4),
+    1024: (1024, 1, 4),
+}
+
+
+def _sm100_long_main_config(
+    b: int, n: int, k: int, num_sms: int, sm_version: int
+) -> tuple[int, int, int] | None:
+    """Return the B200 long-row main plan as ``(BLK, MINB, U)``."""
+    if (
+        sm_version != 100
+        or num_sms != 148
+        or k not in (512, 1024)
+        or not _LONG_STREAMING_MIN_N <= n <= _LONG_STREAMING_MAX_N
+    ):
+        return None
+    return _SM100_LONG_MAIN_CONFIGS.get(b)
+
+
+def _sm100_long_varlen_sampling(
+    b: int,
+    n: int,
+    k: int,
+    num_sms: int,
+    sm_version: int,
+    aim_base: int,
+    sampling_factor: int,
+) -> tuple[int, int]:
+    """Raise sampling coverage for measured B200 long-row retry tails."""
+    if (
+        sm_version != 100
+        or num_sms != 148
+        or not _LONG_STREAMING_MIN_N <= n <= _LONG_STREAMING_MAX_N
+    ):
+        return aim_base, sampling_factor
+    if b == 256 and k == 1024:
+        return 2048, sampling_factor
+    if k == 512 and n >= _LONG_STREAMING_1M_MIN_N:
+        if b == 128:
+            return 2560, 16
+        if b == 256:
+            return 1536, 16
+    return aim_base, sampling_factor
 
 
 def route(
@@ -119,7 +170,8 @@ def route(
 
     Deviations from the CUDA reference (self-sampling only): the 4K < n <= 8K
     register rungs, QC = QUADC for every register plan, NB bins for the
-    not-wide register plans up to n4 <= 2048."""
+    not-wide register plans up to n4 <= 2048, and measured B200 service-shape
+    tuning for the compressed 512K/1M envelopes."""
     if b < 1:
         raise RuntimeError(f"route requires b >= 1, got {b}")
     if num_sms < 1:
@@ -392,11 +444,10 @@ def route(
             "ws": False,
         }
 
-    smem_main = (SCAP + 4) * (8 if (R > 1 or b <= 296) else 4) + (CMP + 1) * 8
-
     def _main(BLK, MINB, U, SPLIT):
         # KPT ladder 1/2/4/8; grid = (R, b).
         kpt = 1 if k <= BLK else (2 if k <= 2 * BLK else (4 if k <= 4 * BLK else 8))
+        smem_main = (SCAP + 4) * (8 if (SPLIT or BLK >= 512) else 4) + (CMP + 1) * 8
         # TSH-floor staging gate.  The CUDA form is a grid-uniform RUNTIME
         # gate (gridDim.y > 15 && k <= 1024 && (n >> 2) <= 32768); here it
         # is a compile-time key -- per-launch semantics are identical
@@ -427,6 +478,9 @@ def route(
             "ws": True,
         }
 
+    long_config = _sm100_long_main_config(b, n, k, num_sms, sm_version)
+    if long_config is not None:
+        return _main(*long_config, False)
     if big:
         per = Q >> 10
         U = 8 if per >= 8 else (4 if per >= 4 else (2 if per >= 2 else 1))
@@ -603,7 +657,13 @@ def route_split(
 
 
 def route_streaming(
-    b: int, n: int, npad: int, k: int, force_main: bool = False
+    b: int,
+    n: int,
+    npad: int,
+    k: int,
+    force_main: bool = False,
+    num_sms: int = 148,
+    sm_version: int = 100,
 ) -> dict[str, object]:
     """route() restricted to its STREAMING half (main / clus) — the varlen
     capture policy: per-row kernels must be picked from the families that are
@@ -614,6 +674,8 @@ def route_streaming(
     min(r1, r2) R matches the CUDA else-branch exactly."""
     if b < 1:
         raise RuntimeError(f"route_streaming requires b >= 1, got {b}")
+    if num_sms < 1:
+        raise RuntimeError(f"route_streaming requires num_sms >= 1, got {num_sms}")
     R = 1
     if b <= 32:
         r1 = max(148 // b, 1)
@@ -695,10 +757,10 @@ def route_streaming(
             "smem": smc,
             "ws": False,
         }
-    smem_main = (scap + 4) * (8 if (R > 1 or b <= 296) else 4) + (cmp_ + 1) * 8
 
     def _main(blk_, minb_, u_, split_):
         kpt = 1 if k <= blk_ else (2 if k <= 2 * blk_ else (4 if k <= 4 * blk_ else 8))
+        smem_main = (scap + 4) * (8 if (split_ or blk_ >= 512) else 4) + (cmp_ + 1) * 8
         tshg = bool(split_) and b > 15 and k <= 1024 and (n >> 2) <= 32768
         return {
             "kernel": "main",
@@ -723,6 +785,9 @@ def route_streaming(
             "ws": True,
         }
 
+    long_config = _sm100_long_main_config(b, n, k, num_sms, sm_version)
+    if long_config is not None:
+        return _main(*long_config, False)
     if big:
         per = q_ >> 10
         u_ = 8 if per >= 8 else (4 if per >= 4 else (2 if per >= 2 else 1))
@@ -901,7 +966,15 @@ def _varlen_launcher(
         )
         _VARLEN_CACHE[key] = lc
         return lc
-    plan = route_streaming(num_rows, n_route, npad, k, force_main=True)
+    plan = route_streaming(
+        num_rows,
+        n_route,
+        npad,
+        k,
+        force_main=True,
+        num_sms=num_sms,
+        sm_version=sm_version,
+    )
     tpl = tuple(plan["tpl"])  # (BLK, U, MINB, SNB, KPT, SPLIT, TSHG)
     rt = plan["rt"]
     r_const = rt["R"]
@@ -919,6 +992,15 @@ def _varlen_launcher(
         (32 if r_const == 2 else (48 if k > 1024 else 16))
         if r_const > 1
         else (64 if k >= 1024 else 32)
+    )
+    aim_base, sfac = _sm100_long_varlen_sampling(
+        num_rows,
+        n_kernel,
+        k,
+        num_sms,
+        sm_version,
+        aim_base,
+        sfac,
     )
     amin = 3 * k if r_const == 2 else (7 * k) // 2
     sd_en = 1 if (k > 1024 and not big) else 0
@@ -1831,6 +1913,8 @@ def warmup_varlen(
                 npad_c,
                 int(top_k),
                 force_main=True,
+                num_sms=num_sms,
+                sm_version=sm_version,
             )
             ekey = ("main", tuple(p["tpl"][:6]), p["rt"]["R"])
         if ekey not in seen_keys:
