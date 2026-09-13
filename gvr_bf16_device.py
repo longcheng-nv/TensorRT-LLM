@@ -5379,6 +5379,10 @@ class GvrTopkRegKernel:
                     short = cutlass.Int32(1)
                 if short == cutlass.Int32(0):
                     n = nv
+                # fix1 (op58, 2026-09-13): pre-bind `i` before the dynamic short-row emit
+                # (TYPE_UNSTABLE_JOIN on CuTe DSL 4.6.1); the predeclaration block below
+                # re-initialises it -> value-neutral.
+                i = cutlass.Int32(0)
                 if short != cutlass.Int32(0):
                     i = tid
                     while i < kq:
@@ -6277,6 +6281,10 @@ class GvrTopkRegKernel:
                     short = cutlass.Int32(1)
                 if short == cutlass.Int32(0):
                     n = nv
+                # fix1 (op58, 2026-09-13): pre-bind `i` before the dynamic short-row emit
+                # (TYPE_UNSTABLE_JOIN on CuTe DSL 4.6.1); the predeclaration block below
+                # re-initialises it -> value-neutral.
+                i = cutlass.Int32(0)
                 if short != cutlass.Int32(0):
                     i = tid
                     while i < kq:
@@ -6664,6 +6672,11 @@ class GvrTopkRegKernel:
                         q = _fmaf__reg(_val(frags, s), SC, CQ)
                         bn = _umin_u32(f2u_rz(q), cutlass.Uint32(self.nbh - 1))
                         _red_shared_add1__reg(hb + (cutlass.Int32(bn) << cutlass.Int32(2)))
+                    # fix1 (op58, 2026-09-13): pre-bind the names written inside the dynamic `if`
+                    # so the scf.if join is type-stable on CuTe DSL 4.6.1 (TYPE_UNSTABLE_JOIN);
+                    # both are dead after the region -> value-neutral.
+                    qt = cutlass.Float32(0.0)
+                    bnt = cutlass.Uint32(0)
                     if tid < ntail:
                         qt = _fmaf__reg(tval, SC, CQ)
                         bnt = _umin_u32(f2u_rz(qt), cutlass.Uint32(self.nbh - 1))
