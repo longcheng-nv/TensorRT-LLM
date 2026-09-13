@@ -763,8 +763,8 @@ def test_selfsampling_route_sm103_large_batch_k2048_register_rung() -> None:
     )
 
 
-def test_selfsampling_route_sm100_long_large_batch_main_tuning() -> None:
-    """The B200 long-row plans are architecture- and shape-exact."""
+def test_selfsampling_long_large_batch_main_tuning() -> None:
+    """The B200/B300 long-row plans are architecture- and shape-exact."""
     expected = {
         128: (1024, 4, 1),
         256: (512, 4, 2),
@@ -790,19 +790,45 @@ def test_selfsampling_route_sm100_long_large_batch_main_tuning() -> None:
                 assert tuple(plan["tpl"][:3]) == template
                 assert ss_host.route_split(rows, n, npad, top_k, 148, 100) == plan
 
+    sm103_expected = {
+        (256, 131075): (512, 4, 2),
+        (256, 262127): (512, 4, 2),
+        (512, 131075): (512, 4, 2),
+        (512, 262127): (512, 4, 2),
+        (1024, 262127): (1024, 4, 1),
+    }
+    for (rows, n), template in sm103_expected.items():
+        npad = (n + 63) // 64 * 64
+        for top_k in (512, 1024):
+            plan = ss_host.route(rows, n, npad, top_k, 148, 103)
+            streaming = ss_host.route_streaming(
+                rows,
+                n,
+                npad,
+                top_k,
+                force_main=True,
+                num_sms=148,
+                sm_version=103,
+            )
+            assert plan == streaming
+            assert plan["kernel"] == "main"
+            assert tuple(plan["tpl"][:3]) == template
+            assert ss_host.route_split(rows, n, npad, top_k, 148, 103) == plan
+
     # Nearby lengths, batches, K values, architectures, and topologies retain
     # the existing streaming plan.
-    for rows, n, top_k, num_sms, sm_version in (
-        (512, 131071, 1024, 148, 100),
-        (512, 262145, 1024, 148, 100),
-        (511, 131075, 1024, 148, 100),
-        (512, 131075, 2048, 148, 100),
-        (512, 131075, 1024, 160, 100),
-        (512, 131075, 1024, 148, 103),
+    for rows, n, top_k, num_sms, sm_version, template in (
+        (512, 131071, 1024, 148, 100, (256, 8, 4)),
+        (512, 262145, 1024, 148, 100, (256, 8, 4)),
+        (511, 131075, 1024, 148, 100, (256, 8, 4)),
+        (512, 131075, 2048, 148, 100, (256, 8, 4)),
+        (512, 131075, 1024, 160, 100, (256, 8, 4)),
+        (128, 131075, 1024, 148, 103, (1024, 8, 1)),
+        (1024, 131075, 1024, 148, 103, (256, 8, 4)),
     ):
         npad = (n + 63) // 64 * 64
         plan = ss_host.route(rows, n, npad, top_k, num_sms, sm_version)
-        assert tuple(plan["tpl"][:3]) == (256, 8, 4)
+        assert tuple(plan["tpl"][:3]) == template
         streaming = ss_host.route_streaming(
             rows,
             n,
@@ -812,11 +838,11 @@ def test_selfsampling_route_sm100_long_large_batch_main_tuning() -> None:
             num_sms=num_sms,
             sm_version=sm_version,
         )
-        assert tuple(streaming["tpl"][:3]) == (256, 8, 4)
+        assert tuple(streaming["tpl"][:3]) == template
 
 
-def test_selfsampling_sm100_long_varlen_launch_policy(monkeypatch) -> None:
-    """Varlen launchers bind the measured B200 templates and sampling tails."""
+def test_selfsampling_long_varlen_launch_policy(monkeypatch) -> None:
+    """Varlen launchers bind the measured Blackwell templates and tails."""
 
     class FakeDevice:
         def __init__(self) -> None:
@@ -853,14 +879,41 @@ def test_selfsampling_sm100_long_varlen_launch_policy(monkeypatch) -> None:
         assert device.templates[-1][:3] == template
         assert launcher[3][:2] == sampling
 
-    assert ss_host._sm100_long_varlen_sampling(256, 262127, 512, 148, 103, 1254, 32) == (
-        1254,
-        32,
+    sm103_cases = (
+        (256, 131075, 1024, (512, 4, 2), (2048, 64)),
+        (256, 262127, 512, (512, 4, 2), (1536, 16)),
+        (512, 131075, 1024, (512, 4, 2), (1408, 64)),
+        (1024, 262127, 1024, (1024, 4, 1), (1408, 64)),
     )
-    assert ss_host._sm100_long_varlen_sampling(128, 261887, 512, 148, 100, 1024, 32) == (
+    for rows, n, top_k, template, sampling in sm103_cases:
+        npad = (n + 63) // 64 * 64
+        launcher = ss_host._varlen_launcher(
+            rows,
+            npad,
+            top_k,
+            n,
+            1,
+            4,
+            num_sms=148,
+            sm_version=103,
+        )
+        assert launcher[0] == "main"
+        assert device.templates[-1][:3] == template
+        assert launcher[3][:2] == sampling
+
+    assert ss_host._long_varlen_sampling(256, 262127, 512, 148, 103, 768, 32) == (
+        1536,
+        16,
+    )
+    assert ss_host._long_varlen_sampling(256, 131075, 1024, 148, 103, 1408, 64) == (
+        2048,
+        64,
+    )
+    assert ss_host._long_varlen_sampling(128, 262127, 512, 148, 103, 1024, 32) == (
         1024,
         32,
     )
+    assert ss_host._long_varlen_sampling(128, 261887, 512, 148, 100, 1024, 32) == (1024, 32)
 
 
 @pytest.mark.skipif(getSMVersion() != 103, reason="requires an SM103 GPU")

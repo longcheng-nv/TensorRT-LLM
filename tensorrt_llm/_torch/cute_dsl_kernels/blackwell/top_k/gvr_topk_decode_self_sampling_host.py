@@ -116,23 +116,32 @@ _SM100_LONG_MAIN_CONFIGS = {
     512: (512, 2, 4),
     1024: (1024, 1, 4),
 }
+_SM103_LONG_MAIN_CONFIGS = {
+    256: (512, 2, 4),
+    512: (512, 2, 4),
+}
 
 
-def _sm100_long_main_config(
+def _long_main_config(
     b: int, n: int, k: int, num_sms: int, sm_version: int
 ) -> tuple[int, int, int] | None:
-    """Return the B200 long-row main plan as ``(BLK, MINB, U)``."""
+    """Return a measured Blackwell long-row plan as ``(BLK, MINB, U)``."""
     if (
-        sm_version != 100
-        or num_sms != 148
+        num_sms != 148
         or k not in (512, 1024)
         or not _LONG_STREAMING_MIN_N <= n <= _LONG_STREAMING_MAX_N
     ):
         return None
-    return _SM100_LONG_MAIN_CONFIGS.get(b)
+    if sm_version == 100:
+        return _SM100_LONG_MAIN_CONFIGS.get(b)
+    if sm_version == 103:
+        if b == 1024 and n >= _LONG_STREAMING_1M_MIN_N:
+            return 1024, 1, 4
+        return _SM103_LONG_MAIN_CONFIGS.get(b)
+    return None
 
 
-def _sm100_long_varlen_sampling(
+def _long_varlen_sampling(
     b: int,
     n: int,
     k: int,
@@ -141,9 +150,9 @@ def _sm100_long_varlen_sampling(
     aim_base: int,
     sampling_factor: int,
 ) -> tuple[int, int]:
-    """Raise sampling coverage for measured B200 long-row retry tails."""
+    """Raise sampling coverage for measured Blackwell retry tails."""
     if (
-        sm_version != 100
+        sm_version not in (100, 103)
         or num_sms != 148
         or not _LONG_STREAMING_MIN_N <= n <= _LONG_STREAMING_MAX_N
     ):
@@ -151,7 +160,7 @@ def _sm100_long_varlen_sampling(
     if b == 256 and k == 1024:
         return 2048, sampling_factor
     if k == 512 and n >= _LONG_STREAMING_1M_MIN_N:
-        if b == 128:
+        if b == 128 and sm_version == 100:
             return 2560, 16
         if b == 256:
             return 1536, 16
@@ -170,8 +179,8 @@ def route(
 
     Deviations from the CUDA reference (self-sampling only): the 4K < n <= 8K
     register rungs, QC = QUADC for every register plan, NB bins for the
-    not-wide register plans up to n4 <= 2048, and measured B200 service-shape
-    tuning for the compressed 512K/1M envelopes."""
+    not-wide register plans up to n4 <= 2048, and measured SM100/SM103
+    service-shape tuning for the compressed 512K/1M envelopes."""
     if b < 1:
         raise RuntimeError(f"route requires b >= 1, got {b}")
     if num_sms < 1:
@@ -478,7 +487,7 @@ def route(
             "ws": True,
         }
 
-    long_config = _sm100_long_main_config(b, n, k, num_sms, sm_version)
+    long_config = _long_main_config(b, n, k, num_sms, sm_version)
     if long_config is not None:
         return _main(*long_config, False)
     if big:
@@ -785,7 +794,7 @@ def route_streaming(
             "ws": True,
         }
 
-    long_config = _sm100_long_main_config(b, n, k, num_sms, sm_version)
+    long_config = _long_main_config(b, n, k, num_sms, sm_version)
     if long_config is not None:
         return _main(*long_config, False)
     if big:
@@ -993,7 +1002,7 @@ def _varlen_launcher(
         if r_const > 1
         else (64 if k >= 1024 else 32)
     )
-    aim_base, sfac = _sm100_long_varlen_sampling(
+    aim_base, sfac = _long_varlen_sampling(
         num_rows,
         n_kernel,
         k,
