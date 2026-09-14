@@ -401,14 +401,38 @@ def _ld_g_nc_v4_f32(gaddr, *, loc=None, ip=None):
     )
 
 
-def ld_g_f32x4(copy_atom, base_addr, v_idx, frag):
+@dsl_user_op
+def _ld_g_cs_v4_f32(gaddr, *, loc=None, ip=None):
+    """Pinned eviction-first ``ld.global.cs.v4.f32`` load."""
+    from cutlass._mlir import ir as _ir
+
+    st = _ir.Type.parse("!llvm.struct<(f32, f32, f32, f32)>")
+    r = mlir_llvm.inline_asm(
+        st,
+        [gaddr.ir_value(loc=loc, ip=ip)],
+        "ld.global.cs.v4.f32 {$0, $1, $2, $3}, [$4];",
+        "=f,=f,=f,=f,l",
+        has_side_effects=False,
+        is_align_stack=False,
+        asm_dialect=mlir_llvm.AsmDialect.AD_ATT,
+        loc=loc,
+        ip=ip,
+    )
+    return tuple(
+        cutlass.Float32(mlir_llvm.extractvalue(T.f32(), r, [i], loc=loc, ip=ip)) for i in range(4)
+    )
+
+
+def ld_g_f32x4(copy_atom, base_addr, v_idx, frag, streaming: bool = False):
     """Load float4 #v_idx (16B units) from gmem byte base into frag[0..3].
 
     base_addr: Int64 byte address; frag: (4,) f32 fragment. Issue ALL batch
-    members before consuming any. Pinned-asm form (see _ld_g_nc_v4_f32);
-    copy_atom kept for call-site compatibility.
+    members before consuming any. Pinned-asm forms preserve the four-scalar
+    register shape; ``streaming`` selects eviction-first cache behavior.
+    ``copy_atom`` is kept for call-site compatibility.
     """
-    v0, v1, v2, v3 = _ld_g_nc_v4_f32(base_addr + cutlass.Int64(v_idx) * cutlass.Int64(16))
+    loader = _ld_g_cs_v4_f32 if streaming else _ld_g_nc_v4_f32
+    v0, v1, v2, v3 = loader(base_addr + cutlass.Int64(v_idx) * cutlass.Int64(16))
     frag[0] = v0
     frag[1] = v1
     frag[2] = v2
@@ -1329,6 +1353,7 @@ class GvrMainKernel:
         r_const: int = 1,
         hint_free: bool = False,
         prefill: bool = False,
+        streaming_load: bool = False,
     ) -> None:
         assert nbs == 256, "SNB must stay 256"
         assert blk in (256, 512, 1024) and u in (1, 2, 4, 8)
@@ -1355,6 +1380,17 @@ class GvrMainKernel:
         # base rounded down to 16B with the <=3 lead lanes masked, one CTA per
         # row (no SPLIT); every edit is const_expr-gated so other codegen is unchanged.
         self.prefill = bool(prefill)
+        self.streaming_load = bool(streaming_load)
+        if self.streaming_load:
+            assert (
+                self.varlen
+                and self.hint_free
+                and not self.prefill
+                and not self.split
+                and u == 4
+                and minb <= 2
+                and blk in (512, 1024)
+            )
         if self.prefill:
             assert (
                 self.varlen
@@ -1887,8 +1923,8 @@ class GvrMainKernel:
             shas = cutlass.Int32(1)
         if shas != cutlass.Int32(0):
             p4 = tidx * SS2 * cutlass.Int32(2)
-            C.ld_g_f32x4(atom128, x_addr, p4, fsa)
-            C.ld_g_f32x4(atom128, x_addr, p4 + cutlass.Int32(1), fsb)
+            C.ld_g_f32x4(atom128, x_addr, p4, fsa, self.streaming_load)
+            C.ld_g_f32x4(atom128, x_addr, p4 + cutlass.Int32(1), fsb, self.streaming_load)
             if cutlass.const_expr(self.prefill):
                 # only thread 0's float4 0 holds the <=3 lead lanes; substitute
                 # lane 3 (a -inf would drive f2s_rz to INT_MIN and index the
@@ -1914,8 +1950,8 @@ class GvrMainKernel:
         j = tidx + cutlass.Int32(BLK)  # strided tail
         while j < SMP:
             p4 = j * SS2 * cutlass.Int32(2)
-            C.ld_g_f32x4(atom128, x_addr, p4, fma_)
-            C.ld_g_f32x4(atom128, x_addr, p4 + cutlass.Int32(1), fmb_)
+            C.ld_g_f32x4(atom128, x_addr, p4, fma_, self.streaming_load)
+            C.ld_g_f32x4(atom128, x_addr, p4 + cutlass.Int32(1), fmb_, self.streaming_load)
             for t in cutlass.range_constexpr(4):
                 smn = C.fmin_f32(smn, fma_[t])
                 smx = C.fmax_f32(smx, fma_[t])
@@ -1945,14 +1981,20 @@ class GvrMainKernel:
                 fullsl = cutlass.Int32(1)
             if fullsl != cutlass.Int32(0):  # prime, full slice
                 for uu in cutlass.range_constexpr(PFD):
-                    C.ld_g_f32x4(atom128, x_addr, c0 + tidx + cutlass.Int32(uu * BLK), pf[uu])
+                    C.ld_g_f32x4(
+                        atom128,
+                        x_addr,
+                        c0 + tidx + cutlass.Int32(uu * BLK),
+                        pf[uu],
+                        self.streaming_load,
+                    )
             else:  # clamped prime
                 for uu in cutlass.range_constexpr(PFD):
                     i_ = c0 + tidx + cutlass.Int32(uu * BLK)
                     ic = i_
                     if ic >= c1:
                         ic = lim4
-                    C.ld_g_f32x4(atom128, x_addr, ic, pf[uu])
+                    C.ld_g_f32x4(atom128, x_addr, ic, pf[uu], self.streaming_load)
             # asm prefetch site #1: gate (c1-c0)>=2*BLK*U && SMP>=160
             g1 = cutlass.Int32(0)
             if (c1 - c0) >= cutlass.Int32(2 * BLK * U):
@@ -2020,8 +2062,8 @@ class GvrMainKernel:
             j = tidx + cutlass.Int32(BLK)  # tail re-loads
             while j < SMP:
                 p4 = j * SS2 * cutlass.Int32(2)
-                C.ld_g_f32x4(atom128, x_addr, p4, fma_)
-                C.ld_g_f32x4(atom128, x_addr, p4 + cutlass.Int32(1), fmb_)
+                C.ld_g_f32x4(atom128, x_addr, p4, fma_, self.streaming_load)
+                C.ld_g_f32x4(atom128, x_addr, p4 + cutlass.Int32(1), fmb_, self.streaming_load)
                 for t in cutlass.range_constexpr(4):
                     bq = C.f2s_rz((fma_[t] - SMIN) * sc_s)
                     if bq > cutlass.Int32(NBS - 1):
@@ -2136,7 +2178,11 @@ class GvrMainKernel:
                         if fullsl != cutlass.Int32(0):
                             for uu in cutlass.range_constexpr(PFD):
                                 C.ld_g_f32x4(
-                                    atom128, x_addr, c0 + tidx + cutlass.Int32(uu * BLK), pf[uu]
+                                    atom128,
+                                    x_addr,
+                                    c0 + tidx + cutlass.Int32(uu * BLK),
+                                    pf[uu],
+                                    self.streaming_load,
                                 )
                         else:
                             for uu in cutlass.range_constexpr(PFD):
@@ -2144,7 +2190,7 @@ class GvrMainKernel:
                                 ic = i_
                                 if ic >= c1:
                                     ic = lim4
-                                C.ld_g_f32x4(atom128, x_addr, ic, pf[uu])
+                                C.ld_g_f32x4(atom128, x_addr, ic, pf[uu], self.streaming_load)
                     if tidx < cutlass.Int32(NBS):
                         s_hist[tidx] = cutlass.Int32(0)
                     if tidx == cutlass.Int32(0):
@@ -2199,7 +2245,13 @@ class GvrMainKernel:
                     isfull = cutlass.Int32(1)
                 if isfull != cutlass.Int32(0):  # full body
                     for uu in cutlass.range_constexpr(PFD, U):
-                        C.ld_g_f32x4(atom128, x_addr, i0 + cutlass.Int32(uu * BLK), fr[uu - PFD])
+                        C.ld_g_f32x4(
+                            atom128,
+                            x_addr,
+                            i0 + cutlass.Int32(uu * BLK),
+                            fr[uu - PFD],
+                            self.streaming_load,
+                        )
                     for uu in cutlass.range_constexpr(U):
                         if cutlass.const_expr(uu < PFD):
                             vv = pf[uu]
@@ -2213,7 +2265,7 @@ class GvrMainKernel:
                         ic = i_
                         if ic >= c1:
                             ic = lim4  # clamped address
-                        C.ld_g_f32x4(atom128, x_addr, ic, fr[uu - PFD])
+                        C.ld_g_f32x4(atom128, x_addr, ic, fr[uu - PFD], self.streaming_load)
                     for uu in cutlass.range_constexpr(U):
                         if cutlass.const_expr(uu < PFD):
                             vv = pf[uu]
@@ -2244,14 +2296,20 @@ class GvrMainKernel:
                             infull = cutlass.Int32(1)
                         if infull != cutlass.Int32(0):
                             for uu in cutlass.range_constexpr(PFD):
-                                C.ld_g_f32x4(atom128, x_addr, j0 + cutlass.Int32(uu * BLK), pf[uu])
+                                C.ld_g_f32x4(
+                                    atom128,
+                                    x_addr,
+                                    j0 + cutlass.Int32(uu * BLK),
+                                    pf[uu],
+                                    self.streaming_load,
+                                )
                         else:
                             for uu in cutlass.range_constexpr(PFD):
                                 j_ = j0 + cutlass.Int32(uu * BLK)
                                 jc = j_
                                 if jc >= c1:
                                     jc = lim4
-                                C.ld_g_f32x4(atom128, x_addr, jc, pf[uu])
+                                C.ld_g_f32x4(atom128, x_addr, jc, pf[uu], self.streaming_load)
                 # warp-aggregated reservation
                 cnt = cutlass.Int32(C.popc(M))
                 inc = C.warp_incl_scan_add(cnt, lane)
@@ -3091,7 +3149,11 @@ _COMPILE_CACHE = {}
 
 
 def get_compiled(
-    tpl: tuple, options_extra: str = "", hint_free: bool = False, prefill: bool = False
+    tpl: tuple,
+    options_extra: str = "",
+    hint_free: bool = False,
+    prefill: bool = False,
+    streaming_load: bool = False,
 ) -> Any:
     """Compile (or fetch) the gvr_main variant for constexpr tuple
     tpl = (BLK, U, MINB, NBS, KPT, SPLIT, TSHG)                — legacy, or
@@ -3103,8 +3165,17 @@ def get_compiled(
     (next_n=1, cr_shift=0) but has a distinct prologue, so it MUST be part of
     the cache key — otherwise a DSv3.2 decode varlen engine and the prefill
     engine collide on the same tuple. The prefill compile also retypes the
-    pre_idx ABI slot to a 1-D align-4 fake (it carries 4B-aligned row_ends)."""
-    key = (tuple(tpl), options_extra, bool(hint_free), bool(prefill))
+    pre_idx ABI slot to a 1-D align-4 fake (it carries 4B-aligned row_ends).
+
+    ``streaming_load`` is a separately cache-keyed long-row specialization; it
+    defaults off so every existing caller keeps byte-identical code generation."""
+    key = (
+        tuple(tpl),
+        options_extra,
+        bool(hint_free),
+        bool(prefill),
+        bool(streaming_load),
+    )
     hit = _COMPILE_CACHE.get(key)
     if hit is not None:
         return hit
@@ -3113,7 +3184,15 @@ def get_compiled(
     if len(tpl) == 7:
         blk, u, minb, nbs, kpt, split, tshg = tpl
         kern = GvrMainKernel(
-            blk, u, minb, nbs, kpt, bool(split), bool(tshg), hint_free=bool(hint_free)
+            blk,
+            u,
+            minb,
+            nbs,
+            kpt,
+            bool(split),
+            bool(tshg),
+            hint_free=bool(hint_free),
+            streaming_load=bool(streaming_load),
         )
     else:
         blk, u, minb, nbs, kpt, split, tshg, next_n, cr_shift, r_const = tpl
@@ -3131,6 +3210,7 @@ def get_compiled(
             r_const=r_const,
             hint_free=bool(hint_free),
             prefill=bool(prefill),
+            streaming_load=bool(streaming_load),
         )
     r0, c0 = cute.sym_int(), cute.sym_int()
     r1, c1 = cute.sym_int(), cute.sym_int()

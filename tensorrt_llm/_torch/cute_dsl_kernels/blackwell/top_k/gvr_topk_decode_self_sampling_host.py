@@ -141,6 +141,20 @@ def _long_main_config(
     return None
 
 
+def _use_streaming_loads(b: int, n: int, k: int, num_sms: int, sm_version: int) -> bool:
+    """Select the measured B200 long-row cache policy specialization."""
+    if (
+        sm_version != 100
+        or num_sms != 148
+        or k not in (512, 1024)
+        or not _LONG_STREAMING_MIN_N <= n <= _LONG_STREAMING_MAX_N
+    ):
+        return False
+    # B=256 benefits across both production long-row envelopes. B=128 only
+    # benefits at the 1M envelope; enabling it at 512K regresses cold tails.
+    return b == 256 or (b == 128 and n >= _LONG_STREAMING_1M_MIN_N)
+
+
 def _long_varlen_sampling(
     b: int,
     n: int,
@@ -990,7 +1004,22 @@ def _varlen_launcher(
     # TSHG (tpl[6]) is dead under varlen (the ctor compiles the TSH
     # machinery in whenever SPLIT); normalize it out of the compile key so
     # row counts differing only in that slot share one engine
-    fn = dev.get_compiled(tpl[:6] + (False,) + (next_n, cr_shift, r_const), hint_free=True)
+    streaming_load = (
+        next_n == 1
+        and cr == 4
+        and _use_streaming_loads(
+            num_rows,
+            n_kernel,
+            k,
+            num_sms,
+            sm_version,
+        )
+    )
+    fn = dev.get_compiled(
+        tpl[:6] + (False,) + (next_n, cr_shift, r_const),
+        hint_free=True,
+        streaming_load=streaming_load,
+    )
     big = num_rows * r_const <= 148
     aim_base = (
         ((4 * k if k >= 1024 else 2 * k) if r_const == 1 else 2 * k)
@@ -1891,11 +1920,11 @@ def warmup_varlen(
     if not req_rows:
         return
     # BAND-AWARE enumeration: the engine compile key depends on the plan's
-    # constexpr tuple (+ r_const family axis), NOT on the exact row count, so
-    # warming ONE representative row per distinct engine key covers every row
-    # count up to the largest request. Representatives are the first row of
-    # each band, which keeps the warmup allocation bounded (~a few hundred
-    # rows) even when CUDA-graph batch lists reach thousands of rows.
+    # constexpr tuple (+ r_const and streaming-load policy axes), NOT on the
+    # exact row count, so warming ONE representative row per distinct engine
+    # key covers every row count up to the largest request. Representatives
+    # are the first row of each band, which keeps the warmup allocation bounded
+    # (~a few hundred rows) even when CUDA-graph batch lists reach thousands.
     n_env_c = max(1, int(max_seq_len) // int(compress_ratio))
     npad_c = (n_env_c + 63) // 64 * 64 if row_stride is None else int(row_stride)
     seen_keys = set()
@@ -1925,7 +1954,23 @@ def warmup_varlen(
                 num_sms=num_sms,
                 sm_version=sm_version,
             )
-            ekey = ("main", tuple(p["tpl"][:6]), p["rt"]["R"])
+            streaming_load = (
+                nn == 1
+                and int(compress_ratio) == 4
+                and _use_streaming_loads(
+                    r,
+                    min(n_env_c, npad_c),
+                    int(top_k),
+                    num_sms,
+                    sm_version,
+                )
+            )
+            ekey = (
+                "main",
+                tuple(p["tpl"][:6]),
+                p["rt"]["R"],
+                streaming_load,
+            )
         if ekey not in seen_keys:
             seen_keys.add(ekey)
             rows_list.append(r)

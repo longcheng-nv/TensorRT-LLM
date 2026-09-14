@@ -847,23 +847,25 @@ def test_selfsampling_long_varlen_launch_policy(monkeypatch) -> None:
     class FakeDevice:
         def __init__(self) -> None:
             self.templates = []
+            self.kwargs = []
 
         def get_compiled(self, template, **kwargs):
             self.templates.append(tuple(template))
+            self.kwargs.append(kwargs)
             return object()
 
     device = FakeDevice()
     monkeypatch.setattr(ss_host, "_device", lambda: device)
     monkeypatch.setattr(ss_host, "_VARLEN_CACHE", {})
     cases = (
-        (128, 131075, 512, (1024, 4, 1), (1024, 32)),
-        (128, 262127, 512, (1024, 4, 1), (2560, 16)),
-        (256, 262127, 512, (512, 4, 2), (1536, 16)),
-        (256, 131075, 1024, (512, 4, 2), (2048, 64)),
-        (512, 131075, 1024, (512, 4, 2), (1408, 64)),
-        (1024, 262127, 1024, (1024, 4, 1), (1408, 64)),
+        (128, 131075, 512, (1024, 4, 1), (1024, 32), False),
+        (128, 262127, 512, (1024, 4, 1), (2560, 16), True),
+        (256, 262127, 512, (512, 4, 2), (1536, 16), True),
+        (256, 131075, 1024, (512, 4, 2), (2048, 64), True),
+        (512, 131075, 1024, (512, 4, 2), (1408, 64), False),
+        (1024, 262127, 1024, (1024, 4, 1), (1408, 64), False),
     )
-    for rows, n, top_k, template, sampling in cases:
+    for rows, n, top_k, template, sampling, streaming_load in cases:
         npad = (n + 63) // 64 * 64
         launcher = ss_host._varlen_launcher(
             rows,
@@ -877,7 +879,25 @@ def test_selfsampling_long_varlen_launch_policy(monkeypatch) -> None:
         )
         assert launcher[0] == "main"
         assert device.templates[-1][:3] == template
+        assert device.kwargs[-1]["streaming_load"] is streaming_load
         assert launcher[3][:2] == sampling
+
+    # The cache policy was validated for the DSv4 single-step decode contract,
+    # not CR1 or multi-token rows with the same physical tensor shape.
+    for next_n, compress_ratio in ((1, 1), (2, 4)):
+        n = 262127
+        npad = (n + 63) // 64 * 64
+        ss_host._varlen_launcher(
+            128,
+            npad,
+            512,
+            n,
+            next_n,
+            compress_ratio,
+            num_sms=148,
+            sm_version=100,
+        )
+        assert device.kwargs[-1]["streaming_load"] is False
 
     sm103_cases = (
         (256, 131075, 1024, (512, 4, 2), (2048, 64)),
@@ -899,6 +919,7 @@ def test_selfsampling_long_varlen_launch_policy(monkeypatch) -> None:
         )
         assert launcher[0] == "main"
         assert device.templates[-1][:3] == template
+        assert device.kwargs[-1]["streaming_load"] is False
         assert launcher[3][:2] == sampling
 
     assert ss_host._long_varlen_sampling(256, 262127, 512, 148, 103, 768, 32) == (
@@ -914,6 +935,9 @@ def test_selfsampling_long_varlen_launch_policy(monkeypatch) -> None:
         32,
     )
     assert ss_host._long_varlen_sampling(128, 261887, 512, 148, 100, 1024, 32) == (1024, 32)
+    assert not ss_host._use_streaming_loads(256, 262127, 2048, 148, 100)
+    assert not ss_host._use_streaming_loads(256, 262127, 512, 160, 100)
+    assert not ss_host._use_streaming_loads(256, 262127, 512, 148, 103)
 
 
 @pytest.mark.skipif(getSMVersion() != 103, reason="requires an SM103 GPU")
