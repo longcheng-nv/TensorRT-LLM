@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parent
 COPYRIGHT = (
     "Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. SPDX-License-Identifier: Apache-2.0"
 )
-ARMS = ["sglang", "flashinfer", "radix_cuda", "deepselect"]
+ARMS = ["sglang", "flashinfer", "radix_cuda", "deepselect", "hpc_ops"]
 MODELS = {
     "flash": "DeepSeek-V4 Flash · K=512",
     "pro": "DeepSeek-V4 Pro · K=1024",
@@ -37,6 +37,7 @@ LABELS = {
     "flashinfer": "FlashInfer 0.6.14",
     "radix_cuda": "TensorRT-LLM radix CUDA",
     "deepselect": "DeepSelect FP32",
+    "hpc_ops": "HPC-ops FP32",
 }
 COLORS = {
     "gvr_v2": "#579600",
@@ -46,6 +47,7 @@ COLORS = {
     "flashinfer": "#007e91",
     "radix_cuda": "#64748b",
     "deepselect": "#d97416",
+    "hpc_ops": "#bd426b",
 }
 CROSS_CAMPAIGN = set(ARMS)
 REACHABLE_BW = 6.912116
@@ -116,7 +118,9 @@ def _comparison(rows: list[dict]) -> dict:
             "cases": len(matched),
             "layers": len({r["layer"] for r in matched}),
             "latency_relative_to_v2": {
-                arm: _stats(matched, arm)["geomean"] for arm in COMPARISON_ARMS
+                arm: _stats(matched, arm)["geomean"]
+                for arm in COMPARISON_ARMS
+                if not (model == "pro" and arm == "hpc_ops")
             },
         }
     return result
@@ -134,14 +138,18 @@ def _overview(rows: list[dict]) -> None:
         "FlashInfer",
         "TRT-LLM radix CUDA",
         "DeepSelect FP32",
+        "HPC-ops FP32",
     ]
-    positions = [7.1, 5.8, 4.8, 3.5, 2.5, 1.5, 0.5]
+    positions = [8.1, 6.8, 5.8, 4.5, 3.5, 2.5, 1.5, 0.5]
     for ax, (model, title) in zip(axes, MODELS.items()):
         panel = data[model]
-        ax.axhspan(6.55, 7.65, color="#edf5df", zorder=0)
+        ax.axhspan(7.55, 8.65, color="#edf5df", zorder=0)
         ax.axvline(1, color="#579600", alpha=0.55, linewidth=1, linestyle=(0, (2, 3)))
         for y, arm in zip(positions, COMPARISON_ARMS):
-            value = panel["latency_relative_to_v2"][arm]
+            value = panel["latency_relative_to_v2"].get(arm)
+            if value is None:
+                ax.text(0.15, y, "Not supported", fontsize=10, color="#88939f", va="center")
+                continue
             ax.barh(y, value, height=0.63, color=COLORS[arm], zorder=3)
             ax.text(
                 value + 0.10,
@@ -162,7 +170,7 @@ def _overview(rows: list[dict]) -> None:
             fontsize=9.5,
             color="#52616f",
         )
-        ax.set(xlim=(0, 5.95), ylim=(-0.1, 7.7), xticks=[0, 1, 2, 3, 4, 5])
+        ax.set(xlim=(0, 5.95), ylim=(-0.1, 8.7), xticks=[0, 1, 2, 3, 4, 5])
         ax.xaxis.set_major_formatter(FuncFormatter(lambda value, _: f"{value:g}×"))
         ax.set_yticks(positions, labels, fontsize=10.5)
         ax.tick_params(axis="both", length=0, pad=8)
@@ -203,7 +211,7 @@ def _overview(rows: list[dict]) -> None:
     fig.text(
         0.035,
         0.032,
-        "SGLang includes plan + transform.",
+        "SGLang includes plan + transform. HPC-ops supports K=512 and K=2048.",
         fontsize=9,
         color="#52616f",
     )
@@ -345,7 +353,7 @@ def _candidate_work() -> None:
     """Illustrate tail counts and candidate amplification without measured data."""
     fig = plt.figure(figsize=(16.7, 7.5), facecolor="white")
     ink, muted = "#17202b", "#52616f"
-    green, blue, orange, rose = "#447a00", "#386781", "#b56b0b", "#ad4b70"
+    green, orange, rose = "#447a00", "#b56b0b", "#ad4b70"
     canvas = fig.add_axes((0, 0, 1, 1))
     canvas.set(xlim=(0, 1), ylim=(0, 1))
     canvas.axis("off")
@@ -379,56 +387,79 @@ def _candidate_work() -> None:
     )
 
     # One finite row defines both panels, including the left-continuous tie jump.
-    scores = np.array([0.8, 1.4, 2.2, 3.0, 3.8, 4.6, 5.4, 6.1, 6.8, 7.5, 8.2, 8.8, 9.4])
-    multiplicities = np.array([60, 40, 45, 40, 25, 20, 30, 35, 35, 58, 27, 20, 25])
+    scores = np.array([1.4, 3.0, 5.8, 7.5, 9.0])
+    multiplicities = np.array([70, 80, 70, 70, 60])
     row = np.repeat(scores, multiplicities)
-    k, q, tau = 100, 5.0, 7.5
+    k, q, tau = 100, 4.4, 7.5
     admitted = int(np.count_nonzero(row >= q))
     at_boundary = int(np.count_nonzero(row >= tau))
     above_boundary = int(np.count_nonzero(row > tau))
     excess = at_boundary - k
     shell = admitted - at_boundary
 
-    ax = fig.add_axes((0.089, 0.32, 0.379, 0.425), facecolor="#f8fafc")
-    ax.set(xlim=(0, 10), ylim=(0, 4.85))
-    ax.axhspan(1, 3.5, color="#eaf3de", zorder=0)
-    for level in (1, 3.5):
+    ax = fig.add_axes((0.089, 0.32, 0.335, 0.425), facecolor="#f8fafc")
+    ax.set(xlim=(0, 10), ylim=(0, 3.9))
+    ax.axhspan(1, 2.8, color="#edf4e5", zorder=0)
+    for level in (1, 2.8):
         ax.axhline(level, color="#adc096", linewidth=1, linestyle=(0, (4, 4)))
     thresholds = np.r_[0, scores, 10]
     counts = np.array([np.count_nonzero(row >= t) / k for t in thresholds])
     ax.step(thresholds, counts, where="pre", color=ink, linewidth=2.3, zorder=3)
-    boundaries = np.array([2.6, 3.4, 4.2, 5.8, 6.4, 7.1, 7.9])
-    populations = np.array([np.count_nonzero(row >= t) / k for t in boundaries])
-    ax.scatter(boundaries, populations, s=32, color=blue, edgecolor="white", linewidth=1, zorder=4)
-    ax.text(9.7, 4.3, "Over capacity", color=muted, fontsize=11.5, ha="right")
-    ax.text(0.25, 1.25, "Feasible admission", color=green, fontsize=11.5)
-    ax.text(0.25, 0.28, "Too few candidates", color=orange, fontsize=11.5)
+    ax.text(9.7, 3.28, "Over capacity", color=muted, fontsize=11.5, ha="right")
+    ax.text(0.25, 0.25, "Too few candidates", color=muted, fontsize=11.5)
     ax.vlines(q, 0, admitted / k, color=green, linewidth=1.2, linestyles=(0, (3, 3)))
     ax.scatter([q], [admitted / k], s=110, color=green, edgecolor="white", linewidth=1.4, zorder=5)
-    ax.annotate(
-        rf"$C(q)={admitted / k:.1f}K$",
-        (q, admitted / k),
-        (5.1, 3.0),
+    ax.text(
+        4.6,
+        2.31,
+        r"$C_p=C(q)$",
         color=green,
-        fontsize=14,
+        fontsize=15,
         ha="center",
-        bbox={"boxstyle": "round,pad=0.3", "facecolor": "white", "edgecolor": "#c6d9b2"},
-        arrowprops={"arrowstyle": "-", "color": green, "lw": 1.2},
     )
     ax.vlines(tau, 0, at_boundary / k, color=rose, linewidth=1.1, linestyles=(0, (3, 3)))
-    ax.plot([tau, tau], [above_boundary / k, at_boundary / k], color=rose, linewidth=3, zorder=5)
     ax.scatter([tau], [at_boundary / k], s=42, color=rose, zorder=6)
     ax.scatter([tau], [above_boundary / k], s=35, facecolor="white", edgecolor=rose, zorder=6)
-    ax.annotate(
-        rf"$C(\tau)={at_boundary / k:.1f}K$",
-        (tau, at_boundary / k),
-        (8.1, 2.0),
+    ax.text(
+        7.6,
+        1.56,
+        r"$C(\tau)$",
         ha="center",
         fontsize=12.5,
         color=rose,
-        arrowprops={"arrowstyle": "-", "color": rose, "lw": 1.1},
     )
-    ax.set_yticks([0, 1, 3.5], ["0", r"$K$", r"$B_r$"])
+    # Brackets split C(q), not the entire tie jump: K cuts through that jump.
+    for start, stop, color, symbol in (
+        (0, 1, green, r"$K$"),
+        (1, at_boundary / k, rose, r"$E$"),
+        (at_boundary / k, admitted / k, orange, r"$D$"),
+    ):
+        ax.plot(
+            [10.14, 10.38, 10.38, 10.14],
+            [start, start, stop, stop],
+            color=color,
+            linewidth=1.8,
+            clip_on=False,
+        )
+        ax.text(
+            10.72,
+            (start + stop) / 2,
+            symbol,
+            color=color,
+            fontsize=16,
+            va="center",
+            clip_on=False,
+        )
+    ax.hlines(
+        [at_boundary / k, admitted / k],
+        [tau, q],
+        [10.14, 10.14],
+        colors=[rose, green],
+        linewidth=0.9,
+        linestyles=(0, (3, 3)),
+        clip_on=False,
+    )
+    ax.set_yticks([0, 1, 2.8], ["0", r"$K$", r"$B_r$"])
     ax.set_xticks([q, tau], [r"$q$", r"$\tau$"])
     for tick, color in zip(ax.get_xticklabels(), (green, rose)):
         tick.set_color(color)
@@ -437,18 +468,24 @@ def _candidate_work() -> None:
     ax.tick_params(length=0, pad=7, labelsize=13)
     ax.spines["left"].set_color("#cbd5e1")
     ax.spines["bottom"].set_color("#cbd5e1")
-    fig.text(0.089, 0.223, "●  Exact counts from one classification", fontsize=11.5, color=blue)
+    fig.text(
+        0.089,
+        0.223,
+        r"Safe admission:  $K\leq C(q)\leq B_r$",
+        fontsize=12,
+        color=green,
+    )
 
     fig.text(0.55, 0.732, "CANDIDATE AMPLIFICATION", fontsize=10.5, weight="bold", color=muted)
-    fig.text(0.55, 0.66, f"{admitted / k:.1f}×", fontsize=33, weight="bold", color=green)
-    fig.text(0.652, 0.677, r"$C(q)\,/\,K$", fontsize=19, color=ink)
+    fig.text(0.55, 0.666, r"$C_p\,/\,K$", fontsize=26, color=green)
+    fig.text(0.665, 0.678, "Candidates per required winner", fontsize=12.5, color=ink)
     right = fig.add_axes((0.55, 0.564, 0.392, 0.072))
     right.set(xlim=(0, admitted), ylim=(0, 1))
     right.axis("off")
     segments = [
         (k, "#deedc8", green, r"$K$", "Required output"),
-        (excess, "#f3dce5", rose, r"$E$", r"Excess ties at $\tau$"),
-        (shell, "#fae6c7", orange, r"$D$", r"Shell: $q\leq x<\tau$"),
+        (excess, "#f3dce5", rose, r"$E$", r"Excess boundary ties: $C(\tau)-K$"),
+        (shell, "#fae6c7", orange, r"$D$", r"Boundary shell: $q\leq x<\tau$"),
     ]
     left = 0
     for i, (width, fill, color, symbol, label) in enumerate(segments):
@@ -461,16 +498,6 @@ def _candidate_work() -> None:
         y = 0.499 - i * 0.079
         fig.text(0.555, y, symbol, fontsize=18, color=color, va="center")
         fig.text(0.589, y, label, fontsize=13, color=ink, va="center")
-        fig.text(
-            0.94,
-            y,
-            f"{width / k:.1f}K",
-            fontsize=13,
-            color=color,
-            ha="right",
-            va="center",
-            weight="bold",
-        )
         canvas.plot([0.55, 0.943], [y - 0.037, y - 0.037], color="#e1e7ec", lw=0.8)
         left += width
     fig.text(0.746, 0.24, r"$C_p=C(q)=K+E+D(q,\tau)$", fontsize=19, ha="center", color=ink)
@@ -835,7 +862,7 @@ def _integration() -> None:
 
 
 def _matching(rows: list[dict], model: str) -> list[dict]:
-    required = ["gvr_v2", *ARMS]
+    required = ["gvr_v2", *ARMS] if model != "pro" else ["gvr_v2", *ARMS[:-1]]
     return [
         r for r in rows if r["model"] == model and all(r[a + "_us"] is not None for a in required)
     ]
@@ -866,7 +893,7 @@ def _legend(fig: plt.Figure) -> None:
     fig.legend(
         handles=handles,
         loc="lower center",
-        ncol=5,
+        ncol=3,
         frameon=False,
         bbox_to_anchor=(0.5, 0.01),
         fontsize=10,
@@ -880,6 +907,8 @@ def _latency(rows: list[dict]) -> None:
         for j, batch in enumerate((1, 1024)):
             ax = axes[i, j]
             for arm in ["gvr_v2", *ARMS]:
+                if model == "pro" and arm == "hpc_ops":
+                    continue
                 x, y = _line_data(matched, arm, batch)
                 ax.plot(
                     x,
@@ -915,6 +944,8 @@ def _roofline_reachable_rates(rows: list[dict]) -> dict:
         k = matched[0]["k"]
         by_model[model] = {}
         for arm in ["gvr_v2", *ARMS]:
+            if model == "pro" and arm == "hpc_ops":
+                continue
             widths, times = _line_data(matched, arm, 1024)
             rates = []
             for n, us in zip(widths, times):
@@ -1012,6 +1043,8 @@ def _roofline(rows: list[dict]) -> None:
         ax.fill_between(xroof, xroof * bw, 1.95, color="#f2f5f7", zorder=0)
         ax.plot(xroof, xroof * bw, color="#273746", linestyle=(0, (2, 2)), linewidth=1.5)
         for arm in [*ARMS, "gvr_v2"]:
+            if model == "pro" and arm == "hpc_ops":
+                continue
             widths, times = _line_data(matched, arm, 1024)
             x = [n / (4 * (n + k)) for n in widths]
             y = [1024 * n / (us * 1e6) for n, us in zip(widths, times)]
@@ -1082,7 +1115,7 @@ def _roofline(rows: list[dict]) -> None:
     fig.legend(
         handles=handles,
         loc="lower center",
-        ncol=5,
+        ncol=3,
         frameon=False,
         bbox_to_anchor=(0.53, 0.077),
         fontsize=10,
