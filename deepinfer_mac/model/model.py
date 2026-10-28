@@ -807,18 +807,17 @@ class Block:
         return y.astype(x.dtype)
 
     def __call__(self, x, positions, pre_mix, st: SeqState, ring: Ring, sh: Shared, image_mask=None, start: int = 0, floor: int = 0):
-        eps = self.a.norm_eps
-        residual = x
-        attn_pre, attn_post, attn_comb = self.hc_mixes(x, "attn")
-        h = rms_norm(self.hc_pre(x, pre_mix), self.attn_norm, eps)
+        # opt-iter2: the elementwise chains around attention and the MoE are each one compiled
+        # graph (mHC mixes + Sinkhorn + residual pre-mix + RMSNorm, and hc_post + the next chain),
+        # instead of 7 separate compiled calls per layer -- same math, same op order.
+        eps = mx.array(self.a.norm_eps, dtype=mx.float32)
+        hc = self.hc
+        h, attn_pre, attn_post, attn_comb = _block_pre_attn_c(x, pre_mix, hc["attn_fn"], hc["attn_scale"], hc["attn_base"], self.attn_norm, eps)
         h = self.attn(h, positions, st, ring, sh, start, floor)
-        x = self.hc_post(h, residual, attn_post, attn_comb)
-
-        residual = x
-        ffn_pre, ffn_post, ffn_comb = self.hc_mixes(x, "ffn")
-        h = rms_norm(self.hc_pre(x, attn_pre), self.ffn_norm, eps)
+        x, h, ffn_pre, ffn_post, ffn_comb = _block_post_attn_pre_ffn_c(
+            h, x, attn_post, attn_comb, attn_pre, hc["ffn_fn"], hc["ffn_scale"], hc["ffn_base"], self.ffn_norm, eps)
         h = self.ffn(h, image_mask)
-        x = self.hc_post(h, residual, ffn_post, ffn_comb)
+        x = self.hc_post(h, x, ffn_post, ffn_comb)
         return x, ffn_pre
 
 
@@ -835,6 +834,35 @@ def _hc_pre_c(x, pre):
 
 
 _hc_post_c = mx.compile(Block._hc_post)
+
+
+def _rms_f32(x, w, eps):
+    xf = x.astype(mx.float32)
+    y = xf * mx.rsqrt(mx.square(xf).mean(-1, keepdims=True) + eps)
+    return (w.astype(mx.float32) * y).astype(x.dtype)
+
+
+def _hc_mixes_f(x, fn, sc, base, eps):
+    xf = x.reshape(x.shape[0], -1).astype(mx.float32)
+    rs = mx.rsqrt(mx.square(xf).mean(-1, keepdims=True) + eps)
+    return ops._hc_split_sinkhorn((xf @ fn.T) * rs, sc, base, 4, 20, 1e-6)
+
+
+@mx.compile
+def _block_pre_attn_c(x, pre_mix, fn, sc, base, norm_w, eps):
+    """hc_mixes(attn) + hc_pre(pre_mix) + attn RMSNorm as one graph."""
+    pre, post, comb = _hc_mixes_f(x, fn, sc, base, eps)
+    h = (pre_mix[..., None] * x.astype(mx.float32)).sum(axis=1).astype(x.dtype)
+    return _rms_f32(h, norm_w, eps), pre, post, comb
+
+
+@mx.compile
+def _block_post_attn_pre_ffn_c(h, residual, attn_post, attn_comb, attn_pre, fn, sc, base, norm_w, eps):
+    """hc_post(attn) + hc_mixes(ffn) + hc_pre(attn_pre) + ffn RMSNorm as one graph."""
+    x = Block._hc_post(h, residual, attn_post, attn_comb)
+    pre, post, comb = _hc_mixes_f(x, fn, sc, base, eps)
+    hf = (attn_pre[..., None] * x.astype(mx.float32)).sum(axis=1).astype(x.dtype)
+    return x, _rms_f32(hf, norm_w, eps), pre, post, comb
 
 
 # ------------------------------------------------------------------------------ the model
