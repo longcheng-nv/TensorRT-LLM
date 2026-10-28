@@ -577,7 +577,7 @@ class MoE:
     OVERLAP = True  # decode: compute resident experts while the misses load
     LOOKAHEAD = False
     LOOKAHEAD_K = 0  # 0 = all predicted experts
-    SPEC_K = 3  # idle-window speculation: guess k next-layer experts, read after this layer's misses (0 = off)
+    SPEC_K = 4  # idle-window speculation: guess k next-layer experts, read after this layer's misses (0 = off); opt-iter3: 3 -> 4 (87% precision, +10% decode)
     SKIP_MISS_BELOW = 0.0  # opt-in, see _prune
     PREFILL_TOPK = 0  # opt-in, see _prune
     PREFILL_KEEP = 140  # measured no gain when SSD-bound; flash-moe saw speculative routing cost 38%
