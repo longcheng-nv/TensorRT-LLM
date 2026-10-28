@@ -95,13 +95,18 @@ def _session() -> requests.Session:
 # Sources, in preference order. ModelScope hosts byte-identical shards (same size and sha256 for
 # all 48) on a CDN in China; from there it delivers full line speed without a proxy, where the
 # Hugging Face CDN can drop under 1 MB/s.
-ENDPOINTS = ["https://www.modelscope.cn", "https://huggingface.co"]
+ENDPOINTS = ["https://huggingface.co", "https://huggingface.co"]
+# Local deployment note (2026-10-27): ModelScope's direct-DNS path (223.5.5.5) times out on this
+# network, so both slots point at Hugging Face. The revision is pinned to the commit whose shard
+# headers were verified against tensor_index.json, so a repo update mid-conversion cannot shift
+# byte offsets under us (the converter has no checksums).
+REVISION = "1bae0e1088993b9b82de08f59de5be5a34e42170"
 
 
 def url(path: str, repo: str = REPO, endpoint: str = ENDPOINT) -> str:
     if "modelscope" in endpoint:
         return f"{endpoint}/models/{repo}/resolve/master/{path}"
-    return f"{endpoint}/{repo}/resolve/main/{path}"
+    return f"{endpoint}/{repo}/resolve/{REVISION}/{path}"
 
 
 PIECE = 32 << 20  # one HTTP request

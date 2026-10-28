@@ -100,6 +100,13 @@ def create_app(llm: LLM) -> FastAPI:
     app = FastAPI(title="DeepInfer-Mac", version="0.1.0")
     tok = Tokenizer.from_file(str(llm.root / "tokenizer.json"))
     gate = threading.Lock()
+    # Local fix (2026-10-28): MLX streams are bound to the thread that created them, so a decode
+    # thread spawned per request cannot touch arrays (KV snapshots for prefix reuse) made by the
+    # previous request's thread -> "There is no Stream(gpu, N) in current thread" on turn 2 of a
+    # conversation. Run every request's engine work on one persistent worker thread instead.
+    from concurrent.futures import ThreadPoolExecutor
+
+    engine_worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="deepinfer-engine")
 
     @app.exception_handler(ConversionError)
     async def conversion_error(_req: Request, exc: ConversionError) -> Response:
@@ -128,7 +135,7 @@ def create_app(llm: LLM) -> FastAPI:
                 reason = InferenceFinishReason.Stop if last == EOS_ID or n < sp.max_tokens else InferenceFinishReason.Length
                 loop.call_soon_threadsafe(q.put_nowait, ("end", reason))
 
-        threading.Thread(target=run, daemon=True).start()
+        engine_worker.submit(run)
         try:
             while True:
                 kind, val = await q.get()
