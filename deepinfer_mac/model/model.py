@@ -578,6 +578,7 @@ class MoE:
     LOOKAHEAD = False
     LOOKAHEAD_K = 0  # 0 = all predicted experts
     SPEC_K = 4  # idle-window speculation: guess k next-layer experts, read after this layer's misses (0 = off); opt-iter3: 3 -> 4 (87% precision, +10% decode)
+    SPEC_K2 = 0  # opt-iter4: second-level speculation, k experts of layer l+2 (0 = off); measured: any k>0 adds bytes and SSD wait on this machine
     SKIP_MISS_BELOW = 0.0  # opt-in, see _prune
     PREFILL_TOPK = 0  # opt-in, see _prune
     PREFILL_KEEP = 140  # measured no gain when SSD-bound; flash-moe saw speculative routing cost 38%
@@ -642,9 +643,11 @@ class MoE:
         if x.shape[0] == 1 and self.OVERLAP:
             self.experts.prefetch(self.key, ids)
             spec = getattr(self, "_spec", None)
-            if spec is not None:  # after this layer's demand reads, never ahead of them
+            if spec:  # after this layer's demand reads, never ahead of them
                 self._spec = None
-                self.experts.speculate(spec[0], spec[1], [self.experts.inflight.get((self.key, e)) for e in ids])
+                after = [self.experts.inflight.get((self.key, e)) for e in ids]
+                for skey, sids in spec:
+                    self.experts.speculate(skey, sids, after)
             hits = [e for e in ids if self.experts.resident(self.key, e)]
             groups = [g for g in (hits, [e for e in ids if e not in hits]) if g]
         elif x.shape[0] == 1:
@@ -711,9 +714,19 @@ class MoE:
             # the next layer's router (its exact scoring) on this layer's input; one sync for both
             sc = mx.sqrt(mx.logaddexp(x[-1:].astype(mx.float32) @ nxt.gate_w.T, 0.0)) + nxt.bias
             pred = mx.argpartition(-sc, kth=self.SPEC_K - 1, axis=-1)[:, : self.SPEC_K]
-            mx.eval(idx, pred)  # one host sync for both (was two)
-            idx_np, pred_np = np.array(idx), np.array(pred)
-            self._spec = (nxt.key, pred_np[0].tolist())
+            # opt-iter4: second-level speculation -- layer l+2's router on the same input is still
+            # 92% precise for its top-2 (measured), so two more experts per layer can be read while
+            # the SSD would otherwise idle. One host sync for everything.
+            nxt2 = nxt.next_moe if self.SPEC_K2 else None
+            if nxt2 is not None:
+                sc2 = mx.sqrt(mx.logaddexp(x[-1:].astype(mx.float32) @ nxt2.gate_w.T, 0.0)) + nxt2.bias
+                pred2 = mx.argpartition(-sc2, kth=self.SPEC_K2 - 1, axis=-1)[:, : self.SPEC_K2]
+                mx.eval(idx, pred, pred2)
+                self._spec = [(nxt.key, np.array(pred)[0].tolist()), (nxt2.key, np.array(pred2)[0].tolist())]
+            else:
+                mx.eval(idx, pred)  # one host sync for both (was two)
+                self._spec = [(nxt.key, np.array(pred)[0].tolist())]
+            idx_np = np.array(idx)
         else:
             idx_np = np.array(idx)  # the one host sync per layer: which experts to fetch
         if hasattr(self.experts, "get_slots"):
