@@ -1,0 +1,4 @@
+interface:
+  display_name: "ISC Paper Proofreader"
+  short_description: "Proofread ISC papers for clear expert-authored HPC prose"
+  default_prompt: "Proofread this ISC High Performance paper for technical clarity, evidence alignment, and natural expert prose while preserving claims, citations, equations, and LaTeX."
