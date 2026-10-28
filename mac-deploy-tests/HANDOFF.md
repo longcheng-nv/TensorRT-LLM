@@ -24,6 +24,8 @@
 | 服务 | `python -m deepinfer_mac serve --cache-gb 9 --port 8000` 常驻 |
 | 补充验证 `followup.sh` | 全部 PASS：API 28/28、离线 5/5、结构化 6/6（含 thinking）、quant_damage N=2 0.989、开关对比见 `logs/tune/results.tsv` |
 
+**后续分析（10-28）**：`PRUNING_ANALYSIS.md`（裁剪不可能达 20×：带宽下限 40 ms/token、99.5% 路由质量需 220/384 专家）；`ROOFLINE_OPT.md`（无损配置优化：缓存 18 GiB + SPEC_K 3，ISL=1024 解码 3.15 tok/s = roofline 68%，prefill ≈100%；服务现以 `--cache-gb 18 --spec-k 3` 运行）。
+
 **最终报告：`dsv41-mac-tests/REPORT.md`。任务已完成；后续可选：向上游提 server.py 线程补丁 PR、尝试更大缓存或 `--moe-topk 4`。**
 
 首轮 4 个 FAIL 的定性：

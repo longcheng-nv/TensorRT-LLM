@@ -1,0 +1,10 @@
+total 521 ms/token (sync after every part)
+  MOE total                        368.4 ms/token
+  moe.experts(get+gather_qmm)      292.7 ms/token
+  ATTN total                       143.5 ms/token
+  attn.proj                         68.9 ms/token
+  attn.core                         65.0 ms/token
+  moe.route+shared                  62.7 ms/token
+  attn.indexer                       5.5 ms/token
+  attn.compressor                    1.0 ms/token
+  SSD wait 234 ms/token, 2.47 GB/token, hit 0.45

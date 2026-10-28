@@ -1,0 +1,2 @@
+{"round": 0, "prompt_tokens": 1024, "reused_tokens": 0, "prefill_s": 16.24, "prefill_tok_s": 63.1, "output_tokens": 32, "decode_s": 10.14, "decode_tok_s": 3.16, "expert_hit_rate": 0.611, "expert_GB_read": 105.23, "wall_s": 26.4}
+{"round": 1, "prompt_tokens": 1024, "reused_tokens": 0, "prefill_s": 14.82, "prefill_tok_s": 69.1, "output_tokens": 32, "decode_s": 10.23, "decode_tok_s": 3.13, "expert_hit_rate": 0.622, "expert_GB_read": 100.97, "wall_s": 25.0}

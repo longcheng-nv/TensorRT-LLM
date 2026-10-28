@@ -1,0 +1,3 @@
+6 experts/fetch: 17.4 ms per fetch, 5.34 GB/s
+12 experts/fetch: 29.0 ms per fetch, 6.40 GB/s
+32 experts/fetch: 75.7 ms per fetch, 6.55 GB/s
