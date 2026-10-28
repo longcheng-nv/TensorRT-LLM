@@ -441,7 +441,9 @@ class Attention:
         idx = mx.where(ok & (idx < visible[:, None]), idx, -1).astype(mx.int32)
         if k < a.index_topk:  # fixed width keeps the attention kernel's shapes constant
             idx = mx.concatenate([idx, mx.full((n, a.index_topk - k), -1, dtype=mx.int32)], axis=-1)
-        mx.eval(idx, *(() if cand is None else (cand,)))
+        if n > 1:  # prefill: bound the live [rows, heads, T] score tensors per query block
+            mx.eval(idx, *(() if cand is None else (cand,)))
+        # decode (n == 1): stay lazy -- the sync here only serialized the GPU pipeline per index layer
         return idx, cand
 
     # -- forward
@@ -709,7 +711,8 @@ class MoE:
             # the next layer's router (its exact scoring) on this layer's input; one sync for both
             sc = mx.sqrt(mx.logaddexp(x[-1:].astype(mx.float32) @ nxt.gate_w.T, 0.0)) + nxt.bias
             pred = mx.argpartition(-sc, kth=self.SPEC_K - 1, axis=-1)[:, : self.SPEC_K]
-            idx_np, pred_np = (np.array(a) for a in (idx, pred))
+            mx.eval(idx, pred)  # one host sync for both (was two)
+            idx_np, pred_np = np.array(idx), np.array(pred)
             self._spec = (nxt.key, pred_np[0].tolist())
         else:
             idx_np = np.array(idx)  # the one host sync per layer: which experts to fetch
