@@ -130,6 +130,31 @@ class Linear:
         return out
 
 
+class MergedLinear:
+    """opt-iter5: two quantized Linears over the same input as ONE quantized_matmul (weights and
+    scales concatenated along the output dim), split afterwards. Same arithmetic per output row;
+    saves a matmul launch and an activation fake-quant per call (wq_a+wkv, shared w1+w3)."""
+
+    def __init__(self, a: "Linear", b: "Linear"):
+        self.merged = a.scales is not None and b.scales is not None and (a.mode, a.bits, a.group) == (b.mode, b.bits, b.group)
+        self.n_a = a.w.shape[0]
+        if not self.merged:
+            self.a, self.b = a, b
+            return
+        self.mode, self.bits, self.group = a.mode, a.bits, a.group
+        self.w = mx.concatenate([a.w, b.w])
+        self.scales = mx.concatenate([a.scales, b.scales])
+        self.biases = None if a.biases is None else mx.concatenate([a.biases, b.biases])
+
+    def __call__(self, x: mx.array) -> tuple[mx.array, mx.array]:
+        if not self.merged:
+            return self.a(x), self.b(x)
+        if self.mode == "mxfp8":
+            x = act_quant(x)
+        y = mx.quantized_matmul(x, self.w, self.scales, self.biases, transpose=True, group_size=self.group, bits=self.bits, mode=self.mode)
+        return y[..., : self.n_a], y[..., self.n_a :]
+
+
 class GroupedLinear:
     """wo_a: block-diagonal over groups (each group projects only its own heads). One batched
     gather_qmm over the groups instead of a matmul per group."""
@@ -341,10 +366,9 @@ class Attention:
         self.is_candidate_source = layer_id == a.candidate_source_layer
         self.uses_candidates = 0 <= a.candidate_source_layer < layer_id
         self.sink = d["attn.attn_sink"].astype(mx.float32)
-        self.wq_a = Linear(d, "attn.wq_a")
+        self.wq_a_kv = MergedLinear(Linear(d, "attn.wq_a"), Linear(d, "attn.wkv"))  # opt-iter5: one matmul for both
         self.q_norm = d["attn.q_norm.weight"]
         self.wq_b = Linear(d, "attn.wq_b")
-        self.wkv = Linear(d, "attn.wkv")
         self.kv_norm = d["attn.kv_norm.weight"]
         self.wo_a = GroupedLinear(Linear(d, "attn.wo_a"), a.o_groups)
         self.wo_b = Linear(d, "attn.wo_b")
@@ -450,9 +474,10 @@ class Attention:
 
     def _proj(self, x, cos, sin):
         a, rd = self.a, self.a.rope_head_dim
-        qr = rms_norm(self.wq_a(x), self.q_norm, a.norm_eps)
+        qa, kvr = self.wq_a_kv(x)
+        qr = rms_norm(qa, self.q_norm, a.norm_eps)
         q = rope_tail(self.wq_b(qr).reshape(x.shape[0], a.n_heads, a.head_dim), (cos, sin), rd)
-        kv = act_quant(rope_tail(rms_norm(self.wkv(x), self.kv_norm, a.norm_eps), (cos, sin), rd))
+        kv = act_quant(rope_tail(rms_norm(kvr, self.kv_norm, a.norm_eps), (cos, sin), rd))
         return qr, q, kv
 
     def _core(self, q, g, valid, cos, sin):
@@ -590,7 +615,8 @@ class MoE:
         self.gate_w = d["ffn.gate.weight"].astype(mx.float32)
         self.bias = d["ffn.gate.bias"].astype(mx.float32)
         self.bias_vl = d.get("ffn.gate.bias_vl")
-        self.shared = [Linear(d, f"ffn.shared_experts.{w}") for w in ("w1", "w2", "w3")]
+        w1, w2, w3 = (Linear(d, f"ffn.shared_experts.{w}") for w in ("w1", "w2", "w3"))
+        self.shared_w13, self.shared_w2 = MergedLinear(w1, w3), w2  # opt-iter5: gate and up in one matmul
 
     def _route_shared(self, x, bias):
         """Gate (sqrt-softplus scores, bias picks, raw scores weigh) and the shared expert."""
@@ -599,9 +625,9 @@ class MoE:
         w = mx.take_along_axis(scores, idx, axis=-1)
         if self.topk > 1:
             w = w / (w.sum(-1, keepdims=True) + 1e-20)
-        w1, w2, w3 = self.shared
         xq = act_quant(x)
-        y = w2(swiglu(w1(x), w3(x), self.a.swiglu_limit).astype(x.dtype)).astype(mx.float32)
+        g, u = self.shared_w13(x)
+        y = self.shared_w2(swiglu(g, u, self.a.swiglu_limit).astype(x.dtype)).astype(mx.float32)
         return w * self.a.route_scale, idx, xq, y
 
     def _prune(self, x, w, idx_np):

@@ -34,12 +34,12 @@ class DSparkBlock(Block):
         at, a, rd = self.attn, self.a, self.a.rope_head_dim
         win, n = a.window_size, x.shape[0]
         # the target's state at position p enters this stage's window
-        main_kv = M.act_quant(rope_tail(rms_norm(at.wkv(main_x), at.kv_norm, a.norm_eps), at.rope.cos_sin(mx.array([p])), rd))
+        main_kv = M.act_quant(rope_tail(rms_norm(at.wq_a_kv(main_x)[1], at.kv_norm, a.norm_eps), at.rope.cos_sin(mx.array([p])), rd))
         seed_ring(ring, main_kv, [p], win)
         cs = at.rope.cos_sin(mx.arange(p + 1, p + 1 + n))
-        qr = rms_norm(at.wq_a(x), at.q_norm, a.norm_eps)
+        qr = rms_norm(at.wq_a_kv(x)[0], at.q_norm, a.norm_eps)
         q = rope_tail(at.wq_b(qr).reshape(n, a.n_heads, a.head_dim), cs, rd)
-        kv = M.act_quant(rope_tail(rms_norm(at.wkv(x), at.kv_norm, a.norm_eps), cs, rd))
+        kv = M.act_quant(rope_tail(rms_norm(at.wq_a_kv(x)[1], at.kv_norm, a.norm_eps), cs, rd))
         valid = np.nonzero((ring.pos >= 0) & (ring.pos > p - win) & (ring.pos <= p))[0]
         idx = np.concatenate([valid, win + np.arange(n)]).astype(np.int32)  # whole block, both ways
         o = ops.sparse_attn(q, mx.concatenate([ring.kv, kv]), at.sink, mx.broadcast_to(mx.array(idx), (n, idx.size)), at.scale)
@@ -103,7 +103,7 @@ class DSpark:
         for blk, ring in zip(self.blocks, self.rings(st)):
             at = blk.attn
             cs = at.rope.cos_sin(mx.array(np.asarray(positions)))
-            kv = M.act_quant(rope_tail(rms_norm(at.wkv(main_x), at.kv_norm, self.a.norm_eps), cs, self.a.rope_head_dim))
+            kv = M.act_quant(rope_tail(rms_norm(at.wq_a_kv(main_x)[1], at.kv_norm, self.a.norm_eps), cs, self.a.rope_head_dim))
             seed_ring(ring, kv, positions, self.a.window_size)
 
     def draft(self, st, token: int, hidden: mx.array, p: int, sp, rng):
