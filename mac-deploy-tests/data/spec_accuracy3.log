@@ -1,0 +1,6 @@
+
+two layers ahead (l+2) coverage of true top-6 by top-K from layer-l MoE input; precision = coverage*6/K
+K=1: coverage 0.160  precision 0.961
+K=2: coverage 0.306  precision 0.918
+K=3: coverage 0.432  precision 0.863
+K=4: coverage 0.540  precision 0.810

@@ -26,6 +26,8 @@
 
 **后续分析（10-28）**：`PRUNING_ANALYSIS.md`（裁剪不可能达 20×：带宽下限 40 ms/token、99.5% 路由质量需 220/384 专家）；`ROOFLINE_OPT.md`（无损配置优化：缓存 18 GiB + SPEC_K 3，ISL=1024 解码 3.15 tok/s = roofline 68%，prefill ≈100%；服务现以 `--cache-gb 18 --spec-k 3` 运行）。
 
+**引擎优化历程（10-28）**：`OPT_HISTORY.md`，引擎分支 `opt/compute-side`（标签 opt-iter0..6，`opt_replay.sh N` 回放）。有效改动 SPEC_K=4；短提示解码 306→259 ms；GPU 纯计算仅 69 ms/token，剩余为 SSD 等待与每层同步气泡。服务现运行在 opt/compute-side 分支（cache 18，spec-k 默认 4）。
+
 **最终报告：`dsv41-mac-tests/REPORT.md`。任务已完成；后续可选：向上游提 server.py 线程补丁 PR、尝试更大缓存或 `--moe-topk 4`。**
 
 首轮 4 个 FAIL 的定性：

@@ -1,0 +1,19 @@
+{
+ "iter": 4,
+ "sha": "5f820e5",
+ "desc": "iter4: second-level speculation (l+2 top-k) implemented; measured negative (k=1/2/3: +3/+6/+14% ms), default OFF [cache 18, SPEC_K 4]",
+ "ts": "2026-10-28 14:54:15",
+ "decode_ms_per_token_median3": 270.0,
+ "decode_tok_s_last": 3.63,
+ "hit_rate": 0.74,
+ "GB_per_token": 1.29,
+ "ssd_wait_ms": 124.0,
+ "isl1024_prefill_s": 14.57,
+ "isl1024_decode_tok_s": 3.13,
+ "isl1024_hit_rate": 0.604,
+ "parity_tests_rc": 0,
+ "parity_tests": "15 passed in 12.01s",
+ "probe_391": "ok",
+ "spec_k": 4,
+ "cache_gb": 18
+}

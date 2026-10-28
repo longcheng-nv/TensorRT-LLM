@@ -1,0 +1,19 @@
+{
+ "iter": 5,
+ "sha": "77a63c6",
+ "desc": "iter5: MergedLinear -- wq_a+wkv and shared w1+w3 as single quantized_matmul (\u22122 matmuls, \u22122 act_quant per layer) [cache 18, SPEC_K 4]",
+ "ts": "2026-10-28 14:58:40",
+ "decode_ms_per_token_median3": 270.0,
+ "decode_tok_s_last": 3.73,
+ "hit_rate": 0.73,
+ "GB_per_token": 1.31,
+ "ssd_wait_ms": 127.0,
+ "isl1024_prefill_s": 14.68,
+ "isl1024_decode_tok_s": 3.06,
+ "isl1024_hit_rate": 0.606,
+ "parity_tests_rc": 0,
+ "parity_tests": "15 passed in 10.83s",
+ "probe_391": "ok",
+ "spec_k": 4,
+ "cache_gb": 18
+}

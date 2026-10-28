@@ -1,0 +1,7 @@
+captured per token: attn.proj: 40 calls, attn.core: 40 calls, moe.route+shared: 40 calls, moe.experts_into(slab gather_qmm; slots already resident on replay): 74 calls, attn.indexer: 8 calls
+  attn.proj                                                                 12.8 ms/token GPU-throughput (0.32 ms/call)
+  attn.core                                                                 18.3 ms/token GPU-throughput (0.46 ms/call)
+  moe.route+shared                                                           9.8 ms/token GPU-throughput (0.25 ms/call)
+  moe.experts_into(slab gather_qmm; slots already resident on replay)       22.9 ms/token GPU-throughput (0.31 ms/call)
+  attn.indexer                                                               4.9 ms/token GPU-throughput (0.61 ms/call)
+  sum of stages: 69 ms/token  (vs ~270 ms/token measured end-to-end)

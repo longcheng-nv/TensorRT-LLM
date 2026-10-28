@@ -1,0 +1,19 @@
+{
+ "iter": 2,
+ "sha": "04db30f",
+ "desc": "iter2: fuse Block elementwise chains (mHC mixes+Sinkhorn+hc_pre+RMSNorm; hc_post+next chain) into 2 compiled graphs per layer",
+ "ts": "2026-10-28 14:40:15",
+ "decode_ms_per_token_median3": 290.0,
+ "decode_tok_s_last": 3.47,
+ "hit_rate": 0.76,
+ "GB_per_token": 1.2,
+ "ssd_wait_ms": 122.0,
+ "isl1024_prefill_s": 14.75,
+ "isl1024_decode_tok_s": 3.27,
+ "isl1024_hit_rate": 0.614,
+ "parity_tests_rc": 0,
+ "parity_tests": "15 passed in 12.68s",
+ "probe_391": "ok",
+ "spec_k": 3,
+ "cache_gb": 18
+}

@@ -1,0 +1,19 @@
+{
+ "iter": 3,
+ "sha": "ccfe179",
+ "desc": "iter3: SPEC_K default 3 -> 4 (speculation precision 87%, recall 58%) [cache 18, SPEC_K 4]",
+ "ts": "2026-10-28 14:49:24",
+ "decode_ms_per_token_median3": 273.0,
+ "decode_tok_s_last": 3.65,
+ "hit_rate": 0.74,
+ "GB_per_token": 1.29,
+ "ssd_wait_ms": 124.0,
+ "isl1024_prefill_s": 14.64,
+ "isl1024_decode_tok_s": 3.23,
+ "isl1024_hit_rate": 0.604,
+ "parity_tests_rc": 0,
+ "parity_tests": "15 passed in 11.95s",
+ "probe_391": "ok",
+ "spec_k": 4,
+ "cache_gb": 18
+}

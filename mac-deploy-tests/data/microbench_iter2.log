@@ -1,0 +1,11 @@
+
+[staged, sync after each stage] total 392 ms/token; SSD wait 105 ms/token; 1.11 GB/token
+   moe.experts (get+gather_qmm, incl SSD wait)        160.1 ms/token
+   attn.proj (wq_a,wq_b,wkv,rope,act_quant)            68.9 ms/token
+   attn.core (scores,softmax,wo_a,wo_b)                61.4 ms/token
+   moe.route+shared                                    56.7 ms/token
+   attn.indexer                                         5.6 ms/token
+   attn.compressor                                      0.9 ms/token
+   other (Block fused chains, hc_post, embed/head, Python)    38.7 ms/token
+
+[resident replay] 341 ms/token with expert hit rate 0.67, SSD wait 146 ms/token  <- compute-side floor of the current code

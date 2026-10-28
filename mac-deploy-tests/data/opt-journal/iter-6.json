@@ -1,0 +1,19 @@
+{
+ "iter": 6,
+ "sha": "ff97db0",
+ "desc": "iter6: io_threads 8 vs 16 vs 24 measured (275/280, 264/273 ms vs 266-273): no gain, kept 8; speculation confidence filter analysed (linear trade-off, not implemented) [cache 18, SPEC_K 4]",
+ "ts": "2026-10-28 15:05:31",
+ "decode_ms_per_token_median3": 259.0,
+ "decode_tok_s_last": 3.54,
+ "hit_rate": 0.74,
+ "GB_per_token": 1.31,
+ "ssd_wait_ms": 123.0,
+ "isl1024_prefill_s": 14.58,
+ "isl1024_decode_tok_s": 3.25,
+ "isl1024_hit_rate": 0.606,
+ "parity_tests_rc": 0,
+ "parity_tests": "15 passed in 22.38s",
+ "probe_391": "ok",
+ "spec_k": 4,
+ "cache_gb": 18
+}

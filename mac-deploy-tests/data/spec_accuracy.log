@@ -1,0 +1,7 @@
+coverage of the true top-6 experts of layer l+1 by top-K predictions (mean over 39 layer pairs x 36 tokens):
+K     | (a) from layer-l MoE input (current SPEC_K) | (b) from layer-(l+1) block input (proposed)
+3     | 0.459                                        | 0.457
+4     | 0.580                                        | 0.576
+6     | 0.747                                        | 0.736
+8     | 0.829                                        | 0.812
+12    | 0.897                                        | 0.872

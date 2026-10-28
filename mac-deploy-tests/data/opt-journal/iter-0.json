@@ -1,0 +1,19 @@
+{
+ "iter": 0,
+ "sha": "e9ff5a1",
+ "desc": "baseline: upstream a4df33c + hf.py/server.py patches, cache 18, SPEC_K 3",
+ "ts": "2026-10-28 14:33:12",
+ "decode_ms_per_token_median3": 306.0,
+ "decode_tok_s_last": 3.19,
+ "hit_rate": 0.76,
+ "GB_per_token": 1.2,
+ "ssd_wait_ms": 122.0,
+ "isl1024_prefill_s": 14.7,
+ "isl1024_decode_tok_s": 3.18,
+ "isl1024_hit_rate": 0.622,
+ "parity_tests_rc": 0,
+ "parity_tests": "15 passed in 22.01s",
+ "probe_391": "ok",
+ "spec_k": 3,
+ "cache_gb": 18
+}

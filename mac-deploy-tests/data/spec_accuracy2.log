@@ -1,0 +1,16 @@
+12    | 0.897                                        | 0.872
+
+adaptive rule: predicted set = top-8 candidates with score >= s(6) - d   (s(6) = 6th best predicted score)
+d      | mean #predicted | precision | recall (of true top-6) | expected wasted reads/layer
+0.0    |            6.00 |     0.747 |                  0.747 | 1.52
+0.05   |            7.21 |     0.682 |                  0.804 | 2.38
+0.1    |            7.66 |     0.651 |                  0.821 | 2.74
+0.2    |            7.91 |     0.630 |                  0.828 | 2.95
+0.3    |            7.98 |     0.624 |                  0.829 | 3.01
+0.5    |            8.00 |     0.622 |                  0.829 | 3.02
+
+fixed-K reference: K=3 precision 0.917 recall 0.459 | K=4 precision 0.870 recall 0.580
+SPEC_K=4: prefill 14 tok 7.5s | decode: median 253 ms/token = 3.96 tok/s | hit rate 0.73 | 1.29 GB/token | SSD wait 130 ms/token
+SPEC_K=4: prefill 14 tok 7.9s | decode: median 259 ms/token = 3.86 tok/s | hit rate 0.73 | 1.29 GB/token | SSD wait 130 ms/token
+SPEC_K=5: prefill 14 tok 7.3s | decode: median 265 ms/token = 3.77 tok/s | hit rate 0.73 | 1.43 GB/token | SSD wait 137 ms/token
+SPEC_K=5: prefill 14 tok 7.1s | decode: median 287 ms/token = 3.49 tok/s | hit rate 0.72 | 1.44 GB/token | SSD wait 140 ms/token
