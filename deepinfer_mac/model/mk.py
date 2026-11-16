@@ -13,9 +13,14 @@ MoE (routed experts, slab slots):
 
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 
 import mlx.core as mx
+
+# sparse attention as two parallel dispatches (sa_scores + sa_pv) instead of the single-dispatch
+# mk_sparse_attn (16 threadgroups, latency-bound at long context). Same arithmetic, same order.
+SPLIT_ATTN = os.environ.get("DEEPINFER_MK_ATTN_SPLIT", "1") != "0"
 
 def supported(a) -> bool:
     """The fused decode kernels are written for DeepSeek-V4.1-Flash's geometry; other shapes (the
@@ -903,6 +908,165 @@ def _sparse_attn_kernel():
                                 output_names=["out", "ring_out"], header=HEADER, source=_SPARSE_ATTN)
 
 
+# Split sparse attention (default). mk_sparse_attn above runs H / 4 = 16 threadgroups that each walk every
+# key twice in a serial loop, so at BS=1 it is latency-bound: 86 us/layer at short context and 195 us at 4K
+# context, slower than the MLX op chain (133 us) once the 512 compressed keys are all valid. The same
+# computation as two parallel dispatches:
+#   sa_scores: threadgroup = 8 heads x 64 keys (8 per simdgroup); q of the 8 heads staged in threadgroup
+#              memory; per key and head 16 products per lane in order, then simd_sum (as mk_sparse_attn)
+#   sa_pv    : threadgroup = 8 heads x 64 output dims; per head the softmax with sink (lane-strided max /
+#              sum, bf16(p) numerator, as mk_sparse_attn); the 8 simdgroups each sum NK/8 keys in order for
+#              all 8 heads (one value load feeds 16 FMAs) and the 8 partials are added in a fixed order;
+#              inverse RoPE, fp8 act-quant; the H threadgroups also write the new ring.
+# Only the PV sum is regrouped (8 ordered partials). On real decode states the output was bit-identical to
+# mk_sparse_attn and to the MLX reference chain; 49 / 82 us/layer at short / 4K context
+# (mac-deploy-tests/mk/bench_attn_speedup.py). DEEPINFER_MK_ATTN_SPLIT=0 selects the old kernel.
+_SA_SCORES = r"""
+  constexpr int D = 512;
+  constexpr int NW = 128;
+  constexpr int NK = NW + NC;
+  constexpr int HB = 8;                            // heads per threadgroup
+  constexpr int KB = 64;                           // keys per threadgroup, 8 per simdgroup
+  const int lane = thread_index_in_simdgroup;
+  const int sg = simdgroup_index_in_threadgroup;
+  const int tid = thread_position_in_threadgroup.x;
+  const int hb = threadgroup_position_in_grid.x % (H / HB);
+  const int kb = threadgroup_position_in_grid.x / (H / HB);
+  // q of this head block, transposed so lane L reads element L*16+j at [j][L] (no bank conflicts)
+  threadgroup float qs[HB][16][32];
+  for (int i = tid; i < HB * D; i += 256) {
+    const int h = i / D, r = i % D;
+    qs[h][r % 16][r / 16] = float(q[(hb * HB + h) * D + r]);
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  const float s = scale[0];
+  for (int i = 0; i < KB / 8; i++) {
+    const int k = kb * KB + sg * (KB / 8) + i;
+    int src;
+    const device bfloat16_t* kp = nullptr;
+    if (k < NW) {
+      src = widx[k];
+      if (src >= 0) kp = (src == NW) ? kvnew : (ring + (size_t)src * D);
+    } else {
+      src = cidx[k - NW];
+      if (src >= 0) kp = comp + (size_t)src * D;
+    }
+    if (src < 0) {
+      if (lane < HB) sc[(hb * HB + lane) * NK + k] = -INFINITY;
+      continue;
+    }
+    const device uint4* kp4 = (const device uint4*)(kp + lane * 16);
+    const uint4 ka = kp4[0], kc = kp4[1];
+    const float kv_[16] = {bf_lo(ka.x), bf_hi(ka.x), bf_lo(ka.y), bf_hi(ka.y), bf_lo(ka.z), bf_hi(ka.z), bf_lo(ka.w), bf_hi(ka.w),
+                           bf_lo(kc.x), bf_hi(kc.x), bf_lo(kc.y), bf_hi(kc.y), bf_lo(kc.z), bf_hi(kc.z), bf_lo(kc.w), bf_hi(kc.w)};
+    for (int h = 0; h < HB; h++) {
+      float dsum = 0.0f;
+      for (int j = 0; j < 16; j++) dsum += qs[h][j][lane] * kv_[j];
+      dsum = simd_sum(dsum);
+      if (lane == 0) sc[(hb * HB + h) * NK + k] = dsum * s;
+    }
+  }
+"""
+
+_SA_PV = r"""
+  constexpr int D = 512;
+  constexpr int NW = 128;
+  constexpr int NK = NW + NC;
+  constexpr int HB = 8;                            // heads per threadgroup
+  constexpr int KC = NK / 8;                       // keys per simdgroup in the PV split
+  const int lane = thread_index_in_simdgroup;
+  const int sg = simdgroup_index_in_threadgroup;
+  const int tid = thread_position_in_threadgroup.x;
+  const int tgi = threadgroup_position_in_grid.x;
+  const int hb = tgi / 8;                          // head block
+  const int dl = lane * 2;
+  const int d = (tgi % 8) * 64 + dl;               // this lane's output dims d, d+1
+  threadgroup bfloat16_t pk[HB][NK];               // bf16(p) per head and key
+  threadgroup int rowc[NK];                        // key source: -1 none, r < NW ring row, NW new kv, NW+1+c comp row c
+  threadgroup float part[8][HB][64];               // per-simdgroup partial o
+  threadgroup float dens[HB];
+  for (int k = tid; k < NK; k += 256) {
+    if (k < NW) rowc[k] = widx[k];
+    else { const int c = cidx[k - NW]; rowc[k] = c < 0 ? -1 : NW + 1 + c; }
+  }
+  {  // softmax with sink for head hb*8+sg (same reduction order as mk_sparse_attn)
+    const int h = hb * HB + sg;
+    const device float* sh = sc + (size_t)h * NK;
+    float m = -INFINITY;
+    for (int k = lane; k < NK; k += 32) m = max(m, sh[k]);
+    m = max(simd_max(m), -1e30f);
+    float sum = 0.0f;
+    for (int k = lane; k < NK; k += 32) {
+      const float p = metal::precise::exp(sh[k] - m);
+      sum += p;
+      pk[sg][k] = bfloat16_t(p);                   // numerator uses bf16(p)
+    }
+    sum = simd_sum(sum);
+    if (lane == 0) dens[sg] = sum + metal::precise::exp(sink[h] - m);
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  float o[HB][2];
+  for (int h = 0; h < HB; h++) { o[h][0] = 0.0f; o[h][1] = 0.0f; }
+  for (int k = sg * KC; k < (sg + 1) * KC; k++) {   // keys of this simdgroup, in order
+    const int code = rowc[k];
+    if (code < 0) continue;
+    const device bfloat16_t* kp = code < NW ? ring + (size_t)code * D : (code == NW ? kvnew : comp + (size_t)(code - NW - 1) * D);
+    const uint w = *((const device uint*)(kp + d));
+    const float v0 = bf_lo(w), v1 = bf_hi(w);
+    for (int h = 0; h < HB; h++) {
+      const float p = float(pk[h][k]);
+      o[h][0] += p * v0;
+      o[h][1] += p * v1;
+    }
+  }
+  for (int h = 0; h < HB; h++) { part[sg][h][dl] = o[h][0]; part[sg][h][dl + 1] = o[h][1]; }
+  {  // ring update: threadgroup g copies rows [g*NW/NTG, (g+1)*NW/NTG) of [ring with row rslot = kvnew]
+    const int rows = NW / (int)threadgroups_per_grid.x;
+    const int rs0 = tgi * rows;
+    const int rsl = rslot[0];
+    for (int i = tid; i < rows * D; i += 256) {
+      const int rr = rs0 + i / D, cc = i % D;
+      ring_out[rr * D + cc] = (rr == rsl) ? kvnew[cc] : ring[rr * D + cc];
+    }
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  // combine the 8 key chunks in order (simdgroup sg finishes head hb*8+sg), then the epilogue
+  const int h = hb * HB + sg;
+  float a0 = 0.0f, a1 = 0.0f;
+  for (int c = 0; c < 8; c++) { a0 += part[c][sg][dl]; a1 += part[c][sg][dl + 1]; }
+  const float den = dens[sg];
+  float a = float(bfloat16_t(a0 / den));
+  float b = float(bfloat16_t(a1 / den));
+  if (d >= D - RD) {                                // inverse RoPE: sin -> -sin
+    const int i = (d - (D - RD)) / 2;
+    const float c = cs[i], sn = -cs[RD / 2 + i];
+    const float a2 = float(bfloat16_t(a * c - b * sn));
+    const float b2 = float(bfloat16_t(a * sn + b * c));
+    a = a2; b = b2;
+  }
+  float amax = max(fabs(a), fabs(b));
+  amax = max(amax, simd_shuffle_xor(amax, 1));
+  amax = max(amax, simd_shuffle_xor(amax, 2));
+  amax = max(amax, simd_shuffle_xor(amax, 4));
+  amax = max(amax, simd_shuffle_xor(amax, 8));
+  const float s = act_scale(amax);
+  out[h * D + d] = bfloat16_t(fq8(a, s));
+  out[h * D + d + 1] = bfloat16_t(fq8(b, s));
+"""
+
+
+@lru_cache(maxsize=None)
+def _sa_scores_kernel():
+    return mx.fast.metal_kernel(name="mk_sa_scores", input_names=["q", "ring", "kvnew", "widx", "comp", "cidx", "scale"],
+                                output_names=["sc"], header=HEADER, source=_SA_SCORES)
+
+
+@lru_cache(maxsize=None)
+def _sa_pv_kernel():
+    return mx.fast.metal_kernel(name="mk_sa_pv", input_names=["sc", "ring", "kvnew", "widx", "comp", "cidx", "sink", "cs", "rslot"],
+                                output_names=["out", "ring_out"], header=HEADER, source=_SA_PV)
+
+
 def attn_aux(qakv: mx.array, q_norm: mx.array, kv_norm: mx.array, eps: mx.array, rope_cs: mx.array, qa_dim: int = 1280,
              kv_dim: int = 512, rope_dim: int = 64):
     """(qr bf16 [qa_dim], kv bf16 [kv_dim]) from the merged wq_a|wkv output."""
@@ -923,6 +1087,21 @@ def sparse_attn(q: mx.array, ring: mx.array, kvnew: mx.array, widx: mx.array, co
     nc = 0 if cidx is None else cidx.size
     if comp is None:
         comp, cidx = kvnew, _neg1()
+    if SPLIT_ATTN and H % 8 == 0 and ring.shape[0] % H == 0 and nc % 64 == 0:
+        nk = ring.shape[0] + nc
+        sc = _sa_scores_kernel()(
+            inputs=[q.reshape(-1), ring, kvnew.reshape(-1), widx, comp, cidx.reshape(-1), scale.reshape(1)],
+            template=[("NC", nc), ("H", H)],
+            grid=(256 * (H // 8) * (nk // 64), 1, 1), threadgroup=(256, 1, 1),
+            output_shapes=[(H * nk,)], output_dtypes=[mx.float32],
+        )[0]
+        out, ring_out = _sa_pv_kernel()(
+            inputs=[sc, ring, kvnew.reshape(-1), widx, comp, cidx.reshape(-1), sink, rope_cs.reshape(-1), rslot],
+            template=[("NC", nc), ("H", H), ("RD", rope_dim)],
+            grid=(256 * H, 1, 1), threadgroup=(256, 1, 1),
+            output_shapes=[(H * 512,), ring.shape], output_dtypes=[mx.bfloat16, ring.dtype],
+        )
+        return out, ring_out
     out, ring_out = _sparse_attn_kernel()(
         inputs=[q.reshape(-1), ring, kvnew.reshape(-1), widx, comp, cidx.reshape(-1), sink, scale.reshape(1), rope_cs.reshape(-1), rslot],
         template=[("NC", nc), ("HPT", heads_per_tg), ("RD", rope_dim)],

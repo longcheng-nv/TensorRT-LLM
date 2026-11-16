@@ -5,7 +5,7 @@
 ## 结论
 | 指标 | 本轮开始 | 现在 | 说明 |
 |---|---|---|---|
-| 计算路径（专家全部命中、无 SSD）| 87 ms/token（11.5 tok/s）| **68 ms/token（14.7 tok/s）** | megakernel 后 GPU 内核合计 ~54 ms，权重带宽下限 ~48 ms |
+| 计算路径（专家全部命中、无 SSD）| 87 ms/token（11.5 tok/s）| **68 ms/token（14.7 tok/s）** | megakernel 后 GPU 内核合计 ~54 ms，权重带宽下限 ~48 ms；新的两次 dispatch 稀疏注意力再省 2.0 ms/token（4K 上下文 5.4 ms/token）|
 | 无损端到端解码（中位）| 3.4 tok/s（单个提示，`scripts/decode_speed.py`）| **4.7 tok/s**（4 类提示各 200 token；同一提示为 4.58 tok/s）| SSD 受限 |
 | `--fast`（有损，`--sub-rank 2`）| — | **10.2–10.6 tok/s**（4 类提示 200 token 稳态，中位/均值）；**经 HTTP 服务流式实测 10.06 tok/s**（4 个提示各 300 token，含开头预热）| 达到 TPS=10；质量代价见下 |
 
@@ -15,7 +15,7 @@
 | 改动 | 无损? | 实测收益 |
 |---|---|---|
 | mHC megakernel：hc_post + mixes GEMV + Sinkhorn(20 轮) + pre-mix + RMSNorm 一次 dispatch（最后一个 threadgroup 收尾）| 是 | 计算路径 87→75 ms（原来每层 ~160 个微小 kernel）|
-| 稀疏注意力 megakernel：window ring + 索引器选中的压缩 KV gather、QK、sink softmax（PV 用 bf16 概率，同参考）、逆 RoPE、fp8 输出量化、ring 更新 | 是 | 注意力核心 ~100 µs/层 → 30 µs |
+| 稀疏注意力 megakernel：window ring + 索引器选中的压缩 KV gather、QK、sink softmax（PV 用 bf16 概率，同参考）、逆 RoPE、fp8 输出量化、ring 更新；两次并行 dispatch（scores：8 头 × 64 key / threadgroup；softmax + PV：8 头 × 64 维 / threadgroup，key 分 8 段）| 是（与参考算子链逐位一致）| BS=1 逐层串行时延：短上下文 49 µs vs 参考 138 µs（**2.8×**，逐算子 167 µs 为 3.4×）；4K 上下文（top-512 生效）82 µs vs 133 µs（**1.6×**，逐算子 171 µs 为 2.1×）|
 | mxfp8 GEMV：融合 act_quant / RMSNorm prologue、分组行（wo_a）、RoPE epilogue（wq_b）、split-K | 是 | 与 MLX 持平或更快（190–240 GB/s）|
 | router + shared expert 两次 dispatch：bf16 gate（省 157 MB 内存）、top-6 + 权重、下一/二层专家预测都在 kernel 内 | 是 | 280→194 µs/层 |
 | MoE megakernel：slab 槽位上的 6 个专家 up/down 两次 dispatch，宽读取 + 预缩放激活 | 是 | 2/3/4-bit 全部快于 MLX gather_qmm 链 |
@@ -27,6 +27,8 @@
 | **缓存感知专家替换** `--sub-rank N`：第 N 名及以后的专家若不在缓存，用缓存里分数最高的未选专家替代，权重重新归一 | **否** | 见下表 |
 
 所有 kernel 均对照 MLX 参考链验证（多数逐位一致，其余在 fp32 求和顺序误差内）；端到端偏差与「只改 fp32 求和分组」的偏差同量级（模型对数值扰动本身是混沌的）。`pytest tests/` 33/33 通过；部署期的 API 端到端套件 `test_api_e2e.py` 在新引擎（无损默认）上 **28/28 通过**（流式、贪心确定性+logprobs、seed、多轮前缀复用、工具调用、JSON schema+thinking、6K/12K 长上下文 needle、视觉、/v1/messages、/v1/responses）。
+
+**更正（稀疏注意力）**：此前报告的「注意力核心 ~100 µs/层 → 30 µs」是把各层调用无数据依赖地批量回放得到的吞吐，多个 kernel 可以重叠执行，不代表解码时的时延。按解码方式串行测（每次调用的 ring 输出喂给下一次），原来的单 dispatch 版本（64 头 ÷ 每组 4 头 = 16 个 threadgroup，每个串行走完全部 640 个 key 两遍）在短上下文为 86 µs/层，在 4K 上下文为 195 µs/层，比参考算子链（133 µs）还慢。现已改为上表的两次并行 dispatch 版本，输出与旧版、参考均逐位一致；`DEEPINFER_MK_ATTN_SPLIT=0` 可切回旧版。表中其他单项 kernel 数字同样是无依赖回放的吞吐；端到端数字（计算路径 87→68 ms、各解码 tok/s）是解码循环实测，不受影响。数据：`logs/mk/attn_speedup_split2_rerun.log`（逐层时延）、`logs/mk/attn_e2e.log`（解码循环 A/B）。实际解码（4 类短提示各 200 token，同一会话新旧 kernel A/B，电池供电）：`--fast` 10.37 vs 10.31 tok/s，无损 4.54 vs 4.41 tok/s（中位），在运行间波动之内：短上下文时省下的 ~2 ms/token 被 SSD 等待淹没，收益主要在长上下文（`logs/mk/multi_prompt_split_ab.log`）。本报告其余速度数字仍是此前接电源时的实测。
 
 ## 速度—质量前沿（cache 16 GiB）
 质量：官方 API 采样续写（antirez/ds4 V4.1-Flash 向量）的 teacher-forced NLL 与 top-1 一致率，与无损配置逐例配对，95% bootstrap 区间。速度：200 token 贪心稳态（第 20 个 token 之后）。
@@ -67,5 +69,5 @@ cd /Users/loncheng/Models/DeepInfer-Mac
 3. GPU 侧专家调度（命中专家不等 CPU 同步）：逐层同步的总开销约 6 ms/token（计算路径实测：无逐层同步 61.6 ms vs 有同步 67.8 ms），这是上限；其中路由同步到首个 MoE kernel 的 CPU 侧延迟实测 ~67 µs/层（≈ 2.7 ms/token）。
 
 ## 复现
-- 工具：`DeepInfer-Mac/mac-deploy-tests/mk/`（`mk_bench.py`、`multi_prompt.py`、`mk_quality.py`、`sim_*.py`、kernel 测试 `test_mk_*.py`）
+- 工具：`DeepInfer-Mac/mac-deploy-tests/mk/`（`mk_bench.py`、`multi_prompt.py`、`mk_quality.py`、`sim_*.py`、kernel 测试 `test_mk_*.py`、稀疏注意力时延 `bench_attn_speedup.py` 与解码 A/B `bench_attn_e2e.py`）
 - 数据：`/Users/loncheng/Models/logs/mk/`（`bench.jsonl`、`quality/*.json`、`traces/`）
