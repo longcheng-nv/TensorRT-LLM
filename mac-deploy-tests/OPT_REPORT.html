@@ -1,0 +1,257 @@
+<title>DSV4.1-Flash Mac Inference Optimization</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Source+Serif+4:opsz,wght@8..60,600&display=swap">
+<style>
+/* Layout: a single reading column (72ch) with full-width data bands; engineering-report register. */
+:root{
+  --bg:#f7f7f4; --surface:#fcfcfb; --fg:#1d1f22; --fg-2:#4a4e55; --fg-3:#767b83; --rule:#dcdcd6;
+  --accent:#2a78d6; --accent-soft:#e3eefb; --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a;
+  --good:#1f7a3a; --bad:#b3261e; --neutral:#6b7280;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --sans:"IBM Plex Sans","PingFang SC","Noto Sans SC","Microsoft YaHei",system-ui,sans-serif;
+  --display:"Source Serif 4","Songti SC","Noto Serif SC",Georgia,serif;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#141517; --surface:#1a1a19; --fg:#ededea; --fg-2:#c3c2b7; --fg-3:#8b8f96; --rule:#33353a;
+  --accent:#3987e5; --accent-soft:#1a2a40; --s1:#3987e5; --s2:#d95926; --s3:#199e70;
+  --good:#4cc26b; --bad:#f08a84; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#141517; --surface:#1a1a19; --fg:#ededea; --fg-2:#c3c2b7; --fg-3:#8b8f96; --rule:#33353a;
+  --accent:#3987e5; --accent-soft:#1a2a40; --s1:#3987e5; --s2:#d95926; --s3:#199e70;
+  --good:#4cc26b; --bad:#f08a84; color-scheme:dark}
+body{background:var(--bg);color:var(--fg);font:15px/1.6 var(--sans);margin:0;padding-block:0 64px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.wrap{max-width:76ch;margin:0 auto}
+header.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);border-bottom:1px solid var(--rule);
+  display:flex;align-items:center;justify-content:space-between;gap:12px;padding-block:10px;flex-wrap:wrap}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--bg)}
+.eyebrow{font:500 11px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--fg-3)}
+.lang{display:inline-flex;border:1px solid var(--rule);border-radius:999px;overflow:hidden;font:500 12px/1 var(--mono)}
+.lang button{background:transparent;color:var(--fg-2);border:0;padding:7px 12px;cursor:pointer}
+.lang button[aria-pressed="true"]{background:var(--fg);color:var(--bg)}
+.lang button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+h1{font:600 clamp(26px,4.5vw,36px)/1.15 var(--display);margin:28px 0 8px;text-wrap:balance;letter-spacing:-.01em}
+h2{font:600 20px/1.3 var(--display);margin:40px 0 10px;text-wrap:balance}
+h3{font:600 15px/1.4 var(--sans);margin:22px 0 6px}
+p{margin:8px 0;max-width:68ch}
+.lede{font-size:17px;color:var(--fg-2)}
+.meta{display:flex;flex-wrap:wrap;gap:6px 18px;color:var(--fg-3);font:400 12.5px/1.5 var(--mono);margin-top:6px}
+.verdict{border-left:3px solid var(--accent);background:var(--accent-soft);padding:12px 16px;margin:18px 0;border-radius:0 6px 6px 0}
+.verdict p{margin:4px 0}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:18px 0}
+.tile{background:var(--surface);border:1px solid var(--rule);border-radius:8px;padding:12px 14px;min-width:0}
+.tile .k{font:500 11px/1.2 var(--mono);color:var(--fg-3);letter-spacing:.06em;text-transform:uppercase}
+.tile .v{font:600 26px/1.1 var(--display);margin-top:6px;font-variant-numeric:tabular-nums}
+.tile .d{font-size:12.5px;color:var(--fg-2);margin-top:4px}
+.up{color:var(--good)} .down{color:var(--bad)}
+table{border-collapse:collapse;width:100%;font-size:13.5px;font-variant-numeric:tabular-nums}
+.tbl{overflow-x:auto;margin:10px 0 4px;border:1px solid var(--rule);border-radius:8px;background:var(--surface)}
+th,td{padding:8px 10px;border-bottom:1px solid var(--rule);text-align:left;vertical-align:top}
+th{font:500 11.5px/1.3 var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--fg-3);background:var(--surface)}
+tr:last-child td{border-bottom:0} td.n,th.n{text-align:right} td.mono{font-family:var(--mono);font-size:12.5px}
+.pill{display:inline-block;font:500 11px/1 var(--mono);padding:4px 8px;border-radius:999px;border:1px solid var(--rule);white-space:nowrap}
+.pill.win{color:var(--good);border-color:color-mix(in srgb,var(--good) 40%,transparent)}
+.pill.flat{color:var(--fg-3)} .pill.neg{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 40%,transparent)}
+figure{margin:14px 0;background:var(--surface);border:1px solid var(--rule);border-radius:8px;padding:14px 14px 10px}
+figcaption{font-size:12.5px;color:var(--fg-3);margin-top:6px}
+svg text{font-family:var(--mono);font-size:11px;fill:var(--fg-2)} svg .axis{stroke:var(--rule)} svg .grid{stroke:var(--rule);stroke-dasharray:2 3}
+svg .lab{fill:var(--fg)} svg .muted{fill:var(--fg-3)}
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12.5px;color:var(--fg-2);margin-top:6px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+code,pre{font-family:var(--mono);font-size:12.5px} pre{background:var(--surface);border:1px solid var(--rule);border-radius:8px;padding:12px;overflow-x:auto;margin:10px 0}
+ul{padding-left:20px} li{margin:4px 0;max-width:68ch}
+.foot{color:var(--fg-3);font-size:12.5px;border-top:1px solid var(--rule);margin-top:40px;padding-top:12px}
+.tip{position:fixed;pointer-events:none;background:var(--fg);color:var(--bg);font:12px/1.4 var(--mono);padding:6px 8px;border-radius:4px;opacity:0;transition:opacity .1s;z-index:20}
+@media (prefers-reduced-motion: reduce){*{transition:none!important}}
+body[data-lang="en"] .zh{display:none} body[data-lang="zh"] .en{display:none}
+body[data-lang="zh"]{font-size:15.5px}
+</style>
+
+<div class="wrap">
+<header class="top">
+  <span class="eyebrow"><span class="en">Engineering report · 2026-10-28</span><span class="zh">工程报告 · 2026-10-28</span></span>
+  <div class="lang" role="group" aria-label="Language"><button id="lang-en" aria-pressed="true" onclick="setLang('en')">EN</button><button id="lang-zh" aria-pressed="false" onclick="setLang('zh')">中文</button></div>
+</header>
+
+<h1><span class="en">DeepSeek-V4.1-Flash on a 48 GB MacBook: Inference Optimization toward the Roofline</span><span class="zh">DeepSeek-V4.1-Flash 在 48 GB MacBook 上的推理优化：面向 Roofline</span></h1>
+<p class="lede"><span class="en">Target: BS=1, ISL=1024, reach 60% of the machine's roofline without pruning or lossy changes. Result: 71–78% of roofline; six recorded, replayable iterations; one change out of six moved the needle.</span><span class="zh">目标：BS=1、ISL=1024，不裁剪、不引入有损改动，达到本机 roofline 的 60%。结果：roofline 的 71–78%；六轮可回放迭代，其中只有一项改动真正有效。</span></p>
+<div class="meta"><span>Apple M4 Pro · 48 GB · macOS 26.7</span><span>DeepInfer-Mac a4df33c → opt/compute-side</span><span>DeepSeek-V4.1-Flash-1017 @ 1bae0e1</span><span>expert cache 18 GiB</span></div>
+
+<div class="verdict">
+  <p><strong><span class="en">Bottom line.</span><span class="zh">结论。</span></strong> <span class="en">Short-prompt decode improved from 306 to 259 ms/token (−15%); ISL=1024 decode 3.18 → 3.25 tok/s (within noise); prefill was already at the SSD roofline. The only measurable win was raising idle-window expert speculation from 3 to 4 experts. Kernel fusion, merged matmuls, two-level speculation and more I/O threads all measured zero gain, because pure GPU work is just 69 ms/token: the remaining time is SSD transfer (125 ms) and per-layer host-sync pipeline bubbles (~76 ms), a dependency inherent to streaming MoE experts from SSD.</span><span class="zh">短提示解码从 306 降到 259 ms/token（−15%）；ISL=1024 解码 3.18 → 3.25 tok/s（噪声范围内）；prefill 本来就在 SSD roofline 上。唯一可测的收益是把空闲窗口专家推测预取从 3 个提到 4 个。Kernel 融合、矩阵乘合并、二级推测、增加 I/O 线程均无增益，因为纯 GPU 计算只有 69 ms/token：其余是 SSD 传输（125 ms）和每层主机同步造成的流水线气泡（约 76 ms），后者是从 SSD 流式加载 MoE 专家的固有依赖。</span></p>
+</div>
+
+<div class="tiles">
+  <div class="tile"><div class="k"><span class="en">Decode, short prompt</span><span class="zh">解码（短提示）</span></div><div class="v">259 <small style="font:500 13px var(--mono);color:var(--fg-3)">ms/tok</small></div><div class="d"><span class="up">−15%</span> <span class="en">vs 306 baseline</span><span class="zh">对比基线 306</span></div></div>
+  <div class="tile"><div class="k"><span class="en">Roofline efficiency</span><span class="zh">Roofline 效率</span></div><div class="v">78%</div><div class="d"><span class="en">short prompt · 71% at ISL=1024</span><span class="zh">短提示 · ISL=1024 为 71%</span></div></div>
+  <div class="tile"><div class="k"><span class="en">ISL=1024 decode</span><span class="zh">ISL=1024 解码</span></div><div class="v">3.25 <small style="font:500 13px var(--mono);color:var(--fg-3)">tok/s</small></div><div class="d"><span class="en">roofline 4.6 tok/s</span><span class="zh">roofline 4.6 tok/s</span></div></div>
+  <div class="tile"><div class="k"><span class="en">ISL=1024 prefill</span><span class="zh">ISL=1024 prefill</span></div><div class="v">14.6 <small style="font:500 13px var(--mono);color:var(--fg-3)">s</small></div><div class="d"><span class="en">≈100% of SSD roofline</span><span class="zh">≈100% SSD roofline</span></div></div>
+</div>
+
+<h2><span class="en">1. Roofline for an SSD-streamed MoE</span><span class="zh">1. SSD 流式 MoE 的 Roofline</span></h2>
+<p><span class="en">The model (552B backbone + 196B Engram) cannot reside in 48 GB at any quantization. The converted checkpoint keeps 8.2 GB of dense weights in memory and streams 213 GB of routed experts and 114 GB of Engram tables from SSD. The bound is therefore two resources, and the SSD dominates:</span><span class="zh">模型（552B 骨干 + 196B Engram）在任何量化下都无法驻留 48 GB 内存。转换后的检查点把 8.2 GB dense 权重常驻内存，213 GB 路由专家和 114 GB Engram 表从 SSD 流式读取。因此下限由两种资源决定，且 SSD 占主导：</span></p>
+<pre>TPOT_roof(C) = max( miss_bytes(C) / 6.5 GB/s ,  11 GB / 273 GB/s = 40 ms ,  T_compute )
+miss_bytes(C) = 240 experts/token × 15.5 MB × (1 − hit_rate(C))</pre>
+<div class="tbl"><table>
+<tr><th><span class="en">Quantity</span><span class="zh">量</span></th><th class="n"><span class="en">Value</span><span class="zh">数值</span></th><th><span class="en">How measured</span><span class="zh">测量方式</span></th></tr>
+<tr><td><span class="en">SSD random read of 15 MB expert records</span><span class="zh">SSD 随机读 15 MB 专家块</span></td><td class="n">6.5 GB/s</td><td><code>bench_store.py</code>: 5.3 / 6.4 / 6.6 GB/s at 6 / 12 / 32 concurrent experts</td></tr>
+<tr><td><span class="en">Unified memory bandwidth</span><span class="zh">统一内存带宽</span></td><td class="n">273 GB/s</td><td>M4 Pro spec</td></tr>
+<tr><td><span class="en">Bytes per decoded token from SSD (cache 18 GiB, hit 0.74)</span><span class="zh">每 token SSD 读取（缓存 18 GiB，命中 0.74）</span></td><td class="n">1.31 GB</td><td><code>decode_speed.py</code></td></tr>
+<tr><td><span class="en">Decode roofline, short prompt</span><span class="zh">解码 roofline（短提示）</span></td><td class="n">202 ms/tok</td><td>1.31 GB / 6.5 GB/s</td></tr>
+<tr><td><span class="en">Decode roofline, ISL=1024 (hit 0.62 after a 1K prefill)</span><span class="zh">解码 roofline（ISL=1024，1K prefill 后命中 0.62）</span></td><td class="n">217 ms/tok · 4.6 tok/s</td><td>1.41 GB / 6.5 GB/s</td></tr>
+<tr><td><span class="en">Prefill roofline, ISL=1024</span><span class="zh">Prefill roofline（ISL=1024）</span></td><td class="n">15.5 s</td><td>101 GB of experts touched / 6.5 GB/s</td></tr>
+</table></div>
+
+<h2><span class="en">2. The optimization history</span><span class="zh">2. 优化历程</span></h2>
+<p><span class="en">Every iteration is a tagged commit (<code>opt-iter0…6</code>) on branch <code>opt/compute-side</code>, recorded with one fixed protocol: cache 18 GiB, router lookahead off, real Engram; <code>decode_speed.py</code> three runs (median), <code>bench</code> ISL=1024 gen 32 (round 2), parity/engine/server tests, a greedy probe (17×23 → 391). <code>opt_replay.sh N</code> checks the tag out into a detached worktree and re-measures it. Replay check: iter0 recorded 306 / replayed 293 ms; iter5 recorded 270 / replayed 264 ms (noise ≈ ±10 ms).</span><span class="zh">每轮迭代是 <code>opt/compute-side</code> 分支上带标签（<code>opt-iter0…6</code>）的一个提交，按固定协议记录：缓存 18 GiB、路由前瞻关、真实 Engram；<code>decode_speed.py</code> 三次取中位数、<code>bench</code> ISL=1024 gen 32 取第二轮、parity/engine/server 单测、贪心探针（17×23 → 391）。<code>opt_replay.sh N</code> 把标签检出到独立 worktree 重新测量。回放校验：iter0 记录 306 / 回放 293 ms；iter5 记录 270 / 回放 264 ms（噪声约 ±10 ms）。</span></p>
+
+<figure>
+<svg viewBox="0 0 640 230" width="100%" role="img" aria-label="Decode latency per iteration">
+  <g class="grid"><line x1="60" x2="620" y1="40" y2="40"/><line x1="60" x2="620" y1="90" y2="90"/><line x1="60" x2="620" y1="140" y2="140"/></g>
+  <text x="54" y="44" text-anchor="end" class="muted">320</text><text x="54" y="94" text-anchor="end" class="muted">280</text><text x="54" y="144" text-anchor="end" class="muted">240</text><text x="54" y="194" text-anchor="end" class="muted">200</text>
+  <line class="axis" x1="60" x2="620" y1="190" y2="190"/>
+  <!-- scale: y = 190 - (v-200)*1.25 ; bars anchored at baseline 190 (200 ms), roofline 202 drawn as a line -->
+  <g id="bars" fill="var(--s1)">
+    <rect x="80" width="48" rx="4" y="57.5" height="132.5" data-v="306" data-l="iter0 · baseline (SPEC_K 3)"/>
+    <rect x="156" width="48" rx="4" y="82.5" height="107.5" data-v="286" data-l="iter1 · fewer decode-path syncs"/>
+    <rect x="232" width="48" rx="4" y="77.5" height="112.5" data-v="290" data-l="iter2 · Block elementwise fusion"/>
+    <rect x="308" width="48" rx="4" y="98.75" height="91.25" data-v="273" data-l="iter3 · SPEC_K 3 → 4"/>
+    <rect x="384" width="48" rx="4" y="102.5" height="87.5" data-v="270" data-l="iter4 · 2-level speculation (off)"/>
+    <rect x="460" width="48" rx="4" y="102.5" height="87.5" data-v="270" data-l="iter5 · MergedLinear"/>
+    <rect x="536" width="48" rx="4" y="116.25" height="73.75" data-v="259" data-l="iter6 · io_threads sweep (kept 8)"/>
+  </g>
+  <g class="lab" font-weight="500"><text x="104" y="51" text-anchor="middle">306</text><text x="180" y="76" text-anchor="middle">286</text><text x="256" y="71" text-anchor="middle">290</text><text x="332" y="93" text-anchor="middle">273</text><text x="408" y="97" text-anchor="middle">270</text><text x="484" y="97" text-anchor="middle">270</text><text x="560" y="111" text-anchor="middle">259</text></g>
+  <line x1="60" x2="620" y1="187.5" y2="187.5" stroke="var(--s2)" stroke-width="2" stroke-dasharray="6 4"/><text x="620" y="182" text-anchor="end" fill="var(--s2)" font-weight="500">roofline 202</text>
+  <g class="muted"><text x="104" y="210" text-anchor="middle">iter0</text><text x="180" y="210" text-anchor="middle">iter1</text><text x="256" y="210" text-anchor="middle">iter2</text><text x="332" y="210" text-anchor="middle">iter3</text><text x="408" y="210" text-anchor="middle">iter4</text><text x="484" y="210" text-anchor="middle">iter5</text><text x="560" y="210" text-anchor="middle">iter6</text></g>
+  <text x="60" y="226" class="muted">ms / token, decode, median of 3 (cache 18 GiB)</text>
+</svg>
+<figcaption><span class="en">Decode latency per recorded iteration. Bars start at 200 ms; the dashed line is the SSD-transfer roofline at this cache size (202 ms). Hover a bar for its description.</span><span class="zh">每轮迭代的解码延迟。柱从 200 ms 起画；虚线是该缓存下的 SSD 传输 roofline（202 ms）。悬停查看说明。</span></figcaption>
+</figure>
+
+<div class="tbl"><table>
+<tr><th>#</th><th><span class="en">Change</span><span class="zh">改动</span></th><th class="n">ms/tok</th><th class="n">ISL1024 tok/s</th><th><span class="en">Outcome</span><span class="zh">结论</span></th></tr>
+<tr><td class="mono">0</td><td><span class="en">Baseline: upstream a4df33c + hf.py/server.py patches, SPEC_K 3</span><span class="zh">基线：上游 a4df33c + hf.py/server.py 补丁，SPEC_K 3</span></td><td class="n">306</td><td class="n">3.18</td><td>—</td></tr>
+<tr><td class="mono">1</td><td><span class="en">Drop the per-index-layer <code>mx.eval</code> on decode; merge the idx/pred host syncs</span><span class="zh">去掉解码路径索引层的 <code>mx.eval</code>；idx/pred 两次同步合一</span></td><td class="n">286</td><td class="n">3.18</td><td><span class="pill flat"><span class="en">noise edge</span><span class="zh">噪声边缘</span></span></td></tr>
+<tr><td class="mono">2</td><td><span class="en">Fuse the Block elementwise chains (mHC mixes + Sinkhorn + hc_pre + RMSNorm) into 2 compiled graphs per layer</span><span class="zh">Block 逐元素链（mHC mixes + Sinkhorn + hc_pre + RMSNorm）融合为每层 2 个编译图</span></td><td class="n">290</td><td class="n">3.27</td><td><span class="pill flat"><span class="en">no gain</span><span class="zh">无增益</span></span></td></tr>
+<tr><td class="mono">3</td><td><span class="en">Idle-window speculation SPEC_K 3 → 4 (prediction precision 87%, recall 58%)</span><span class="zh">空闲窗口推测 SPEC_K 3 → 4（预测精度 87%，召回 58%）</span></td><td class="n">273</td><td class="n">3.23</td><td><span class="pill win"><span class="en">effective</span><span class="zh">有效</span></span></td></tr>
+<tr><td class="mono">4</td><td><span class="en">Second-level speculation (layer l+2 top-k); k=1/2/3 measured +3/+6/+14% slower; default off</span><span class="zh">二级推测（l+2 层 top-k）；k=1/2/3 实测慢 3/6/14%；默认关闭</span></td><td class="n">270</td><td class="n">3.13</td><td><span class="pill neg"><span class="en">negative</span><span class="zh">负结果</span></span></td></tr>
+<tr><td class="mono">5</td><td><span class="en">MergedLinear: wq_a+wkv and shared w1+w3 as one quantized_matmul each</span><span class="zh">MergedLinear：wq_a+wkv、共享 w1+w3 各合成一次 quantized_matmul</span></td><td class="n">270</td><td class="n">3.06</td><td><span class="pill flat"><span class="en">no gain</span><span class="zh">无增益</span></span></td></tr>
+<tr><td class="mono">6</td><td><span class="en">I/O threads 8 / 16 / 24 compared; speculation confidence filter calibrated offline (linear trade-off, not shipped)</span><span class="zh">I/O 线程 8/16/24 对比；推测置信度过滤离线标定（线性权衡，未实现）</span></td><td class="n">259</td><td class="n">3.25</td><td><span class="pill flat"><span class="en">no gain, kept 8</span><span class="zh">无增益，保持 8</span></span></td></tr>
+</table></div>
+
+<h2><span class="en">3. Why the GPU-side changes could not work</span><span class="zh">3. 为什么 GPU 侧改动注定无效</span></h2>
+<p><span class="en">A replay microbenchmark executed each layer's captured decode kernels 20× back-to-back with a single evaluation at the end, isolating GPU execution from dispatch latency, syncs and SSD waits. Pure GPU work is 69 ms per token. The end-to-end 270 ms decomposes as follows:</span><span class="zh">一个回放微基准把每层捕获的解码 kernel 连续执行 20 次、末尾一次求值，把 GPU 执行与派发延迟、同步、SSD 等待分离。纯 GPU 计算每 token 只有 69 ms。端到端 270 ms 的构成如下：</span></p>
+
+<figure>
+<svg viewBox="0 0 640 86" width="100%" role="img" aria-label="Decomposition of one decode step">
+  <!-- 270 ms over 560 px: 2.074 px/ms; 2px surface gaps between segments -->
+  <rect x="60" y="20" width="257" height="28" rx="4" fill="var(--s1)"/><text x="188" y="38" text-anchor="middle" fill="#fff" font-weight="500">SSD wait 125 ms</text>
+  <rect x="319" y="20" width="141" height="28" rx="4" fill="var(--s2)"/><text x="389" y="38" text-anchor="middle" fill="#fff" font-weight="500">GPU 69 ms</text>
+  <rect x="462" y="20" width="156" height="28" rx="4" fill="var(--s3)"/><text x="540" y="38" text-anchor="middle" fill="#fff" font-weight="500">bubbles ~76 ms</text>
+  <line class="axis" x1="60" x2="620" y1="56" y2="56"/>
+  <g class="muted"><text x="60" y="72">0</text><text x="340" y="72" text-anchor="middle">135</text><text x="620" y="72" text-anchor="end">270 ms</text></g>
+</svg>
+<div class="legend"><span><i style="background:var(--s1)"></i><span class="en">SSD wait: 1.31 GB/token at 6.5 GB/s, measured in the expert store</span><span class="zh">SSD 等待：每 token 1.31 GB，6.5 GB/s，专家存储实测</span></span><span><i style="background:var(--s2)"></i><span class="en">GPU: attention proj 12.8 · core 18.3 · route+shared 9.8 · expert gather 22.9 · indexer 4.9</span><span class="zh">GPU：attention 投影 12.8 · 核心 18.3 · 路由+共享 9.8 · 专家 gather 22.9 · 索引 4.9</span></span><span><i style="background:var(--s3)"></i><span class="en">Pipeline bubbles: 40 per-layer host syncs (routing result → SSD slot assignment) drain the GPU queue</span><span class="zh">流水线气泡：每层一次主机同步（路由结果 → SSD 槽位分配）使 GPU 队列排空</span></span></div>
+<figcaption><span class="en">One decode step at cache 18 GiB, SPEC_K 4. The bubble share is the remainder after measured SSD wait and GPU throughput.</span><span class="zh">缓存 18 GiB、SPEC_K 4 下的一个解码步。气泡部分为扣除实测 SSD 等待与 GPU 吞吐后的余量。</span></figcaption>
+</figure>
+
+<p><span class="en">The sync is structural: which experts a layer needs is a GPU result, and the host must know it to issue SSD reads and assign cache slots before the expert matmul can be enqueued. Fusing elementwise kernels or merging matmuls shortens a 69 ms component that is already overlapped; it does nothing to the 201 ms that is not. The only lossless way to fill the SSD during the bubble is speculation, and its precision curve sets the ceiling:</span><span class="zh">这个同步是结构性的：每层需要哪些专家是 GPU 计算结果，主机必须拿到它才能发起 SSD 读取并分配缓存槽位，之后才能排入专家矩阵乘。融合逐元素 kernel 或合并矩阵乘只缩短本已被重叠掉的 69 ms，对未重叠的 201 ms 毫无作用。气泡期间唯一能无损填充 SSD 的手段是推测预取，而它的精度曲线决定了上限：</span></p>
+
+<div class="tbl"><table>
+<tr><th><span class="en">Predicted rank (next layer's router on this layer's input)</span><span class="zh">预测名次（下一层路由器作用于本层输入）</span></th><th class="n">1</th><th class="n">2</th><th class="n">3</th><th class="n">4</th><th class="n">5</th><th class="n">6</th></tr>
+<tr><td><span class="en">Precision: predicted expert is in the true top-6</span><span class="zh">精度：预测专家落在真实 top-6 内</span></td><td class="n">97%</td><td class="n">93%</td><td class="n">84%</td><td class="n">73%</td><td class="n">56%</td><td class="n">44%</td></tr>
+</table></div>
+<ul>
+<li><span class="en">K=4 is the knee: K=5 and K=6 add more wasted reads than useful ones on a saturated SSD (measured 265–287 ms and 331 ms).</span><span class="zh">K=4 是拐点：在已饱和的 SSD 上，K=5、6 增加的无效读取多于有效读取（实测 265–287 ms 与 331 ms）。</span></li>
+<li><span class="en">Predicting two layers ahead is 92% precise for its top-2, yet every setting measured slower: the idle windows are already filled, so extra reads only delay the next layer's demand reads.</span><span class="zh">提前两层预测的 top-2 精度有 92%，但各档位实测均变慢：空闲窗口已被填满，额外读取只会推迟下一层的需求读。</span></li>
+<li><span class="en">Predicting from the layer's output instead of its input is no more accurate (45.7% vs 45.9% coverage at K=3): attention determines routing.</span><span class="zh">用本层输出代替输入做预测并不更准（K=3 覆盖率 45.7% vs 45.9%）：路由由 attention 决定。</span></li>
+<li><span class="en">A confidence filter on the 4th prediction trades recall for precision linearly (δ=0.1: wasted reads 0.53 → 0.37 per layer, recall −3 pts), with no knee worth shipping.</span><span class="zh">对第 4 个预测做置信度过滤是线性权衡（δ=0.1：每层无效读 0.53 → 0.37，召回 −3 个百分点），没有值得实现的拐点。</span></li>
+</ul>
+
+<h2><span class="en">4. Where this leaves the deployment</span><span class="zh">4. 当前部署所处位置</span></h2>
+<div class="tbl"><table>
+<tr><th><span class="en">Workload</span><span class="zh">负载</span></th><th class="n"><span class="en">Baseline</span><span class="zh">基线</span></th><th class="n"><span class="en">Now</span><span class="zh">现在</span></th><th class="n">Roofline</th><th class="n"><span class="en">Efficiency</span><span class="zh">效率</span></th></tr>
+<tr><td><span class="en">Decode, short prompt (cache 18, hit 0.74)</span><span class="zh">解码，短提示（缓存 18，命中 0.74）</span></td><td class="n">306 ms</td><td class="n">259 ms</td><td class="n">202 ms</td><td class="n">78%</td></tr>
+<tr><td><span class="en">Decode, ISL=1024 (hit 0.62)</span><span class="zh">解码，ISL=1024（命中 0.62）</span></td><td class="n">3.18 tok/s</td><td class="n">3.25 tok/s</td><td class="n">4.6 tok/s</td><td class="n">71%</td></tr>
+<tr><td><span class="en">Prefill, ISL=1024</span><span class="zh">Prefill，ISL=1024</span></td><td class="n">14.7 s</td><td class="n">14.6 s</td><td class="n">15.5 s</td><td class="n">≈100%</td></tr>
+<tr><td><span class="en">Decode with cache 9 GiB (before this work)</span><span class="zh">缓存 9 GiB 时的解码（本工作之前）</span></td><td class="n">416 ms</td><td class="n">—</td><td class="n">241 ms</td><td class="n">58%</td></tr>
+</table></div>
+<p><span class="en">Configuration carried into the server: expert cache 18 GiB (22 GiB starts swapping on this machine), SPEC_K 4, router lookahead off. Every iteration passed the 33 parity/engine/server tests against the official PyTorch reference and the greedy probes.</span><span class="zh">服务采用的配置：专家缓存 18 GiB（22 GiB 在本机开始触发 swap）、SPEC_K 4、路由前瞻关。每轮迭代都通过了对照官方 PyTorch 参考的 33 项 parity/engine/server 单测和贪心探针。</span></p>
+
+<h2><span class="en">5. What it would take to go further</span><span class="zh">5. 继续提升需要什么</span></h2>
+<ul>
+<li><span class="en"><strong>Remove the per-layer sync</strong> with a GPU-side slot table and speculative routing with verification (flash-moe style). Large change; the upstream author measured a 38% cost for speculative routing when SSD-bound.</span><span class="zh"><strong>去掉每层同步</strong>：GPU 侧槽位表 + 带验证的推测路由（flash-moe 式）。改动大；上游作者实测 SSD 受限时推测路由开销 38%。</span></li>
+<li><span class="en"><strong>More memory</strong> raises the hit rate and lowers SSD bytes directly; a faster external SSD does not help (Thunderbolt 5 ≈ internal).</span><span class="zh"><strong>更多内存</strong>直接提高命中率、减少 SSD 字节；更快的外置 SSD 无济于事（Thunderbolt 5 ≈ 内置）。</span></li>
+<li><span class="en"><strong>Lossy knobs</strong>, outside this report's constraint: <code>--moe-topk 4</code> measured +38% decode; light code-calibrated expert pruning gives at most ~1.2× within a 0.5% accuracy budget (see the pruning analysis).</span><span class="zh"><strong>有损开关</strong>（超出本报告约束）：<code>--moe-topk 4</code> 实测解码 +38%；在 0.5% 精度预算内的轻度代码校准专家裁剪最多约 1.2×（见裁剪分析）。</span></li>
+</ul>
+
+<h2><span class="en">6. Reproduce</span><span class="zh">6. 复现</span></h2>
+<pre># record a new iteration (fixed protocol) / replay a recorded one
+/Users/loncheng/Models/dsv41-mac-tests/opt_iter.sh "description"
+/Users/loncheng/Models/dsv41-mac-tests/opt_replay.sh 3        # or: all
+
+# microbenchmarks behind section 3
+.venv/bin/python mac-deploy-tests/microbench_gpu_throughput.py   # pure GPU time per stage
+.venv/bin/python mac-deploy-tests/spec_accuracy.py               # speculation precision curves
+.venv/bin/python mac-deploy-tests/cprofile_decode.py 18          # host-side profile
+
+# serve with the tuned configuration
+.venv/bin/python -m deepinfer_mac serve --model /Users/loncheng/Models/dsv41-mac --cache-gb 18 --port 8000</pre>
+<p><span class="en">Code and data: branch <code>opt/compute-side</code> with tags <code>opt-iter0…6</code> at github.com/longcheng-nv/TensorRT-LLM; journal and raw logs under <code>mac-deploy-tests/data/opt-journal/</code>.</span><span class="zh">代码与数据：github.com/longcheng-nv/TensorRT-LLM 的 <code>opt/compute-side</code> 分支（标签 <code>opt-iter0…6</code>）；记录与原始日志在 <code>mac-deploy-tests/data/opt-journal/</code>。</span></p>
+
+<h2><span class="en">7. Start and use the service</span><span class="zh">7. 启动与使用服务</span></h2>
+<h3><span class="en">Start, check, stop</span><span class="zh">启动、检查、停止</span></h3>
+<pre>cd /Users/loncheng/Models/DeepInfer-Mac
+nohup .venv/bin/python -m deepinfer_mac serve --model /Users/loncheng/Models/dsv41-mac \
+      --cache-gb 18 --port 8000 > /Users/loncheng/Models/logs/serve.log 2>&amp;1 &amp;
+
+curl -s http://127.0.0.1:8000/v1/models    # health: lists "deepseek-flash"
+curl -s http://127.0.0.1:8000/stats        # last request: tok/s, hit rate, cache size
+pkill -f "deepinfer_mac serve"             # stop</pre>
+<p><span class="en">Startup takes 20–30 s (8 GB dense weights + an 18 GiB expert cache, about 26 GB in total). Add <code>--moe-topk 4</code> for roughly +38% decode speed at the cost of computing 4 instead of 6 experts per token (lossy). Do not run the CLI chat and the server at the same time; each needs its own 26 GB.</span><span class="zh">启动约 20–30 s（8 GB dense 权重 + 18 GiB 专家缓存，共约 26 GB）。加 <code>--moe-topk 4</code> 可换约 +38% 解码速度，代价是每 token 只算 4 个而非 6 个专家（有损）。CLI 聊天与服务不要同时运行，各需 26 GB。</span></p>
+
+<h3><span class="en">The API contract (OpenAI-compatible)</span><span class="zh">API 契约（OpenAI 兼容）</span></h3>
+<pre>curl -s http://127.0.0.1:8000/v1/chat/completions -H 'Content-Type: application/json' -d '{
+  "model": "deepseek-flash",
+  "messages": [{"role":"user","content":"用一句话介绍杭州。"}],
+  "max_tokens": 128, "temperature": 0.7,
+  "thinking": {"type":"disabled"}
+}'</pre>
+<ul>
+<li><span class="en"><strong>Always send <code>max_tokens</code>.</strong> Without it the default is 65536 tokens, which at ~3 tok/s can occupy the server for hours.</span><span class="zh"><strong>一定要传 <code>max_tokens</code>。</strong>不传默认 65536，在约 3 tok/s 下一个请求可能占用服务器数小时。</span></li>
+<li><span class="en">Reasoning mode is on by default and forces temperature 1.0. For direct answers send <code>"thinking":{"type":"disabled"}</code>; for reasoning send <code>{"type":"enabled"}</code> plus <code>"reasoning_effort":"low"|"high"|"max"</code> (strings) and reserve ≥500 tokens; the reply carries <code>reasoning_content</code>.</span><span class="zh">推理模式默认开启并强制 temperature 1.0。要直接回答传 <code>"thinking":{"type":"disabled"}</code>；要推理传 <code>{"type":"enabled"}</code> 并用字符串 <code>"reasoning_effort":"low"|"high"|"max"</code>，预留 ≥500 token；回复含 <code>reasoning_content</code>。</span></li>
+<li><span class="en">One request at a time (global lock); others queue. Set long client timeouts.</span><span class="zh">同一时间只处理一个请求（全局锁），其余排队。客户端超时要设大。</span></li>
+<li><span class="en">Structured output: <code>response_format</code> <code>{"type":"json_object"}</code> or <code>{"type":"json_schema","json_schema":{…}}</code>. Tools: standard <code>tools</code> / <code>tool_calls</code> / <code>role: tool</code>. Images: <code>image_url</code> with a data URL or a public URL (loopback and private addresses are refused). Multi-turn: resend the conversation; the prefix cache is reused (<code>usage.prompt_cache_hit_tokens</code>).</span><span class="zh">结构化输出：<code>response_format</code> 为 <code>{"type":"json_object"}</code> 或 <code>{"type":"json_schema","json_schema":{…}}</code>。工具调用：标准 <code>tools</code> / <code>tool_calls</code> / <code>role: tool</code>。图片：<code>image_url</code> 用 data URL 或公网 URL（拒绝回环与内网地址）。多轮：原样回传对话，前缀缓存会复用（<code>usage.prompt_cache_hit_tokens</code>）。</span></li>
+<li><span class="en">Also served: Anthropic-style <code>POST /v1/messages</code> and <code>POST /v1/responses</code>; point those SDKs at <code>http://127.0.0.1:8000</code>.</span><span class="zh">同时提供 Anthropic 格式 <code>POST /v1/messages</code> 与 <code>POST /v1/responses</code>；对应 SDK 的 base URL 指向 <code>http://127.0.0.1:8000</code> 即可。</span></li>
+</ul>
+
+<h3><span class="en">Python (any OpenAI SDK)</span><span class="zh">Python（任意 OpenAI SDK）</span></h3>
+<pre>from openai import OpenAI            # pip install openai, in your own environment
+client = OpenAI(base_url="http://127.0.0.1:8000/v1", api_key="local")
+r = client.chat.completions.create(
+    model="deepseek-flash",
+    messages=[{"role": "user", "content": "Write a Python LRU cache."}],
+    max_tokens=400, temperature=0.6,
+    extra_body={"thinking": {"type": "disabled"}},
+    stream=True,
+)
+for chunk in r:
+    print(chunk.choices[0].delta.content or "", end="", flush=True)</pre>
+
+<h3><span class="en">Command-line chat (no server)</span><span class="zh">命令行聊天（不经服务）</span></h3>
+<pre>cd /Users/loncheng/Models/DeepInfer-Mac
+.venv/bin/python -m deepinfer_mac chat --model /Users/loncheng/Models/dsv41-mac --cache-gb 18 \
+      --temperature 0.7 --max-tokens 512        # --think for reasoning; "/img &lt;path&gt; &lt;question&gt;" for an image</pre>
+
+<h3><span class="en">Using it from tools</span><span class="zh">在工具中使用</span></h3>
+<p><span class="en">Open WebUI, Continue, Cursor and similar tools that accept a custom OpenAI endpoint: base URL <code>http://127.0.0.1:8000/v1</code>, model <code>deepseek-flash</code>, a generous request timeout and a small max_tokens. Expect 7–8 s to first token for short prompts, ~15 s for 1K-token prompts, and 3.2–3.8 tok/s generation.</span><span class="zh">Open WebUI、Continue、Cursor 等支持自定义 OpenAI 端点的工具：base URL 填 <code>http://127.0.0.1:8000/v1</code>，模型名 <code>deepseek-flash</code>，请求超时设大、max_tokens 设小。预期短提示首 token 7–8 s，1K token 提示约 15 s，生成 3.2–3.8 tok/s。</span></p>
+
+<div class="foot"><span class="en">Engine: haoruilee/DeepInfer-Mac (community MLX port; the official DeepInfer runs only on NVIDIA SM100 / Ascend 950). Deployment is lossy by construction (2/3/4-bit experts, 4-bit Engram); all speed numbers are from this machine and vary by roughly ±10 ms between runs.</span><span class="zh">引擎：haoruilee/DeepInfer-Mac（社区 MLX 移植；官方 DeepInfer 仅支持 NVIDIA SM100 / Ascend 950）。部署本身为有损量化（2/3/4-bit 专家、4-bit Engram）；所有速度数字来自本机，运行间波动约 ±10 ms。</span></div>
+</div>
+<div class="tip" id="tip"></div>
+
+<script>
+function setLang(l){document.body.dataset.lang=l;document.getElementById('lang-en').setAttribute('aria-pressed',l==='en');document.getElementById('lang-zh').setAttribute('aria-pressed',l==='zh');document.documentElement.lang=l==='zh'?'zh-CN':'en';try{localStorage.setItem('dsv41-opt-lang',l)}catch(e){}}
+(function(){var l='en';try{l=localStorage.getItem('dsv41-opt-lang')||'en'}catch(e){}setLang(l==='zh'?'zh':'en');})();
+(function(){var tip=document.getElementById('tip');document.querySelectorAll('#bars rect').forEach(function(r){r.addEventListener('mousemove',function(e){tip.textContent=r.dataset.l+' · '+r.dataset.v+' ms/token';tip.style.left=(e.clientX+12)+'px';tip.style.top=(e.clientY-28)+'px';tip.style.opacity=1});r.addEventListener('mouseleave',function(){tip.style.opacity=0});});})();
+</script>

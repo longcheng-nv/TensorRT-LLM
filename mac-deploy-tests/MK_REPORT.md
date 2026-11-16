@@ -6,7 +6,7 @@
 | 指标 | 本轮开始 | 现在 | 说明 |
 |---|---|---|---|
 | 计算路径（专家全部命中、无 SSD）| 87 ms/token（11.5 tok/s）| **68 ms/token（14.7 tok/s）** | megakernel 后 GPU 内核合计 ~54 ms，权重带宽下限 ~48 ms |
-| 无损端到端解码（4 类提示，200 token，中位）| 3.4 tok/s | **4.7 tok/s** | SSD 受限 |
+| 无损端到端解码（中位）| 3.4 tok/s（单个提示，`scripts/decode_speed.py`）| **4.7 tok/s**（4 类提示各 200 token；同一提示为 4.58 tok/s）| SSD 受限 |
 | `--fast`（有损，`--sub-rank 2`）| — | **10.2–10.6 tok/s**（4 类提示 200 token 稳态，中位/均值）；**经 HTTP 服务流式实测 10.06 tok/s**（4 个提示各 300 token，含开头预热）| 达到 TPS=10；质量代价见下 |
 
 **TPS=10 只在有损的「缓存感知路由」下达到。** 16 GiB 缓存时 LRU 命中率约 67%，每 token 约 78 次专家读盘 × 2.56 ms（15.5 MB / 6 GB/s）；即使未来全知的 Belady 缓存也要约 46 次读盘（~120 ms），所以无损 10 TPS 在这台机器上物理不可达。kernel 融合只能压缩计算（87→68 ms），压不掉 SSD。
@@ -64,7 +64,7 @@ cd /Users/loncheng/Models/DeepInfer-Mac
 ## 还能做什么
 1. 更大的专家缓存最有效（需要关掉其他应用、放宽 CLAUDE.md 的 16 GiB 上限）：24 GiB 时读盘 −22%，`--sub-rank 3` 有望接近 10 TPS。
 2. 外置 Thunderbolt 5 SSD 与内置盘条带化（专家文件分两半），SSD 带宽翻倍是唯一能直接解决无损瓶颈的硬件手段。
-3. GPU 侧专家调度（命中专家不等 CPU 同步）可再省 ~6 ms/token。
+3. GPU 侧专家调度（命中专家不等 CPU 同步）：逐层同步的总开销约 6 ms/token（计算路径实测：无逐层同步 61.6 ms vs 有同步 67.8 ms），这是上限；其中路由同步到首个 MoE kernel 的 CPU 侧延迟实测 ~67 µs/层（≈ 2.7 ms/token）。
 
 ## 复现
 - 工具：`DeepInfer-Mac/mac-deploy-tests/mk/`（`mk_bench.py`、`multi_prompt.py`、`mk_quality.py`、`sim_*.py`、kernel 测试 `test_mk_*.py`）
