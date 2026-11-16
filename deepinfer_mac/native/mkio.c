@@ -48,7 +48,7 @@ static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t cv_work = PTHREAD_COND_INITIALIZER;
 static pthread_cond_t cv_done = PTHREAD_COND_INITIALIZER;
 static Queue qhi, qlo;
-static int active_lo = 0, spec_conc = 2;
+static int active_lo = 0, active_hi = 0, spec_conc = 2;
 static size_t chunk_sz = 2u << 20;
 static int next_slot = 0;
 static long gen_ctr = 1;
@@ -109,8 +109,9 @@ static void *worker(void *arg) {
     Job *j = NULL;
     int lo = 0;
     for (;;) {
-      if (qhi.head) { j = qhi.head; q_unlink(&qhi, j); break; }
-      if (qlo.head && active_lo < spec_conc) { j = qlo.head; q_unlink(&qlo, j); lo = 1; active_lo++; break; }
+      if (qhi.head) { j = qhi.head; q_unlink(&qhi, j); active_hi++; break; }
+      // guesses only while no demand chunk is queued or on the SSD: a demand read has the whole device
+      if (qlo.head && active_hi == 0 && active_lo < spec_conc) { j = qlo.head; q_unlink(&qlo, j); lo = 1; active_lo++; break; }
       pthread_cond_wait(&cv_work, &mu);
     }
     Req *r = &reqs[j->req];
@@ -120,6 +121,7 @@ static void *worker(void *arg) {
     do_read(r, j->a, j->b, &err);
     pthread_mutex_lock(&mu);
     if (lo) { active_lo--; if (qlo.head) pthread_cond_signal(&cv_work); }
+    else { active_hi--; if (active_hi == 0 && qlo.head) pthread_cond_broadcast(&cv_work); }
     if (err) r->error = 1;
     if (--r->left == 0) { r->done = 1; pthread_cond_broadcast(&cv_done); }
     pthread_mutex_unlock(&mu);

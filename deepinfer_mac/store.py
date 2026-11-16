@@ -99,7 +99,7 @@ class PrioIO:
     queues behind a backlog of guesses; a guess that turns out to be needed is promoted."""
 
     CHUNK = int(os.environ.get("DEEPINFER_IO_CHUNK", str(2 << 20)))
-    SPEC_CONC = int(os.environ.get("DEEPINFER_SPEC_CONC", "2"))
+    SPEC_CONC = int(os.environ.get("DEEPINFER_SPEC_CONC", "4"))
 
     def __init__(self, threads: int):
         self.cv = threading.Condition()
@@ -224,6 +224,21 @@ class _NReq:
             pass
 
 
+def _mkio_lib():
+    """Path of the native IO library, built from native/mkio.c on first use (clang); None if it
+    cannot be built (the Python PrioIO is used then)."""
+    import subprocess
+
+    src = Path(__file__).parent / "native" / "mkio.c"
+    lib = src.with_name("libmkio.dylib")
+    try:
+        if not lib.exists() or lib.stat().st_mtime < src.stat().st_mtime:
+            subprocess.run(["clang", "-O2", "-shared", "-fPIC", "-o", str(lib), str(src)], check=True, capture_output=True)
+        return lib
+    except Exception:  # noqa: BLE001 - no compiler: fall back
+        return None
+
+
 class NativeIO:
     """Same contract as PrioIO, implemented in C (native/mkio.c): no Python per chunk, no GIL
     traffic from the I/O workers."""
@@ -231,7 +246,7 @@ class NativeIO:
     def __init__(self, threads: int):
         import ctypes
 
-        lib = ctypes.CDLL(str(Path(__file__).parent / "native" / "libmkio.dylib"))
+        lib = ctypes.CDLL(str(_mkio_lib()))
         lib.mkio_init.argtypes = [ctypes.c_int, ctypes.c_longlong, ctypes.c_int]
         lib.mkio_submit.argtypes = [ctypes.c_int, ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(ctypes.c_longlong),
                                     ctypes.c_int, ctypes.c_longlong, ctypes.c_longlong, ctypes.c_int]
@@ -276,6 +291,7 @@ class ExpertStore:
     IO_SPLIT = int(os.environ.get("DEEPINFER_IO_SPLIT", "1"))  # parallel reads per expert record
     PRIO_IO = os.environ.get("DEEPINFER_PRIO_IO", "1") == "1"  # chunked two-priority scheduler (PrioIO)
     NATIVE_IO = os.environ.get("DEEPINFER_NATIVE_IO", "1") == "1"  # ... implemented in C (native/mkio.c)
+    HOT_WAIT = os.environ.get("DEEPINFER_HOT_WAIT", "1") == "1"  # keep the GPU clocked up while waiting for reads
 
     def __init__(self, root: Path, budget_bytes: int, threads: int = 8):
         root = Path(root)
@@ -304,8 +320,7 @@ class ExpertStore:
         self.pool = ThreadPoolExecutor(threads, thread_name_prefix="expert-io")
         self.prio = None
         if self.PRIO_IO:
-            lib = Path(__file__).parent / "native" / "libmkio.dylib"
-            self.prio = NativeIO(threads) if (self.NATIVE_IO and lib.exists()) else PrioIO(threads)
+            self.prio = NativeIO(threads) if (self.NATIVE_IO and _mkio_lib() is not None) else PrioIO(threads)
         self._addr = {}  # slab id -> per-part base addresses (native IO)
         self.spec_pool = ThreadPoolExecutor(1, thread_name_prefix="expert-spec")
         self._pad = threading.local()
@@ -550,7 +565,14 @@ class ExpertStore:
             fut = self.inflight.get(k)
             if fut is not None:
                 t = time.perf_counter()
-                fut.result()
+                if self.HOT_WAIT and not fut.done():
+                    if hasattr(fut, "high") and not fut.high:
+                        self.prio.promote(fut)
+                    from .model import mk
+
+                    mk.hot_wait(fut)
+                else:
+                    fut.result()
                 self.stats["wait_s"] += time.perf_counter() - t
                 with self.lock:
                     self.inflight.pop(k, None)

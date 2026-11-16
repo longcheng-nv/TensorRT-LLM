@@ -3,3 +3,4 @@ __pycache__/
 *.pyc
 .pytest_cache/
 deepinfer_mac.egg-info/
+deepinfer_mac/native/*.dylib

@@ -12,6 +12,7 @@ Routed experts never live in this module: `Weights.experts.get(layer_key, ids)` 
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 
 import mlx.core as mx
@@ -1206,6 +1207,7 @@ class Transformer:
         return self.w.embed(np.asarray(tokens, dtype=np.int64))
 
     MK = True  # fused decode path (mk.py) for single-token text decode
+    ASYNC_ATTN = os.environ.get('DEEPINFER_ASYNC_ATTN', '1') == '1'
 
     def forward_mk(self, st: SeqState, token: int):
         """Single-token decode with the fused kernels of mk.py. Same state updates and math as
@@ -1234,14 +1236,18 @@ class Transformer:
                     X = _hc_post_c(carry[0][None], carry[1][None], carry[2][None], carry[3][None])[0]
                     carry = None
                 X = layer.engram(X[None], hash_ids[:, a.engram_layer_ids.index(i)], None)[0]
+            ca, cf = mk.hc_counter((i, 0)), mk.hc_counter((i, 1))
             if carry is not None:
                 X, h, a_pre, a_post, a_comb = mk.hc_stage(carry[1], pre_mix, hc["attn_fn"], hc["attn_scale"], hc["attn_base"],
-                                                          layer.attn_norm, eps, hin=carry[0], post=carry[2], comb=carry[3])
+                                                          layer.attn_norm, eps, hin=carry[0], post=carry[2], comb=carry[3], counter=ca)
             else:
-                X, h, a_pre, a_post, a_comb = mk.hc_stage(X, pre_mix, hc["attn_fn"], hc["attn_scale"], hc["attn_base"], layer.attn_norm, eps)
+                X, h, a_pre, a_post, a_comb = mk.hc_stage(X, pre_mix, hc["attn_fn"], hc["attn_scale"], hc["attn_base"], layer.attn_norm, eps,
+                                                          counter=ca)
             ha = layer.attn(h[None], positions, st, st.rings[i], sh, start)
+            if self.ASYNC_ATTN:  # the GPU starts on attention while Python builds the rest of the layer
+                mx.async_eval(ha)
             X, h, f_pre, f_post, f_comb = mk.hc_stage(X, a_pre, hc["ffn_fn"], hc["ffn_scale"], hc["ffn_base"], layer.ffn_norm, eps,
-                                                      hin=ha[0], post=a_post, comb=a_comb)
+                                                      hin=ha[0], post=a_post, comb=a_comb, counter=cf)
             hm = layer.ffn(h[None])
             carry = (hm[0], X, f_post, f_comb)
             pre_mix = f_pre

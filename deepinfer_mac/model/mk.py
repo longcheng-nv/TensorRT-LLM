@@ -396,7 +396,115 @@ _HC_FINALIZE = r"""
   }
 """
 
+_HC_FUSED = r"""
+  constexpr int D = DIM;
+  constexpr int HC = 4;
+  constexpr int NM = 24;
+  const int tid = thread_position_in_threadgroup.x;
+  const int tg = threadgroup_position_in_grid.x;
+  const int d = tg * TPG + tid;
+  float xf[HC];
+  if (HAS_POST) {
+    const float hv = float(hin[d]);
+    float res[HC];
+    for (int j = 0; j < HC; j++) res[j] = float(xres[j * D + d]);
+    for (int k = 0; k < HC; k++) {
+      float acc = comb[0 * HC + k] * res[0];
+      for (int j = 1; j < HC; j++) acc = acc + comb[j * HC + k] * res[j];
+      const bfloat16_t o = bfloat16_t(post[k] * hv + acc);
+      xnew[k * D + d] = o;
+      xf[k] = float(o);
+    }
+  } else {
+    for (int k = 0; k < HC; k++) { const bfloat16_t o = xres[k * D + d]; xnew[k * D + d] = o; xf[k] = float(o); }
+  }
+  float part[NM + 2];
+  float ss = 0.0f;
+  for (int k = 0; k < HC; k++) ss += xf[k] * xf[k];
+  for (int i = 0; i < NM; i++) {
+    float a = 0.0f;
+    for (int k = 0; k < HC; k++) a += xf[k] * fn[(size_t)i * (HC * D) + k * D + d];
+    part[i] = a;
+  }
+  float hs = premix[0] * xf[0];
+  for (int j = 1; j < HC; j++) hs = hs + premix[j] * xf[j];
+  const bfloat16_t hb = bfloat16_t(hs);
+  hraw[d] = hb;
+  const float hf = float(hb);
+  part[NM] = ss;
+  part[NM + 1] = hf * hf;
+  threadgroup float red[TPG / 32][NM + 2];
+  const int sg = tid / 32, lane = tid % 32;
+  for (int i = 0; i < NM + 2; i++) {
+    const float v = simd_sum(part[i]);
+    if (lane == 0) red[sg][i] = v;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  if (tid < NM + 2) {
+    float v = 0.0f;
+    for (int s = 0; s < TPG / 32; s++) v += red[s][tid];
+    partials[tg * (NM + 2) + tid] = v;
+  }
+
+  // ---- last-threadgroup epilogue (no second dispatch)
+  threadgroup uint ticket;
+  atomic_thread_fence(mem_flags::mem_device, memory_order_seq_cst, thread_scope_device);
+  threadgroup_barrier(mem_flags::mem_device);
+  if (tid == 0) ticket = atomic_fetch_add_explicit((device atomic_uint*)counter, 1u, memory_order_relaxed);
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  if (ticket != uint(NT - 1)) return;
+  atomic_thread_fence(mem_flags::mem_device, memory_order_seq_cst, thread_scope_device);
+  if (tid == 0) atomic_store_explicit((device atomic_uint*)counter, 0u, memory_order_relaxed);
+
+  threadgroup float tot[NM + 2];
+  threadgroup float rstd_h;
+  if (tid < NM + 2) {
+    float v = 0.0f;
+    for (int t = 0; t < NT; t++) v += partials[t * (NM + 2) + tid];
+    tot[tid] = v;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  if (tid < 32) {  // one simdgroup: lane = j * 4 + k holds comb[j][k] (lanes 0..15)
+    const float eps = epsv[0];
+    const float hc_eps = 1e-6f;
+    const float rs = metal::precise::rsqrt(tot[NM] / float(HC * D) + eps);
+    const int lane = tid;
+    const int li = lane & 15;
+    float c = tot[2 * HC + li] * rs * sc[2] + base[2 * HC + li];
+    float mx_ = max(c, simd_shuffle_xor(c, 1));
+    mx_ = max(mx_, simd_shuffle_xor(mx_, 2));
+    c = metal::precise::exp(c - mx_);
+    float s = c + simd_shuffle_xor(c, 1);
+    s = s + simd_shuffle_xor(s, 2);
+    c = c / s + hc_eps;
+    s = c + simd_shuffle_xor(c, 4);
+    s = s + simd_shuffle_xor(s, 8);
+    c = c / (s + hc_eps);
+    for (int it = 0; it < ITERS - 1; it++) {
+      s = c + simd_shuffle_xor(c, 1);
+      s = s + simd_shuffle_xor(s, 2);
+      c = c / (s + hc_eps);
+      s = c + simd_shuffle_xor(c, 4);
+      s = s + simd_shuffle_xor(s, 8);
+      c = c / (s + hc_eps);
+    }
+    if (lane < 16) comb_o[lane] = c;
+    if (lane < HC) {
+      pre_o[lane] = sigmoid_mlx(tot[lane] * rs * sc[0] + base[lane]) + hc_eps;
+      post_o[lane] = 2.0f * sigmoid_mlx(tot[HC + lane] * rs * sc[1] + base[HC + lane]);
+    }
+    if (lane == 0) rstd_h = metal::precise::rsqrt(tot[NM + 1] / float(D) + eps);
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  const float r = rstd_h;
+  for (int d = tid; d < D; d += TPG) {
+    hnorm[d] = bfloat16_t(float(normw[d]) * (float(hraw[d]) * r));
+  }
+"""
+
+
 HC_TPG = 64  # threads (= d values) per hc_partial threadgroup
+HC_FUSED = True  # one dispatch per mHC stage (last-threadgroup epilogue)
 
 
 @lru_cache(maxsize=None)
@@ -418,8 +526,27 @@ def _hc_finalize_kernel():
                                 output_names=["hnorm", "pre_o", "post_o", "comb_o"], header=HEADER, source=_HC_FINALIZE)
 
 
+@lru_cache(maxsize=None)
+def _hc_fused_kernel():
+    return mx.fast.metal_kernel(name="mk_hc_fused", input_names=["hin", "xres", "post", "comb", "premix", "fn", "normw", "sc", "base", "epsv", "counter"],
+                                output_names=["xnew", "hraw", "partials", "hnorm", "pre_o", "post_o", "comb_o"], header=HEADER, source=_HC_FUSED)
+
+
+_COUNTERS: dict = {}
+
+
+def hc_counter(key) -> mx.array:
+    """A persistent ticket counter for one call site (the kernel resets it to 0 when done)."""
+    c = _COUNTERS.get(key)
+    if c is None:
+        c = _COUNTERS[key] = mx.zeros((4096,), dtype=mx.uint32)  # large enough to be bound as device memory
+        mx.eval(c)
+    return c
+
+
 def hc_stage(x_res: mx.array, premix: mx.array, fn: mx.array, sc: mx.array, base: mx.array, norm_w: mx.array,
-             eps: mx.array, hin: mx.array | None = None, post: mx.array | None = None, comb: mx.array | None = None):
+             eps: mx.array, hin: mx.array | None = None, post: mx.array | None = None, comb: mx.array | None = None,
+             counter: mx.array | None = None):
     """One mHC stage for a single token.
     x_res [4, D] bf16 residual streams; if hin is given, first X = hc_post(hin, x_res, post, comb).
     -> (X [4, D] bf16, h_norm [D] bf16, pre [4], post [4], comb [4, 4]) with h = sum_j premix[j] X[j]
@@ -429,6 +556,16 @@ def hc_stage(x_res: mx.array, premix: mx.array, fn: mx.array, sc: mx.array, base
     has_post = hin is not None
     if not has_post:
         hin, post, comb = _dummies(D)
+    if HC_FUSED and counter is not None:
+        xnew, hraw, _, hnorm, pre_o, post_o, comb_o = _hc_fused_kernel()(
+            inputs=[hin.reshape(-1), x_res.reshape(-1), post.reshape(-1), comb.reshape(-1), premix.reshape(-1), fn, norm_w, sc, base,
+                    eps.reshape(1), counter],
+            template=[("DIM", D), ("TPG", HC_TPG), ("HAS_POST", has_post), ("NT", nt), ("ITERS", 20)],
+            grid=(D, 1, 1), threadgroup=(HC_TPG, 1, 1),
+            output_shapes=[(4 * D,), (D,), (nt * 26,), (D,), (4,), (4,), (16,)],
+            output_dtypes=[mx.bfloat16, mx.bfloat16, mx.float32, mx.bfloat16, mx.float32, mx.float32, mx.float32],
+        )
+        return xnew.reshape(4, D), hnorm, pre_o, post_o, comb_o.reshape(4, 4)
     xnew, hraw, partials = _hc_partial_kernel()(
         inputs=[hin.reshape(-1), x_res.reshape(-1), post.reshape(-1), comb.reshape(-1), premix.reshape(-1), fn],
         template=[("DIM", D), ("TPG", HC_TPG), ("HAS_POST", has_post)],
@@ -1056,3 +1193,45 @@ def router_shared(x: mx.array, gate_w: mx.array, w13: mx.array, w13s: mx.array, 
         output_dtypes=[mx.uint32, mx.float32, mx.float32, mx.uint32, mx.uint32, mx.float32],
     )
     return idx, w, scores, pred, pred2, xq, y
+
+
+# --------------------------------------------------------------------------------- GPU keep-alive
+# Apple GPUs drop to a low-power state after ~1-2 ms without work; the next kernels then run 2-4x
+# slower (measured: a 190 us GEMV takes ~1.2 ms after a 4 ms idle gap). While the decode thread
+# waits for an SSD read, keep the GPU's submit/complete path busy with tiny kernels on the default
+# stream instead of letting it idle.
+_SPIN = r"""
+  uint t = thread_position_in_grid.x;
+  float a = float(t) * 1e-3f;
+  for (int i = 0; i < ITERS; i++) a = metal::fma(a, 0.9999f, 1e-4f);
+  if (a == 12345.0f) out[t] = a;
+"""
+
+
+@lru_cache(maxsize=None)
+def _spin_kernel():
+    return mx.fast.metal_kernel(name="mk_spin", input_names=["dummy"], output_names=["out"], source=_SPIN)
+
+
+@lru_cache(maxsize=None)
+def _spin_dummy():
+    d = mx.zeros((1,))
+    mx.eval(d)
+    return d
+
+
+SPIN_ITERS = 400
+
+
+def gpu_tick():
+    """Run one tiny kernel on the default GPU stream and wait for it (keeps the GPU clocked up)."""
+    o = _spin_kernel()(inputs=[_spin_dummy()], template=[("ITERS", SPIN_ITERS)], grid=(32, 1, 1), threadgroup=(32, 1, 1),
+                       output_shapes=[(32,)], output_dtypes=[mx.float32])[0]
+    mx.eval(o)
+
+
+def hot_wait(fut) -> None:
+    """Block until `fut` (a read request) is done, keeping the GPU busy meanwhile."""
+    while not fut.done():
+        gpu_tick()
+    fut.result()
