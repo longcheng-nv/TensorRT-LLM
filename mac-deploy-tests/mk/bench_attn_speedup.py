@@ -11,7 +11,7 @@ feeds the next call, so the calls run in sequence as in decode. Reference varian
   prod = the core compiled with mx.compile, exactly as the reference decode path runs it
 Expert routing is fixed to experts 0-5 (no SSD reads); attention timing does not depend on it.
 
-usage: bench_attn_speedup.py [--ctx 4096] [--n 60] [--reps 7]
+usage: bench_attn_speedup.py [--ctx 4096] [--n 60] [--reps 7] [--check-only]
 """
 from __future__ import annotations
 
@@ -127,6 +127,7 @@ def main():
     ap.add_argument("--ctx", type=int, default=4096, help="long-context prompt length in tokens")
     ap.add_argument("--n", type=int, default=60, help="tokens per timed batch")
     ap.add_argument("--reps", type=int, default=7)
+    ap.add_argument("--check-only", action="store_true", help="exactness check only, no timing")
     a = ap.parse_args()
     M.MoE.SPEC_K = 0
     M.MoE.FIXED_EXPERTS = list(range(6))
@@ -145,28 +146,35 @@ def main():
         t0 = time.perf_counter()
         caps, _ = capture(llm, ids)
         prep = time.perf_counter() - t0
-        # correctness: fused vs reference, and new split kernel vs the old single-dispatch one
-        worst_cos, worst_exact, rings_ok, old_exact = 1.0, 1.0, True, 1.0
+        # correctness: exact element counts, new split kernel vs the reference chain and vs the old kernel
+        n_el = int(caps[0]["q"].size)
+        stats = {"new vs ref": [], "new vs old": [], "old vs ref": []}
+        worst_cos, rings_ok, max_rel = 1.0, True, 0.0
         for c in caps:
             o_m, r_m = mk_step(c, c["ring"])
             o_o, r_o = mk_old_step(c, c["ring"])
             o_r, r_r = ref_step(c, c["ring"], core_ops)
             mx.eval(o_m, r_m, o_o, r_o, o_r, r_r)
-            x, y = np.array(o_r.astype(F32)).ravel(), np.array(o_m.astype(F32)).ravel()
+            x, y, z = (np.array(t.astype(F32)).ravel() for t in (o_r, o_m, o_o))
             worst_cos = min(worst_cos, float(x @ y / (np.linalg.norm(x) * np.linalg.norm(y) + 1e-30)))
-            worst_exact = min(worst_exact, float((x == y).mean()))
-            old_exact = min(old_exact, float((np.array(o_o.astype(F32)).ravel() == y).mean()))
+            max_rel = max(max_rel, float(np.abs(x - y).max() / (np.abs(x).max() + 1e-30)))
+            stats["new vs ref"].append(int((x != y).sum()))
+            stats["new vs old"].append(int((z != y).sum()))
+            stats["old vs ref"].append(int((x != z).sum()))
             rm = np.array(r_m.astype(F32))
             rings_ok &= bool(np.array_equal(rm, np.array(r_r.astype(F32))) and np.array_equal(rm, np.array(r_o.astype(F32))))
+        diff_txt = " | ".join(f"{k}: {sum(1 for d in v if d)} of {len(v)} layers differ, max {max(v)} / {n_el} elements per layer"
+                              for k, v in stats.items())
         nkeys = [int((np.array(c["cidx"]) >= 0).sum()) if c["comp"] is not None else 0 for c in caps]
         groups = {
             "window only": [c for c in caps if c["comp"] is None],
             "window + compressed": [c for c in caps if c["comp"] is not None],
         }
         print(f"\n[{name}] prompt {len(ids)} tok (prefill+3 steps {prep:.1f} s) | {len(caps)} layers | compressed keys attended "
-              f"per layer: min {min(nkeys)} max {max(nkeys)} | new kernel vs reference: worst cos {worst_cos:.7f}, "
-              f"min bit-exact {worst_exact:.3f} | new vs old kernel: min bit-exact {old_exact:.3f} | rings identical {rings_ok}",
-              flush=True)
+              f"per layer: min {min(nkeys)} max {max(nkeys)} | new vs reference: worst cos {worst_cos:.7f}, max rel diff {max_rel:.1e} | "
+              f"rings identical {rings_ok}\n  exact compare: {diff_txt}", flush=True)
+        if a.check_only:
+            continue
         variants = (("megakernel (split)", mk_step), ("old megakernel", mk_old_step),
                     ("ref prod", lambda c, r: ref_step(c, r, core_prod)), ("ref ops", lambda c, r: ref_step(c, r, core_ops)))
         for gname, gc in (("all layers", caps), *groups.items()):

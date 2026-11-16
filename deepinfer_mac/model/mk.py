@@ -19,7 +19,8 @@ from functools import lru_cache
 import mlx.core as mx
 
 # sparse attention as two parallel dispatches (sa_scores + sa_pv) instead of the single-dispatch
-# mk_sparse_attn (16 threadgroups, latency-bound at long context). Same arithmetic, same order.
+# mk_sparse_attn (16 threadgroups, latency-bound at long context). Same arithmetic; only the PV sum is
+# split into 8 ordered partials.
 SPLIT_ATTN = os.environ.get("DEEPINFER_MK_ATTN_SPLIT", "1") != "0"
 
 def supported(a) -> bool:
@@ -918,9 +919,11 @@ def _sparse_attn_kernel():
 #              sum, bf16(p) numerator, as mk_sparse_attn); the 8 simdgroups each sum NK/8 keys in order for
 #              all 8 heads (one value load feeds 16 FMAs) and the 8 partials are added in a fixed order;
 #              inverse RoPE, fp8 act-quant; the H threadgroups also write the new ring.
-# Only the PV sum is regrouped (8 ordered partials). On real decode states the output was bit-identical to
-# mk_sparse_attn and to the MLX reference chain; 49 / 82 us/layer at short / 4K context
-# (mac-deploy-tests/mk/bench_attn_speedup.py). DEEPINFER_MK_ATTN_SPLIT=0 selects the old kernel.
+# Only the PV sum is regrouped (8 ordered partials). On real decode states (bench_attn_speedup.py
+# --check-only): identical to mk_sparse_attn at short context, at most 1 of 32768 output elements per layer
+# differs at 4K; against the MLX reference chain at most 12 elements per layer differ by one fp8 step, exactly
+# as for mk_sparse_attn (fp32 summation order of QK). 49 / 82 us/layer at short / 4K context.
+# DEEPINFER_MK_ATTN_SPLIT=0 selects the old kernel.
 _SA_SCORES = r"""
   constexpr int D = 512;
   constexpr int NW = 128;

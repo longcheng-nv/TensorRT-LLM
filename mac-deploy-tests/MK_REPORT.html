@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>DSV4.1 单用户解码优化</title>
+<title>DSV4.1-Flash 单用户解码优化</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <meta name="description" content="DeepSeek-V4.1-Flash 在 M4 Pro 48 GB 上的 BS=1 解码优化报告：megakernel、SSD 瓶颈分析与速度—质量前沿。">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -194,7 +194,7 @@ footer.foot{border-top:1px solid var(--rule);padding-top:14px;color:var(--fg-3);
   <p class="lede">在 48 GB 的 M4 Pro 上做 BS=1 解码：megakernel 把计算路径从 87 压到 68 ms/token，但端到端瓶颈是 SSD 读专家。TPS=10 只在有损的缓存感知路由（<code>--fast</code>）下达到。</p>
   <div class="meta">
     <span>日期 2026-11-16</span>
-    <span>引擎分支 opt/megakernel（DeepInfer-Mac，提交 mk-1 … mk-5，基于 opt/compute-side）</span>
+    <span>引擎分支 deepinfer-mac-dsv41-flash（DeepInfer-Mac，提交 mk-1 … mk-6，基于 opt/compute-side）</span>
     <span>专家缓存 --cache-gb 16（CLAUDE.md 上限）</span>
   </div>
 
@@ -212,7 +212,7 @@ footer.foot{border-top:1px solid var(--rule);padding-top:14px;color:var(--fg-3);
     <div class="tile">
       <div class="k"><span>计算路径（专家全部命中）</span></div>
       <div class="v">68<small>ms/token</small></div>
-      <div class="d">原 87 ms；GPU 内核合计 ~54 ms，权重带宽下限 ~48 ms</div>
+      <div class="d">原 87 ms；kernel 回放吞吐合计 ~54 ms，权重带宽下限 ~48 ms</div>
     </div>
     <div class="tile">
       <div class="k"><span>--fast 的质量代价</span></div>
@@ -269,9 +269,9 @@ footer.foot{border-top:1px solid var(--rule);padding-top:14px;color:var(--fg-3);
     <table>
       <thead><tr><th>指标</th><th>本轮开始</th><th>现在</th><th>说明</th></tr></thead>
       <tbody>
-        <tr><td>计算路径（专家全部命中、无 SSD）</td><td class="num">87 ms/token（11.5 tok/s）</td><td class="num"><strong>68 ms/token（14.7 tok/s）</strong></td><td>megakernel 后 GPU 内核合计 ~54 ms，权重带宽下限 ~48 ms；新的两次 dispatch 稀疏注意力再省 2.0 ms/token（4K 上下文 5.4 ms/token）</td></tr>
+        <tr><td>计算路径（专家全部命中、无 SSD）</td><td class="num">87 ms/token（11.5 tok/s）</td><td class="num"><strong>68 ms/token（14.7 tok/s）</strong></td><td>megakernel 后 GPU 内核合计 ~54 ms（各 kernel 无依赖回放吞吐之和），权重带宽下限 ~48 ms；新的两次 dispatch 稀疏注意力再省 2.0 ms/token（4K 上下文 5.4 ms/token；电池供电下同会话 A/B）</td></tr>
         <tr><td>无损端到端解码（中位）</td><td>3.4 tok/s（单个提示，<code>scripts/decode_speed.py</code>）</td><td><strong>4.7 tok/s</strong>（4 类提示各 200 token；同一提示为 4.58 tok/s）</td><td>SSD 受限</td></tr>
-        <tr class="em"><td><code>--fast</code>（有损，<code>--sub-rank 2</code>）</td><td>—</td><td><strong>10.2–10.6 tok/s</strong>（4 类提示 200 token 稳态，中位/均值）；<strong>经 HTTP 服务流式实测 10.06 tok/s</strong>（4 个提示各 300 token，含开头预热）</td><td>达到 TPS=10；质量代价见下</td></tr>
+        <tr class="em"><td><code>--fast</code>（有损，<code>--sub-rank 2 --spec-k 2</code>）</td><td>—</td><td><strong>10.2–10.6 tok/s</strong>（4 类提示 200 token 稳态，中位/均值）；<strong>经 HTTP 服务流式实测 10.06 tok/s</strong>（4 个提示各 300 token，含开头预热）</td><td>达到 TPS=10；质量代价见下</td></tr>
       </tbody>
     </table>
   </div>
@@ -284,7 +284,7 @@ footer.foot{border-top:1px solid var(--rule);padding-top:14px;color:var(--fg-3);
       <thead><tr><th>改动</th><th>无损?</th><th>实测收益</th></tr></thead>
       <tbody>
         <tr><td><strong>mHC megakernel</strong>：hc_post + mixes GEMV + Sinkhorn（20 轮）+ pre-mix + RMSNorm 一次 dispatch（最后一个 threadgroup 收尾）</td><td><span class="chip good"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.2 6.3 4.8 8.8 9.8 3.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>是</span></td><td>计算路径 87→75 ms（原来每层 ~160 个微小 kernel）</td></tr>
-        <tr><td><strong>稀疏注意力 megakernel</strong>：window ring + 索引器选中的压缩 KV gather、QK、sink softmax（PV 用 bf16 概率，同参考）、逆 RoPE、fp8 输出量化、ring 更新；两次并行 dispatch（scores：8 头 × 64 key / threadgroup；softmax + PV：8 头 × 64 维 / threadgroup，key 分 8 段）</td><td><span class="chip good"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.2 6.3 4.8 8.8 9.8 3.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>是（逐位一致）</span></td><td>BS=1 逐层串行时延：短上下文 49 µs vs 参考 138 µs（<strong>2.8×</strong>，逐算子 3.4×）；4K 上下文 82 µs vs 133 µs（<strong>1.6×</strong>，逐算子 2.1×）</td></tr>
+        <tr><td><strong>稀疏注意力 megakernel</strong>：window ring + 索引器选中的压缩 KV gather、QK、sink softmax（PV 用 bf16 概率，同参考）、逆 RoPE、fp8 输出量化、ring 更新；两次并行 dispatch（scores：8 头 × 64 key / threadgroup；softmax + PV：8 头 × 64 维 / threadgroup，key 分 8 段）</td><td><span class="chip good"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.2 6.3 4.8 8.8 9.8 3.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>是</span></td><td>BS=1 逐层串行时延：短上下文 49 µs vs 参考 138 µs（<strong>2.8×</strong>，逐算子 3.4×）；4K 上下文（top-512 生效）82 µs vs 133 µs（<strong>1.6×</strong>，逐算子 2.1×）；与参考的数值差异同旧 kernel（fp32 求和顺序级）</td></tr>
         <tr><td><strong>mxfp8 GEMV</strong>：融合 act_quant / RMSNorm prologue、分组行（wo_a）、RoPE epilogue（wq_b）、split-K</td><td><span class="chip good"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.2 6.3 4.8 8.8 9.8 3.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>是</span></td><td>与 MLX 持平或更快（190–240 GB/s）</td></tr>
         <tr><td><strong>router + shared expert 两次 dispatch</strong>：bf16 gate（省 157 MB 内存）、top-6 + 权重、下一/二层专家预测都在 kernel 内</td><td><span class="chip good"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.2 6.3 4.8 8.8 9.8 3.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>是</span></td><td>280→194 µs/层</td></tr>
         <tr><td><strong>MoE megakernel</strong>：slab 槽位上的 6 个专家 up/down 两次 dispatch，宽读取 + 预缩放激活</td><td><span class="chip good"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.2 6.3 4.8 8.8 9.8 3.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>是</span></td><td>2/3/4-bit 全部快于 MLX gather_qmm 链</td></tr>
@@ -303,7 +303,7 @@ footer.foot{border-top:1px solid var(--rule);padding-top:14px;color:var(--fg-3);
     <div class="fig-head">
       <div>
         <h3 class="fig-title">稀疏注意力 BS=1 逐层时延（µs/层，越低越好）</h3>
-        <p class="fig-sub">同一份真实解码状态的输入；逐次串行执行（上一次的 ring 输出喂给下一次），9 次重复取中位</p>
+        <p class="fig-sub">同一份真实解码状态的输入；逐次串行执行（上一次的 ring 输出喂给下一次），9 次重复取中位；电池供电</p>
       </div>
       <button class="fig-btn" type="button" id="btn-attn" aria-controls="tbl-attn" aria-expanded="false">显示数据表</button>
     </div>
@@ -322,7 +322,7 @@ footer.foot{border-top:1px solid var(--rule);padding-top:14px;color:var(--fg-3);
       <div class="hb-plot">
         <div class="hb-base"></div>
         <div class="hb-grid" style="left:25%"></div><div class="hb-grid" style="left:50%"></div><div class="hb-grid" style="left:75%"></div><div class="hb-grid" style="left:100%"></div>
-        <div class="hb-row" tabindex="0" role="img" aria-label="短上下文，新 kernel：49.1 微秒每层" data-tv="49.1 µs/层" data-tt="短上下文 · 新 kernel（两次 dispatch）" data-tn="比参考快 2.82×，比逐算子快 3.40×；输出与参考逐位一致"><div class="hb-bar" style="--w:24.55%"></div><span class="hb-v" style="--w:24.55%">49.1</span></div>
+        <div class="hb-row" tabindex="0" role="img" aria-label="短上下文，新 kernel：49.1 微秒每层" data-tv="49.1 µs/层" data-tt="短上下文 · 新 kernel（两次 dispatch）" data-tn="比参考快 2.82×，比逐算子快 3.40×；与参考的差异同旧 kernel：每层至多 12 / 32768 个元素差一个 fp8 量化步"><div class="hb-bar" style="--w:24.55%"></div><span class="hb-v" style="--w:24.55%">49.1</span></div>
         <div class="hb-row" tabindex="0" role="img" aria-label="短上下文，旧 kernel：85.7 微秒每层" data-tv="85.7 µs/层" data-tt="短上下文 · 旧 kernel（单 dispatch，16 个 threadgroup）" data-tn="新 kernel 快 1.75×"><div class="hb-bar mute" style="--w:42.85%"></div><span class="hb-v" style="--w:42.85%">85.7</span></div>
         <div class="hb-row" tabindex="0" role="img" aria-label="短上下文，参考（编译）：138.3 微秒每层" data-tv="138.3 µs/层" data-tt="短上下文 · 参考（编译）" data-tn="MLX 算子链，核心部分 mx.compile，即参考解码路径的做法"><div class="hb-bar mute" style="--w:69.15%"></div><span class="hb-v" style="--w:69.15%">138.3</span></div>
         <div class="hb-row" tabindex="0" role="img" aria-label="短上下文，逐算子：167.0 微秒每层" data-tv="167.0 µs/层" data-tt="短上下文 · 逐算子" data-tn="每个 MLX 算子单独 dispatch（单算子组合）"><div class="hb-bar mute" style="--w:83.5%"></div><span class="hb-v" style="--w:83.5%">167.0</span></div>
@@ -333,7 +333,7 @@ footer.foot{border-top:1px solid var(--rule);padding-top:14px;color:var(--fg-3);
         <div class="hb-axis" aria-hidden="true"><span style="left:0">0</span><span style="left:25%">50</span><span style="left:50%">100</span><span style="left:75%">150</span><span style="left:100%">200</span></div>
       </div>
     </div>
-    <figcaption>旧 kernel 只有 16 个 threadgroup，每个串行走完全部 640 个 key，4K 上下文时比参考还慢；新 kernel 把 scores 与 PV 分到两次并行 dispatch。在解码循环里（专家固定、无 SSD），新 kernel 每 token 省 2.0 ms（短上下文）/ 5.4 ms（4K 上下文）。实际解码（4 类短提示，SSD 流式，同一会话 A/B）差异在波动之内：<code>--fast</code> 10.37 vs 10.31 tok/s，无损 4.54 vs 4.41 tok/s（新 vs 旧，中位）；收益主要在长上下文。</figcaption>
+    <figcaption>旧 kernel 只有 16 个 threadgroup（64 头 ÷ 每组 4 头），每个串行走完全部 640 个 key 两遍，4K 上下文时比参考还慢；新 kernel 把 scores 与 PV 分到两次并行 dispatch。在解码循环里（专家固定、无 SSD），新 kernel 每 token 省 2.0 ms（短上下文）/ 5.4 ms（4K 上下文）。实际解码（4 类短提示各 200 token，SSD 流式，同一会话 A/B）差异在波动之内：<code>--fast</code> 10.37 vs 10.31 tok/s，无损 4.54 vs 4.41 tok/s（新 vs 旧，中位），短上下文省下的 ~2 ms/token 被 SSD 等待淹没；收益主要在长上下文。这几组新数据都在电池供电下测得（旧 kernel 在电池下为 85.7 / 194.7 µs/层，与首次测量的 85.5 / 192.3 µs 一致），报告其余速度数字（含 4.7 / 10.2–10.6 tok/s）是此前接电源时的实测。</figcaption>
     <div class="tbl" id="tbl-attn" hidden>
       <table>
         <thead><tr><th>上下文</th><th>新 kernel</th><th>旧 kernel</th><th>参考（编译）</th><th>逐算子</th><th>新 kernel 加速（对参考 / 逐算子）</th></tr></thead>
@@ -347,7 +347,7 @@ footer.foot{border-top:1px solid var(--rule);padding-top:14px;color:var(--fg-3);
 
   <div class="note">
     <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5 15 14H1z" fill="currentColor"/><path d="M8 6v4M8 11.6v.4" stroke="#0b0b0b" stroke-width="1.5" stroke-linecap="round"/></svg>
-    <p><strong>更正（稀疏注意力）</strong>：此前报告的「注意力核心 ~100 µs/层 → 30 µs」是把各层调用无数据依赖地批量回放得到的吞吐，多个 kernel 可以重叠执行，不代表解码时的时延。按解码方式串行测，原来的单 dispatch 版本在 4K 上下文为 195 µs/层，比参考算子链（133 µs）还慢。现已改为两次并行 dispatch 版本，输出与旧版、参考均逐位一致；<code>DEEPINFER_MK_ATTN_SPLIT=0</code> 可切回旧版。表中其他单项 kernel 数字同样是无依赖回放的吞吐；端到端数字（计算路径、各解码 tok/s）是解码循环实测，不受影响。</p>
+    <p><strong>更正（稀疏注意力）</strong>：此前报告的「注意力核心 ~100 µs/层 → 30 µs」是把各层调用无数据依赖地批量回放得到的吞吐，多个 kernel 可以重叠执行，不代表解码时的时延。按解码方式串行测，原来的单 dispatch 版本在 4K 上下文为 195 µs/层，比参考算子链（133 µs）还慢。现已改为两次并行 dispatch 版本。逐元素比对：新旧 kernel 在短上下文完全一致，4K 上下文 40 层中有 5 层各差 1 个元素；新 kernel 与参考算子链每层至多 12 / 32768 个输出元素相差一个 fp8 量化步（最差余弦 0.9999996），与旧 kernel 对参考的差异相同；ring 逐位一致。<code>DEEPINFER_MK_ATTN_SPLIT=0</code> 可切回旧版。表中其他单项 kernel 数字同样是无依赖回放的吞吐；端到端数字（计算路径、各解码 tok/s）是解码循环实测，不受影响。数据：<code>logs/mk/attn_speedup_split2_rerun.log</code>（逐层时延）、<code>logs/mk/attn_e2e.log</code>（解码循环 A/B）、<code>logs/mk/multi_prompt_split_ab.log</code>（实际解码 A/B）、<code>logs/mk/attn_exactness.log</code>（逐元素比对）。</p>
   </div>
 </section>
 
@@ -421,7 +421,7 @@ footer.foot{border-top:1px solid var(--rule);padding-top:14px;color:var(--fg-3);
           <circle class="s-dot" cx="521.7" cy="165" r="5"/>
           <circle class="s-hit" cx="521.7" cy="165" r="14"/>
         </g>
-        <g class="s-pt" tabindex="0" role="img" aria-label="--fast，general 集：10.2–10.6 tok/s，ΔNLL +0.087，95% 区间 +0.046 到 +0.129" data-tv="10.2–10.6 tok/s · ΔNLL +0.087" data-tt="--fast = --sub-rank 2（general 40 例）" data-tn="95% 区间 [+0.046, +0.129] · API 一致率 −2.6 pp · 服务实测 10.06 tok/s">
+        <g class="s-pt" tabindex="0" role="img" aria-label="--fast，general 集：10.2–10.6 tok/s，ΔNLL +0.087，95% 区间 +0.046 到 +0.129" data-tv="10.2–10.6 tok/s · ΔNLL +0.087" data-tt="--fast = --sub-rank 2 --spec-k 2（general 40 例）" data-tn="95% 区间 [+0.046, +0.129] · API 一致率 −2.6 pp · 服务实测 10.06 tok/s">
           <line class="s-wh" x1="619.1" x2="654.6" y1="125.4" y2="125.4"/>
           <line class="s-wh" x1="630.9" x2="630.9" y1="199.2" y2="49.8"/>
           <circle class="s-dot" cx="630.9" cy="125.4" r="5"/>
@@ -458,7 +458,7 @@ footer.foot{border-top:1px solid var(--rule);padding-top:14px;color:var(--fg-3);
         <tr><td><code>--sub-rank 4</code>（替换第 5–6 名）</td><td class="num">~5</td><td class="num">+0.025 [+0.003, +0.047]</td><td class="num">−0.8 pp</td></tr>
         <tr><td><code>--sub-rank 3</code>（替换第 4–6 名）</td><td class="num">~7.6</td><td class="num">+0.053 [+0.013, +0.090]</td><td class="num">−2.2 pp</td></tr>
         <tr><td><code>--sub-rank 2 --sub-gap 0.2</code>（第 3 名限 gap，4–6 名放开）</td><td class="num">~9.1</td><td class="num">+0.065 [+0.024, +0.108]</td><td class="num">−3.0 pp</td></tr>
-        <tr class="em"><td><strong><code>--fast</code> = <code>--sub-rank 2</code>（替换第 3–6 名）</strong></td><td><strong>10.2–10.6</strong>（服务实测 10.06）</td><td><strong>+0.087 [+0.046, +0.129]</strong>（general 40 例）；<strong>+0.050 [+0.033, +0.068]</strong>（held-out router 60 例，3786 位置）</td><td class="num"><strong>−2.6 pp / −2.4 pp</strong></td></tr>
+        <tr class="em"><td><strong><code>--fast</code> = <code>--sub-rank 2 --spec-k 2</code>（替换第 3–6 名）</strong></td><td><strong>10.2–10.6</strong>（服务实测 10.06）</td><td><strong>+0.087 [+0.046, +0.129]</strong>（general 40 例）；<strong>+0.050 [+0.033, +0.068]</strong>（held-out router 60 例，3786 位置）</td><td class="num"><strong>−2.6 pp / −2.4 pp</strong></td></tr>
         <tr><td>同上但直接丢弃不替换</td><td>—</td><td class="num">+0.144</td><td class="num">−3.8 pp</td></tr>
       </tbody>
     </table>
@@ -473,7 +473,7 @@ footer.foot{border-top:1px solid var(--rule);padding-top:14px;color:var(--fg-3);
 <section id="why" aria-labelledby="t-why">
   <h2 id="t-why">为什么无损做不到 10 TPS</h2>
   <ul class="plain">
-    <li><strong>计算侧</strong>：每 token 读 ~11 GB 常驻权重（dense mxfp8 5.2 GB + 共享专家/路由 1.8 GB + 6 个路由专家 3.5 GB + head 0.7 GB）；现在 GPU 内核 54 ms，带宽下限 ~48 ms。</li>
+    <li><strong>计算侧</strong>：每 token 读 ~11 GB 常驻权重（dense mxfp8 5.2 GB + 共享专家/路由 1.8 GB + 6 个路由专家 3.5 GB + head 0.7 GB）；现在 GPU 内核 ~54 ms（各 kernel 无依赖回放吞吐之和），带宽下限 ~48 ms。</li>
     <li><strong>SSD 侧</strong>：<code>logs/mk/traces/trace_c16.npz</code>（960 个解码 token 的完整路由分数）离线回放：LRU 0.674 命中 → 78 读/token；Belady 0.811 → 46 读/token；LFU / 2Q / 衰减 LFU / 按名次刷新都不优于 LRU；缓存 24 GiB → 61 读/token。</li>
     <li><strong>时序模型</strong> <code>sim_pipeline.py</code>：计算压到 48 ms、<code>--sub-rank 3</code>、16 GiB 时约 110 ms/token；要到 100 ms 需要再大缓存或更激进的替换。</li>
     <li><strong>自投机（DSpark MTP）</strong>：每轮只接受 ~1.9 token，验证要读所有草稿 token 的专家并集，SSD 受限下反而更慢（2.5–2.8 tok/s），已放弃。</li>
@@ -560,7 +560,7 @@ footer.foot{border-top:1px solid var(--rule);padding-top:14px;color:var(--fg-3);
 <footer class="foot">
   <span>由 dsv41-mac-tests/MK_REPORT.md 生成</span>
   <span>2026-11-16</span>
-  <span>DeepInfer-Mac · opt/megakernel</span>
+  <span>DeepInfer-Mac · deepinfer-mac-dsv41-flash</span>
 </footer>
 </main>
 
