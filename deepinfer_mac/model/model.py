@@ -607,6 +607,7 @@ class MoE:
     SKIP_MISS_BELOW = 0.0  # opt-in, see _prune
     PREFILL_TOPK = 0  # opt-in, see _prune
     PREFILL_KEEP = 140  # measured no gain when SSD-bound; flash-moe saw speculative routing cost 38%
+    FIXED_EXPERTS = None  # benchmark only (mk_bench --mode fixed): override decode routing
     next_moe = None
 
     def __init__(self, a: Args, layer_id: int, d: dict, experts, key: str):
@@ -725,6 +726,8 @@ class MoE:
         if not hasattr(self, "_rs_c"):
             self._rs_c = mx.compile(self._route_shared)
         w, idx, xq, y = self._rs_c(x, self._bias(x, image_mask))
+        if self.FIXED_EXPERTS is not None and x.shape[0] == 1:  # benchmark only: compute path without SSD
+            idx = mx.array([self.FIXED_EXPERTS[: self.topk]], dtype=mx.uint32)
         nxt = self.next_moe
         if nxt is not None and self.LOOKAHEAD and hasattr(self.experts, "prefetch"):
             # router lookahead: the next layer's gate on this layer's input predicts most of its
@@ -873,6 +876,7 @@ def _hc_pre_c(x, pre):
 
 
 _hc_post_c = mx.compile(Block._hc_post)
+_ONEHOT4 = mx.array([1.0, 0.0, 0.0, 0.0], dtype=mx.float32)
 
 
 def _rms_f32(x, w, eps):
@@ -968,6 +972,47 @@ class Transformer:
     def embed_tokens(self, tokens: list[int]) -> mx.array:
         return self.w.embed(np.asarray(tokens, dtype=np.int64))
 
+    MK = True  # fused decode path (mk.py) for single-token text decode
+
+    def forward_mk(self, st: SeqState, token: int):
+        """Single-token decode with the fused kernels of mk.py. Same state updates and math as
+        forward(st, [token]) (up to fp32 summation order); returns logits [1, vocab]."""
+        from . import mk
+
+        a = self.a
+        start = st.pos
+        positions = mx.arange(start, start + 1)
+        hash_ids = self.ngram(st, [token], None) if self.ngram is not None else None
+        st.tokens.append(token)
+        h0 = self.embed_tokens([token])[0]
+        X = mx.broadcast_to(h0[None], (a.hc_mult, a.dim))
+        pre_mix = _ONEHOT4
+        eps = mx.array(a.norm_eps, dtype=mx.float32)
+        sh = Shared()
+        carry = None
+        for i, layer in enumerate(self.layers):
+            hc = layer.hc
+            if layer.engram is not None:
+                if carry is not None:
+                    X = _hc_post_c(carry[0][None], carry[1][None], carry[2][None], carry[3][None])[0]
+                    carry = None
+                X = layer.engram(X[None], hash_ids[:, a.engram_layer_ids.index(i)], None)[0]
+            if carry is not None:
+                X, h, a_pre, a_post, a_comb = mk.hc_stage(carry[1], pre_mix, hc["attn_fn"], hc["attn_scale"], hc["attn_base"],
+                                                          layer.attn_norm, eps, hin=carry[0], post=carry[2], comb=carry[3])
+            else:
+                X, h, a_pre, a_post, a_comb = mk.hc_stage(X, pre_mix, hc["attn_fn"], hc["attn_scale"], hc["attn_base"], layer.attn_norm, eps)
+            ha = layer.attn(h[None], positions, st, st.rings[i], sh, start)
+            X, h, f_pre, f_post, f_comb = mk.hc_stage(X, a_pre, hc["ffn_fn"], hc["ffn_scale"], hc["ffn_base"], layer.ffn_norm, eps,
+                                                      hin=ha[0], post=a_post, comb=a_comb)
+            hm = layer.ffn(h[None])
+            carry = (hm[0], X, f_post, f_comb)
+            pre_mix = f_pre
+        st.pos = start + 1
+        X = _hc_post_c(carry[0][None], carry[1][None], carry[2][None], carry[3][None])
+        h = Block.hc_pre(X, pre_mix[None])
+        return self.head(rms_norm(h, self.norm, a.norm_eps)).astype(mx.float32)
+
     def forward(
         self,
         st: SeqState,
@@ -989,6 +1034,9 @@ class Transformer:
         """
         a = self.a
         L = len(tokens)
+        if (L == 1 and self.MK and not all_logits and not want_hidden and not images and token_types is None
+                and replay_from is None):
+            return self.forward_mk(st, tokens[0])
         start = st.pos
         positions = mx.arange(start, start + L)
         is_img = None if token_types is None else np.asarray(token_types) >= 0
