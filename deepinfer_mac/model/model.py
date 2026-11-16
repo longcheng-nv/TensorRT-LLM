@@ -702,6 +702,7 @@ class MoE:
     LOOKAHEAD = False
     LOOKAHEAD_K = 0  # 0 = all predicted experts
     SPEC_K = 4  # idle-window speculation: guess k next-layer experts, read after this layer's misses (0 = off); opt-iter3: 3 -> 4 (87% precision, +10% decode)
+    SPEC_HI = int(os.environ.get("DEEPINFER_SPEC_HI", "0"))  # top next-layer guesses read at demand priority
     SPEC_K2 = 0  # opt-iter4: second-level speculation, k experts of layer l+2 (0 = off); measured: any k>0 adds bytes and SSD wait on this machine
     SKIP_MISS_BELOW = 0.0  # opt-in, see _prune
     PREFILL_TOPK = 0  # opt-in, see _prune
@@ -735,9 +736,17 @@ class MoE:
     # opt-in, lossy: cache-aware substitution at decode (see _substitute)
     SUB_RANK = None  # selected experts ranked >= SUB_RANK (0-based, by biased score) may be substituted
     SUB_GAP = float("inf")  # ... only by a resident expert whose biased score is within SUB_GAP
+    SUB_FREE_RANK = 99  # ranks >= SUB_FREE_RANK are substituted regardless of SUB_GAP
+    SUB_MODE = "sub"  # "sub": best resident substitute; "drop": the missing expert is dropped (weights renormalized)
+    # deadline-aware substitution: with SUB_TARGET_MS set, a layer whose token is behind a linear
+    # schedule (target x layer fraction) uses SUB_RANK, one on schedule uses SUB_RANK_MILD (None = exact)
+    SUB_TARGET_MS = float(os.environ.get("DEEPINFER_SUB_TARGET_MS", "0"))
+    SUB_RANK_MILD = None
+    tok_t0 = 0.0
+    layer_frac = 0.0
     sub_stats = {"tokens_layers": 0, "subs": 0, "considered": 0}
 
-    def _substitute(self, scores_np: np.ndarray, idx_np: np.ndarray, bias_np: np.ndarray):
+    def _substitute(self, scores_np: np.ndarray, idx_np: np.ndarray, bias_np: np.ndarray, rank: int | None = None):
         """Replace selected experts at rank >= SUB_RANK that are neither resident nor being read by the
         best-scoring resident experts outside the selection (biased score within SUB_GAP of the one
         replaced). Routing weights are renormalized over the new set, as the router normalizes over
@@ -747,16 +756,24 @@ class MoE:
         sel = idx_np[0].tolist()
         ranked = sorted(sel, key=lambda e: -b[e])
         MoE.sub_stats["tokens_layers"] += 1
-        miss = [e for r, e in enumerate(ranked) if r >= self.SUB_RANK and not st.resident(self.key, e)
+        sub_rank = self.SUB_RANK if rank is None else rank
+        miss = [e for r, e in enumerate(ranked) if r >= sub_rank and not st.resident(self.key, e)
                 and (self.key, e) not in st.inflight]
         if not miss:
             return None, None
         MoE.sub_stats["considered"] += len(miss)
+        if self.SUB_MODE == "drop":
+            keep = [e for e in sel if e not in miss]
+            MoE.sub_stats["subs"] += len(miss)
+            raw = scores_np[np.array(keep)].astype(np.float32)
+            w = raw / (raw.sum() + np.float32(1e-20)) * np.float32(self.a.route_scale)
+            return np.array([keep], dtype=idx_np.dtype), w[None]
         taken = set(sel)
         order = np.argsort(-b, kind="stable")
         need = len(miss)
         cands = []
-        floor = b[miss[-1]] - self.SUB_GAP  # misses are in descending b; the weakest bounds the search
+        free = any(rank_of_r >= self.SUB_FREE_RANK for rank_of_r in (ranked.index(e) for e in miss))
+        floor = -np.inf if free else b[miss[-1]] - self.SUB_GAP  # misses are in descending b; the weakest bounds the search
         for e in order[len(sel):].tolist():
             if b[e] < floor:
                 break
@@ -764,9 +781,11 @@ class MoE:
                 cands.append(e)
                 if len(cands) == need:
                     break
+        rank_of = {e: r for r, e in enumerate(ranked)}
         new, ci = list(sel), 0
         for e in miss:  # strongest miss gets the strongest substitute
-            if ci < len(cands) and b[e] - b[cands[ci]] <= self.SUB_GAP:
+            gap_ok = rank_of[e] >= self.SUB_FREE_RANK or b[e] - b[cands[ci]] <= self.SUB_GAP if ci < len(cands) else False
+            if ci < len(cands) and gap_ok:
                 new[new.index(e)] = cands[ci]
                 ci += 1
                 MoE.sub_stats["subs"] += 1
@@ -890,7 +909,15 @@ class MoE:
             x, self.gate_bf16, sw13.w, sw13.scales, sw2.w, sw2.scales, bias, rsc, lim, topk=self.topk,
             gate_next=nxt.gate_bf16 if speck else None, bias_next=nxt.bias if speck else None, spec_k=speck,
             gate_next2=nxt2.gate_bf16 if speck2 else None, bias_next2=nxt2.bias if speck2 else None, spec_k2=speck2)
-        sub = self.SUB_RANK is not None and hasattr(self.experts, "resident_ids")
+        rank = self.SUB_RANK
+        if rank is not None and self.SUB_TARGET_MS > 0:
+            import time as _t
+
+            behind = (_t.perf_counter() - MoE.tok_t0) * 1e3 > self.SUB_TARGET_MS * self.layer_frac
+            if not behind:
+                rank = self.SUB_RANK_MILD
+                MoE.sub_stats["mild_layers"] = MoE.sub_stats.get("mild_layers", 0) + 1
+        sub = rank is not None and hasattr(self.experts, "resident_ids")
         mx.eval(idx, w, *((pred,) if speck else ()), *((pred2,) if speck2 else ()), *((scores,) if sub else ()))
         idx_np = np.array(idx)[None]
         w_np = np.array(w)[None]
@@ -901,16 +928,35 @@ class MoE:
             if speck2:
                 self._spec.append((nxt2.key, np.array(pred2).tolist()))
         if sub:
-            new_idx, new_w = self._substitute(np.array(scores), idx_np, self._bias_np(bias))
+            new_idx, new_w = self._substitute(np.array(scores), idx_np, self._bias_np(bias), rank)
             if new_idx is not None:
                 idx_np, w_np = new_idx, new_w
         return self._slab_moe_mk(x, xq, w_np[0], idx_np, y, lim)
 
     def _slab_moe_mk(self, x, xq, w_np, idx_np, y, lim):
+        """Resident experts are launched first (the GPU computes them while the IO bookkeeping of
+        this layer -- cancels, demand reads, speculation -- runs on the CPU), then the misses once
+        their reads land."""
         from . import mk
 
         ids = idx_np[0].tolist()
         st = self.experts
+        wmap = dict(zip(ids, w_np.tolist()))
+        hits = [e for e in ids if st.resident(self.key, e)]
+        misses = [e for e in ids if e not in hits]
+
+        def launch(group, last):
+            slab, slots = st.get_slots(self.key, group)
+            order = np.argsort(np.array(slots), kind="stable")  # slot order, like the gather_qmm path
+            sl = mx.array(np.array(slots, dtype=np.uint32)[order])
+            wk = mx.array(np.array([wmap[group[i]] for i in order], dtype=np.float32))
+            out = mk.moe_experts(xq, sl, wk, lim, slab.proj("w1"), slab.proj("w3"), slab.proj("w2"), y,
+                                 out_dtype=x.dtype if last else mx.float32)
+            mx.async_eval(out)
+            return out
+
+        if hits:
+            y = launch(hits, not misses)
         if hasattr(st, "cancel_unneeded"):
             st.cancel_unneeded(self.key, ids)
         st.prefetch(self.key, ids)
@@ -918,20 +964,14 @@ class MoE:
         if spec:
             self._spec = None
             after = [st.inflight.get((self.key, e)) for e in ids]
-            for skey, sids in spec:
-                st.speculate(skey, sids, after)
-        wmap = dict(zip(ids, w_np.tolist()))
-        hits = [e for e in ids if st.resident(self.key, e)]
-        groups = [g for g in (hits, [e for e in ids if e not in hits]) if g]
-        for gi, group in enumerate(groups):
-            slab, slots = st.get_slots(self.key, group)
-            order = np.argsort(np.array(slots), kind="stable")  # slot order, like the gather_qmm path
-            sl = mx.array(np.array(slots, dtype=np.uint32)[order])
-            wk = mx.array(np.array([wmap[group[i]] for i in order], dtype=np.float32))
-            last = gi == len(groups) - 1
-            y = mk.moe_experts(xq, sl, wk, lim, slab.proj("w1"), slab.proj("w3"), slab.proj("w2"), y,
-                               out_dtype=x.dtype if last else mx.float32)
-            mx.async_eval(y)
+            for j, (skey, sids) in enumerate(spec):
+                if j == 0 and self.SPEC_HI:  # the most confident next-layer guesses at demand priority
+                    st.prefetch(skey, sids[: self.SPEC_HI])
+                    sids = sids[self.SPEC_HI :]
+                if sids:
+                    st.speculate(skey, sids, after)
+        if misses:
+            y = launch(misses, True)
         return y[None]
 
     def _bias_np(self, bias):
@@ -1229,8 +1269,13 @@ class Transformer:
         eps = mx.array(a.norm_eps, dtype=mx.float32)
         sh = Shared()
         carry = None
+        if MoE.SUB_TARGET_MS > 0:
+            import time as _t
+
+            MoE.tok_t0 = _t.perf_counter()
         for i, layer in enumerate(self.layers):
             hc = layer.hc
+            layer.ffn.layer_frac = (i + 0.6) / len(self.layers)
             if layer.engram is not None:
                 if carry is not None:
                     X = _hc_post_c(carry[0][None], carry[1][None], carry[2][None], carry[3][None])[0]

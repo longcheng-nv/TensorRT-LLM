@@ -88,9 +88,22 @@ def _distribution(logits: np.ndarray, sp: SamplingParams, mask: np.ndarray | Non
     if sp.temperature <= 0:
         return lp
     if sp.top_p < 1.0:
-        order = np.argsort(-lp)
+        # the nucleus almost always lies in the few hundred most likely tokens: sort only the top
+        # candidates (argpartition) instead of the whole vocabulary (~10 ms -> ~1 ms per token);
+        # fall back to the full sort when the candidates' mass does not reach top_p
+        k = min(2048, lp.size)
+        cand = np.argpartition(-lp, k - 1)[:k] if k < lp.size else np.arange(lp.size)
+        order = cand[np.argsort(-lp[cand])]
         c = np.cumsum(np.exp(lp[order]))
-        lp[order[np.searchsorted(c, sp.top_p) + 1 :]] = -np.inf
+        if c[-1] >= sp.top_p or k == lp.size:
+            keep = order[: np.searchsorted(c, sp.top_p) + 1]
+            out = np.full_like(lp, -np.inf)
+            out[keep] = lp[keep]
+            lp = out
+        else:
+            order = np.argsort(-lp)
+            c = np.cumsum(np.exp(lp[order]))
+            lp[order[np.searchsorted(c, sp.top_p) + 1 :]] = -np.inf
     if sp.top_k and sp.top_k < lp.size:
         lp[lp < np.partition(lp, -sp.top_k)[-sp.top_k]] = -np.inf
     m = lp.max()

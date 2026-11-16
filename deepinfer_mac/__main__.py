@@ -23,6 +23,16 @@ def _llm(a):
     MoE.PREFILL_TOPK = a.prefill_topk
     MoE.LOOKAHEAD, MoE.LOOKAHEAD_K = a.lookahead > 0, a.lookahead
     MoE.SPEC_K = 0 if a.lookahead else a.spec_k
+    MoE.SPEC_K2 = a.spec_k2
+    if a.fast:  # measured preset: ~10 tok/s decode at --cache-gb 16 on an M4 Pro (lossy, see --sub-rank)
+        a.sub_rank = 2 if a.sub_rank is None else a.sub_rank
+        MoE.SPEC_K = 2
+    MoE.SUB_RANK = a.sub_rank
+    MoE.SUB_GAP = a.sub_gap
+    if a.no_mk:
+        from .model.model import Attention, Transformer
+
+        Transformer.MK = MoE.MK = Attention.MK = False
     return LLM(a.model, expert_cache_gb=a.cache_gb, speculative=a.spec or None, moe_topk=a.moe_topk)
 
 
@@ -106,7 +116,14 @@ def main(argv=None):
         p.add_argument("--skip-miss", type=float, default=0.0, help="skip a non-cached expert under this routing-weight share (e.g. 0.08); lossy")
         p.add_argument("--prefill-topk", type=int, default=0, help="experts per prompt token outside the last 140 (e.g. 4); faster TTFT, lossy")
         p.add_argument("--lookahead", type=int, default=0, help="prefetch the k most confident next-layer experts (0 = off)")
-        p.add_argument("--spec-k", type=int, default=4, help="idle-window speculation: read k guessed next-layer experts after each layer's misses, inserted cold (0 = off)")
+        p.add_argument("--spec-k", type=int, default=4, help="speculation: read the k most likely next-layer experts at low priority, inserted cold (0 = off)")
+        p.add_argument("--spec-k2", type=int, default=0, help="also guess k experts two layers ahead (0 = off)")
+        p.add_argument("--sub-rank", type=int, default=None,
+                       help="LOSSY cache-aware routing at decode: a selected expert ranked >= N (0-based) that is not cached "
+                            "is replaced by the best-scoring cached one instead of read from SSD (2 = keep the top-2 exact)")
+        p.add_argument("--sub-gap", type=float, default=float("inf"), help="... only when the substitute's biased router score is within this gap")
+        p.add_argument("--fast", action="store_true", help="LOSSY preset for ~10 tok/s decode: --sub-rank 2 --spec-k 2")
+        p.add_argument("--no-mk", action="store_true", help="disable the fused decode kernels (reference MLX path)")
         if name == "chat":
             p.add_argument("--think", action="store_true")
             p.add_argument("--effort", choices=["high", "max"], default=None, help="reasoning effort in thinking mode (API default: high = 75)")
