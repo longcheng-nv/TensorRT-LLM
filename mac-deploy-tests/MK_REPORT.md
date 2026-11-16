@@ -1,0 +1,71 @@
+# DSV4.1-Flash 单用户解码优化（megakernel）报告 — M4 Pro 48 GB
+
+日期：2026-11-16 ｜ 引擎分支 `opt/megakernel`（DeepInfer-Mac，提交 mk-1 … mk-5，基于 `opt/compute-side`）｜ 专家缓存 `--cache-gb 16`（CLAUDE.md 上限）
+
+## 结论
+| 指标 | 本轮开始 | 现在 | 说明 |
+|---|---|---|---|
+| 计算路径（专家全部命中、无 SSD）| 87 ms/token（11.5 tok/s）| **68 ms/token（14.7 tok/s）** | megakernel 后 GPU 内核合计 ~54 ms，权重带宽下限 ~48 ms |
+| 无损端到端解码（4 类提示，200 token，中位）| 3.4 tok/s | **4.7 tok/s** | SSD 受限 |
+| `--fast`（有损，`--sub-rank 2`）| — | **10.2–10.6 tok/s**（4 类提示 200 token 稳态，中位/均值）；**经 HTTP 服务流式实测 10.06 tok/s**（4 个提示各 300 token，含开头预热）| 达到 TPS=10；质量代价见下 |
+
+**TPS=10 只在有损的「缓存感知路由」下达到。** 16 GiB 缓存时 LRU 命中率约 67%，每 token 约 78 次专家读盘 × 2.56 ms（15.5 MB / 6 GB/s）；即使未来全知的 Belady 缓存也要约 46 次读盘（~120 ms），所以无损 10 TPS 在这台机器上物理不可达。kernel 融合只能压缩计算（87→68 ms），压不掉 SSD。
+
+## 做了什么
+| 改动 | 无损? | 实测收益 |
+|---|---|---|
+| mHC megakernel：hc_post + mixes GEMV + Sinkhorn(20 轮) + pre-mix + RMSNorm 一次 dispatch（最后一个 threadgroup 收尾）| 是 | 计算路径 87→75 ms（原来每层 ~160 个微小 kernel）|
+| 稀疏注意力 megakernel：window ring + 索引器选中的压缩 KV gather、QK、sink softmax（PV 用 bf16 概率，同参考）、逆 RoPE、fp8 输出量化、ring 更新 | 是 | 注意力核心 ~100 µs/层 → 30 µs |
+| mxfp8 GEMV：融合 act_quant / RMSNorm prologue、分组行（wo_a）、RoPE epilogue（wq_b）、split-K | 是 | 与 MLX 持平或更快（190–240 GB/s）|
+| router + shared expert 两次 dispatch：bf16 gate（省 157 MB 内存）、top-6 + 权重、下一/二层专家预测都在 kernel 内 | 是 | 280→194 µs/层 |
+| MoE megakernel：slab 槽位上的 6 个专家 up/down 两次 dispatch，宽读取 + 预缩放激活 | 是 | 2/3/4-bit 全部快于 MLX gather_qmm 链 |
+| 索引器精确捷径：压缩 key ≤ 512 时 top-k 就是全部 key | 是（精确）| 短/中上下文省 ~300 kernel/token |
+| **GPU hot-wait**：Apple GPU 空闲 ≥1–2 ms 后降频，下一个 kernel 慢 2–4×；等 SSD 时持续提交微小 kernel 保持时钟 | 是 | 无损解码 281→213 ms/token |
+| 原生 C 双优先级 IO（需求读独占 SSD，投机读低优先级、可提升、可取消）| 是 | 与旧 IO 持平，去掉 GIL 争用 |
+| Engram 行在 token 开始时预取 | 是 | −9.5 ms/token |
+| top-p 采样只排序前 2048 候选（60 次随机校验结果一致）| 是 | 采样 11→2 ms/token |
+| **缓存感知专家替换** `--sub-rank N`：第 N 名及以后的专家若不在缓存，用缓存里分数最高的未选专家替代，权重重新归一 | **否** | 见下表 |
+
+所有 kernel 均对照 MLX 参考链验证（多数逐位一致，其余在 fp32 求和顺序误差内）；端到端偏差与「只改 fp32 求和分组」的偏差同量级（模型对数值扰动本身是混沌的）。`pytest tests/` 33/33 通过；部署期的 API 端到端套件 `test_api_e2e.py` 在新引擎（无损默认）上 **28/28 通过**（流式、贪心确定性+logprobs、seed、多轮前缀复用、工具调用、JSON schema+thinking、6K/12K 长上下文 needle、视觉、/v1/messages、/v1/responses）。
+
+## 速度—质量前沿（cache 16 GiB）
+质量：官方 API 采样续写（antirez/ds4 V4.1-Flash 向量）的 teacher-forced NLL 与 top-1 一致率，与无损配置逐例配对，95% bootstrap 区间。速度：200 token 贪心稳态（第 20 个 token 之后）。
+
+| 配置 | 解码 tok/s | ΔNLL | Δ API top-1 一致率 |
+|---|---|---|---|
+| 无损（默认）| 4.5–4.7 | 0 | 0（噪声地板 ±0.01 NLL）|
+| `--sub-rank 4`（替换第 5–6 名）| ~5 | +0.025 [+0.003, +0.047] | −0.8 pp |
+| `--sub-rank 3`（替换第 4–6 名）| ~7.6 | +0.053 [+0.013, +0.090] | −2.2 pp |
+| `--sub-rank 2 --sub-gap 0.2`（第 3 名限 gap，4–6 名放开）| ~9.1 | +0.065 [+0.024, +0.108] | −3.0 pp |
+| **`--fast` = `--sub-rank 2`（替换第 3–6 名）** | **10.2–10.6**（服务实测 10.06）| **+0.087 [+0.046, +0.129]**（general 40 例）；**+0.050 [+0.033, +0.068]**（held-out router 60 例，3786 位置）| **−2.6 pp / −2.4 pp** |
+| 同上但直接丢弃不替换 | — | +0.144 | −3.8 pp |
+
+规律：速度与质量代价都随「被替换的专家数」近似线性变化；替换优于丢弃；分数差（gap）限制每次替换的质量代价最低，但换来的速度也少。
+
+`--fast` 功能回归：API 端到端套件 **26/28 通过**——精确答案、生成代码可执行、JSON schema、工具调用、6K/12K 长上下文检索、视觉全部通过；失败的 2 项是「同一贪心请求两次输出一致」与「同 seed 可复现」。这是缓存感知路由的固有性质：替换哪个专家取决于当时缓存里有什么（受之前的请求和 SSD 时序影响），所以 **`--fast` 的输出不可复现**；需要确定性输出时请用默认无损模式。
+
+## 为什么无损做不到 10 TPS（复核用的数据）
+- 计算侧：每 token 读 ~11 GB 常驻权重（dense mxfp8 5.2 GB + 共享专家/路由 1.8 GB + 6 个路由专家 3.5 GB + head 0.7 GB）；现在 GPU 内核 54 ms，带宽下限 ~48 ms。
+- SSD 侧：`logs/mk/traces/trace_c16.npz`（960 个解码 token 的完整路由分数）离线回放：LRU 0.674 命中 → 78 读/token；Belady 0.811 → 46 读/token；LFU / 2Q / 衰减 LFU / 按名次刷新都不优于 LRU；缓存 24 GiB → 61 读/token。
+- 时序模型 `sim_pipeline.py`：计算压到 48 ms、`--sub-rank 3`、16 GiB 时约 110 ms/token；要到 100 ms 需要再大缓存或更激进的替换。
+- 自投机（DSpark MTP）：每轮只接受 ~1.9 token，验证要读所有草稿 token 的专家并集，SSD 受限下反而更慢（2.5–2.8 tok/s），已放弃。
+
+## 怎么用
+```bash
+cd /Users/loncheng/Models/DeepInfer-Mac
+# 无损（默认，融合 kernel 已默认开启）
+.venv/bin/python -m deepinfer_mac serve --model /Users/loncheng/Models/dsv41-mac --cache-gb 16 --port 8000
+# ~10 tok/s（有损，见上表）
+.venv/bin/python -m deepinfer_mac serve --model /Users/loncheng/Models/dsv41-mac --cache-gb 16 --fast --port 8000
+# 关闭融合 kernel（回到参考 MLX 路径）
+... --no-mk
+```
+
+## 还能做什么
+1. 更大的专家缓存最有效（需要关掉其他应用、放宽 CLAUDE.md 的 16 GiB 上限）：24 GiB 时读盘 −22%，`--sub-rank 3` 有望接近 10 TPS。
+2. 外置 Thunderbolt 5 SSD 与内置盘条带化（专家文件分两半），SSD 带宽翻倍是唯一能直接解决无损瓶颈的硬件手段。
+3. GPU 侧专家调度（命中专家不等 CPU 同步）可再省 ~6 ms/token。
+
+## 复现
+- 工具：`DeepInfer-Mac/mac-deploy-tests/mk/`（`mk_bench.py`、`multi_prompt.py`、`mk_quality.py`、`sim_*.py`、kernel 测试 `test_mk_*.py`）
+- 数据：`/Users/loncheng/Models/logs/mk/`（`bench.jsonl`、`quality/*.json`、`traces/`）
