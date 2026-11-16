@@ -17,6 +17,18 @@ from functools import lru_cache
 
 import mlx.core as mx
 
+def supported(a) -> bool:
+    """The fused decode kernels are written for DeepSeek-V4.1-Flash's geometry; other shapes (the
+    tiny test models) use the reference MLX path."""
+    try:
+        return (a.dim % 512 == 0 and a.head_dim == 512 and a.window_size == 128 and a.hc_mult == 4
+                and a.rope_head_dim == 64 and a.q_lora_rank % 256 == 0 and a.n_routed_experts % 32 == 0
+                and a.n_activated_experts <= 32 and a.moe_inter_dim % 256 == 0
+                and (a.n_heads * a.head_dim // a.o_groups) % 256 == 0 and (a.o_groups * a.o_lora_rank) % 256 == 0)
+    except AttributeError:
+        return False
+
+
 HEADER = r"""
 #include <metal_stdlib>
 #include <metal_simdgroup>

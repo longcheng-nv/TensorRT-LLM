@@ -584,7 +584,7 @@ class Attention:
         queries see the window only from the replayed suffix's start, as in DeepInfer."""
         a, rd = self.a, self.a.rope_head_dim
         L = x.shape[0]
-        if L == 1 and self.MK and self.wq_a_kv.merged and self.wq_a_kv.mode == "mxfp8":
+        if L == 1 and self.MK and self.wq_a_kv.merged and self.wq_a_kv.mode == "mxfp8" and _mk_supported(self.a):
             return self._decode_mk(x, positions, st, ring, sh, start, floor)
         proj, core = self._compiled()
         cos, sin = self.rope.cos_sin(positions)
@@ -639,6 +639,19 @@ class Attention:
         ring.pos = ring.pos.copy()
         ring.pos[pos_np[-keep:] % win] = pos_np[-keep:]
         return out
+
+
+_MK_OK: dict = {}
+
+
+def _mk_supported(a) -> bool:
+    k = id(a)
+    v = _MK_OK.get(k)
+    if v is None:
+        from . import mk
+
+        v = _MK_OK[k] = mk.supported(a)
+    return v
 
 
 _ALL_KEYS: dict = {}
@@ -713,6 +726,7 @@ class MoE:
 
     def __init__(self, a: Args, layer_id: int, d: dict, experts, key: str):
         self.a, self.key, self.experts = a, key, experts
+        self.layer_id = layer_id
         self.n_routed, self.topk = a.moe(layer_id)
         self.gate_bf16 = d["ffn.gate.weight"]  # bf16 as stored: the fused decode router reads half the bytes
         self.gate_w = None  # fp32 view for the MLX paths, materialized lazily (prefill / non-MK decode)
@@ -990,7 +1004,9 @@ class MoE:
         if not hasattr(self, "_rs_c"):
             self._rs_c = mx.compile(self._route_shared)
         bias = self._bias(x, image_mask)
-        if self.MK and x.shape[0] == 1 and hasattr(self.experts, "get_slots"):
+        if (self.MK and x.shape[0] == 1 and hasattr(self.experts, "get_slots") and _mk_supported(self.a)
+                and self.shared_w13.merged and self.shared_w13.mode == "mxfp8" and self.shared_w2.mode == "mxfp8"
+                and self.layer_id < self.a.n_layers):
             return self._decode_mk(x, bias)
         w, idx, xq, y, scores = self._rs_c(x, bias)
         if self.FIXED_EXPERTS is not None and x.shape[0] == 1:  # benchmark only: compute path without SSD
@@ -1249,6 +1265,14 @@ class Transformer:
     MK = True  # fused decode path (mk.py) for single-token text decode
     ASYNC_ATTN = os.environ.get('DEEPINFER_ASYNC_ATTN', '1') == '1'
 
+    def _mk_ok(self) -> bool:
+        ok = getattr(self, "_mk_supported", None)
+        if ok is None:
+            from . import mk
+
+            ok = self._mk_supported = mk.supported(self.a)
+        return ok
+
     def forward_mk(self, st: SeqState, token: int):
         """Single-token decode with the fused kernels of mk.py. Same state updates and math as
         forward(st, [token]) (up to fp32 summation order); returns logits [1, vocab]."""
@@ -1323,7 +1347,7 @@ class Transformer:
         a = self.a
         L = len(tokens)
         if (L == 1 and self.MK and not all_logits and not want_hidden and not images and token_types is None
-                and replay_from is None):
+                and replay_from is None and self._mk_ok()):
             return self.forward_mk(st, tokens[0])
         start = st.pos
         positions = mx.arange(start, start + L)

@@ -129,8 +129,12 @@ def test_speculation_waits_for_demand_reads(big_store):
     gate.add_done_callback(lambda _: order.append("demand"))
     s.speculate("L00", [10, 11], after=[gate])
     s.prefetch("L00", [1])  # demand traffic proceeds meanwhile
-    assert ("L00", 10) not in s.slabs["L00"].lru  # nothing speculative before the demand read lands
-    gate.set_result(None)
-    s.spec_pool.submit(lambda: None).result()
-    assert ("L00", 10) in s.slabs["L00"].lru and order == ["demand"]
+    if s.prio is None:  # thread-pool IO: guesses are issued only once the demand reads have landed
+        assert ("L00", 10) not in s.slabs["L00"].lru  # nothing speculative before the demand read lands
+        gate.set_result(None)
+        s.spec_pool.submit(lambda: None).result()
+        assert ("L00", 10) in s.slabs["L00"].lru and order == ["demand"]
+    else:  # priority IO: guesses are queued at once at low priority; the scheduler never runs a guess
+        gate.set_result(None)  # chunk while a demand chunk is queued or on the SSD
+        assert ("L00", 10) in s.slabs["L00"].lru
     _check(s, data, lay, "L00", [10, 11, 1])
