@@ -212,7 +212,7 @@ footer.foot{border-top:1px solid var(--rule);padding-top:14px;color:var(--fg-3);
     <div class="tile">
       <div class="k"><span>计算路径（专家全部命中）</span></div>
       <div class="v">68<small>ms/token</small></div>
-      <div class="d">原 87 ms；kernel 回放吞吐合计 ~54 ms，权重带宽下限 ~48 ms</div>
+      <div class="d">原 87 ms；kernel 回放吞吐合计 ~54 ms，权重带宽下限 ~41 ms</div>
     </div>
     <div class="tile">
       <div class="k"><span>--fast 的质量代价</span></div>
@@ -222,7 +222,7 @@ footer.foot{border-top:1px solid var(--rule);padding-top:14px;color:var(--fg-3);
   </div>
 
   <div class="verdict">
-    <p><strong>TPS=10 只在有损的「缓存感知路由」下达到。</strong> 16 GiB 缓存时 LRU 命中率约 67%，每 token 约 78 次专家读盘 × 2.56 ms（15.5 MB / 6 GB/s）；即使未来全知的 Belady 缓存也要约 46 次读盘（~120 ms），所以无损 10 TPS 在这台机器上物理不可达。kernel 融合只能压缩计算（87→68 ms），压不掉 SSD。</p>
+    <p><strong>TPS=10 只在有损的「缓存感知路由」下达到。</strong> 16 GiB 缓存时 LRU 命中率约 67%，每 token 约 78 次专家读盘 × 约 2.3–2.4 ms（平均约 14.5 MB / 6 GB/s；3/3/3 位宽层 15.5 MB）；即使未来全知的 Belady 缓存也要约 46 次读盘（约 100–110 ms，已超过 100 ms 预算），所以无损 10 TPS 在这台机器上不可达。kernel 融合只能压缩计算（87→68 ms），压不掉 SSD。</p>
   </div>
 
   <div class="note">
@@ -274,7 +274,7 @@ footer.foot{border-top:1px solid var(--rule);padding-top:14px;color:var(--fg-3);
     <table>
       <thead><tr><th>指标</th><th>本轮开始</th><th>现在</th><th>说明</th></tr></thead>
       <tbody>
-        <tr><td>计算路径（专家全部命中、无 SSD）</td><td class="num">87 ms/token（11.5 tok/s）</td><td class="num"><strong>68 ms/token（14.7 tok/s）</strong></td><td>megakernel 后 GPU 内核合计 ~54 ms（各 kernel 无依赖回放吞吐之和），权重带宽下限 ~48 ms；新的两次 dispatch 稀疏注意力再省 2.0 ms/token（4K 上下文 5.4 ms/token；电池供电下同会话 A/B）</td></tr>
+        <tr><td>计算路径（专家全部命中、无 SSD）</td><td class="num">87 ms/token（11.5 tok/s）</td><td class="num"><strong>68 ms/token（14.7 tok/s）</strong></td><td>megakernel 后 GPU 内核合计 ~54 ms（各 kernel 无依赖回放吞吐之和），权重带宽下限 ~41 ms（峰值带宽）；新的两次 dispatch 稀疏注意力再省 2.0 ms/token（4K 上下文 5.4 ms/token；电池供电下同会话 A/B）</td></tr>
         <tr><td>无损端到端解码（中位）</td><td>3.4 tok/s（单个提示，<code>scripts/decode_speed.py</code>）</td><td><strong>4.7 tok/s</strong>（4 类提示各 200 token；同一提示为 4.58 tok/s）</td><td>SSD 受限</td></tr>
         <tr class="em"><td><code>--fast</code>（有损，<code>--sub-rank 2 --spec-k 2</code>；CLI 默认）</td><td>—</td><td><strong>10.2–10.6 tok/s</strong>（4 类提示 200 token 稳态，中位/均值）；<strong>经 HTTP 服务流式实测 10.06 tok/s</strong>（4 个提示各 300 token，含开头预热）</td><td>达到 TPS=10；质量代价见下</td></tr>
       </tbody>
@@ -462,7 +462,7 @@ footer.foot{border-top:1px solid var(--rule);padding-top:14px;color:var(--fg-3);
         <tr><td>无损（--lossless）</td><td class="num">4.5–4.7</td><td class="num">0</td><td>0（噪声地板 ±0.01 NLL）</td></tr>
         <tr><td><code>--sub-rank 4</code>（替换第 5–6 名）</td><td class="num">~5</td><td class="num">+0.025 [+0.003, +0.047]</td><td class="num">−0.8 pp</td></tr>
         <tr><td><code>--sub-rank 3</code>（替换第 4–6 名）</td><td class="num">~7.6</td><td class="num">+0.053 [+0.013, +0.090]</td><td class="num">−2.2 pp</td></tr>
-        <tr><td><code>--sub-rank 2 --sub-gap 0.2</code>（第 3 名限 gap，4–6 名放开）</td><td class="num">~9.1</td><td class="num">+0.065 [+0.024, +0.108]</td><td class="num">−3.0 pp</td></tr>
+        <tr><td><code>--sub-rank 2</code> + 第 3 名 gap 0.2（4–6 名不限；内部参数，CLI 的 <code>--sub-gap</code> 会对第 3–6 名都限 gap）</td><td class="num">~9.1</td><td class="num">+0.065 [+0.024, +0.108]</td><td class="num">−3.0 pp</td></tr>
         <tr class="em"><td><strong><code>--fast</code> = <code>--sub-rank 2 --spec-k 2</code>（替换第 3–6 名）</strong></td><td><strong>10.2–10.6</strong>（服务实测 10.06）</td><td><strong>+0.087 [+0.046, +0.129]</strong>（general 40 例）；<strong>+0.050 [+0.033, +0.068]</strong>（held-out router 60 例，3786 位置）</td><td class="num"><strong>−2.6 pp / −2.4 pp</strong></td></tr>
         <tr><td>同上但直接丢弃不替换</td><td>—</td><td class="num">+0.144</td><td class="num">−3.8 pp</td></tr>
       </tbody>
@@ -478,8 +478,8 @@ footer.foot{border-top:1px solid var(--rule);padding-top:14px;color:var(--fg-3);
 <section id="why" aria-labelledby="t-why">
   <h2 id="t-why">为什么无损做不到 10 TPS</h2>
   <ul class="plain">
-    <li><strong>计算侧</strong>：每 token 读 ~11 GB 常驻权重（dense mxfp8 5.2 GB + 共享专家/路由 1.8 GB + 6 个路由专家 3.5 GB + head 0.7 GB）；现在 GPU 内核 ~54 ms（各 kernel 无依赖回放吞吐之和），带宽下限 ~48 ms。</li>
-    <li><strong>SSD 侧</strong>：<code>logs/mk/traces/trace_c16.npz</code>（960 个解码 token 的完整路由分数）离线回放：LRU 0.674 命中 → 78 读/token；Belady 0.811 → 46 读/token；LFU / 2Q / 衰减 LFU / 按名次刷新都不优于 LRU；缓存 24 GiB → 61 读/token。</li>
+    <li><strong>计算侧</strong>：每 token 读 ~11 GB 常驻权重（dense mxfp8 5.2 GB + 共享专家/路由 1.8 GB + 6 个路由专家 3.5 GB + head 0.7 GB）；现在 GPU 内核 ~54 ms（各 kernel 无依赖回放吞吐之和），带宽下限 ~41 ms（峰值带宽）。</li>
+    <li><strong>SSD 侧</strong>：<code>logs/mk/traces/trace_c16.npz</code>（960 个解码 token 的完整路由分数）离线回放：LRU 0.674 命中 → 78 读/token；Belady 0.811 → 46 读/token；LFU / 2Q / 衰减 LFU / 按名次刷新都没有明显优于 LRU（最好的 2Q 每 token 只少约 3%）；缓存 24 GiB → 61 读/token。</li>
     <li><strong>时序模型</strong> <code>sim_pipeline.py</code>：计算压到 48 ms、<code>--sub-rank 3</code>、16 GiB 时约 110 ms/token；要到 100 ms 需要再大缓存或更激进的替换。</li>
     <li><strong>自投机（DSpark MTP）</strong>：每轮只接受 ~1.9 token，验证要读所有草稿 token 的专家并集，SSD 受限下反而更慢（2.5–2.8 tok/s），已放弃。</li>
   </ul>
@@ -488,11 +488,11 @@ footer.foot{border-top:1px solid var(--rule);padding-top:14px;color:var(--fg-3);
     <div class="fig-head">
       <div>
         <h3 class="fig-title">每个 token 要从 SSD 读的专家数（离线回放 960 个解码 token）</h3>
-        <p class="fig-sub">一次读 15.5 MB，约 2.56 ms（6 GB/s）</p>
+        <p class="fig-sub">一次读平均约 14.5 MB（12.5–19.9 MB），约 2.3–2.4 ms（6.0–6.4 GB/s）</p>
       </div>
       <button class="fig-btn" type="button" id="btn-reads" aria-controls="tbl-reads" aria-expanded="false">显示数据表</button>
     </div>
-    <div class="hb" role="group" aria-label="每 token 读盘次数，10 tok/s 的预算约 39 次">
+    <div class="hb" role="group" aria-label="每 token 读盘次数，10 tok/s 的预算约 41–44 次">
       <div class="hb-labels" aria-hidden="true">
         <div>LRU · 16 GiB（当前）</div>
         <div>LRU · 24 GiB</div>
@@ -502,14 +502,14 @@ footer.foot{border-top:1px solid var(--rule);padding-top:14px;color:var(--fg-3);
       <div class="hb-plot">
         <div class="hb-base"></div>
         <div class="hb-grid" style="left:25%"></div><div class="hb-grid" style="left:50%"></div><div class="hb-grid" style="left:75%"></div><div class="hb-grid" style="left:100%"></div>
-        <div class="hb-row" tabindex="0" role="img" aria-label="LRU 16 GiB（当前）：每 token 78 次" data-tv="78 次/token" data-tt="LRU · 16 GiB（当前）" data-tn="命中率 0.674；78 × 2.56 ms ≈ 200 ms"><div class="hb-bar" style="--w:97.5%"></div><span class="hb-v" style="--w:97.5%">78</span></div>
+        <div class="hb-row" tabindex="0" role="img" aria-label="LRU 16 GiB（当前）：每 token 78 次" data-tv="78 次/token" data-tt="LRU · 16 GiB（当前）" data-tn="命中率 0.674；约 1.13 GB/token，约 180–190 ms"><div class="hb-bar" style="--w:97.5%"></div><span class="hb-v" style="--w:97.5%">78</span></div>
         <div class="hb-row" tabindex="0" role="img" aria-label="LRU 24 GiB：每 token 61 次" data-tv="61 次/token" data-tt="LRU · 24 GiB" data-tn="比 16 GiB 少 22%；需要关掉其他应用"><div class="hb-bar" style="--w:76.25%"></div><span class="hb-v" style="--w:76.25%">61</span></div>
         <div class="hb-row" tabindex="0" role="img" aria-label="Belady 理想替换 16 GiB：每 token 46 次" data-tv="46 次/token" data-tt="Belady 理想替换 · 16 GiB" data-tn="命中率 0.811；需要预知未来的路由，现实中达不到"><div class="hb-bar" style="--w:57.5%"></div><span class="hb-v" style="--w:57.5%">46</span></div>
-        <div class="hb-ref" style="left:48.75%" aria-hidden="true"><span>10 tok/s 预算 ≈ 39</span></div>
+        <div class="hb-ref" style="left:53.13%" aria-hidden="true"><span>10 tok/s 预算 ≈ 41–44</span></div>
         <div class="hb-axis" aria-hidden="true"><span style="left:0">0</span><span style="left:25%">20</span><span style="left:50%">40</span><span style="left:75%">60</span><span style="left:100%">80</span></div>
       </div>
     </div>
-    <figcaption>竖线（推算）：10 tok/s 时每个 token 只有 100 ms，按 2.56 ms/次最多读约 39 次。三根柱子都超过竖线：就算 GPU 不花时间，SSD 读盘本身也装不进 100 ms。</figcaption>
+    <figcaption>竖线（推算）：10 tok/s 时每个 token 只有 100 ms，按每次约 2.3–2.4 ms 最多读约 41–44 次。三根柱子都超过竖线：就算 GPU 不花时间，SSD 读盘本身也装不进 100 ms（Belady 约 100–110 ms，余量很小，但读盘与逐层计算无法完全重叠）。</figcaption>
     <div class="tbl" id="tbl-reads" hidden>
       <table>
         <thead><tr><th>缓存策略</th><th>命中率</th><th>读盘次数/token</th></tr></thead>
@@ -517,7 +517,7 @@ footer.foot{border-top:1px solid var(--rule);padding-top:14px;color:var(--fg-3);
           <tr><td>LRU · 16 GiB（当前）</td><td class="num">0.674</td><td class="num">78</td></tr>
           <tr><td>LRU · 24 GiB</td><td class="num">—</td><td class="num">61</td></tr>
           <tr><td>Belady 理想替换 · 16 GiB</td><td class="num">0.811</td><td class="num">46</td></tr>
-          <tr><td>10 tok/s 的时间预算（推算）</td><td class="num">—</td><td class="num">≈ 39（100 ms ÷ 2.56 ms）</td></tr>
+          <tr><td>10 tok/s 的时间预算（推算）</td><td class="num">—</td><td class="num">≈ 41–44（100 ms ÷ 2.3–2.4 ms）</td></tr>
         </tbody>
       </table>
     </div>

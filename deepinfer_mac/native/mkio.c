@@ -6,6 +6,11 @@
 // once, so a demand read never queues behind a backlog of guesses. A low request can be promoted
 // (its pending chunks jump the queue) or cancelled while none of its chunks has started.
 //
+// Optional tracing (off unless mkio_trace_enable is called): per chunk the worker thread, queue /
+// start / end times and whether it ran at speculative priority; per request submit / promote / cancel
+// events with a caller tag. Times are CLOCK_UPTIME_RAW ns, the clock behind Python's perf_counter_ns
+// on macOS, so they line up with host-side events.
+//
 // build: clang -O2 -shared -fPIC -o libmkio.dylib mkio.c
 #include <errno.h>
 #include <pthread.h>
@@ -13,6 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/uio.h>
+#include <time.h>
 #include <unistd.h>
 
 #define MAXREQ 4096
@@ -30,14 +36,31 @@ typedef struct {
   int high;
   int nchunks, left, started, error, cancelled, done;
   long gen;
+  long long tag;
 } Req;
 
 typedef struct Job {
   int req;
   long gen;
   size_t a, b;  // byte range within the request
+  long long tq;  // enqueue time (tracing)
   struct Job *next, *prev;
 } Job;
+
+// ---- tracing ----
+typedef struct { long long tq, t0, t1, tag, a, b; long gen; int thr, lo; } TChunk;
+typedef struct { long long t, tag, total; long gen; int kind, high; } TReq;  // kind 0 submit, 1 promote, 2 cancel
+static TChunk *tch = NULL;
+static TReq *trq = NULL;
+static int tch_cap = 0, tch_n = 0, trq_cap = 0, trq_n = 0, trace_on = 0;
+
+static long long now_ns(void) { return (long long)clock_gettime_nsec_np(CLOCK_UPTIME_RAW); }
+
+static void trace_req(int kind, Req *r, long long t) {  // caller holds mu
+  if (!trace_on || trq_n >= trq_cap) return;
+  TReq *e = &trq[trq_n++];
+  e->t = t; e->tag = r->tag; e->total = (long long)r->total; e->gen = r->gen; e->kind = kind; e->high = r->high;
+}
 
 typedef struct {
   Job *head, *tail;
@@ -103,7 +126,7 @@ static void do_read(Req *r, size_t a, size_t b, int *err) {
 }
 
 static void *worker(void *arg) {
-  (void)arg;
+  const int thr = (int)(intptr_t)arg;
   for (;;) {
     pthread_mutex_lock(&mu);
     Job *j = NULL;
@@ -116,10 +139,18 @@ static void *worker(void *arg) {
     }
     Req *r = &reqs[j->req];
     r->started++;
+    const int traced = trace_on;
+    const long long t0 = traced ? now_ns() : 0;
     pthread_mutex_unlock(&mu);
     int err = 0;
     do_read(r, j->a, j->b, &err);
+    const long long t1 = traced ? now_ns() : 0;
     pthread_mutex_lock(&mu);
+    if (traced && trace_on && tch_n < tch_cap) {
+      TChunk *e = &tch[tch_n++];
+      e->tq = j->tq; e->t0 = t0; e->t1 = t1; e->tag = r->tag; e->a = (long long)j->a; e->b = (long long)j->b;
+      e->gen = j->gen; e->thr = thr; e->lo = lo;
+    }
     if (lo) { active_lo--; if (qlo.head) pthread_cond_signal(&cv_work); }
     else { active_hi--; if (active_hi == 0 && qlo.head) pthread_cond_broadcast(&cv_work); }
     if (err) r->error = 1;
@@ -135,14 +166,14 @@ int mkio_init(int nthreads, long long chunk, int conc) {
   spec_conc = conc;
   for (int i = 0; i < nthreads; i++) {
     pthread_t t;
-    if (pthread_create(&t, NULL, worker, NULL) != 0) return -1;
+    if (pthread_create(&t, NULL, worker, (void *)(intptr_t)i) != 0) return -1;
     pthread_detach(t);
   }
   return 0;
 }
 
-// returns request handle (slot index, >= 0) or -1
-int mkio_submit(int fd, void **bufs, long long *lens, int nbuf, long long off, long long total, int high) {
+// returns request handle (slot index, >= 0) or -1; `tag` is an opaque caller id kept for tracing
+int mkio_submit_tagged(int fd, void **bufs, long long *lens, int nbuf, long long off, long long total, int high, long long tag) {
   if (nbuf > MAXIOV) return -1;
   pthread_mutex_lock(&mu);
   int s = -1;
@@ -162,6 +193,9 @@ int mkio_submit(int fd, void **bufs, long long *lens, int nbuf, long long off, l
   r->total = (size_t)total;
   r->high = high;
   r->gen = gen_ctr++;
+  r->tag = tag;
+  const long long tq = trace_on ? now_ns() : 0;
+  trace_req(0, r, tq);
   size_t a = 0;
   int n = 0;
   while (a < r->total) {
@@ -170,7 +204,7 @@ int mkio_submit(int fd, void **bufs, long long *lens, int nbuf, long long off, l
     if (b <= a) b = a + ALIGNB;
     if (b > r->total) b = r->total;
     Job *j = (Job *)malloc(sizeof(Job));
-    j->req = s; j->gen = r->gen; j->a = a; j->b = b;
+    j->req = s; j->gen = r->gen; j->a = a; j->b = b; j->tq = tq;
     q_push(high ? &qhi : &qlo, j);
     n++;
     a = b;
@@ -180,6 +214,68 @@ int mkio_submit(int fd, void **bufs, long long *lens, int nbuf, long long off, l
   pthread_cond_broadcast(&cv_work);
   pthread_mutex_unlock(&mu);
   return s;
+}
+
+int mkio_submit(int fd, void **bufs, long long *lens, int nbuf, long long off, long long total, int high) {
+  return mkio_submit_tagged(fd, bufs, lens, nbuf, off, total, high, -1);
+}
+
+// generation (unique id) of the request in slot s; valid until the slot is released
+long mkio_gen(int s) {
+  pthread_mutex_lock(&mu);
+  long g = reqs[s].gen;
+  pthread_mutex_unlock(&mu);
+  return g;
+}
+
+long long mkio_now(void) { return now_ns(); }
+
+// start (or restart) tracing with room for `cap` chunk and `cap` request events
+int mkio_trace_enable(int cap) {
+  pthread_mutex_lock(&mu);
+  if (cap > tch_cap) {
+    free(tch); free(trq);
+    tch = (TChunk *)calloc((size_t)cap, sizeof(TChunk));
+    trq = (TReq *)calloc((size_t)cap, sizeof(TReq));
+    if (!tch || !trq) { free(tch); free(trq); tch = NULL; trq = NULL; tch_cap = trq_cap = 0; pthread_mutex_unlock(&mu); return -1; }
+    tch_cap = trq_cap = cap;
+  }
+  tch_n = trq_n = 0;
+  trace_on = 1;
+  pthread_mutex_unlock(&mu);
+  return 0;
+}
+
+void mkio_trace_disable(void) {
+  pthread_mutex_lock(&mu);
+  trace_on = 0;
+  pthread_mutex_unlock(&mu);
+}
+
+// copy up to `max` chunk events as 9 int64 each: tq, t0, t1, gen, tag, thr, lo, a, b; returns the count
+int mkio_trace_chunks(long long *out, int max) {
+  pthread_mutex_lock(&mu);
+  int n = tch_n < max ? tch_n : max;
+  for (int i = 0; i < n; i++) {
+    TChunk *e = &tch[i];
+    long long *o = out + 9 * i;
+    o[0] = e->tq; o[1] = e->t0; o[2] = e->t1; o[3] = e->gen; o[4] = e->tag; o[5] = e->thr; o[6] = e->lo; o[7] = e->a; o[8] = e->b;
+  }
+  pthread_mutex_unlock(&mu);
+  return n;
+}
+
+// copy up to `max` request events as 6 int64 each: t, gen, tag, kind, high, total; returns the count
+int mkio_trace_reqs(long long *out, int max) {
+  pthread_mutex_lock(&mu);
+  int n = trq_n < max ? trq_n : max;
+  for (int i = 0; i < n; i++) {
+    TReq *e = &trq[i];
+    long long *o = out + 6 * i;
+    o[0] = e->t; o[1] = e->gen; o[2] = e->tag; o[3] = e->kind; o[4] = e->high; o[5] = e->total;
+  }
+  pthread_mutex_unlock(&mu);
+  return n;
 }
 
 int mkio_done(int s) {
@@ -195,6 +291,7 @@ void mkio_promote(int s) {
   Req *r = &reqs[s];
   if (!r->high && !r->done) {
     r->high = 1;
+    trace_req(1, r, trace_on ? now_ns() : 0);
     Job *moved[1024];
     int n = 0;
     for (Job *j = qlo.head; j && n < 1024;) {
@@ -239,6 +336,7 @@ int mkio_cancel(int s) {
     r->cancelled = 1;
     r->left = 0;
     ok = 1;
+    trace_req(2, r, trace_on ? now_ns() : 0);
     pthread_cond_broadcast(&cv_done);
   }
   pthread_mutex_unlock(&mu);

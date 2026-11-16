@@ -1,0 +1,1254 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>DSV4.1-Flash 解码时间线</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="DeepSeek-V4.1-Flash 在 M4 Pro 上单 token 解码的 Nsight Systems 式时间线：CPU 主线程逐层阶段、由主机同步推断的 GPU 区间、SSD 专家读取的逐块 IO。">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,600&display=swap">
+<style>
+/* Same visual language as DSV41_OPT_REPORT.html. Timeline-only tokens (categorical kinds --k1..--k8 in the
+   reference palette's fixed order, two neutrals, label inks, band shades, shadow) are defined in all three blocks. */
+:root{
+  --bg:#f7f7f4; --surface:#fcfcfb; --fg:#1d1f22; --fg-2:#4a4e55; --fg-3:#666b73; --rule:#dcdcd6;
+  --grid:#e1e0d9; --axis:#c3c2b7; --code-bg:#efeee9;
+  --accent:#2a78d6; --accent-soft:#e3eefb; --s2:#eb6834; --s2-soft:#fbe9e1; --mute-mark:#898781; --link:#1f63b8;
+  --good:#0ca30c; --warn:#fab219;
+  --tip-bg:#1d1f22; --tip-fg:#f7f7f4; --tip-2:#c3c2b7;
+  --sans:"IBM Plex Sans","PingFang SC","Hiragino Sans GB","Noto Sans SC","Microsoft YaHei",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,monospace;
+  --display:"Source Serif 4","Songti SC","Noto Serif SC",Georgia,serif;
+  --k1:#2a78d6; --k2:#eb6834; --k3:#1baf7a; --k4:#eda100; --k5:#e87ba4; --k6:#008300; --k7:#6250d6; --k8:#e34948;
+  --kn1:#4f4e4a; --kn2:#898781; --ink-w:#ffffff; --ink-b:#0b0b0b;
+  --on-k1:var(--ink-w); --on-k2:var(--ink-w); --on-k3:var(--ink-w); --on-k4:var(--ink-b); --on-k5:var(--ink-w);
+  --on-k6:var(--ink-w); --on-k7:var(--ink-w); --on-k8:var(--ink-w); --on-kn1:var(--ink-w); --on-kn2:var(--ink-b);
+  --band:#f1f0eb; --layer-a:#e2e1da; --shadow:rgba(11,11,11,.18);
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#121313; --surface:#1a1a19; --fg:#f0efec; --fg-2:#c3c2b7; --fg-3:#9a9992; --rule:#30302d;
+  --grid:#2c2c2a; --axis:#46463f; --code-bg:#222220;
+  --accent:#3987e5; --accent-soft:#16263a; --s2:#d95926; --s2-soft:#3a2219; --mute-mark:#898781; --link:#5a9cf0;
+  --good:#0ca30c; --warn:#fab219;
+  --tip-bg:#f0efec; --tip-fg:#121313; --tip-2:#52514e; color-scheme:dark;
+  --k1:#3987e5; --k2:#d95926; --k3:#199e70; --k4:#c98500; --k5:#d55181; --k6:#008300; --k7:#9085e9; --k8:#e66767;
+  --kn1:#c9c8c0; --kn2:#898781; --ink-w:#ffffff; --ink-b:#0b0b0b;
+  --on-k1:var(--ink-w); --on-k2:var(--ink-w); --on-k3:var(--ink-w); --on-k4:var(--ink-w); --on-k5:var(--ink-w);
+  --on-k6:var(--ink-w); --on-k7:var(--ink-w); --on-k8:var(--ink-w); --on-kn1:var(--ink-b); --on-kn2:var(--ink-b);
+  --band:#20201f; --layer-a:#2e2e2b; --shadow:rgba(0,0,0,.5)}}
+:root[data-theme="dark"]{
+  --bg:#121313; --surface:#1a1a19; --fg:#f0efec; --fg-2:#c3c2b7; --fg-3:#9a9992; --rule:#30302d;
+  --grid:#2c2c2a; --axis:#46463f; --code-bg:#222220;
+  --accent:#3987e5; --accent-soft:#16263a; --s2:#d95926; --s2-soft:#3a2219; --mute-mark:#898781; --link:#5a9cf0;
+  --good:#0ca30c; --warn:#fab219;
+  --tip-bg:#f0efec; --tip-fg:#121313; --tip-2:#52514e; color-scheme:dark;
+  --k1:#3987e5; --k2:#d95926; --k3:#199e70; --k4:#c98500; --k5:#d55181; --k6:#008300; --k7:#9085e9; --k8:#e66767;
+  --kn1:#c9c8c0; --kn2:#898781; --ink-w:#ffffff; --ink-b:#0b0b0b;
+  --on-k1:var(--ink-w); --on-k2:var(--ink-w); --on-k3:var(--ink-w); --on-k4:var(--ink-w); --on-k5:var(--ink-w);
+  --on-k6:var(--ink-w); --on-k7:var(--ink-w); --on-k8:var(--ink-w); --on-kn1:var(--ink-b); --on-kn2:var(--ink-b);
+  --band:#20201f; --layer-a:#2e2e2b; --shadow:rgba(0,0,0,.5)}
+
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.65 var(--sans);
+  padding-block:0 72px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--bg)}
+.wrap{max-width:1200px;margin:0 auto}
+a{color:var(--link)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:3px}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+
+header.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);border-bottom:1px solid var(--rule)}
+header.top .wrap{display:flex;align-items:center;justify-content:space-between;gap:8px 16px;flex-wrap:wrap;padding-block:10px}
+.eyebrow{font:500 11.5px/1.3 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--fg-3)}
+nav.toc{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:13px}
+nav.toc a{color:var(--fg-2);text-decoration:none}
+nav.toc a:hover{color:var(--link)}
+
+main.wrap{display:flex;flex-direction:column;gap:40px;padding-top:28px}
+section{display:flex;flex-direction:column;gap:14px;min-width:0;scroll-margin-top:64px}
+h1{font:600 clamp(28px,4.6vw,38px)/1.18 var(--display);margin:0;letter-spacing:-.01em;text-wrap:balance}
+h2{font:600 22px/1.3 var(--display);margin:0;text-wrap:balance}
+h2 .num{font:500 13px/1 var(--mono);color:var(--fg-3);margin-right:8px;vertical-align:3px}
+h3{font:600 15px/1.4 var(--sans);margin:0}
+p{margin:0;max-width:74ch}
+.lede{font-size:17px;color:var(--fg-2);max-width:78ch}
+.meta{display:flex;flex-wrap:wrap;gap:4px 18px;color:var(--fg-3);font:400 12.5px/1.6 var(--mono)}
+code{font:13px/1.5 var(--mono);background:var(--code-bg);border-radius:4px;padding:1px 5px;white-space:nowrap}
+strong{font-weight:600}
+.muted{color:var(--fg-3)}
+.note{border:1px solid var(--rule);background:var(--surface);border-radius:8px;padding:12px 16px;display:flex;gap:10px;align-items:flex-start}
+.note svg{width:16px;height:16px;flex:none;margin-top:3px;color:var(--warn)}
+.note p{max-width:none}
+
+/* controls row */
+.controls{display:flex;flex-wrap:wrap;align-items:center;gap:10px 22px}
+.ctl{display:flex;align-items:center;gap:8px;min-width:0}
+.ctl-label{font:500 11.5px/1.3 var(--mono);letter-spacing:.04em;color:var(--fg-3)}
+.segs{display:inline-flex;gap:2px;padding:2px;border:1px solid var(--rule);border-radius:8px;background:var(--code-bg)}
+.segs button{font:500 13px/1 var(--sans);color:var(--fg-2);background:none;border:0;border-radius:6px;padding:7px 11px;cursor:pointer;white-space:nowrap}
+.segs button:hover{color:var(--fg)}
+.segs button[aria-pressed="true"]{background:var(--surface);color:var(--fg);box-shadow:0 0 0 1px var(--rule)}
+.ctl select{font:500 13px/1.2 var(--sans);color:var(--fg);background:var(--surface);border:1px solid var(--rule);border-radius:6px;padding:6px 8px;min-width:6.5em;cursor:pointer}
+.zoom{display:inline-flex;gap:4px}
+.zoom button{font:500 13px/1 var(--sans);color:var(--fg-2);background:var(--surface);border:1px solid var(--rule);border-radius:6px;padding:7px 10px;min-width:34px;cursor:pointer}
+.zoom button:hover{color:var(--fg)}
+.zoom button:disabled,.segs button:disabled,.ctl select:disabled{opacity:.5;cursor:default}
+.hint{font-size:12.5px;color:var(--fg-3)}
+
+/* figure */
+figure.fig{margin:0;background:var(--surface);border:1px solid var(--rule);border-radius:10px;padding:14px 14px 12px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.fig-head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px 16px;flex-wrap:wrap}
+.fig-title{font:600 15px/1.4 var(--sans);margin:0}
+.fig-sub{font-size:12.5px;color:var(--fg-3);margin:2px 0 0;font-variant-numeric:tabular-nums}
+figcaption{font-size:12.5px;color:var(--fg-3);line-height:1.55}
+.tl{position:relative;border:1px solid var(--rule);border-radius:6px;overflow:hidden;min-width:0;background:var(--surface)}
+.tl canvas{display:block;width:100%;height:280px;touch-action:pan-y;cursor:grab;outline-offset:-2px}
+.tl canvas.dragging{cursor:grabbing}
+.tl canvas:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;border-radius:6px}
+.tl-empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:16px;text-align:center;color:var(--fg-3);font-size:13px;pointer-events:none}
+
+/* legend */
+.legend{display:flex;flex-direction:column;gap:8px;font-size:12.5px;color:var(--fg-2)}
+.lg-group{display:flex;flex-wrap:wrap;align-items:center;gap:4px 16px}
+.lg-title{font:500 11.5px/1.5 var(--mono);letter-spacing:.04em;color:var(--fg-3);min-width:7.5em}
+.lg-item{display:inline-flex;align-items:center;gap:6px}
+.sw{width:12px;height:12px;border-radius:3px;flex:none;display:inline-block;background:var(--c);position:relative}
+.sw.est{background:repeating-linear-gradient(135deg,var(--c) 0 1.3px,color-mix(in srgb,var(--c) 30%,var(--surface)) 1.3px 4px);box-shadow:inset 0 0 0 1px var(--c)}
+.lg-mk{width:12px;height:12px;flex:none}
+.lg-mk .ink{fill:var(--fg);stroke:none}
+.lg-mk .ink-line{fill:none;stroke:var(--fg);stroke-width:1.6;stroke-linecap:round}
+.lg-mk .base{fill:var(--k7)}
+
+/* summary table */
+.tbl{overflow-x:auto;border:1px solid var(--rule);border-radius:8px;background:var(--surface);max-width:100%}
+table{border-collapse:collapse;width:100%;font-size:13.5px;line-height:1.55;font-variant-numeric:tabular-nums}
+th,td{padding:8px 11px;border-bottom:1px solid var(--rule);text-align:right;vertical-align:top;white-space:nowrap}
+th{font:500 11.5px/1.35 var(--mono);letter-spacing:.04em;color:var(--fg-3);background:var(--bg)}
+thead tr:first-child th[colspan]{text-align:center;border-bottom:1px solid var(--rule)}
+th.l,td.l{text-align:left}
+tbody tr:last-child td{border-bottom:0}
+tr.em td{background:var(--accent-soft)}
+tr.avg td{font-weight:600;border-top:1px solid var(--axis)}
+td.l,th.l{position:sticky;left:0;z-index:1}
+td.l{background:var(--surface)}
+th.l{background:var(--bg)}
+tr.em td.l{background:var(--accent-soft)}
+.tok-btn{font:500 13.5px/1.55 var(--sans);color:var(--link);background:none;border:0;padding:0;cursor:pointer;text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:3px}
+.tbl-empty{color:var(--fg-3);text-align:left}
+
+/* notes */
+.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
+.card{background:var(--surface);border:1px solid var(--rule);border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.card h3{font-size:14.5px}
+.card p,.card li{font-size:13.5px;color:var(--fg-2)}
+ul.plain{margin:0;padding-left:1.3em;display:flex;flex-direction:column;gap:6px;max-width:80ch}
+ul.plain li::marker{color:var(--fg-3)}
+ul.tight{gap:4px}
+dl.kv{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:3px 14px;margin:0;font-size:13.5px}
+dl.kv dt{color:var(--fg-3)}
+dl.kv dd{margin:0;color:var(--fg);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+
+footer.foot{border-top:1px solid var(--rule);padding-top:14px;color:var(--fg-3);font:400 12px/1.6 var(--mono);display:flex;flex-wrap:wrap;gap:4px 18px}
+
+.tip{position:fixed;z-index:20;max-width:320px;background:var(--tip-bg);color:var(--tip-fg);border-radius:8px;padding:9px 11px;
+  font:12.5px/1.45 var(--sans);box-shadow:0 6px 20px var(--shadow);pointer-events:none;display:flex;flex-direction:column;gap:2px}
+.tip .tv{font-weight:600;font-size:14px;font-variant-numeric:tabular-nums}
+.tip .tt{color:var(--tip-2);display:flex;align-items:center;gap:6px}
+.tip .tn{color:var(--tip-2);font-size:12px;font-variant-numeric:tabular-nums}
+.tip .key{width:10px;height:3px;border-radius:2px;flex:none;display:inline-block}
+
+@media (max-width:560px){
+  body{font-size:14.5px}
+  header.top nav.toc{display:none}
+  .lede{font-size:15.5px}
+  figure.fig{padding:12px 10px 10px}
+  .controls{gap:10px 14px}
+  .lg-title{min-width:0;width:100%}
+  th,td{padding:7px 9px}
+}
+@media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <span class="eyebrow">DSV4.1-Flash · M4 Pro 48 GB · 解码时间线</span>
+    <nav class="toc" aria-label="章节">
+      <a href="#timeline">时间线</a><a href="#summary">逐 token 汇总</a><a href="#howto">怎么读</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+
+<section id="intro" aria-labelledby="t-intro">
+  <h1 id="t-intro">单 token 解码时间线</h1>
+  <p class="lede">每条泳道是一个执行者：CPU 主线程是 Python 解码循环里逐层的各个阶段，GPU 是 Metal 上执行的工作，SSD IO 0–7 是原生 IO 线程逐块（约 2 MB）读取路由专家。这台 Mac 拿不到 GPU 时间戳，所以 GPU 区间是从主机同步点反推的：注意力块的结束取路由同步返回的时刻，MoE 块的时长是估计（斜线）。SSD 块来自原生 IO（mkio）的逐块跟踪，时间是实测的。</p>
+  <div class="meta" id="meta-line"></div>
+  <div class="note" id="data-error" role="alert" hidden>
+    <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5 15 14H1z" fill="currentColor"/></svg>
+    <p id="data-error-text"></p>
+  </div>
+</section>
+
+<section id="timeline" aria-labelledby="t-tl">
+  <div class="controls">
+    <div class="ctl">
+      <span class="ctl-label" id="lab-run">运行</span>
+      <div class="segs" id="runs" role="group" aria-labelledby="lab-run"></div>
+    </div>
+    <div class="ctl">
+      <label class="ctl-label" for="tok">Token</label>
+      <select id="tok"></select>
+    </div>
+    <div class="ctl">
+      <span class="ctl-label" id="lab-zoom">缩放</span>
+      <div class="zoom" role="group" aria-labelledby="lab-zoom">
+        <button type="button" id="z-out" aria-label="缩小" title="缩小（−）">−</button>
+        <button type="button" id="z-in" aria-label="放大" title="放大（+）">+</button>
+        <button type="button" id="z-reset" title="回到所选 token（Home）">重置</button>
+      </div>
+    </div>
+    <span class="hint">滚轮缩放，拖动平移，←→ 平移</span>
+  </div>
+
+  <figure class="fig" id="fig-tl">
+    <div class="fig-head">
+      <div>
+        <h2 class="fig-title" id="t-tl">解码时间线 · <span id="run-label">—</span></h2>
+        <p class="fig-sub" id="view-sub" aria-live="off">—</p>
+      </div>
+    </div>
+    <div class="tl" id="tl">
+      <canvas id="cv" tabindex="0" role="img" aria-label="解码时间线"></canvas>
+      <p class="tl-empty" id="tl-empty" hidden></p>
+    </div>
+    <div class="legend" id="legend"></div>
+    <figcaption>时间相对本次运行第一个被跟踪 token 的开始（ms）。粗竖线是 token 边界，带状区按层交替着色。画布获得焦点后：←/→ 平移（Shift 加大步长），+/− 缩放，Home 回到所选 token；手机上单指左右拖动平移，点按色块看详情。</figcaption>
+  </figure>
+</section>
+
+<section id="summary" aria-labelledby="t-sum">
+  <h2 id="t-sum"><span class="num">01</span>逐 token 汇总</h2>
+  <p class="muted" style="font-size:13.5px">每行一个 token，最后一行是平均。CPU 列为主线程各阶段在该 token 内的时长；GPU 忙 = 实测（非估计）GPU 区间的并集 ÷ 墙钟，「含估计」再并上 MoE 估计块，「其中保温」是 hot-wait 块单独的占比；SSD 忙 = 所有 IO 线程区间的并集 ÷ 墙钟；读盘请求按提交时刻归入 token；需求读延迟为提交 → 完成的中位数。点 token 名可在时间线上定位。</p>
+  <div class="tbl">
+    <table id="sum-table">
+      <caption class="sr-only" id="sum-caption">逐 token 汇总</caption>
+      <thead>
+        <tr>
+          <th class="l" rowspan="2" scope="col">Token</th>
+          <th rowspan="2" scope="col">墙钟 ms</th>
+          <th colspan="4" scope="colgroup">CPU 主线程 ms</th>
+          <th colspan="3" scope="colgroup">GPU 忙</th>
+          <th rowspan="2" scope="col">SSD 忙</th>
+          <th colspan="4" scope="colgroup">读盘请求（个）</th>
+          <th rowspan="2" scope="col">需求读延迟<br>中位 ms</th>
+        </tr>
+        <tr>
+          <th scope="col">路由同步</th>
+          <th scope="col">等盘</th>
+          <th scope="col">构建</th>
+          <th scope="col">其余</th>
+          <th scope="col">实测</th>
+          <th scope="col">含估计</th>
+          <th scope="col">其中保温</th>
+          <th scope="col">需求</th>
+          <th scope="col">推测</th>
+          <th scope="col">提升</th>
+          <th scope="col">取消</th>
+        </tr>
+      </thead>
+      <tbody id="sum-body"></tbody>
+    </table>
+  </div>
+</section>
+
+<section id="howto" aria-labelledby="t-howto">
+  <h2 id="t-howto"><span class="num">02</span>怎么读</h2>
+  <div class="two">
+    <div class="card">
+      <h3>各泳道</h3>
+      <ul class="plain tight">
+        <li><strong>Token / 层：</strong>上半格是 token 编号与墙钟，下半格按层交替着色；放大后显示层号。悬停可看 token 或层的时长。</li>
+        <li><strong>CPU 主线程：</strong>每层依次是构建 → 构建路由图 → 路由同步 → 读回 → 提交命中 MoE → 下发读盘 → 等盘 → 提交未命中 MoE；token 末尾是 head 与采样。「路由同步」是在等 GPU，「等盘」是在等需求读。</li>
+        <li><strong>GPU（推断）：</strong>没有 GPU 时间戳。注意力块的结束是路由同步返回的时刻（实测），开始取提交时刻与上一块结束中较晚者；MoE 块按专家数估计时长（斜线、半透明）；等盘期间的灰块是 hot-wait 保温 kernel，用来防止 GPU 降频。</li>
+        <li><strong>SSD IO：</strong>每行一个原生 IO 线程，每块约 2 MB，一个专家 15.5 MB 约 8 块。颜色按块开始时的优先级：需求读在前，推测预取低优先级；<svg class="lg-mk" viewBox="0 0 12 12" aria-hidden="true" style="vertical-align:-1px"><path class="ink" d="M1 1h8L1 9z"/></svg> 表示该推测请求后来被提升为需求读，<svg class="lg-mk" viewBox="0 0 12 12" aria-hidden="true" style="vertical-align:-1px"><path class="ink-line" d="M2 2l8 8M10 2l-8 8"/></svg> 表示被取消（剩余块不再读）。</li>
+        <li><strong>汇总表：</strong>与时间线同源，切换运行后一起更新；它也是本页的可访问数据视图。</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>本次运行</h3>
+      <dl class="kv" id="run-meta"></dl>
+      <h3>数据说明</h3>
+      <ul class="plain tight" id="run-notes"></ul>
+    </div>
+  </div>
+</section>
+
+<footer class="foot">
+  <span>DSV4.1-Flash on DeepInfer-Mac</span>
+  <span id="foot-gen">—</span>
+  <span>trace_viewer_template.html</span>
+</footer>
+</main>
+
+<div class="tip" id="tip" aria-hidden="true" hidden></div>
+
+<script id="trace-data" type="application/json">__TRACE_JSON__</script>
+<script>
+(function () {
+  "use strict";
+
+  var root = document.documentElement;
+  function $(id) { return document.getElementById(id); }
+
+  // ---------------------------------------------------------------- kinds (colour = CSS token name)
+  var CPU_KINDS = [
+    { k: "build", label: "Python 构建 hc+注意力图（惰性）", short: "构建", c: "k1" },
+    { k: "route_build", label: "构建路由图", short: "路由图", c: "k2" },
+    { k: "sync", label: "路由同步：等 GPU 算完注意力+路由", short: "路由同步", c: "k3" },
+    { k: "post", label: "读回路由 / 专家替换", short: "读回", c: "k4" },
+    { k: "launch_hit", label: "提交命中专家的 MoE", short: "MoE 命中", c: "k5" },
+    { k: "io_issue", label: "下发读盘：取消多余推测、需求读、推测预取", short: "下发 IO", c: "k6" },
+    { k: "wait", label: "等 SSD 读完（hot-wait 保温）", short: "等盘", c: "k7" },
+    { k: "launch_miss", label: "提交未命中专家的 MoE", short: "MoE 未命中", c: "k8" },
+    { k: "tail", label: "token 收尾：head 与采样同步", short: "收尾", c: "kn1" },
+    { k: "other", label: "其他", short: "其他", c: "kn2" }
+  ];
+  var GPU_KINDS = [
+    { k: "attn", label: "hc+注意力+路由（结束时刻实测）", short: "注意力", c: "k1" },
+    { k: "moe", label: "MoE 专家（斜线：时长估计）", short: "MoE", c: "k2" },
+    { k: "hot", label: "hot-wait 保温小 kernel", short: "保温", c: "kn2" },
+    { k: "head", label: "head / logits", short: "head", c: "k3" },
+    { k: "other", label: "其他", short: "其他", c: "kn1" }
+  ];
+  var IO_KINDS = [
+    { k: "demand", label: "需求读（CPU 在等）", short: "需求", c: "k7" },
+    { k: "spec", label: "推测预取（低优先级）", short: "推测", c: "k6" }
+  ];
+  function keyed(list) { var m = Object.create(null); list.forEach(function (d) { m[d.k] = d; }); return m; }
+  var CPU = keyed(CPU_KINDS), GPU = keyed(GPU_KINDS), IOK = keyed(IO_KINDS);
+
+  var COLOR_TOKENS = ["surface", "bg", "fg", "fg-2", "fg-3", "rule", "grid", "axis", "band", "layer-a", "tip-bg", "tip-fg",
+    "k1", "k2", "k3", "k4", "k5", "k6", "k7", "k8", "kn1", "kn2",
+    "on-k1", "on-k2", "on-k3", "on-k4", "on-k5", "on-k6", "on-k7", "on-k8", "on-kn1", "on-kn2"];
+  function readTheme() {
+    var cs = getComputedStyle(root), c = {};
+    COLOR_TOKENS.forEach(function (n) { c[n] = cs.getPropertyValue("--" + n).trim(); });
+    c.sans = cs.getPropertyValue("--sans").trim() || "sans-serif";
+    c.mono = cs.getPropertyValue("--mono").trim() || "monospace";
+    return c;
+  }
+
+  // ---------------------------------------------------------------- data (defensive normalisation)
+  function num(v) {
+    if (typeof v === "number") return isFinite(v) ? v : null;
+    if (typeof v === "string" && v.trim() !== "") { var n = Number(v); return isFinite(n) ? n : null; }
+    return null;
+  }
+  function str(v) { return typeof v === "string" ? v : (typeof v === "number" && isFinite(v)) || typeof v === "boolean" ? String(v) : ""; }
+  function arr(v) { return Array.isArray(v) ? v : []; }
+  function obj(v) { return v && typeof v === "object" && !Array.isArray(v) ? v : {}; }
+  function byStart(a, b) { return a.t0 - b.t0 || a.t1 - b.t1; }
+  function interval(e) {
+    var t0 = num(e.t0), t1 = num(e.t1);
+    if (t0 === null && t1 === null) return null;
+    if (t0 === null) t0 = t1;
+    if (t1 === null) t1 = t0;
+    return t1 < t0 ? [t1, t0] : [t0, t1];
+  }
+  function layerOf(v) { var n = num(v); return n === null ? null : Math.round(n); }
+  // lists are sorted by t0; with the longest duration known, a binary search finds where a time window starts
+  function indexed(list) {
+    var m = 0;
+    for (var i = 0; i < list.length; i++) { var d = list[i].t1 - list[i].t0; if (d > m) m = d; }
+    list.maxDur = m;
+    return list;
+  }
+  function startIdx(list, t) {
+    var lo = 0, hi = list.length, key = t - (list.maxDur || 0);
+    while (lo < hi) { var mid = (lo + hi) >> 1; if (list[mid].t0 < key) lo = mid + 1; else hi = mid; }
+    return lo;
+  }
+  function truthy(v) { return v === true || v === 1 || v === "1" || v === "true"; }
+
+  function normKinds(list, table) {
+    var out = [];
+    arr(list).forEach(function (e) {
+      e = obj(e);
+      var s = interval(e);
+      if (!s) return;
+      var raw = str(e.k);
+      out.push({ k: table[raw] ? raw : "other", raw: raw, l: layerOf(e.l), t0: s[0], t1: s[1], n: str(e.n), est: truthy(e.est) });
+    });
+    return out.sort(byStart);
+  }
+  function normReqs(list) {
+    var out = [], map = Object.create(null);
+    arr(list).forEach(function (r) {
+      r = obj(r);
+      var key = str(r.req);
+      var q = { req: key, l: layerOf(r.l), e: str(r.e), spec: truthy(r.spec) ? 1 : 0, t_sub: num(r.t_sub), t_done: num(r.t_done),
+                t_promote: num(r.t_promote), t_cancel: num(r.t_cancel), kb: num(r.kb) };
+      out.push(q);
+      if (key) map[key] = q;
+    });
+    return { list: out, map: map };
+  }
+  function normIO(list, reqMap) {
+    var out = [];
+    arr(list).forEach(function (e) {
+      e = obj(e);
+      var s = interval(e);
+      if (!s) return;
+      var th = num(e.th);
+      th = th === null || th < 0 ? 0 : Math.floor(th);
+      if (th > 63) return;
+      var key = str(e.req), q = key ? reqMap[key] || null : null;
+      var sp = num(e.spec);
+      out.push({ th: th, t0: s[0], t1: s[1], spec: sp === null ? (q ? q.spec : 0) : (sp ? 1 : 0), req: key, q: q,
+                 l: e.l != null ? layerOf(e.l) : (q ? q.l : null), e: e.e != null ? str(e.e) : (q ? q.e : ""), kb: num(e.kb) });
+    });
+    return out.sort(byStart);
+  }
+  function layerSegments(list) {
+    var segs = [], cur = null;
+    list.forEach(function (e) {
+      if (e.l === null || e.l < 0) { cur = null; return; }
+      if (cur && cur.l === e.l && e.t0 <= cur.t1 + 0.5) { if (e.t1 > cur.t1) cur.t1 = e.t1; return; }
+      cur = { l: e.l, t0: e.t0, t1: e.t1 };
+      segs.push(cur);
+    });
+    return segs;
+  }
+  function normRun(r, idx) {
+    r = obj(r);
+    var meta = obj(r.meta), tokens = [];
+    arr(r.tokens).forEach(function (t) {
+      t = obj(t);
+      var t0 = num(t.t0), t1 = num(t.t1);
+      if (t0 === null || t1 === null || !(t1 > t0)) return;
+      tokens.push({ t0: t0, t1: t1 });
+    });
+    tokens.sort(byStart);
+    var rq = normReqs(r.reqs);
+    var cpu = normKinds(r.cpu, CPU), gpu = normKinds(r.gpu, GPU), io = normIO(r.io, rq.map);
+    var nth = Math.floor(num(meta.io_threads) || 0);
+    nth = Math.max(0, Math.min(64, nth));
+    io.forEach(function (c) { if (c.th + 1 > nth) nth = c.th + 1; });
+    var ioByTh = [];
+    for (var i = 0; i < nth; i++) ioByTh.push([]);
+    io.forEach(function (c) { ioByTh[c.th].push(c); });
+    ioByTh.forEach(indexed);
+    var lo = Infinity, hi = -Infinity;
+    function grow(a, b) { if (a < lo) lo = a; if (b > hi) hi = b; }
+    tokens.forEach(function (t) { grow(t.t0, t.t1); });
+    [cpu, gpu, io].forEach(function (list) { list.forEach(function (e) { grow(e.t0, e.t1); }); });
+    var empty = !isFinite(lo);
+    if (empty) { lo = 0; hi = 1; } else if (!(hi > lo)) hi = lo + 1;
+    var id = str(r.id) || "run" + (idx + 1);
+    return { id: id, label: str(r.label) || id, meta: meta, tokens: tokens, cpu: indexed(cpu), gpu: indexed(gpu),
+             gpuMeasured: gpu.filter(function (e) { return !e.est; }), gpuHot: gpu.filter(function (e) { return e.k === "hot"; }), io: io, ioByTh: ioByTh, nth: nth,
+             reqs: rq.list, layers: indexed(layerSegments(cpu.length ? cpu : gpu)), ext0: lo, ext1: hi, empty: empty, stats: null };
+  }
+
+  var parsed = (function () {
+    var el = $("trace-data"), raw = el ? el.textContent : "";
+    try { return { data: JSON.parse(raw), error: "" }; }
+    catch (err) { return { data: null, error: raw.trim() ? "数据块不是合法的 JSON（模板是否已用 embed.py 嵌入数据？）" : "数据块为空。" }; }
+  })();
+  var DATA = obj(parsed.data);
+  var RUNS = arr(DATA.runs).filter(function (r) { return r && typeof r === "object" && !Array.isArray(r); }).map(normRun);
+
+  // ---------------------------------------------------------------- helpers
+  function tokenAt(R, t) {
+    var a = R.tokens, lo = 0, hi = a.length - 1;
+    while (lo <= hi) {
+      var m = (lo + hi) >> 1;
+      if (t < a[m].t0) hi = m - 1; else if (t >= a[m].t1) lo = m + 1; else return m;
+    }
+    return a.length && t === a[a.length - 1].t1 ? a.length - 1 : -1;
+  }
+  function unionLen(list, a, b) {
+    var total = 0, cs = 0, ce = -Infinity;
+    for (var i = 0; i < list.length; i++) {
+      var e = list[i];
+      if (e.t0 >= b) break;
+      if (e.t1 <= a) continue;
+      var s = Math.max(e.t0, a), f = Math.min(e.t1, b);
+      if (s > ce) { if (ce > cs) total += ce - cs; cs = s; ce = f; } else if (f > ce) ce = f;
+    }
+    if (ce > cs) total += ce - cs;
+    return total;
+  }
+  function median(xs) {
+    if (!xs.length) return null;
+    var s = xs.slice().sort(function (a, b) { return a - b; }), m = s.length >> 1;
+    return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+  }
+  function fx(v, d) { return v === null || v === undefined || !isFinite(v) ? "—" : v.toFixed(d); }
+  function pct(v) { return v === null || v === undefined || !isFinite(v) ? "—" : (v * 100).toFixed(0) + "%"; }
+  function dur(ms) { return !isFinite(ms) ? "—" : ms < 1 ? ms.toFixed(3) + " ms" : ms < 100 ? ms.toFixed(2) + " ms" : ms.toFixed(1) + " ms"; }
+  function tokName(j) { return "token " + (j + 1); }
+
+  function tokenStats(R, j) {
+    var tk = R.tokens[j], a = tk.t0, b = tk.t1, wall = b - a, last = j === R.tokens.length - 1;
+    var by = Object.create(null), total = 0;
+    R.cpu.forEach(function (e) {
+      var d = Math.min(e.t1, b) - Math.max(e.t0, a);
+      if (d > 0) { by[e.k] = (by[e.k] || 0) + d; total += d; }
+    });
+    var sync = by.sync || 0, wait = by.wait || 0, build = (by.build || 0) + (by.route_build || 0);
+    var nDem = 0, nSpec = 0, nProm = 0, nCanc = 0, lat = [];
+    R.reqs.forEach(function (q) {
+      if (q.t_sub === null || q.t_sub < a || (last ? q.t_sub > b : q.t_sub >= b)) return;
+      if (q.spec) nSpec++; else nDem++;
+      if (q.t_promote !== null) nProm++;
+      if (q.t_cancel !== null) nCanc++;
+      if (!q.spec && q.t_done !== null && q.t_done >= q.t_sub) lat.push(q.t_done - q.t_sub);
+    });
+    return { wall: wall, sync: sync, wait: wait, build: build, rest: Math.max(0, total - sync - wait - build),
+             gpu: wall > 0 ? unionLen(R.gpuMeasured, a, b) / wall : null, gpuAll: wall > 0 ? unionLen(R.gpu, a, b) / wall : null,
+             hot: wall > 0 ? unionLen(R.gpuHot, a, b) / wall : null,
+             ssd: wall > 0 ? unionLen(R.io, a, b) / wall : null, nDem: nDem, nSpec: nSpec, nProm: nProm, nCanc: nCanc, lat: median(lat) };
+  }
+  function runStats(R) {
+    if (!R.stats) R.stats = R.tokens.map(function (_, j) { return tokenStats(R, j); });
+    return R.stats;
+  }
+  function average(stats) {
+    var keys = ["wall", "sync", "wait", "build", "rest", "gpu", "gpuAll", "hot", "ssd", "nDem", "nSpec", "nProm", "nCanc", "lat"], out = {};
+    keys.forEach(function (k) {
+      var s = 0, n = 0;
+      stats.forEach(function (st) { if (st[k] !== null && isFinite(st[k])) { s += st[k]; n++; } });
+      out[k] = n ? s / n : null;
+    });
+    return out;
+  }
+
+  // ---------------------------------------------------------------- state
+  var state = { run: 0, tok: "0", v0: 0, v1: 1, hover: null, cross: null };
+  for (var ri = 0; ri < RUNS.length; ri++) if (RUNS[ri].id === "fast") { state.run = ri; break; }
+  function cur() { return RUNS[state.run] || null; }
+
+  var cv = $("cv"), ctx = cv.getContext("2d"), box = $("tl"), tip = $("tip");
+  var L = null, drawQueued = false, drag = null, lastW = -1;
+  var measureCache = new Map();
+
+  function spanLimits(R) {
+    var full = R.ext1 - R.ext0;
+    return { lo: R.ext0 - full * 0.05, hi: R.ext1 + full * 0.05, min: Math.min(0.02, full), max: full * 1.1 };
+  }
+  function setView(a, b) {
+    var R = cur();
+    if (!R) return;
+    var lim = spanLimits(R), w = b - a;
+    if (!(w > 0) || !isFinite(w)) w = lim.max;
+    w = Math.max(lim.min, Math.min(lim.max, w));
+    var c = (a + b) / 2;
+    if (!isFinite(c)) c = (R.ext0 + R.ext1) / 2;
+    a = c - w / 2; b = a + w;
+    if (a < lim.lo) { a = lim.lo; b = a + w; }
+    if (b > lim.hi) { b = lim.hi; a = b - w; }
+    state.v0 = a; state.v1 = b;
+    viewChanged();
+  }
+  function zoomAt(t, f) {
+    var R = cur();
+    if (!R) return;
+    var lim = spanLimits(R), w = state.v1 - state.v0, nw = Math.max(lim.min, Math.min(lim.max, w * f));
+    var frac = (t - state.v0) / w;
+    if (!isFinite(frac)) frac = 0.5;
+    setView(t - frac * nw, t - frac * nw + nw);
+  }
+  function pan(ms) { setView(state.v0 + ms, state.v1 + ms); }
+  function selectionRange(R) {
+    var tk = state.tok !== "all" ? R.tokens[+state.tok] : null;
+    var a = tk ? tk.t0 : R.ext0, b = tk ? tk.t1 : R.ext1, pad = (b - a) * 0.015;
+    return [a - pad, b + pad];
+  }
+  function resetView() { var R = cur(); if (R) { var s = selectionRange(R); setView(s[0], s[1]); } }
+  function pxPerMs() { return L ? Math.max(1, L.w - L.padR - L.gutter) / (state.v1 - state.v0) : 1; }
+  function tAt(px) { return state.v0 + (px - L.gutter) / pxPerMs(); }
+
+  // ---------------------------------------------------------------- layout + drawing
+  function layout() {
+    var R = cur();
+    var w = Math.max(240, Math.floor(box.clientWidth || 0));
+    var narrow = w < 560, rows = [], y = 0;
+    function row(id, h, label, short, th) { rows.push({ id: id, y: y, h: h, label: label, short: short, th: th }); y += h; }
+    row("ruler", 24, "时间 ms", "ms");
+    row("tok", 32, "Token / 层", "Token/层");
+    y += 6;
+    row("cpu", 34, "CPU 主线程", "CPU");
+    row("gpu", 34, "GPU（推断）", "GPU");
+    y += 10;
+    var n = R ? R.nth : 0;
+    for (var i = 0; i < n; i++) row("io", narrow ? 17 : 19, "SSD IO " + i, "IO " + i, i);
+    y += 6;
+    L = { w: w, h: y, narrow: narrow, gutter: narrow ? 58 : 100, padR: 8, rows: rows };
+    cv.style.height = L.h + "px";
+  }
+  function rowById(id) { for (var i = 0; i < L.rows.length; i++) if (L.rows[i].id === id) return L.rows[i]; return null; }
+  function blockBox(r) { var inset = r.id === "io" ? 2 : 5; return { y: r.y + inset, h: r.h - inset * 2 }; }
+  function textW(font, s) {
+    var key = font + "|" + s, v = measureCache.get(key);
+    if (v === undefined) { ctx.font = font; v = ctx.measureText(s).width; measureCache.set(key, v); }
+    return v;
+  }
+  function niceTicks(a, b, px, target) {
+    var raw = (b - a) * target / Math.max(px, 1);
+    var p = Math.pow(10, Math.floor(Math.log10(raw))), m = raw / p;
+    var step = (m < 1.5 ? 1 : m < 3.5 ? 2 : m < 7.5 ? 5 : 10) * p;
+    var dec = Math.max(0, -Math.floor(Math.log10(step) + 1e-9)), list = [];
+    var first = Math.ceil(a / step);
+    for (var i = first; i * step <= b && list.length < 400; i++) list.push(i * step);
+    return { list: list, dec: dec };
+  }
+  function requestDraw() {
+    if (drawQueued) return;
+    drawQueued = true;
+    window.requestAnimationFrame(draw);
+  }
+
+  function hatchRect(x0, x, y, w, h, color) {
+    ctx.save();
+    ctx.globalAlpha = 0.3;
+    ctx.fillStyle = color;
+    ctx.fillRect(x, y, w, h);
+    if (w >= 3) {
+      ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip();
+      ctx.globalAlpha = 0.9;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      var sx = x0 + Math.floor((x - h - x0) / 5) * 5;
+      for (; sx < x + w; sx += 5) { ctx.moveTo(sx, y + h); ctx.lineTo(sx + h, y); }
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+  function markPromote(x, y, C) {
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + 7, y); ctx.lineTo(x, y + 7); ctx.closePath();
+    ctx.lineWidth = 2; ctx.strokeStyle = C.surface; ctx.stroke();
+    ctx.fillStyle = C.fg; ctx.fill();
+  }
+  function markCancel(x, y, C) {
+    ctx.beginPath();
+    ctx.moveTo(x + 2, y + 2); ctx.lineTo(x + 7, y + 7); ctx.moveTo(x + 7, y + 2); ctx.lineTo(x + 2, y + 7);
+    ctx.lineCap = "round";
+    ctx.lineWidth = 3.6; ctx.strokeStyle = C.surface; ctx.stroke();
+    ctx.lineWidth = 1.6; ctx.strokeStyle = C.fg; ctx.stroke();
+    ctx.lineCap = "butt";
+  }
+
+  // one lane: wide blocks (with a 1px surface gap), sub-pixel blocks merged per pixel column by coverage
+  function drawLane(list, r, X, C, opt) {
+    var bb = blockBox(r), y = bb.y, h = bb.h, pl = L.gutter, maxX = L.w + 2, v0 = state.v0, v1 = state.v1;
+    var cov = new Map(), wide = [], i, e, x0, x1;
+    for (i = startIdx(list, v0); i < list.length; i++) {
+      e = list[i];
+      if (e.t0 > v1) break;
+      if (e.t1 < v0) continue;
+      if (opt.filter && !opt.filter(e)) continue;
+      x0 = X(e.t0); x1 = X(e.t1);
+      if (x1 - x0 < 1) {
+        var col = Math.floor(x0), c = cov.get(col), ck = opt.color(e), wgt = Math.max(x1 - x0, 0.05) * (e.est ? 0.5 : 1);
+        if (!c) { c = { total: 0, by: {} }; cov.set(col, c); }
+        c.total += wgt; c.by[ck] = (c.by[ck] || 0) + wgt;
+      } else wide.push(e);
+    }
+    cov.forEach(function (c, col) {
+      if (col < pl - 1) return;
+      var best = null, bv = -1;
+      for (var key in c.by) if (c.by[key] > bv) { bv = c.by[key]; best = key; }
+      ctx.globalAlpha = Math.min(1, Math.max(0.35, c.total));
+      ctx.fillStyle = C[best];
+      ctx.fillRect(col, y, 1, h);
+    });
+    ctx.globalAlpha = 1;
+    var font = "500 10.5px " + C.sans;
+    ctx.textBaseline = "middle";
+    for (i = 0; i < wide.length; i++) {
+      e = wide[i];
+      x0 = X(e.t0); x1 = X(e.t1);
+      var w = x1 - x0, cx0 = Math.max(x0, pl - 2), cx1 = Math.min(x1, maxX);
+      var bw = cx1 - cx0 - (w >= 4 && x1 <= maxX ? 1 : 0);
+      if (bw <= 0) continue;
+      var ck2 = opt.color(e);
+      if (e.est) hatchRect(x0, cx0, y, bw, h, C[ck2]);
+      else { ctx.fillStyle = C[ck2]; ctx.fillRect(cx0, y, bw, h); }
+      var vis0 = Math.max(cx0, pl), visW = cx0 + bw - vis0;
+      if (opt.label && visW >= 22 && h >= 12) {
+        var s = opt.label(e);
+        if (s && textW(font, s) + 8 <= visW) {
+          ctx.font = font;
+          ctx.fillStyle = e.est ? C.fg : C["on-" + ck2];
+          ctx.fillText(s, vis0 + 4, y + h / 2 + 0.5);
+        }
+      }
+      if (opt.marker && visW >= 5) opt.marker(e, vis0, y);
+    }
+  }
+
+  function draw() {
+    drawQueued = false;
+    if (!L) layout();
+    var dpr = window.devicePixelRatio || 1, W = Math.round(L.w * dpr), H = Math.round(L.h * dpr);
+    if (cv.width !== W) cv.width = W;
+    if (cv.height !== H) cv.height = H;
+    var C = readTheme();
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = C.surface;
+    ctx.fillRect(0, 0, L.w, L.h);
+    var R = cur(), pl = L.gutter, pw = Math.max(10, L.w - L.padR - pl), v0 = state.v0, k = pw / (state.v1 - v0);
+    if (!R || R.empty) return;   // the overlay message explains the empty state
+    function X(t) { return pl + (t - v0) * k; }
+    var rr = rowById("ruler"), rt = rowById("tok"), rc = rowById("cpu"), rg = rowById("gpu");
+    var lanesTop = rc.y, FM = "400 10.5px " + C.mono;
+    var ticks = niceTicks(v0, state.v1, pw, L.narrow ? 70 : 96);
+
+    ctx.save();
+    ctx.beginPath(); ctx.rect(pl, 0, L.w - pl, L.h); ctx.clip();
+
+    // token / layer band
+    ctx.fillStyle = C.band;
+    ctx.fillRect(pl, rt.y, L.w - pl, rt.h);
+    var stripY = rt.y + 17, stripH = rt.h - 17;
+    if (R) R.layers.forEach(function (sg) {
+      var x0 = X(sg.t0), x1 = X(sg.t1), w = x1 - x0;
+      if (x1 < pl || x0 > L.w || w < 1.5) return;
+      if (sg.l % 2 === 1) { ctx.fillStyle = C["layer-a"]; ctx.fillRect(x0, stripY, w, stripH); }
+      var lab = w >= 14 ? String(sg.l) : "";
+      if (lab) {
+        var tw = textW(FM, lab), vx0 = Math.max(x0, pl), vx1 = Math.min(x1, L.w);
+        if (vx1 - vx0 >= tw + 4) {
+          ctx.font = FM; ctx.fillStyle = C["fg-3"];
+          ctx.fillText(lab, Math.min(Math.max((x0 + x1 - tw) / 2, vx0 + 2), vx1 - tw - 2), stripY + stripH / 2 + 0.5);
+        }
+      }
+    });
+
+    // gridlines and lane rules
+    ctx.fillStyle = C.grid;
+    ticks.list.forEach(function (t) { var x = Math.round(X(t)); if (x >= pl && x <= L.w) ctx.fillRect(x, lanesTop, 1, L.h - lanesTop); });
+    L.rows.forEach(function (r) {
+      if (r.id === "cpu" || r.id === "gpu" || r.id === "io") {
+        ctx.fillStyle = C.grid;
+        ctx.fillRect(pl, r.y + r.h - 1, L.w - pl, 1);
+        if (r.id === "cpu" || (r.id === "io" && r.th === 0)) ctx.fillRect(pl, r.y, L.w - pl, 1);
+      }
+    });
+
+    if (R) {
+      drawLane(R.cpu, rc, X, C, {
+        color: function (e) { return (CPU[e.k] || CPU.other).c; },
+        label: function (e) { return (CPU[e.k] || CPU.other).short; }
+      });
+      var gpuOpt = {
+        color: function (e) { return (GPU[e.k] || GPU.other).c; },
+        label: function (e) { return (GPU[e.k] || GPU.other).short; }
+      };
+      // estimates first so measured blocks stay on top where an estimate overlaps them
+      gpuOpt.filter = function (e) { return e.est; };
+      drawLane(R.gpu, rg, X, C, gpuOpt);
+      gpuOpt.filter = function (e) { return !e.est; };
+      drawLane(R.gpu, rg, X, C, gpuOpt);
+      L.rows.forEach(function (r) {
+        if (r.id !== "io") return;
+        drawLane(R.ioByTh[r.th] || [], r, X, C, {
+          color: function (e) { return e.spec ? IOK.spec.c : IOK.demand.c; },
+          label: function (e) { return e.e !== "" ? "e" + e.e : ""; },
+          marker: function (e, x, y) {
+            if (!e.q) return;
+            if (e.q.t_promote !== null) markPromote(x, y, C);
+            else if (e.q.t_cancel !== null) markCancel(x, y, C);
+          }
+        });
+      });
+
+      // token boundaries and labels
+      var bandFont = "600 11px " + C.sans, durFont = "400 11px " + C.sans;
+      R.tokens.forEach(function (tk, j) {
+        var x0 = X(tk.t0), x1 = X(tk.t1);
+        if (x1 < pl - 2 || x0 > L.w + 2) return;
+        if (x0 >= pl - 1) {
+          ctx.fillStyle = C.axis; ctx.fillRect(Math.round(x0), lanesTop, 1, L.h - lanesTop);
+          ctx.fillStyle = C["fg-3"]; ctx.fillRect(Math.round(x0) - 1, rt.y, 2, rt.h);
+        }
+        if (j === R.tokens.length - 1 && x1 <= L.w + 1) {
+          ctx.fillStyle = C.axis; ctx.fillRect(Math.round(x1), lanesTop, 1, L.h - lanesTop);
+          ctx.fillStyle = C["fg-3"]; ctx.fillRect(Math.round(x1) - 1, rt.y, 2, rt.h);
+        }
+        var name = tokName(j), extra = " · " + dur(tk.t1 - tk.t0);
+        var lx = Math.max(x0, pl) + 6, room = Math.min(x1, L.w) - lx - 4, w1 = textW(bandFont, name), w2 = textW(durFont, extra);
+        var ly = rt.y + 9;
+        if (room >= w1) {
+          ctx.font = bandFont; ctx.fillStyle = C.fg; ctx.fillText(name, lx, ly);
+          if (room >= w1 + w2) { ctx.font = durFont; ctx.fillStyle = C["fg-3"]; ctx.fillText(extra, lx + w1, ly); }
+        } else if (room >= textW(bandFont, String(j + 1))) {
+          ctx.font = bandFont; ctx.fillStyle = C.fg; ctx.fillText(String(j + 1), lx, ly);
+        }
+      });
+
+      // hover outline
+      var hv = state.hover;
+      if (hv && hv.ev && hv.row && (hv.type === "cpu" || hv.type === "gpu" || hv.type === "io")) {
+        var hb = blockBox(hv.row), hx0 = X(hv.ev.t0), hx1 = Math.max(X(hv.ev.t1), hx0 + 1);
+        ctx.lineWidth = 1.5; ctx.strokeStyle = C.fg;
+        ctx.strokeRect(Math.max(hx0, pl - 4) - 1.25, hb.y - 1.25, Math.min(hx1, L.w + 4) - Math.max(hx0, pl - 4) + 2.5, hb.h + 2.5);
+      } else if (hv && hv.type === "layer") {
+        ctx.lineWidth = 1.5; ctx.strokeStyle = C.fg;
+        ctx.strokeRect(X(hv.ev.t0) + 0.75, stripY + 0.75, Math.max(1, X(hv.ev.t1) - X(hv.ev.t0) - 1.5), stripH - 1.5);
+      }
+    }
+
+    // crosshair
+    if (state.cross !== null && !drag) {
+      ctx.fillStyle = C["fg-3"];
+      ctx.fillRect(Math.round(state.cross), rt.y, 1, L.h - rt.y);
+    }
+
+    // ruler
+    ctx.font = FM;
+    ticks.list.forEach(function (t) {
+      var x = Math.round(X(t));
+      if (x < pl || x > L.w) return;
+      ctx.fillStyle = C.axis; ctx.fillRect(x, rr.y + rr.h - 6, 1, 6);
+      ctx.fillStyle = C["fg-3"]; ctx.fillText(t.toFixed(ticks.dec), x + 4, rr.y + 10);
+    });
+    if (state.cross !== null && !drag) {
+      var ts = tAt(state.cross).toFixed(Math.min(3, ticks.dec + 2)), tw2 = textW(FM, ts) + 10;
+      var bx = Math.min(Math.max(state.cross - tw2 / 2, pl), L.w - tw2);
+      ctx.fillStyle = C["tip-bg"]; ctx.fillRect(bx, rr.y + 2, tw2, 16);
+      ctx.font = FM; ctx.fillStyle = C["tip-fg"]; ctx.fillText(ts, bx + 5, rr.y + 10.5);
+    }
+    ctx.restore();
+
+    ctx.fillStyle = C.axis;
+    ctx.fillRect(0, rr.y + rr.h - 1, L.w, 1);
+
+    // fixed gutter with lane labels
+    ctx.fillStyle = C.surface; ctx.fillRect(0, 0, pl - 1, L.h);
+    ctx.fillStyle = C.axis; ctx.fillRect(0, rr.y + rr.h - 1, pl, 1); ctx.fillRect(pl - 1, 0, 1, L.h);
+    L.rows.forEach(function (r) {
+      var io = r.id === "io";
+      ctx.font = io || r.id === "ruler" ? FM : "500 11.5px " + C.sans;
+      ctx.fillStyle = r.id === "ruler" ? C["fg-3"] : C["fg-2"];
+      ctx.fillText(L.narrow ? r.short : r.label, L.narrow ? 6 : 10, r.y + r.h / 2 + 0.5);
+      if (r.id === "cpu" || r.id === "gpu" || io) {
+        ctx.fillStyle = C.grid; ctx.fillRect(0, r.y + r.h - 1, pl - 1, 1);
+        if (r.id === "cpu" || (io && r.th === 0)) ctx.fillRect(0, r.y, pl - 1, 1);
+      }
+    });
+  }
+
+  // ---------------------------------------------------------------- hover / tooltip
+  function findIn(list, t, tol) {
+    var best = null, bestD = Infinity;
+    for (var i = startIdx(list, t - tol); i < list.length; i++) {
+      var e = list[i];
+      if (e.t0 > t + tol) break;
+      if (e.t1 < t - tol) continue;
+      var d = t < e.t0 ? e.t0 - t : t > e.t1 ? t - e.t1 : 0;
+      if (d < bestD || (d === bestD && best && e.t1 - e.t0 < best.t1 - best.t0)) { best = e; bestD = d; }
+    }
+    return best;
+  }
+  function hitTest(px, py) {
+    var R = cur();
+    if (!R || !L || px < L.gutter || px > L.w) return null;
+    var r = null;
+    for (var i = 0; i < L.rows.length; i++) { var q = L.rows[i]; if (py >= q.y && py < q.y + q.h) { r = q; break; } }
+    if (!r) return null;
+    var t = tAt(px), tol = 3 / pxPerMs();
+    if (r.id === "tok") {
+      if (py < r.y + 17) { var j = tokenAt(R, t); return j < 0 ? null : { row: r, type: "token", idx: j, ev: R.tokens[j] }; }
+      var sg = findIn(R.layers, t, tol);
+      return sg ? { row: r, type: "layer", ev: sg } : null;
+    }
+    var list = r.id === "cpu" ? R.cpu : r.id === "gpu" ? R.gpu : r.id === "io" ? R.ioByTh[r.th] : null;
+    if (!list) return null;
+    var e = findIn(list, t, tol);
+    return e ? { row: r, type: r.id, ev: e } : null;
+  }
+  function tipLine(cls, text, key) {
+    var d = document.createElement("div");
+    d.className = cls;
+    if (key) { var k = document.createElement("i"); k.className = "key"; k.style.background = "var(--" + key + ")"; d.appendChild(k); }
+    d.appendChild(document.createTextNode(text));
+    tip.appendChild(d);
+  }
+  function startText(R, t, j) {
+    var s = "开始 " + t.toFixed(3) + " ms";
+    if (j >= 0) s += "（" + tokName(j) + " 内 +" + (t - R.tokens[j].t0).toFixed(3) + " ms）";
+    return s;
+  }
+  function fillTip(hit) {
+    var R = cur(), e = hit.ev, j;
+    tip.replaceChildren();
+    if (hit.type === "token") {
+      tipLine("tv", dur(e.t1 - e.t0));
+      tipLine("tt", tokName(hit.idx) + " · 墙钟");
+      tipLine("tn", "从 " + e.t0.toFixed(3) + " 到 " + e.t1.toFixed(3) + " ms");
+    } else if (hit.type === "layer") {
+      j = tokenAt(R, e.t0);
+      tipLine("tv", dur(e.t1 - e.t0));
+      tipLine("tt", "第 " + e.l + " 层（CPU 侧从构建到提交未命中 MoE）");
+      tipLine("tn", (j >= 0 ? tokName(j) + " · " : "") + startText(R, e.t0, j));
+    } else if (hit.type === "cpu" || hit.type === "gpu") {
+      var K = (hit.type === "cpu" ? CPU : GPU)[e.k] || CPU.other;
+      j = tokenAt(R, e.t0);
+      tipLine("tv", dur(e.t1 - e.t0) + (e.est ? "（估计）" : ""));
+      tipLine("tt", (hit.type === "gpu" ? "GPU · " : "CPU · ") + K.label + (e.k === "other" && e.raw && e.raw !== "other" ? "（" + e.raw + "）" : ""), K.c);
+      var where = [];
+      if (e.l !== null && e.l >= 0) where.push("第 " + e.l + " 层");
+      if (j >= 0) where.push(tokName(j));
+      if (where.length) tipLine("tn", where.join(" · "));
+      tipLine("tn", startText(R, e.t0, j));
+      if (e.n) tipLine("tn", e.n);
+    } else if (hit.type === "io") {
+      var q = e.q, IK = e.spec ? IOK.spec : IOK.demand, w = [], rq = [];
+      j = tokenAt(R, e.t0);
+      tipLine("tv", dur(e.t1 - e.t0) + (e.kb !== null ? " · " + Math.round(e.kb) + " KB" : ""));
+      tipLine("tt", "SSD · " + IK.label, IK.c);
+      if (e.e !== "") w.push("专家 " + e.e);
+      if (e.l !== null && e.l >= 0) w.push("第 " + e.l + " 层");
+      if (j >= 0) w.push(tokName(j));
+      if (w.length) tipLine("tn", w.join(" · "));
+      if (e.req) rq.push("请求 #" + e.req);
+      if (q && q.t_sub !== null && q.t_done !== null && q.t_cancel === null) rq.push("排队→完成 " + dur(q.t_done - q.t_sub));
+      if (q && q.kb !== null) rq.push("共 " + Math.round(q.kb) + " KB");
+      if (rq.length) tipLine("tn", rq.join(" · "));
+      if (q && q.t_promote !== null) tipLine("tn", "已提升为需求读 @ " + q.t_promote.toFixed(3) + " ms" + (q.t_done !== null ? "，完成 @ " + q.t_done.toFixed(3) + " ms" : ""));
+      if (q && q.t_cancel !== null) tipLine("tn", "已取消 @ " + q.t_cancel.toFixed(3) + " ms（剩余块不再读）");
+      tipLine("tn", "IO 线程 " + e.th + " · " + startText(R, e.t0, j));
+    }
+    tip.hidden = false;
+  }
+  function placeTip(x, y) {
+    var r = tip.getBoundingClientRect();
+    var left = x + 14, top = y + 14;
+    if (left + r.width > window.innerWidth - 8) left = x - r.width - 14;
+    if (top + r.height > window.innerHeight - 8) top = y - r.height - 14;
+    tip.style.left = Math.max(8, left) + "px";
+    tip.style.top = Math.max(8, top) + "px";
+  }
+  function hideTip() { tip.hidden = true; }
+  function sameHit(a, b) { return a && b ? a.ev === b.ev && a.row === b.row : a === b; }
+  function hoverAt(px, py, cx, cy) {
+    var hit = hitTest(px, py);
+    state.cross = L && px >= L.gutter && px <= L.w ? px : null;
+    if (!sameHit(hit, state.hover)) { state.hover = hit; if (hit) fillTip(hit); else hideTip(); }
+    if (hit) placeTip(cx, cy);
+    requestDraw();
+  }
+  function clearHover() { state.hover = null; state.cross = null; hideTip(); requestDraw(); }
+  function local(e) { var r = cv.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
+
+  // ---------------------------------------------------------------- interaction
+  cv.addEventListener("wheel", function (e) {
+    if (!cur() || !L) return;
+    e.preventDefault();
+    var p = local(e), unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? L.w : 1;
+    var dx = e.deltaX * unit, dy = e.deltaY * unit;
+    if (!e.ctrlKey && Math.abs(dx) > Math.abs(dy)) pan(dx / pxPerMs());
+    else {
+      var anchor = p.x >= L.gutter ? tAt(p.x) : (state.v0 + state.v1) / 2;
+      zoomAt(anchor, Math.exp(dy * (e.ctrlKey ? 0.01 : 0.0015)));
+    }
+    if (state.hover) hoverAt(p.x, p.y, e.clientX, e.clientY);
+  }, { passive: false });
+
+  cv.addEventListener("pointerdown", function (e) {
+    if (!cur() || (e.pointerType === "mouse" && e.button !== 0)) return;
+    var p = local(e);
+    drag = { id: e.pointerId, x: p.x, v0: state.v0, v1: state.v1, moved: false };
+    try { cv.setPointerCapture(e.pointerId); } catch (err) { /* capture is optional */ }
+  });
+  cv.addEventListener("pointermove", function (e) {
+    var p = local(e);
+    if (drag && drag.id === e.pointerId) {
+      var dx = p.x - drag.x;
+      if (!drag.moved && Math.abs(dx) > 4) { drag.moved = true; cv.classList.add("dragging"); state.hover = null; hideTip(); }
+      if (drag.moved) { var ms = dx / pxPerMs(); setView(drag.v0 - ms, drag.v1 - ms); }
+      return;
+    }
+    if (e.pointerType === "mouse" || e.pointerType === "pen" || !e.pointerType) hoverAt(p.x, p.y, e.clientX, e.clientY);
+  });
+  function endDrag(e, cancelled) {
+    if (!drag || drag.id !== e.pointerId) return;
+    var tap = !drag.moved && !cancelled;
+    drag = null;
+    cv.classList.remove("dragging");
+    if (tap) { var p = local(e); hoverAt(p.x, p.y, e.clientX, e.clientY); }
+  }
+  cv.addEventListener("pointerup", function (e) { endDrag(e, false); });
+  cv.addEventListener("pointercancel", function (e) { endDrag(e, true); });
+  cv.addEventListener("pointerleave", function (e) { if (e.pointerType === "mouse" && !drag) clearHover(); });
+  cv.addEventListener("dblclick", function (e) { var p = local(e); if (L && p.x >= L.gutter) zoomAt(tAt(p.x), 0.5); });
+  cv.addEventListener("keydown", function (e) {
+    if (!cur()) return;
+    var w = state.v1 - state.v0, mid = (state.v0 + state.v1) / 2, done = true;
+    switch (e.key) {
+      case "ArrowLeft": pan(-w * (e.shiftKey ? 0.5 : 0.15)); break;
+      case "ArrowRight": pan(w * (e.shiftKey ? 0.5 : 0.15)); break;
+      case "+": case "=": zoomAt(mid, 1 / 1.6); break;
+      case "-": case "_": zoomAt(mid, 1.6); break;
+      case "Home": resetView(); break;
+      case "Escape": clearHover(); break;
+      default: done = false;
+    }
+    if (done) { e.preventDefault(); if (e.key !== "Escape") clearHover(); }
+  });
+  document.addEventListener("pointerdown", function (e) { if (e.target !== cv) hideTip(); });
+  window.addEventListener("scroll", function () { if (!tip.hidden) { hideTip(); state.hover = null; state.cross = null; requestDraw(); } }, { passive: true });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape") hideTip(); });
+
+  $("z-in").addEventListener("click", function () { zoomAt((state.v0 + state.v1) / 2, 1 / 1.6); });
+  $("z-out").addEventListener("click", function () { zoomAt((state.v0 + state.v1) / 2, 1.6); });
+  $("z-reset").addEventListener("click", resetView);
+  $("tok").addEventListener("change", function () { state.tok = this.value; resetView(); selectionChanged(); });
+
+  // ---------------------------------------------------------------- run / token selection
+  function mapView(oldR, newR) {
+    // keep a zoom only when it sits within about one token: same token index, same relative window
+    var w = state.v1 - state.v0, c = (state.v0 + state.v1) / 2, j = tokenAt(oldR, c);
+    if (state.tok === "all") {
+      var full = oldR.ext1 - oldR.ext0;
+      if (w >= full * 0.9) return null;
+    }
+    if (j < 0 || j >= newR.tokens.length) return null;
+    var ot = oldR.tokens[j], nt = newR.tokens[j], od = ot.t1 - ot.t0, nd = nt.t1 - nt.t0;
+    var f0 = (state.v0 - ot.t0) / od, f1 = (state.v1 - ot.t0) / od;
+    if (!(f1 - f0 > 0) || f1 - f0 > 1.5) return null;
+    return [nt.t0 + f0 * nd, nt.t0 + f1 * nd];
+  }
+  function switchRun(i) {
+    if (i === state.run || !RUNS[i]) return;
+    var oldR = cur(), newR = RUNS[i], keep = oldR ? mapView(oldR, newR) : null;
+    state.run = i;
+    if (state.tok !== "all" && !newR.tokens[+state.tok]) { state.tok = newR.tokens.length ? "0" : "all"; keep = null; }
+    clearHover();
+    layout();
+    renderRun();
+    if (keep) setView(keep[0], keep[1]); else resetView();
+  }
+
+  function renderRunButtons() {
+    var boxR = $("runs");
+    boxR.replaceChildren();
+    RUNS.forEach(function (R, i) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.textContent = R.id === "fast" ? "默认 --fast" : R.id === "lossless" ? "--lossless" : R.label;
+      b.title = R.label;
+      b.setAttribute("aria-pressed", String(i === state.run));
+      b.addEventListener("click", function () { switchRun(i); });
+      boxR.appendChild(b);
+    });
+    if (!RUNS.length) {
+      var d = document.createElement("button");
+      d.type = "button"; d.disabled = true; d.textContent = "无数据";
+      boxR.appendChild(d);
+    }
+  }
+  function renderTokenSelect() {
+    var sel = $("tok"), R = cur();
+    sel.replaceChildren();
+    sel.appendChild(new Option("全部", "all"));
+    if (R) R.tokens.forEach(function (_, j) { sel.appendChild(new Option(tokName(j), String(j))); });
+    if (state.tok !== "all" && !(R && R.tokens[+state.tok])) state.tok = "all";
+    sel.value = state.tok;
+    sel.disabled = !R;
+  }
+  function renderLegend() {
+    var lg = $("legend"), R = cur();
+    lg.replaceChildren();
+    function group(title, items) {
+      var g = document.createElement("div");
+      g.className = "lg-group";
+      var t = document.createElement("span");
+      t.className = "lg-title"; t.textContent = title;
+      g.appendChild(t);
+      items.forEach(function (it) {
+        var s = document.createElement("span");
+        s.className = "lg-item";
+        if (it.svg) s.appendChild(it.svg);
+        else {
+          var sw = document.createElement("i");
+          sw.className = "sw" + (it.est ? " est" : "");
+          sw.style.setProperty("--c", "var(--" + it.c + ")");
+          s.appendChild(sw);
+        }
+        s.appendChild(document.createTextNode(it.label));
+        g.appendChild(s);
+      });
+      lg.appendChild(g);
+    }
+    function mark(kind) {
+      var ns = "http://www.w3.org/2000/svg", svg = document.createElementNS(ns, "svg"), p = document.createElementNS(ns, "path");
+      svg.setAttribute("viewBox", "0 0 12 12"); svg.setAttribute("class", "lg-mk"); svg.setAttribute("aria-hidden", "true");
+      if (kind === "promote") { p.setAttribute("class", "ink"); p.setAttribute("d", "M1 1h8L1 9z"); }
+      else { p.setAttribute("class", "ink-line"); p.setAttribute("d", "M2 2l8 8M10 2l-8 8"); }
+      svg.appendChild(p);
+      return svg;
+    }
+    group("CPU 主线程", CPU_KINDS.map(function (d) { return { c: d.c, label: d.label }; }));
+    var hasGpuOther = R && R.gpu.some(function (e) { return e.k === "other"; });
+    group("GPU（推断）", GPU_KINDS.filter(function (d) { return d.k !== "other" || hasGpuOther; })
+      .map(function (d) { return { c: d.c, label: d.label, est: d.k === "moe" }; }));
+    group("SSD IO", [
+      { c: IOK.demand.c, label: IOK.demand.label },
+      { c: IOK.spec.c, label: IOK.spec.label },
+      { svg: mark("promote"), label: "推测请求被提升为需求读" },
+      { svg: mark("cancel"), label: "推测请求被取消" }
+    ]);
+  }
+  function renderTable() {
+    var tb = $("sum-body"), R = cur();
+    tb.replaceChildren();
+    function td(text, cls) { var c = document.createElement("td"); if (cls) c.className = cls; c.textContent = text; return c; }
+    if (!R || !R.tokens.length) {
+      var tr0 = document.createElement("tr"), c0 = td(R ? "这个运行没有 token 区间，无法逐 token 汇总。" : "没有数据。", "tbl-empty");
+      c0.colSpan = 15; tr0.appendChild(c0); tb.appendChild(tr0);
+      return;
+    }
+    var stats = runStats(R);
+    function cells(tr, st, countDec) {
+      [fx(st.wall, 1), fx(st.sync, 1), fx(st.wait, 1), fx(st.build, 1), fx(st.rest, 1), pct(st.gpu), pct(st.gpuAll), pct(st.hot), pct(st.ssd),
+       fx(st.nDem, countDec), fx(st.nSpec, countDec), fx(st.nProm, countDec), fx(st.nCanc, countDec), fx(st.lat, 2)]
+        .forEach(function (v) { tr.appendChild(td(v)); });
+    }
+    stats.forEach(function (st, j) {
+      var tr = document.createElement("tr"), first = document.createElement("td"), b = document.createElement("button");
+      if (state.tok === String(j)) tr.className = "em";
+      first.className = "l";
+      b.type = "button"; b.className = "tok-btn"; b.textContent = tokName(j);
+      b.setAttribute("aria-label", "在时间线上定位 " + tokName(j));
+      b.addEventListener("click", function () {
+        state.tok = String(j); $("tok").value = state.tok; resetView(); selectionChanged();
+        $("fig-tl").scrollIntoView({ block: "nearest" });
+      });
+      first.appendChild(b); tr.appendChild(first);
+      cells(tr, st, 0);
+      tb.appendChild(tr);
+    });
+    var trA = document.createElement("tr");
+    trA.className = "avg";
+    trA.appendChild(td("平均", "l"));
+    cells(trA, average(stats), 1);
+    tb.appendChild(trA);
+  }
+  function metaValue(v, unit) {
+    if (v === null || v === undefined || v === "") return "—";
+    if (Array.isArray(v)) return v.map(function (x) { var n = num(x); return n === null ? str(x) : n.toFixed(1); }).join(" / ") + (unit || "");
+    var n = num(v);
+    return (n === null ? str(v) || "—" : String(n)) + (unit || "");
+  }
+  function renderNotes() {
+    var R = cur(), dl = $("run-meta"), ul = $("run-notes");
+    dl.replaceChildren(); ul.replaceChildren();
+    if (!R) { var li0 = document.createElement("li"); li0.textContent = "没有数据。"; ul.appendChild(li0); return; }
+    var m = R.meta, power = str(m.power);
+    var rows = [
+      ["运行", R.label],
+      ["专家缓存", metaValue(m.cache_gb, " GiB")],
+      ["推测预取 spec_k", metaValue(m.spec_k)],
+      ["替换名次 sub_rank", m.sub_rank === null || m.sub_rank === undefined ? "—（不替换）" : metaValue(m.sub_rank)],
+      ["供电", power === "AC" ? "电源（AC）" : power === "battery" ? "电池" : power || "—"],
+      ["提示长度", metaValue(m.prompt_tokens, " token")],
+      ["预热", metaValue(m.warm_tokens, " token")],
+      ["跟踪", metaValue(m.traced_tokens, " token")],
+      ["IO 线程", metaValue(m.io_threads)],
+      ["IO 块大小", metaValue(m.chunk_kb, " KB")],
+      ["每 token", metaValue(m.ms_per_token, " ms")],
+      ["数据生成", str(DATA.generated) || "—"]
+    ];
+    rows.forEach(function (p) {
+      var dt = document.createElement("dt"), dd = document.createElement("dd");
+      dt.textContent = p[0]; dd.textContent = p[1];
+      dl.appendChild(dt); dl.appendChild(dd);
+    });
+    var notes = arr(m.notes).map(str).filter(function (s) { return s; });
+    if (!notes.length) notes = ["这个运行没有附带说明。"];
+    notes.forEach(function (s) { var li = document.createElement("li"); li.textContent = s; ul.appendChild(li); });
+  }
+  function renderRun() {
+    var R = cur();
+    $("run-label").textContent = R ? R.label : "没有数据";
+    Array.prototype.forEach.call($("runs").children, function (b, i) { b.setAttribute("aria-pressed", String(i === state.run)); });
+    renderTokenSelect();
+    renderLegend();
+    renderTable();
+    renderNotes();
+    var empty = $("tl-empty");
+    if (!R) { empty.textContent = parsed.error || "没有可显示的运行（runs 为空）。"; empty.hidden = false; }
+    else if (R.empty) { empty.textContent = "这个运行没有任何事件。"; empty.hidden = false; }
+    else empty.hidden = true;
+    ["z-in", "z-out", "z-reset"].forEach(function (id) { $(id).disabled = !R; });
+    selectionChanged();
+  }
+  function selectionChanged() {
+    var R = cur();
+    Array.prototype.forEach.call($("sum-body").children, function (tr, j) { tr.classList.toggle("em", state.tok === String(j)); });
+    if (!R) { cv.setAttribute("aria-label", "解码时间线：没有数据"); return; }
+    var s = R.label + " 的解码时间线：CPU 主线程、推断的 GPU 与 " + R.nth + " 个 SSD IO 线程。";
+    var stats = runStats(R);
+    if (state.tok !== "all" && stats[+state.tok]) {
+      var st = stats[+state.tok];
+      s += tokName(+state.tok) + " 墙钟 " + fx(st.wall, 1) + " ms；CPU 路由同步 " + fx(st.sync, 1) + " ms，等盘 " + fx(st.wait, 1) +
+        " ms；GPU 忙 " + pct(st.gpu) + "（其中保温 " + pct(st.hot) + "，含估计 " + pct(st.gpuAll) + "）；SSD 忙 " + pct(st.ssd) + "；需求读 " + st.nDem + " 个，推测读 " + st.nSpec + " 个。";
+    } else if (stats.length) {
+      var av = average(stats);
+      s += "共 " + stats.length + " 个 token，平均墙钟 " + fx(av.wall, 1) + " ms，GPU 忙 " + pct(av.gpu) + "，SSD 忙 " + pct(av.ssd) + "。";
+    }
+    cv.setAttribute("aria-label", s + "逐 token 数据见下方汇总表。");
+  }
+  function viewChanged() {
+    var R = cur();
+    $("view-sub").textContent = R ? "视图 " + state.v0.toFixed(2) + "–" + state.v1.toFixed(2) + " ms · 跨度 " + dur(state.v1 - state.v0) : "—";
+    requestDraw();
+  }
+
+  // ---------------------------------------------------------------- boot
+  (function boot() {
+    var gen = str(DATA.generated);
+    var ml = $("meta-line");
+    [gen ? "数据生成 " + gen : "", RUNS.length ? RUNS.length + " 个运行" : "", "引擎 DeepInfer-Mac（MLX）· SSD 专家流式读取"].forEach(function (t) {
+      if (!t) return;
+      var s = document.createElement("span"); s.textContent = t; ml.appendChild(s);
+    });
+    $("foot-gen").textContent = gen || "—";
+    if (parsed.error || !RUNS.length) {
+      $("data-error-text").textContent = parsed.error || "数据里没有 runs，时间线为空。";
+      $("data-error").hidden = false;
+    }
+    renderRunButtons();
+    layout();
+    renderRun();
+    resetView();
+    draw();
+    lastW = box.clientWidth;
+    if (window.ResizeObserver) {
+      new ResizeObserver(function () {
+        var w = box.clientWidth;
+        if (w === lastW) return;
+        lastW = w; layout(); requestDraw();
+      }).observe(box);
+    }
+    window.addEventListener("resize", function () { if (box.clientWidth !== lastW) { lastW = box.clientWidth; layout(); } requestDraw(); });
+    var mq = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+    if (mq) { if (mq.addEventListener) mq.addEventListener("change", requestDraw); else if (mq.addListener) mq.addListener(requestDraw); }
+    if (window.MutationObserver) new MutationObserver(requestDraw).observe(root, { attributes: true, attributeFilter: ["data-theme", "class", "style"] });
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { measureCache.clear(); requestDraw(); });
+  })();
+})();
+</script>
+</body>
+</html>

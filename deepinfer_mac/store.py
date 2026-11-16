@@ -195,10 +195,11 @@ class PrioIO:
 class _NReq:
     """A native read request (mkio): Future-like done()/result(), promote via result()."""
 
-    __slots__ = ("io", "id", "fin", "high", "__weakref__")
+    __slots__ = ("io", "id", "fin", "high", "gen", "__weakref__")
 
     def __init__(self, io, rid: int, high: bool):
         self.io, self.id, self.fin, self.high = io, rid, 0, high
+        self.gen = io.lib.mkio_gen(rid) if io.tracing else -1  # unique request id, for tracing
 
     def done(self) -> bool:
         if self.fin == 0:
@@ -256,19 +257,48 @@ class NativeIO:
         for f in ("mkio_promote", "mkio_release"):
             getattr(lib, f).argtypes = [ctypes.c_int]
             getattr(lib, f).restype = None
+        lib.mkio_submit_tagged.argtypes = lib.mkio_submit.argtypes + [ctypes.c_longlong]
+        lib.mkio_gen.argtypes, lib.mkio_gen.restype = [ctypes.c_int], ctypes.c_long
+        lib.mkio_now.argtypes, lib.mkio_now.restype = [], ctypes.c_longlong
+        lib.mkio_trace_enable.argtypes, lib.mkio_trace_enable.restype = [ctypes.c_int], ctypes.c_int
+        lib.mkio_trace_disable.argtypes, lib.mkio_trace_disable.restype = [], None
+        for f in ("mkio_trace_chunks", "mkio_trace_reqs"):
+            getattr(lib, f).argtypes = [ctypes.POINTER(ctypes.c_longlong), ctypes.c_int]
+            getattr(lib, f).restype = ctypes.c_int
         self.lib, self.ct = lib, ctypes
+        self.tracing = False
         if lib.mkio_init(threads, PrioIO.CHUNK, PrioIO.SPEC_CONC) != 0:
             raise RuntimeError("mkio_init failed")
 
-    def submit_addrs(self, fd: int, addrs, lens, off: int, total: int, high: bool) -> _NReq:
+    def submit_addrs(self, fd: int, addrs, lens, off: int, total: int, high: bool, tag: int = -1) -> _NReq:
         ct = self.ct
         n = len(addrs)
         a = (ct.c_void_p * n)(*addrs)
         l_ = (ct.c_longlong * n)(*lens)
-        rid = self.lib.mkio_submit(fd, a, l_, n, off, total, 1 if high else 0)
+        rid = self.lib.mkio_submit_tagged(fd, a, l_, n, off, total, 1 if high else 0, tag)
         if rid < 0:
             raise RuntimeError("mkio_submit: request table full")
         return _NReq(self, rid, high)
+
+    # -- tracing (mac-deploy-tests/mk/trace_decode.py): chunk and request events, CLOCK_UPTIME_RAW ns
+    def trace_start(self, cap: int = 1 << 18) -> None:
+        if self.lib.mkio_trace_enable(cap) != 0:
+            raise MemoryError("mkio_trace_enable")
+        self.tracing = True
+
+    def trace_stop(self):
+        """Stop tracing; returns (chunks [n, 9]: tq t0 t1 gen tag thr lo a b, requests [m, 6]:
+        t gen tag kind(0 submit, 1 promote, 2 cancel) high total) as numpy int64 arrays."""
+        import numpy as _np
+
+        self.lib.mkio_trace_disable()
+        self.tracing = False
+        out = []
+        for f, w in (("mkio_trace_chunks", 9), ("mkio_trace_reqs", 6)):
+            buf = _np.zeros((1 << 18) * w, dtype=_np.int64)
+            n = getattr(self.lib, f)(buf.ctypes.data_as(self.ct.POINTER(self.ct.c_longlong)), 1 << 18)
+            out.append(buf[: n * w].reshape(n, w).copy())
+        return out[0], out[1]
 
     def promote(self, req: _NReq):
         if not req.high:
@@ -327,6 +357,7 @@ class ExpertStore:
         self.stats = {"hits": 0, "misses": 0, "prefetch_hits": 0, "bytes": 0, "spec_bytes": 0, "wait_s": 0.0}
         self._prefetched: set[tuple[str, int]] = set()
         self._spec_inflight: dict[str, set[int]] = {}
+        self.trace_keys: dict[str, int] = {}  # layer key -> id in IO trace tags (NativeIO tracing only)
 
     # -- IO
 
@@ -463,7 +494,12 @@ class ExpertStore:
                 if isinstance(self.prio, NativeIO):
                     lay = self.layouts[key]
                     addrs, lens = self._iov_addrs(slab, slot, lay)
-                    self.inflight[k] = self.prio.submit_addrs(self._fd(key), addrs, lens, e * lay.stride, lay.stride, high=not optional)
+                    tag = -1
+                    if self.prio.tracing:  # layer key id, expert, speculative flag
+                        kid = self.trace_keys.setdefault(key, len(self.trace_keys))
+                        tag = (kid << 20) | (e << 1) | (1 if optional else 0)
+                    self.inflight[k] = self.prio.submit_addrs(self._fd(key), addrs, lens, e * lay.stride, lay.stride,
+                                                              high=not optional, tag=tag)
                 elif self.prio is not None:
                     lay = self.layouts[key]
                     bufs = slab.iovecs(slot) + ([memoryview(self._padbuf(lay))] if lay.stride > lay.nbytes else [])
