@@ -62,6 +62,9 @@ inline float act_scale(float amax) {
   return pow2_ceil(max(amax, 1e-4f) / 448.0f);
 }
 
+inline float bf_lo(uint w) { return as_type<float>(w << 16); }
+inline float bf_hi(uint w) { return as_type<float>(w & 0xFFFF0000u); }
+
 inline float fq8(float x, float s) {  // fake-quant one value with block scale s
   return fp8_e4m3_round(clamp(x / s, -448.0f, 448.0f)) * s;
 }
@@ -69,6 +72,43 @@ inline float fq8(float x, float s) {  // fake-quant one value with block scale s
 inline float sigmoid_mlx(float x) {
   float y = 1.0f / (1.0f + metal::precise::exp(metal::abs(x)));
   return (x < 0.0f) ? y : 1.0f - y;
+}
+
+// sum_j q_j * x[j] for 16 affine codes of `bits` bits starting at byte p (p aligned to the 16-code
+// group's byte size: 3-bit -> 6 bytes (2-aligned), 2-bit -> 4 bytes, 4-bit -> 8 bytes), wide loads
+// sum_j q_j * x[j] for 16 affine codes of `bits` bits starting at byte p, with xs[j] = x[j] pre-scaled
+// by 2^-(bit offset of code j within its word) (exact: powers of two), so a code needs only a mask,
+// a conversion and an FMA (no shift) -- the same trick as MLX's qdot. Wide loads: 3-bit -> 3 ushort
+// (6 bytes, 2-aligned), 2-bit -> one uint, 4-bit -> uint2.
+template <int bits>
+inline void prescale16(thread const float* x, thread float* xs) {
+  if (bits == 2) { for (int j = 0; j < 16; j++) xs[j] = x[j] * as_type<float>(uint(127 - 2 * j) << 23); }
+  else if (bits == 4) { for (int j = 0; j < 16; j++) xs[j] = x[j] * as_type<float>(uint(127 - 4 * (j & 7)) << 23); }
+  else {  // 3-bit: codes 0..9 in lo (shift 3j), code 10 straddles, 11..15 in hi (shift 3j-32)
+    for (int j = 0; j < 10; j++) xs[j] = x[j] * as_type<float>(uint(127 - 3 * j) << 23);
+    xs[10] = x[10];
+    for (int j = 11; j < 16; j++) xs[j] = x[j] * as_type<float>(uint(127 - (3 * j - 32)) << 23);
+  }
+}
+template <int bits>
+inline float qdot16(const device uint8_t* p, thread const float* xs) {
+  float acc = 0.0f;
+  if (bits == 2) {
+    const uint w = *((const device uint*)p);
+    for (int j = 0; j < 16; j++) acc += float(w & (3u << (2 * j))) * xs[j];
+  } else if (bits == 3) {
+    const device ushort* q = (const device ushort*)p;
+    const uint lo = uint(q[0]) | (uint(q[1]) << 16);
+    const uint hi = uint(q[2]);
+    for (int j = 0; j < 10; j++) acc += float(lo & (7u << (3 * j))) * xs[j];
+    acc += float(((lo >> 30) | ((hi & 1u) << 2)) & 7u) * xs[10];
+    for (int j = 11; j < 16; j++) acc += float(hi & (7u << (3 * j - 32))) * xs[j];
+  } else if (bits == 4) {
+    const uint2 w = *((const device uint2*)p);
+    for (int j = 0; j < 8; j++) acc += float(w.x & (15u << (4 * j))) * xs[j];
+    for (int j = 0; j < 8; j++) acc += float(w.y & (15u << (4 * j))) * xs[8 + j];
+  }
+  return acc;
 }
 
 // sum_j q_j * x[j] for 8 affine codes of `bits` bits packed little-endian starting at byte p
@@ -92,73 +132,87 @@ inline float qdot8(const device uint8_t* p, thread const float* x) {
 """
 
 # ---------------------------------------------------------------------------------------- MoE up
-# grid: (32 * SG, n_experts * inter / (RPS * SG), 1) threads; threadgroup (32 * SG, 1, 1)
-# each simdgroup: RPS consecutive rows of one expert (w1 and w3), lane l covers 16 values per step
+# One threadgroup = 8 simdgroups x 4 rows = 32 consecutive rows of one expert (one act_quant block of
+# h), so h is fake-quantized here, once. x is the already fake-quantized MoE input (bf16, from the
+# router stage). Lane l of a simdgroup covers 16 values per step (K / 512 steps).
 _MOE_UP = r"""
   constexpr int RPS = 4;
-  constexpr int SG = 2;
-  const int K = DIM;          // 5120
-  const int N = INTER;        // 2304
+  constexpr int SG = 8;
+  const int K = DIM;
+  const int N = INTER;
   const int lane = thread_index_in_simdgroup;
   const int sg = simdgroup_index_in_threadgroup;
-  const int row0 = (threadgroup_position_in_grid.y * SG + sg) * RPS;   // over n_experts * N
-  const int e = row0 / N;
-  const int r0 = row0 % N;
+  const int blk = threadgroup_position_in_grid.y;           // over n_experts * N / 32
+  const int e = (blk * 32) / N;
+  const int rb = (blk * 32) % N;                             // first row of this 32-row block
+  const int r0 = rb + sg * RPS;
   const uint slot = slots[e];
-  constexpr int RB = (DIM * BITS) / 8;                // packed bytes per row
-  constexpr int G = DIM / 64;                          // groups per row
+  constexpr int RB = (DIM * BITS) / 8;
+  constexpr int G = DIM / 64;
   const device uint8_t* w1p = (const device uint8_t*)w1q + ((size_t)slot * N + r0) * RB;
   const device uint8_t* w3p = (const device uint8_t*)w3q + ((size_t)slot * N + r0) * RB;
   const device bfloat16_t* s1p = w1s + ((size_t)slot * N + r0) * G;
   const device bfloat16_t* b1p = w1b + ((size_t)slot * N + r0) * G;
   const device bfloat16_t* s3p = w3s + ((size_t)slot * N + r0) * G;
   const device bfloat16_t* b3p = w3b + ((size_t)slot * N + r0) * G;
-
   float acc1[RPS] = {0}, acc3[RPS] = {0};
   for (int it = 0; it < K / 512; it++) {
-    const int c = it * 512 + lane * 16;               // first of this lane's 16 values
+    const int c = it * 512 + lane * 16;
     float xv[16];
-    float amax = 0.0f;
-    for (int j = 0; j < 16; j++) { xv[j] = float(x[c + j]); amax = max(amax, fabs(xv[j])); }
-    amax = max(amax, simd_shuffle_xor(amax, 1));       // lanes 2i, 2i+1 share a 32-block
-    const float s = act_scale(amax);
+    const uint4 xa = *((const device uint4*)(x + c));
+    const uint4 xb = *((const device uint4*)(x + c + 8));
+    xv[0] = bf_lo(xa.x); xv[1] = bf_hi(xa.x); xv[2] = bf_lo(xa.y); xv[3] = bf_hi(xa.y);
+    xv[4] = bf_lo(xa.z); xv[5] = bf_hi(xa.z); xv[6] = bf_lo(xa.w); xv[7] = bf_hi(xa.w);
+    xv[8] = bf_lo(xb.x); xv[9] = bf_hi(xb.x); xv[10] = bf_lo(xb.y); xv[11] = bf_hi(xb.y);
+    xv[12] = bf_lo(xb.z); xv[13] = bf_hi(xb.z); xv[14] = bf_lo(xb.w); xv[15] = bf_hi(xb.w);
     float xs = 0.0f;
-    for (int j = 0; j < 16; j++) { xv[j] = fq8(xv[j], s); xs += xv[j]; }
+    for (int j = 0; j < 16; j++) xs += xv[j];
+    float xp[16];
+    prescale16<BITS>(xv, xp);
     const int g = c / 64;
     const int boff = c * BITS / 8;
     for (int r = 0; r < RPS; r++) {
-      const float q1 = qdot8<BITS>(w1p + r * RB + boff, xv) + qdot8<BITS>(w1p + r * RB + boff + BITS, xv + 8);
-      const float q3 = qdot8<BITS>(w3p + r * RB + boff, xv) + qdot8<BITS>(w3p + r * RB + boff + BITS, xv + 8);
+      const float q1 = qdot16<BITS>(w1p + r * RB + boff, xp);
+      const float q3 = qdot16<BITS>(w3p + r * RB + boff, xp);
       acc1[r] += float(s1p[r * G + g]) * q1 + float(b1p[r * G + g]) * xs;
       acc3[r] += float(s3p[r * G + g]) * q3 + float(b3p[r * G + g]) * xs;
     }
   }
+  threadgroup float hb[32];
   for (int r = 0; r < RPS; r++) {
     float gt = simd_sum(acc1[r]);
     float up = simd_sum(acc3[r]);
     if (lane == 0) {
-      gt = float(bfloat16_t(gt));                      // gather_qmm output dtype
+      gt = float(bfloat16_t(gt));
       up = float(bfloat16_t(up));
       const float lim = limit[0];
       if (lim > 0.0f) { up = clamp(up, -lim, lim); gt = min(gt, lim); }
-      const float hv = wts[e] * (gt * sigmoid_mlx(gt) * up);
-      h[e * N + r0 + r] = bfloat16_t(hv);
+      hb[sg * RPS + r] = float(bfloat16_t(wts[e] * (gt * sigmoid_mlx(gt) * up)));
     }
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  if (sg == 0) {  // act_quant over the 32-row block
+    const float v = hb[lane];
+    float amax = simd_max(fabs(v));
+    const float s = act_scale(amax);
+    h[e * N + rb + lane] = bfloat16_t(fq8(v, s));
   }
 """
 
 # -------------------------------------------------------------------------------------- MoE down
-# grid: (32 * SG, DIM / (RPS * SG), 1); each simdgroup RPS output rows, all experts
+# h is already fake-quantized (moe_up). Each simdgroup: RPS output rows over all experts.
 _MOE_DOWN = r"""
   constexpr int RPS = 4;
   constexpr int SG = 2;
-  const int K = INTER;        // 2304
-  const int N = DIM;          // 5120
+  const int K = INTER;
+  const int N = DIM;
   const int lane = thread_index_in_simdgroup;
   const int sg = simdgroup_index_in_threadgroup;
   const int r0 = (threadgroup_position_in_grid.y * SG + sg) * RPS;
   constexpr int RB = (INTER * BITS) / 8;
   constexpr int G = INTER / 64;
+  constexpr int ITF = INTER / 512;                 // full 512-value steps
+  constexpr bool TAIL = (INTER % 512) != 0;         // + a half step (lanes 0..15)
   float out[RPS] = {0};
   for (int e = 0; e < NE; e++) {
     const uint slot = slots[e];
@@ -166,65 +220,69 @@ _MOE_DOWN = r"""
     const device bfloat16_t* sp = w2s + ((size_t)slot * N + r0) * G;
     const device bfloat16_t* bp = w2b + ((size_t)slot * N + r0) * G;
     float acc[RPS] = {0};
-    for (int it = 0; it < K / 256; it++) {
-      const int c = it * 256 + lane * 8;
-      float xv[8];
-      float amax = 0.0f;
-      for (int j = 0; j < 8; j++) { xv[j] = float(h[e * K + c + j]); amax = max(amax, fabs(xv[j])); }
-      amax = max(amax, simd_shuffle_xor(amax, 1));
-      amax = max(amax, simd_shuffle_xor(amax, 2));     // 4 lanes per 32-block
-      const float s = act_scale(amax);
+    for (int it = 0; it < ITF + (TAIL ? 1 : 0); it++) {
+      const int c = it * 512 + lane * 16;
+      if (c >= K) break;
+      float xv[16];
+      const uint4 xa = *((const device uint4*)(h + e * K + c));
+      const uint4 xb = *((const device uint4*)(h + e * K + c + 8));
+      xv[0] = bf_lo(xa.x); xv[1] = bf_hi(xa.x); xv[2] = bf_lo(xa.y); xv[3] = bf_hi(xa.y);
+      xv[4] = bf_lo(xa.z); xv[5] = bf_hi(xa.z); xv[6] = bf_lo(xa.w); xv[7] = bf_hi(xa.w);
+      xv[8] = bf_lo(xb.x); xv[9] = bf_hi(xb.x); xv[10] = bf_lo(xb.y); xv[11] = bf_hi(xb.y);
+      xv[12] = bf_lo(xb.z); xv[13] = bf_hi(xb.z); xv[14] = bf_lo(xb.w); xv[15] = bf_hi(xb.w);
       float xs = 0.0f;
-      for (int j = 0; j < 8; j++) { xv[j] = fq8(xv[j], s); xs += xv[j]; }
+      for (int j = 0; j < 16; j++) xs += xv[j];
+      float xp[16];
+      prescale16<BITS>(xv, xp);
       const int g = c / 64;
       const int boff = c * BITS / 8;
       for (int r = 0; r < RPS; r++) {
-        acc[r] += float(sp[r * G + g]) * qdot8<BITS>(wp + r * RB + boff, xv) + float(bp[r * G + g]) * xs;
+        acc[r] += float(sp[r * G + g]) * qdot16<BITS>(wp + r * RB + boff, xp) + float(bp[r * G + g]) * xs;
       }
     }
     for (int r = 0; r < RPS; r++) {
       float v = simd_sum(acc[r]);
-      out[r] += float(bfloat16_t(v));                  // each expert's output rounds to bf16
+      out[r] += float(bfloat16_t(v));
     }
   }
   if (lane == 0) {
-    for (int r = 0; r < RPS; r++) y[r0 + r] = shared[r0 + r] + out[r];
+    for (int r = 0; r < RPS; r++) y[r0 + r] = static_cast<OT>(shared[r0 + r] + out[r]);
   }
 """
 
 
 @lru_cache(maxsize=None)
 def _moe_up_kernel():
-    return mx.fast.metal_kernel(name="mk_moe_up", input_names=["x", "slots", "wts", "limit", "w1q", "w1s", "w1b", "w3q", "w3s", "w3b"],
+    return mx.fast.metal_kernel(name="mk_moe_up2", input_names=["x", "slots", "wts", "limit", "w1q", "w1s", "w1b", "w3q", "w3s", "w3b"],
                                 output_names=["h"], header=HEADER, source=_MOE_UP)
 
 
 @lru_cache(maxsize=None)
 def _moe_down_kernel():
-    return mx.fast.metal_kernel(name="mk_moe_down", input_names=["h", "slots", "shared", "w2q", "w2s", "w2b"],
+    return mx.fast.metal_kernel(name="mk_moe_down2", input_names=["h", "slots", "shared", "w2q", "w2s", "w2b"],
                                 output_names=["y"], header=HEADER, source=_MOE_DOWN)
 
 
-def moe_experts(x: mx.array, slots: mx.array, wts: mx.array, limit: mx.array, p1, p3, p2, shared: mx.array,
-                dim: int = 5120, inter: int = 2304) -> mx.array:
+def moe_experts(xq: mx.array, slots: mx.array, wts: mx.array, limit: mx.array, p1, p3, p2, shared: mx.array,
+                dim: int = 5120, inter: int = 2304, out_dtype=mx.float32) -> mx.array:
     """Routed experts of one decode token over slab slots, plus the shared expert's output.
-    x: [dim] bf16 MoE input (pre act-quant); slots: [k] uint32; wts: [k] fp32 routing weights;
+    xq: [dim] bf16 MoE input AFTER act_quant; slots: [k] uint32; wts: [k] fp32 routing weights;
     p1/p3/p2: (packed, scales_bf16, biases_bf16, bits) slab projections; shared: [dim] fp32.
     Returns y [dim] fp32 = shared + sum_e expert_e(x)."""
     ne = slots.shape[0]
     b13, b2 = p1[3], p2[3]
     assert p3[3] == b13
     h = _moe_up_kernel()(
-        inputs=[x.reshape(-1), slots, wts.reshape(-1).astype(mx.float32), limit.reshape(1), p1[0], p1[1], p1[2], p3[0], p3[1], p3[2]],
+        inputs=[xq.reshape(-1), slots, wts.reshape(-1).astype(mx.float32), limit.reshape(1), p1[0], p1[1], p1[2], p3[0], p3[1], p3[2]],
         template=[("BITS", b13), ("DIM", dim), ("INTER", inter)],
-        grid=(64, ne * inter // 8, 1), threadgroup=(64, 1, 1),
+        grid=(256, ne * inter // 32, 1), threadgroup=(256, 1, 1),
         output_shapes=[(ne * inter,)], output_dtypes=[mx.bfloat16],
     )[0]
     y = _moe_down_kernel()(
         inputs=[h, slots, shared.reshape(-1).astype(mx.float32), p2[0], p2[1], p2[2]],
-        template=[("BITS", b2), ("DIM", dim), ("INTER", inter), ("NE", ne)],
+        template=[("BITS", b2), ("DIM", dim), ("INTER", inter), ("NE", ne), ("OT", out_dtype)],
         grid=(64, dim // 8, 1), threadgroup=(64, 1, 1),
-        output_shapes=[(dim,)], output_dtypes=[mx.float32],
+        output_shapes=[(dim,)], output_dtypes=[out_dtype],
     )[0]
     return y
 
@@ -384,3 +442,617 @@ def hc_stage(x_res: mx.array, premix: mx.array, fn: mx.array, sc: mx.array, base
         output_shapes=[(D,), (4,), (4,), (16,)], output_dtypes=[mx.bfloat16, mx.float32, mx.float32, mx.float32],
     )
     return xnew.reshape(4, D), hnorm, pre_o, post_o, comb_o.reshape(4, 4)
+
+
+# ------------------------------------------------------------------------------------- mxfp8 GEMV
+# y[r] = sum_g 2^(s[r,g]-127) * sum_{i in g} e4m3(w[r,i]) * xin[i]   (MLX mxfp8 layout: uint32 words of
+# 4 e4m3 codes, uint8 e8m0 scale per 32). Each simdgroup owns RS consecutive rows; its 32 lanes stride
+# over K in 8-element chunks (4 lanes = one 32-block); SPLIT simdgroups of a threadgroup share the same
+# rows and split the K iterations, reduced through threadgroup memory.
+# PRO (activation prologue): 0 = x as given, 1 = fp8 fake-quant of x (ops.act_quant), 2 = RMSNorm(x, nw)
+# then fp8 fake-quant (rms in fp32, weight applied, rounded to the dtype of x like ops.rms_norm).
+_GEMV_MXFP8_HDR = HEADER + r"""
+inline float e4m3_to_float(uint b) {
+  uint16_t v = b & 127;
+  uint16_t sign_bit = ((uint16_t)((b >> 7) & 1)) << 15;
+  uint16_t u = (v << 7) | (((v + 1) >> 7) << 14) | sign_bit;
+  return float(as_type<half>(u)) * 256.0f;
+}
+inline float e8m0_to_float(uint8_t s) { return as_type<float>(uint(s) << 23); }
+// MLX LogAddExp(z, 0) with MLX's log1p (utils.h)
+inline float log1p_mlx(float x) {
+  float xp1 = 1.0f + x;
+  if (xp1 == FLT_MAX) return FLT_MAX;
+  if (xp1 == 1.0f) return x;
+  return x * (metal::log(xp1) / (xp1 - 1.0f));
+}
+inline float softplus_mlx(float z) {
+  const float maxval = max(z, 0.0f), minval = min(z, 0.0f);
+  if (isinf(maxval)) return maxval;
+  return maxval + log1p_mlx(metal::exp(minval - maxval));
+}
+"""
+
+_GEMV_MXFP8 = r"""
+  const int lane = thread_index_in_simdgroup;
+  const int sg = simdgroup_index_in_threadgroup;           // 0 .. SGS*SPLIT-1
+  const int part = sg % SPLIT;                              // K split index
+  const int rgrp = sg / SPLIT;                              // row group within the threadgroup
+  const int r0 = (threadgroup_position_in_grid.y * SGS + rgrp) * RS;
+  constexpr int ITERS = K / 256;
+  if (GROWS > 0) x += (r0 / GROWS) * K;     // grouped (block-diagonal) weights: rows of group g read input slice g
+  float rinv = 1.0f;
+  if (PRO == 2) {  // RMSNorm statistic over the whole input (cheap: x is small and cached)
+    float ss = 0.0f;
+    for (int i = lane; i < K; i += 32) { const float v = float(x[i]); ss += v * v; }
+    ss = simd_sum(ss);
+    rinv = metal::precise::rsqrt(ss / float(K) + epsv[0]);
+  }
+  float acc[RS] = {0};
+  const device uint8_t* wb = (const device uint8_t*)w;
+  for (int it = part; it < ITERS; it += SPLIT) {
+    const int c = it * 256 + lane * 8;
+    float xv[8];
+    for (int j = 0; j < 8; j++) {
+      float v = float(x[c + j]);
+      if (PRO == 2) v = float(static_cast<XT>(float(nw[c + j]) * (v * rinv)));
+      xv[j] = v;
+    }
+    if (PRO >= 1) {
+      float amax = 0.0f;
+      for (int j = 0; j < 8; j++) amax = max(amax, fabs(xv[j]));
+      amax = max(amax, simd_shuffle_xor(amax, 1));
+      amax = max(amax, simd_shuffle_xor(amax, 2));
+      const float s = act_scale(amax);
+      for (int j = 0; j < 8; j++) xv[j] = fq8(xv[j], s);
+    }
+    const int g = c / 32;
+    for (int r = 0; r < RS; r++) {
+      const int row = r0 + r;
+      const uint2 q = *((const device uint2*)(wb + (size_t)row * K + c));
+      float d = 0.0f;
+      d += e4m3_to_float(q.x & 0xFF) * xv[0];
+      d += e4m3_to_float((q.x >> 8) & 0xFF) * xv[1];
+      d += e4m3_to_float((q.x >> 16) & 0xFF) * xv[2];
+      d += e4m3_to_float(q.x >> 24) * xv[3];
+      d += e4m3_to_float(q.y & 0xFF) * xv[4];
+      d += e4m3_to_float((q.y >> 8) & 0xFF) * xv[5];
+      d += e4m3_to_float((q.y >> 16) & 0xFF) * xv[6];
+      d += e4m3_to_float(q.y >> 24) * xv[7];
+      acc[r] += e8m0_to_float(sc[(size_t)row * (K / 32) + g]) * d;
+    }
+  }
+  if (SPLIT == 1 && EPI == 1) {           // RoPE on head dims [HD-RD, HD) (pairs), like ops.rope_tail
+    float v[RS];
+    for (int r = 0; r < RS; r++) v[r] = float(static_cast<OT>(simd_sum(acc[r])));
+    if (lane == 0) {
+      const int d0 = r0 % HD;
+      for (int r = 0; r < RS; r += 2) {
+        const int d = d0 + r;
+        if (d >= HD - RD) {
+          const int i = (d - (HD - RD)) / 2;
+          const float c = cs[i], sn = cs[RD / 2 + i];
+          const float a = v[r], b = v[r + 1];
+          y[r0 + r] = static_cast<OT>(a * c - b * sn);
+          y[r0 + r + 1] = static_cast<OT>(a * sn + b * c);
+        } else {
+          y[r0 + r] = static_cast<OT>(v[r]);
+          y[r0 + r + 1] = static_cast<OT>(v[r + 1]);
+        }
+      }
+    }
+  } else if (SPLIT == 1) {
+    for (int r = 0; r < RS; r++) {
+      const float v = simd_sum(acc[r]);
+      if (lane == 0) y[r0 + r] = static_cast<OT>(v);
+    }
+  } else {
+    threadgroup float red[SGS * SPLIT][RS];
+    for (int r = 0; r < RS; r++) {
+      const float v = simd_sum(acc[r]);
+      if (lane == 0) red[sg][r] = v;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    if (part == 0 && lane < RS) {
+      float v = 0.0f;
+      for (int p = 0; p < SPLIT; p++) v += red[rgrp * SPLIT + p][lane];
+      y[r0 + lane] = static_cast<OT>(v);
+    }
+  }
+"""
+
+
+@lru_cache(maxsize=None)
+def _gemv_mxfp8_kernel():
+    return mx.fast.metal_kernel(name="mk_gemv_mxfp8", input_names=["x", "w", "sc", "nw", "epsv", "cs"], output_names=["y"],
+                                header=_GEMV_MXFP8_HDR, source=_GEMV_MXFP8)
+
+
+def gemv_mxfp8(x: mx.array, w: mx.array, scales: mx.array, pro: int = 1, norm_w: mx.array | None = None,
+               eps: mx.array | None = None, rs: int = 8, sgs: int = 1, split: int = 1, out_dtype=None,
+               group_rows: int = 0, rope_cs: mx.array | None = None, head_dim: int = 512, rope_dim: int = 64) -> mx.array:
+    """y = W @ prologue(x) for one token; W mxfp8 [N, K] (uint32 [N, K/4] + uint8 [N, K/32]).
+    pro: 0 none, 1 act_quant(x), 2 act_quant(rms_norm(x, norm_w, eps)).
+    group_rows > 0: block-diagonal weights, rows [g*group_rows, (g+1)*group_rows) read x[g*K:(g+1)*K].
+    rope_cs: [rope_dim] (cos | sin) -> RoPE epilogue on dims [head_dim-rope_dim, head_dim) of every
+    head_dim-row head of the output (rs must be even; split must be 1)."""
+    N, K = w.shape[0], w.shape[1] * 4
+    assert K % 256 == 0 and N % (rs * sgs) == 0, (N, K)
+    x = x.reshape(-1)
+    out_dtype = out_dtype or x.dtype
+    nw = norm_w if norm_w is not None else x
+    ev = (eps if eps is not None else mx.array(0.0, dtype=mx.float32)).reshape(1)
+    epi = 1 if rope_cs is not None else 0
+    if epi:
+        assert split == 1 and rs % 2 == 0
+    cs = rope_cs.reshape(-1) if rope_cs is not None else ev
+    return _gemv_mxfp8_kernel()(
+        inputs=[x, w, scales, nw, ev, cs],
+        template=[("K", K), ("RS", rs), ("SGS", sgs), ("SPLIT", split), ("PRO", pro), ("XT", x.dtype), ("OT", out_dtype),
+                  ("GROWS", group_rows), ("EPI", epi), ("HD", head_dim), ("RD", rope_dim)],
+        grid=(32 * sgs * split, N // (rs * sgs), 1), threadgroup=(32 * sgs * split, 1, 1),
+        output_shapes=[(N,)], output_dtypes=[out_dtype],
+    )[0]
+
+
+# ------------------------------------------------------------------------------- attention (decode)
+# attn_aux: qr = rms_norm(qa, q_norm) (bf16, for wq_b and the indexer) and
+#           kv = act_quant(rope_tail(rms_norm(kvr, kv_norm), cs)) (bf16) -- one threadgroup.
+_ATTN_AUX = r"""
+  const int tid = thread_position_in_threadgroup.x;     // 0..255
+  const int lane = tid % 32, sg = tid / 32;
+  threadgroup float red[2][8];
+  float sq = 0.0f, sk = 0.0f;
+  for (int i = tid; i < QA; i += 256) { const float v = float(qakv[i]); sq += v * v; }
+  for (int i = tid; i < KVD; i += 256) { const float v = float(qakv[QA + i]); sk += v * v; }
+  sq = simd_sum(sq); sk = simd_sum(sk);
+  if (lane == 0) { red[0][sg] = sq; red[1][sg] = sk; }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  float tq = 0.0f, tk = 0.0f;
+  for (int i = 0; i < 8; i++) { tq += red[0][i]; tk += red[1][i]; }
+  const float eps = epsv[0];
+  const float rq = metal::precise::rsqrt(tq / float(QA) + eps);
+  const float rk = metal::precise::rsqrt(tk / float(KVD) + eps);
+  for (int i = tid; i < QA; i += 256) qr[i] = bfloat16_t(float(qnw[i]) * (float(qakv[i]) * rq));
+  // kv: 512 values, 2 per thread (one RoPE pair), then act_quant per 32 (16 threads)
+  const int d = tid * 2;
+  float a = float(bfloat16_t(float(kvnw[d]) * (float(qakv[QA + d]) * rk)));
+  float b = float(bfloat16_t(float(kvnw[d + 1]) * (float(qakv[QA + d + 1]) * rk)));
+  if (d >= KVD - RD) {
+    const int i = (d - (KVD - RD)) / 2;
+    const float c = cs[i], sn = cs[RD / 2 + i];
+    const float a2 = float(bfloat16_t(a * c - b * sn));
+    const float b2 = float(bfloat16_t(a * sn + b * c));
+    a = a2; b = b2;
+  }
+  float amax = max(fabs(a), fabs(b));
+  amax = max(amax, simd_shuffle_xor(amax, 1));
+  amax = max(amax, simd_shuffle_xor(amax, 2));
+  amax = max(amax, simd_shuffle_xor(amax, 4));
+  amax = max(amax, simd_shuffle_xor(amax, 8));
+  const float s = act_scale(amax);
+  kv[d] = bfloat16_t(fq8(a, s));
+  kv[d + 1] = bfloat16_t(fq8(b, s));
+"""
+
+# sparse_attn: grid = 64/HPT threadgroups (HPT heads each), 256 threads. Keys: the window (128 slots
+# indexing [ring | new], -1 empty) then NC compressed rows (cidx, -1 empty). Same math as
+# Attention._core: fp32 scores * scale, max (>= -1e30), p = exp(s - m), denominator sum(p) +
+# exp(sink - m), numerator sum(bf16(p) * k); then bf16, inverse RoPE on [D-RD, D), act_quant per 32.
+_SPARSE_ATTN = r"""
+  constexpr int D = 512;
+  constexpr int NW = 128;
+  constexpr int NK = NW + NC;
+  const int tid = thread_position_in_threadgroup.x;
+  const int lane = tid % 32, sg = tid / 32;
+  const int h0 = threadgroup_position_in_grid.x * HPT;
+  threadgroup float sc[HPT][NK];
+  threadgroup float stat[HPT][2];
+  // q slice of this lane for HPT heads: dims [lane*16, lane*16+16)
+  float qv[HPT][16];
+  for (int h = 0; h < HPT; h++)
+    for (int j = 0; j < 16; j++) qv[h][j] = float(q[(h0 + h) * D + lane * 16 + j]);
+  // pass 1: scores
+  for (int k = sg; k < NK; k += 8) {
+    int src = -1;
+    const device bfloat16_t* kp = nullptr;
+    if (k < NW) {
+      src = widx[k];
+      if (src >= 0) kp = (src == NW) ? kvnew : (ring + (size_t)src * D);
+    } else {
+      src = cidx[k - NW];
+      if (src >= 0) kp = comp + (size_t)src * D;
+    }
+    if (src < 0) {
+      if (lane < HPT) sc[lane][k] = -INFINITY;
+      continue;
+    }
+    float kv_[16];
+    for (int j = 0; j < 16; j++) kv_[j] = float(kp[lane * 16 + j]);
+    for (int h = 0; h < HPT; h++) {
+      float dsum = 0.0f;
+      for (int j = 0; j < 16; j++) dsum += qv[h][j] * kv_[j];
+      dsum = simd_sum(dsum);
+      if (lane == 0) sc[h][k] = dsum * scale[0];
+    }
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  // max and denominator per head: simdgroup h (< HPT) reduces head h
+  if (sg < HPT) {
+    float m = -INFINITY;
+    for (int k = lane; k < NK; k += 32) m = max(m, sc[sg][k]);
+    m = max(simd_max(m), -1e30f);
+    float sum = 0.0f;
+    for (int k = lane; k < NK; k += 32) {
+      const float p = metal::precise::exp(sc[sg][k] - m);
+      sum += p;
+      sc[sg][k] = float(bfloat16_t(p));              // numerator uses bf16(p)
+    }
+    sum = simd_sum(sum);
+    if (lane == 0) { stat[sg][0] = m; stat[sg][1] = sum + metal::precise::exp(sink[h0 + sg] - m); }
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  // pass 2: o[h, d] for d = 2*tid, 2*tid+1
+  const int d = tid * 2;
+  float o[HPT][2];
+  for (int h = 0; h < HPT; h++) { o[h][0] = 0.0f; o[h][1] = 0.0f; }
+  for (int k = 0; k < NK; k++) {
+    int src;
+    const device bfloat16_t* kp;
+    if (k < NW) { src = widx[k]; kp = (src == NW) ? kvnew : (ring + (size_t)max(src, 0) * D); }
+    else { src = cidx[k - NW]; kp = comp + (size_t)max(src, 0) * D; }
+    if (src < 0) continue;
+    const float k0 = float(kp[d]), k1 = float(kp[d + 1]);
+    for (int h = 0; h < HPT; h++) {
+      const float p = sc[h][k];
+      o[h][0] += p * k0;
+      o[h][1] += p * k1;
+    }
+  }
+  {  // ring update: threadgroup g copies rows [g*NW/NTG, (g+1)*NW/NTG) of [ring with row rslot = kvnew]
+    const int ntg = threadgroups_per_grid.x;
+    const int rows = NW / ntg;
+    const int rs0 = threadgroup_position_in_grid.x * rows;
+    const int rsl = rslot[0];
+    for (int i = tid; i < rows * D; i += 256) {
+      const int rr = rs0 + i / D, cc = i % D;
+      ring_out[rr * D + cc] = (rr == rsl) ? kvnew[cc] : ring[rr * D + cc];
+    }
+  }
+  for (int h = 0; h < HPT; h++) {
+    const float den = stat[h][1];
+    float a = float(bfloat16_t(o[h][0] / den));
+    float b = float(bfloat16_t(o[h][1] / den));
+    if (d >= D - RD) {                                // inverse RoPE: sin -> -sin
+      const int i = (d - (D - RD)) / 2;
+      const float c = cs[i], sn = -cs[RD / 2 + i];
+      const float a2 = float(bfloat16_t(a * c - b * sn));
+      const float b2 = float(bfloat16_t(a * sn + b * c));
+      a = a2; b = b2;
+    }
+    float amax = max(fabs(a), fabs(b));
+    amax = max(amax, simd_shuffle_xor(amax, 1));
+    amax = max(amax, simd_shuffle_xor(amax, 2));
+    amax = max(amax, simd_shuffle_xor(amax, 4));
+    amax = max(amax, simd_shuffle_xor(amax, 8));
+    const float s = act_scale(amax);
+    out[(h0 + h) * D + d] = bfloat16_t(fq8(a, s));
+    out[(h0 + h) * D + d + 1] = bfloat16_t(fq8(b, s));
+  }
+"""
+
+
+@lru_cache(maxsize=None)
+def _attn_aux_kernel():
+    return mx.fast.metal_kernel(name="mk_attn_aux", input_names=["qakv", "qnw", "kvnw", "epsv", "cs"], output_names=["qr", "kv"],
+                                header=HEADER, source=_ATTN_AUX)
+
+
+@lru_cache(maxsize=None)
+def _sparse_attn_kernel():
+    return mx.fast.metal_kernel(name="mk_sparse_attn", input_names=["q", "ring", "kvnew", "widx", "comp", "cidx", "sink", "scale", "cs", "rslot"],
+                                output_names=["out", "ring_out"], header=HEADER, source=_SPARSE_ATTN)
+
+
+def attn_aux(qakv: mx.array, q_norm: mx.array, kv_norm: mx.array, eps: mx.array, rope_cs: mx.array, qa_dim: int = 1280,
+             kv_dim: int = 512, rope_dim: int = 64):
+    """(qr bf16 [qa_dim], kv bf16 [kv_dim]) from the merged wq_a|wkv output."""
+    qr, kv = _attn_aux_kernel()(
+        inputs=[qakv.reshape(-1), q_norm, kv_norm, eps.reshape(1), rope_cs.reshape(-1)],
+        template=[("QA", qa_dim), ("KVD", kv_dim), ("RD", rope_dim)],
+        grid=(256, 1, 1), threadgroup=(256, 1, 1),
+        output_shapes=[(qa_dim,), (kv_dim,)], output_dtypes=[mx.bfloat16, mx.bfloat16],
+    )
+    return qr, kv
+
+
+def sparse_attn(q: mx.array, ring: mx.array, kvnew: mx.array, widx: mx.array, comp: mx.array | None, cidx: mx.array | None,
+                sink: mx.array, scale: mx.array, rope_cs: mx.array, rslot: mx.array, heads_per_tg: int = 4, rope_dim: int = 64):
+    """One decode token's sparse attention (window + compressed) for all heads -> (act-quantized,
+    inverse-RoPE'd output [H * 512] bf16 (the input of wo_a), the ring with row rslot = kvnew)."""
+    H = q.size // 512
+    nc = 0 if cidx is None else cidx.size
+    if comp is None:
+        comp, cidx = kvnew, _neg1()
+    out, ring_out = _sparse_attn_kernel()(
+        inputs=[q.reshape(-1), ring, kvnew.reshape(-1), widx, comp, cidx.reshape(-1), sink, scale.reshape(1), rope_cs.reshape(-1), rslot],
+        template=[("NC", nc), ("HPT", heads_per_tg), ("RD", rope_dim)],
+        grid=(256 * H // heads_per_tg, 1, 1), threadgroup=(256, 1, 1),
+        output_shapes=[(H * 512,), ring.shape], output_dtypes=[mx.bfloat16, ring.dtype],
+    )
+    return out, ring_out
+
+
+@lru_cache(maxsize=None)
+def _neg1():
+    a = mx.full((1,), -1, dtype=mx.int32)
+    mx.eval(a)
+    return a
+
+
+# ---------------------------------------------------------------------------- router + shared expert
+# rs_up  : rows [0, NG) are router logits x.f32 . gate_w (bf16 weights, fp32 math, like the reference's
+#          fp32 matmul of bf16 values) for this layer's gate (and the next layer's, for speculation);
+#          rows [NG, NG + 2*INTER) are the shared expert's w1|w3 (mxfp8, act_quant(x) in-register);
+#          the first mxfp8 simdgroup also writes xq = act_quant(x) for the routed experts.
+# rs_down: threadgroup 0 selects top-k (biased sqrt-softplus scores) + weights, and the next layer's
+#          top-SPECK prediction; the others compute y = w2 . act_quant(bf16(swiglu(g, u))) (shared).
+_RS_UP = r"""
+  constexpr int SGN = 8;
+  const int lane = thread_index_in_simdgroup;
+  const int sg = simdgroup_index_in_threadgroup;
+  const int tg = threadgroup_position_in_grid.y;
+  constexpr int ITERS = K / 256;
+  constexpr int GTG = NG / 32;                      // router threadgroups
+  if (tg < GTG) {                                   // router rows (bf16 weights), 4 per simdgroup
+    constexpr int RS = 4;
+    const int r0 = (tg * SGN + sg) * RS;
+    float acc[RS] = {0};
+    for (int it = 0; it < ITERS; it++) {
+      const int c = it * 256 + lane * 8;
+      float xv[8];
+      const uint4 xw = *((const device uint4*)(x + c));
+      xv[0] = bf_lo(xw.x); xv[1] = bf_hi(xw.x); xv[2] = bf_lo(xw.y); xv[3] = bf_hi(xw.y);
+      xv[4] = bf_lo(xw.z); xv[5] = bf_hi(xw.z); xv[6] = bf_lo(xw.w); xv[7] = bf_hi(xw.w);
+      for (int r = 0; r < RS; r++) {
+        const int gr = r0 + r;
+        const device bfloat16_t* gbase = (gr < NE) ? (gw + (size_t)gr * K)
+                                       : (gr < 2 * NE) ? (gwn + (size_t)(gr - NE) * K) : (gwn2 + (size_t)(gr - 2 * NE) * K);
+        const uint4 ww = *((const device uint4*)(gbase + c));
+        float d = bf_lo(ww.x) * xv[0];
+        d += bf_hi(ww.x) * xv[1];
+        d += bf_lo(ww.y) * xv[2];
+        d += bf_hi(ww.y) * xv[3];
+        d += bf_lo(ww.z) * xv[4];
+        d += bf_hi(ww.z) * xv[5];
+        d += bf_lo(ww.w) * xv[6];
+        d += bf_hi(ww.w) * xv[7];
+        acc[r] += d;
+      }
+    }
+    for (int r = 0; r < RS; r++) {
+      const float v = simd_sum(acc[r]);
+      if (lane == 0) logits[r0 + r] = v;
+    }
+    return;
+  }
+  // shared expert: this threadgroup owns h rows [hb0, hb0 + 32): w1 rows and the same w3 rows
+  constexpr int RS = 4;
+  const int hb0 = (tg - GTG) * 32;
+  const int m0 = hb0 + sg * RS;
+  const bool write_xq = (tg == GTG && sg == 0);
+  float acc1[RS] = {0}, acc3[RS] = {0};
+  const device uint8_t* wb = (const device uint8_t*)w13;
+  for (int it = 0; it < ITERS; it++) {
+    const int c = it * 256 + lane * 8;
+    float xv[8];
+    float amax = 0.0f;
+    const uint4 xw = *((const device uint4*)(x + c));
+    xv[0] = bf_lo(xw.x); xv[1] = bf_hi(xw.x); xv[2] = bf_lo(xw.y); xv[3] = bf_hi(xw.y);
+    xv[4] = bf_lo(xw.z); xv[5] = bf_hi(xw.z); xv[6] = bf_lo(xw.w); xv[7] = bf_hi(xw.w);
+    for (int j = 0; j < 8; j++) amax = max(amax, fabs(xv[j]));
+    amax = max(amax, simd_shuffle_xor(amax, 1));
+    amax = max(amax, simd_shuffle_xor(amax, 2));
+    const float s = act_scale(amax);
+    for (int j = 0; j < 8; j++) xv[j] = fq8(xv[j], s);
+    if (write_xq) for (int j = 0; j < 8; j++) xq[c + j] = static_cast<bfloat16_t>(xv[j]);
+    const int g = c / 32;
+    for (int r = 0; r < RS; r++) {
+      for (int hp = 0; hp < 2; hp++) {
+        const int row = m0 + r + hp * INTER;
+        const uint2 q = *((const device uint2*)(wb + (size_t)row * K + c));
+        float d = 0.0f;
+        d += e4m3_to_float(q.x & 0xFF) * xv[0];
+        d += e4m3_to_float((q.x >> 8) & 0xFF) * xv[1];
+        d += e4m3_to_float((q.x >> 16) & 0xFF) * xv[2];
+        d += e4m3_to_float(q.x >> 24) * xv[3];
+        d += e4m3_to_float(q.y & 0xFF) * xv[4];
+        d += e4m3_to_float((q.y >> 8) & 0xFF) * xv[5];
+        d += e4m3_to_float((q.y >> 16) & 0xFF) * xv[6];
+        d += e4m3_to_float(q.y >> 24) * xv[7];
+        const float v = e8m0_to_float(w13s[(size_t)row * (K / 32) + g]) * d;
+        if (hp == 0) acc1[r] += v; else acc3[r] += v;
+      }
+    }
+  }
+  threadgroup float hb[32];
+  const float lim = limit[0];
+  for (int r = 0; r < RS; r++) {
+    float gt = simd_sum(acc1[r]);
+    float up = simd_sum(acc3[r]);
+    if (lane == 0) {
+      gt = float(bfloat16_t(gt));
+      up = float(bfloat16_t(up));
+      if (lim > 0.0f) { up = clamp(up, -lim, lim); gt = min(gt, lim); }
+      hb[sg * RS + r] = float(bfloat16_t(gt * sigmoid_mlx(gt) * up));
+    }
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  if (sg == 0) {
+    const float v = hb[lane];
+    const float s = act_scale(simd_max(fabs(v)));
+    hq[hb0 + lane] = bfloat16_t(fq8(v, s));
+  }
+"""
+
+_RS_DOWN = r"""
+  const int lane = thread_index_in_simdgroup;
+  const int sg = simdgroup_index_in_threadgroup;
+  if (threadgroup_position_in_grid.y == 0) {
+    if (sg != 0) return;
+    // ---- routing: one simdgroup, each lane owns NE/32 experts
+    constexpr int PER = NE / 32;
+    float sc[PER], bs[PER];
+    for (int i = 0; i < PER; i++) {
+      const int e = lane + 32 * i;
+      const float z = logits[e];
+      sc[i] = metal::precise::sqrt(softplus_mlx(z));
+      scores[e] = sc[i];
+      bs[i] = sc[i] + bias[e];
+    }
+    float wsel[TOPK];
+    uint isel[TOPK];
+    float wsum = 0.0f;
+    for (int k = 0; k < TOPK; k++) {
+      float best = -INFINITY; int bi = 0x7fffffff;
+      for (int i = 0; i < PER; i++) if (bs[i] > best) { best = bs[i]; bi = lane + 32 * i; }
+      const float gbest = simd_max(best);
+      const int cand = (best == gbest) ? bi : 0x7fffffff;
+      const int gi = simd_min(cand);
+      isel[k] = uint(gi);
+      if ((gi % 32) == lane) { bs[gi / 32] = -INFINITY; }
+      wsel[k] = simd_broadcast(sc[0], 0);  // placeholder, fixed below
+    }
+    // raw scores of the selected experts
+    for (int k = 0; k < TOPK; k++) {
+      const int e = int(isel[k]);
+      float v = 0.0f;
+      for (int i = 0; i < PER; i++) if (lane + 32 * i == e) v = sc[i];
+      v = simd_sum(v);
+      wsel[k] = v;
+      wsum += v;
+    }
+    if (lane < TOPK) {
+      idx[lane] = isel[lane];
+      w[lane] = wsel[lane] / (wsum + 1e-20f) * route_scale[0];
+    }
+    if (SPECK2 > 0) {
+      float pb2[PER];
+      for (int i = 0; i < PER; i++) {
+        const int e = lane + 32 * i;
+        pb2[i] = metal::precise::sqrt(softplus_mlx(logits[2 * NE + e])) + bias_n2[e];
+      }
+      for (int k = 0; k < SPECK2; k++) {
+        float best = -INFINITY; int bi = 0x7fffffff;
+        for (int i = 0; i < PER; i++) if (pb2[i] > best) { best = pb2[i]; bi = lane + 32 * i; }
+        const float gbest = simd_max(best);
+        const int cand = (best == gbest) ? bi : 0x7fffffff;
+        const int gi = simd_min(cand);
+        if (lane == 0) pred2[k] = uint(gi);
+        if ((gi % 32) == lane) pb2[gi / 32] = -INFINITY;
+      }
+    }
+    if (SPECK > 0) {
+      float pb[PER];
+      for (int i = 0; i < PER; i++) {
+        const int e = lane + 32 * i;
+        const float z = logits[NE + e];
+        pb[i] = metal::precise::sqrt(softplus_mlx(z)) + bias_n[e];
+      }
+      for (int k = 0; k < SPECK; k++) {
+        float best = -INFINITY; int bi = 0x7fffffff;
+        for (int i = 0; i < PER; i++) if (pb[i] > best) { best = pb[i]; bi = lane + 32 * i; }
+        const float gbest = simd_max(best);
+        const int cand = (best == gbest) ? bi : 0x7fffffff;
+        const int gi = simd_min(cand);
+        if (lane == 0) pred[k] = uint(gi);
+        if ((gi % 32) == lane) pb[gi / 32] = -INFINITY;
+      }
+    }
+    return;
+  }
+  // ---- shared expert down projection: rows r0 .. r0+RS of w2 (mxfp8 [DIM, INTER]) on hq
+  constexpr int RS = 8;
+  constexpr int SGS = 2;
+  const int r0 = ((threadgroup_position_in_grid.y - 1) * SGS + sg) * RS;
+  constexpr int K = INTER;
+  float acc[RS] = {0};
+  const device uint8_t* wb = (const device uint8_t*)w2;
+  for (int it = 0; it < K / 256; it++) {
+    const int c = it * 256 + lane * 8;
+    float xv[8];
+    const uint4 xw = *((const device uint4*)(hq + c));
+    xv[0] = bf_lo(xw.x); xv[1] = bf_hi(xw.x); xv[2] = bf_lo(xw.y); xv[3] = bf_hi(xw.y);
+    xv[4] = bf_lo(xw.z); xv[5] = bf_hi(xw.z); xv[6] = bf_lo(xw.w); xv[7] = bf_hi(xw.w);
+    const int g = c / 32;
+    for (int r = 0; r < RS; r++) {
+      const int row = r0 + r;
+      const uint2 q = *((const device uint2*)(wb + (size_t)row * K + c));
+      float d = 0.0f;
+      d += e4m3_to_float(q.x & 0xFF) * xv[0];
+      d += e4m3_to_float((q.x >> 8) & 0xFF) * xv[1];
+      d += e4m3_to_float((q.x >> 16) & 0xFF) * xv[2];
+      d += e4m3_to_float(q.x >> 24) * xv[3];
+      d += e4m3_to_float(q.y & 0xFF) * xv[4];
+      d += e4m3_to_float((q.y >> 8) & 0xFF) * xv[5];
+      d += e4m3_to_float((q.y >> 16) & 0xFF) * xv[6];
+      d += e4m3_to_float(q.y >> 24) * xv[7];
+      acc[r] += e8m0_to_float(w2s[(size_t)row * (K / 32) + g]) * d;
+    }
+  }
+  for (int r = 0; r < RS; r++) {
+    const float v = simd_sum(acc[r]);
+    if (lane == 0) y[r0 + r] = float(bfloat16_t(v));
+  }
+"""
+
+
+@lru_cache(maxsize=None)
+def _rs_up_kernel():
+    return mx.fast.metal_kernel(name="mk_rs_up3", input_names=["x", "gw", "gwn", "gwn2", "w13", "w13s", "limit"], output_names=["logits", "hq", "xq"],
+                                header=_GEMV_MXFP8_HDR, source=_RS_UP)
+
+
+@lru_cache(maxsize=None)
+def _rs_down_kernel():
+    return mx.fast.metal_kernel(name="mk_rs_down3", input_names=["logits", "bias", "bias_n", "bias_n2", "route_scale", "hq", "w2", "w2s"],
+                                output_names=["idx", "w", "scores", "pred", "pred2", "y"], header=_GEMV_MXFP8_HDR, source=_RS_DOWN)
+
+
+def router_shared(x: mx.array, gate_w: mx.array, w13: mx.array, w13s: mx.array, w2: mx.array, w2s: mx.array,
+                  bias: mx.array, route_scale: mx.array, limit: mx.array, topk: int = 6,
+                  gate_next: mx.array | None = None, bias_next: mx.array | None = None, spec_k: int = 0,
+                  gate_next2: mx.array | None = None, bias_next2: mx.array | None = None, spec_k2: int = 0):
+    """Decode router + shared expert in two dispatches.
+    gate_w, gate_next, gate_next2: bf16 [NE, DIM] (this layer's router; the next two layers', used on
+    this layer's input to predict their experts when spec_k / spec_k2 > 0); w13/w13s: shared w1|w3
+    mxfp8 [2*INTER, DIM]; w2/w2s: shared w2 mxfp8 [DIM, INTER].
+    -> idx [topk] uint32, w [topk] f32 (x route_scale), scores [NE] f32, pred [spec_k] uint32,
+       pred2 [spec_k2] uint32, xq [DIM] bf16 (act_quant(x)), y_shared [DIM] f32."""
+    D = x.shape[-1]
+    NE = gate_w.shape[0]
+    spec = spec_k > 0 and gate_next is not None
+    spec2 = spec and spec_k2 > 0 and gate_next2 is not None
+    NG = NE * (1 + spec + spec2)
+    two_inter = w13.shape[0]
+    inter = two_inter // 2
+    x = x.reshape(-1)
+    gn = gate_next if spec else gate_w
+    gn2 = gate_next2 if spec2 else gate_w
+    logits, hq, xq = _rs_up_kernel()(
+        inputs=[x, gate_w, gn, gn2, w13, w13s, limit.reshape(1)],
+        template=[("K", D), ("NG", NG), ("NE", NE), ("INTER", inter)],
+        grid=(256, NG // 32 + inter // 32, 1), threadgroup=(256, 1, 1),
+        output_shapes=[(NG,), (inter,), (D,)], output_dtypes=[mx.float32, mx.bfloat16, mx.bfloat16],
+    )
+    bn = bias_next if spec else bias
+    bn2 = bias_next2 if spec2 else bias
+    idx, w, scores, pred, pred2, y = _rs_down_kernel()(
+        inputs=[logits, bias, bn, bn2, route_scale.reshape(1), hq, w2, w2s],
+        template=[("NE", NE), ("TOPK", topk), ("SPECK", spec_k if spec else 0), ("SPECK2", spec_k2 if spec2 else 0),
+                  ("INTER", inter), ("DIM", D)],
+        grid=(64, 1 + D // 16, 1), threadgroup=(64, 1, 1),
+        output_shapes=[(topk,), (topk,), (NE,), (max(spec_k, 1),), (max(spec_k2, 1),), (D,)],
+        output_dtypes=[mx.uint32, mx.float32, mx.float32, mx.uint32, mx.uint32, mx.float32],
+    )
+    return idx, w, scores, pred, pred2, xq, y

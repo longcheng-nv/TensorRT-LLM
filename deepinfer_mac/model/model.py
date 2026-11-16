@@ -345,6 +345,7 @@ class Shared:
     """What attention layers hand down the stack within one forward (SharedAttentionRuntime)."""
 
     def __init__(self):
+        self.mk: dict = {}  # per-token values shared by the fused decode layers (rope tables, window indices)
         self.comp: CompressorState | None = None
         self.index_k: Growable | None = None
         self.topk: mx.array | None = None
@@ -501,12 +502,89 @@ class Attention:
         return self._proj_c, self._core_c
 
     Q_BLOCK = 128
+    MK = True  # fused decode attention (mk.py): projections, sparse attention, output projections
+
+    def _decode_mk(self, x, positions, st: SeqState, ring: Ring, sh: Shared, start: int, floor: int = 0):
+        """One-token attention with the fused kernels; same state updates as __call__."""
+        from . import mk
+
+        a = self.a
+        if not hasattr(self, "_mk_c"):
+            self._mk_c = (mx.array(a.norm_eps, dtype=mx.float32), mx.array(self.scale, dtype=mx.float32))
+        eps, scale = self._mk_c
+        ckey = ("cs", self.ratio > 0)
+        cs = sh.mk.get(ckey)
+        if cs is None:
+            cos, sin = self.rope.cos_sin(positions)
+            cs = sh.mk[ckey] = mx.concatenate([cos[0], sin[0]])
+        m = self.wq_a_kv
+        qakv = mk.gemv_mxfp8(x, m.w, m.scales, pro=1, rs=8, sgs=1, split=4)
+        qr, kv = mk.attn_aux(qakv, self.q_norm, self.kv_norm, eps, cs, qa_dim=m.n_a, kv_dim=a.head_dim, rope_dim=a.rope_head_dim)
+        q = mk.gemv_mxfp8(qr, self.wq_b.w, self.wq_b.scales, pro=1, rs=16, sgs=1, rope_cs=cs, head_dim=a.head_dim,
+                          rope_dim=a.rope_head_dim)
+        win = a.window_size
+        wkey = ("widx", start, floor)
+        cached = sh.mk.get(wkey)
+        if cached is not None and np.array_equal(cached[0], ring.pos):
+            widx = cached[1]
+        else:
+            wpos = start - win + 1 + np.arange(win)
+            slot = wpos % win
+            in_ring = (wpos >= floor) & (wpos < start) & (ring.pos[slot] == wpos)
+            widx = mx.array(np.where(wpos >= start, win + wpos - start, np.where(in_ring, slot, -1)).astype(np.int32))
+            sh.mk[wkey] = (ring.pos.copy(), widx)
+        comp = cidx = None
+        if self.ratio:
+            c = st.comp[self.layer_id] if self.is_kv_source else sh.comp
+            first_group = c.kv.n
+            latent = self._compress(x, c) if self.is_kv_source else None
+            if self.is_kv_source:
+                sh.comp = c
+            if self.is_index_source:
+                T = (start + 1) // self.ratio
+                if T == 0:
+                    sh.topk = mx.full((1, a.index_topk), -1, dtype=mx.int32)
+                elif T <= a.index_topk:
+                    # exact shortcut: with at most index_topk compressed keys (all visible at decode) the
+                    # top-k is every key, in order -- skip the scores. Keep the index keys up to date.
+                    if self.owns_index_k:
+                        if latent is not None:
+                            gpos = mx.arange(first_group, first_group + latent.shape[0]) * self.ratio
+                            k = rms_norm(self.i_wk(latent), self.i_k_norm, a.norm_eps)
+                            k = fp4_act_quant(rope_tail(k, self.rope.cos_sin(gpos), a.rope_head_dim))
+                            c.index_k.append(k)
+                        sh.index_k = c.index_k
+                    sh.topk = _all_keys(T, a.index_topk)
+                    if self.is_candidate_source:  # every block survives level one as well
+                        sh.candidates = _all_true(T)
+                else:
+                    sh.topk = self._indexer(x, qr[None], latent, first_group, positions, sh, c, start + 1)
+            if latent is not None:
+                gpos = mx.arange(first_group, first_group + latent.shape[0]) * self.ratio
+                latent = fp4_act_quant(rope_tail(latent, self.rope.cos_sin(gpos), a.rope_head_dim), block=16, e4m3_scale=True)
+                c.kv.append(latent)
+            comp, cidx = sh.comp.kv.buf, sh.topk[0]
+        s0 = start % win
+        rkey = ("rslot", s0)
+        rslot = sh.mk.get(rkey)
+        if rslot is None:
+            rslot = sh.mk[rkey] = mx.array([s0], dtype=mx.int32)
+        o, ring_new = mk.sparse_attn(q, ring.kv, kv, widx, comp, cidx, self.sink, scale, cs, rslot, rope_dim=a.rope_head_dim)
+        wa = self.wo_a.lin
+        o = mk.gemv_mxfp8(o, wa.w, wa.scales, pro=0, rs=8, sgs=1, split=4, group_rows=wa.w.shape[0] // a.o_groups)
+        y = mk.gemv_mxfp8(o, self.wo_b.w, self.wo_b.scales, pro=1, rs=8, sgs=1, split=2)
+        ring.kv = ring_new
+        ring.pos = ring.pos.copy()
+        ring.pos[s0] = start
+        return y[None]
 
     def __call__(self, x: mx.array, positions: mx.array, st: SeqState, ring: Ring, sh: Shared, start: int, floor: int = 0) -> mx.array:
         """floor: window keys below this position are invisible -- a bounded-replay chunk's decoder
         queries see the window only from the replayed suffix's start, as in DeepInfer."""
         a, rd = self.a, self.a.rope_head_dim
         L = x.shape[0]
+        if L == 1 and self.MK and self.wq_a_kv.merged and self.wq_a_kv.mode == "mxfp8":
+            return self._decode_mk(x, positions, st, ring, sh, start, floor)
         proj, core = self._compiled()
         cos, sin = self.rope.cos_sin(positions)
         qr, q, kv = proj(x, cos, sin)
@@ -562,6 +640,26 @@ class Attention:
         return out
 
 
+_ALL_KEYS: dict = {}
+
+
+def _all_keys(T: int, width: int) -> mx.array:
+    """[[0, 1, ..., T-1, -1, ...]] (width wide): the decode top-k when every key is selected."""
+    a = _ALL_KEYS.get((T, width))
+    if a is None:
+        if len(_ALL_KEYS) > 4096:
+            _ALL_KEYS.clear()
+        a = _ALL_KEYS[(T, width)] = mx.array(np.where(np.arange(width) < T, np.arange(width), -1).astype(np.int32)[None])
+    return a
+
+
+def _all_true(T: int) -> mx.array:
+    a = _ALL_KEYS.get(("cand", T))
+    if a is None:
+        a = _ALL_KEYS[("cand", T)] = mx.ones((1, T), dtype=mx.bool_)
+    return a
+
+
 def topk_positions(score: mx.array, k: int) -> mx.array:
     """Indices of the k best entries of each row of a bf16-valued float32 [rows, T] score: higher
     score first, the earlier position on ties. A total order makes the selection independent of
@@ -608,12 +706,14 @@ class MoE:
     PREFILL_TOPK = 0  # opt-in, see _prune
     PREFILL_KEEP = 140  # measured no gain when SSD-bound; flash-moe saw speculative routing cost 38%
     FIXED_EXPERTS = None  # benchmark only (mk_bench --mode fixed): override decode routing
+    ASYNC_LAST = True  # decode: async_eval the last expert group as well (overlaps next layer's graph build)
     next_moe = None
 
     def __init__(self, a: Args, layer_id: int, d: dict, experts, key: str):
         self.a, self.key, self.experts = a, key, experts
         self.n_routed, self.topk = a.moe(layer_id)
-        self.gate_w = d["ffn.gate.weight"].astype(mx.float32)
+        self.gate_bf16 = d["ffn.gate.weight"]  # bf16 as stored: the fused decode router reads half the bytes
+        self.gate_w = None  # fp32 view for the MLX paths, materialized lazily (prefill / non-MK decode)
         self.bias = d["ffn.gate.bias"].astype(mx.float32)
         self.bias_vl = d.get("ffn.gate.bias_vl")
         w1, w2, w3 = (Linear(d, f"ffn.shared_experts.{w}") for w in ("w1", "w2", "w3"))
@@ -621,7 +721,7 @@ class MoE:
 
     def _route_shared(self, x, bias):
         """Gate (sqrt-softplus scores, bias picks, raw scores weigh) and the shared expert."""
-        scores = mx.sqrt(mx.logaddexp(x.astype(mx.float32) @ self.gate_w.T, 0.0))
+        scores = mx.sqrt(mx.logaddexp(x.astype(mx.float32) @ self.gate_bf16.astype(mx.float32).T, 0.0))
         idx = mx.argpartition(-(scores + bias), kth=self.topk - 1, axis=-1)[:, : self.topk]
         w = mx.take_along_axis(scores, idx, axis=-1)
         if self.topk > 1:
@@ -629,7 +729,51 @@ class MoE:
         xq = act_quant(x)
         g, u = self.shared_w13(x)
         y = self.shared_w2(swiglu(g, u, self.a.swiglu_limit).astype(x.dtype)).astype(mx.float32)
-        return w * self.a.route_scale, idx, xq, y
+        return w * self.a.route_scale, idx, xq, y, scores
+
+    # opt-in, lossy: cache-aware substitution at decode (see _substitute)
+    SUB_RANK = None  # selected experts ranked >= SUB_RANK (0-based, by biased score) may be substituted
+    SUB_GAP = float("inf")  # ... only by a resident expert whose biased score is within SUB_GAP
+    sub_stats = {"tokens_layers": 0, "subs": 0, "considered": 0}
+
+    def _substitute(self, scores_np: np.ndarray, idx_np: np.ndarray, bias_np: np.ndarray):
+        """Replace selected experts at rank >= SUB_RANK that are neither resident nor being read by the
+        best-scoring resident experts outside the selection (biased score within SUB_GAP of the one
+        replaced). Routing weights are renormalized over the new set, as the router normalizes over
+        whatever set it picks. Returns (new idx [1, k], new weights [1, k] fp32) or (None, None)."""
+        st = self.experts
+        b = scores_np + bias_np
+        sel = idx_np[0].tolist()
+        ranked = sorted(sel, key=lambda e: -b[e])
+        MoE.sub_stats["tokens_layers"] += 1
+        miss = [e for r, e in enumerate(ranked) if r >= self.SUB_RANK and not st.resident(self.key, e)
+                and (self.key, e) not in st.inflight]
+        if not miss:
+            return None, None
+        MoE.sub_stats["considered"] += len(miss)
+        taken = set(sel)
+        order = np.argsort(-b, kind="stable")
+        need = len(miss)
+        cands = []
+        floor = b[miss[-1]] - self.SUB_GAP  # misses are in descending b; the weakest bounds the search
+        for e in order[len(sel):].tolist():
+            if b[e] < floor:
+                break
+            if e not in taken and st.resident(self.key, e):
+                cands.append(e)
+                if len(cands) == need:
+                    break
+        new, ci = list(sel), 0
+        for e in miss:  # strongest miss gets the strongest substitute
+            if ci < len(cands) and b[e] - b[cands[ci]] <= self.SUB_GAP:
+                new[new.index(e)] = cands[ci]
+                ci += 1
+                MoE.sub_stats["subs"] += 1
+        if new == sel:
+            return None, None
+        raw = scores_np[np.array(new)].astype(np.float32)
+        w = raw / (raw.sum() + np.float32(1e-20)) * np.float32(self.a.route_scale)
+        return np.array([new], dtype=idx_np.dtype), w[None]
 
     def _prune(self, x, w, idx_np):
         """Opt-in byte savers for SSD-bound runs. Both renormalize the surviving routing weights to
@@ -668,6 +812,8 @@ class MoE:
         working set stays within the slab; each batch's reads overlap the previous batch's compute."""
         ids = [e for e in np.unique(idx_np).tolist() if e >= 0]
         if x.shape[0] == 1 and self.OVERLAP:
+            if hasattr(self.experts, "cancel_unneeded"):
+                self.experts.cancel_unneeded(self.key, ids)
             self.experts.prefetch(self.key, ids)
             spec = getattr(self, "_spec", None)
             if spec:  # after this layer's demand reads, never ahead of them
@@ -686,7 +832,11 @@ class MoE:
             if x.shape[0] > 1 and gi + 1 < len(groups):
                 self.experts.prefetch(self.key, groups[gi + 1], optional=True)
             y = self._experts_into(y, x, xq, w, idx_np, group)
-            if gi + 1 < len(groups):
+            if x.shape[0] == 1 and self.ASYNC_LAST:
+                # decode: submit every group, the last one too, so the GPU computes this layer's
+                # experts while Python builds the next layer's graph (no idle gap until the next sync)
+                mx.async_eval(y)
+            elif gi + 1 < len(groups):
                 mx.async_eval(y) if x.shape[0] == 1 else mx.eval(y)
         return y.astype(x.dtype)
 
@@ -714,8 +864,81 @@ class MoE:
         return y + o.sum(axis=0, keepdims=True) if x.shape[0] == 1 else y.at[r].add(o)
 
     def route(self, x: mx.array, image_mask: mx.array | None = None):
-        w, idx, _, _ = self._route_shared(x, self._bias(x, image_mask))
+        w, idx, _, _, _ = self._route_shared(x, self._bias(x, image_mask))
         return w, idx
+
+    MK = True  # fused decode kernels (mk.router_shared + mk.moe_experts)
+
+    def _decode_mk(self, x, bias):
+        """One-token MoE with the fused kernels: router + shared expert (+ next layer's prediction for
+        speculation) in two dispatches, one host sync for the routing, then the routed experts of
+        the resident slots and of the misses (after their reads land) in two dispatches each."""
+        from . import mk
+
+        nxt = self.next_moe
+        speck = self.SPEC_K if (nxt is not None and self.SPEC_K and hasattr(self.experts, "speculate")) else 0
+        if self.FIXED_EXPERTS is not None:
+            speck = 0
+        if not hasattr(self, "_mk_consts"):
+            self._mk_consts = (mx.array(self.a.route_scale, dtype=mx.float32), mx.array(self.a.swiglu_limit, dtype=mx.float32))
+        rsc, lim = self._mk_consts
+        sw13, sw2 = self.shared_w13, self.shared_w2
+        nxt2 = nxt.next_moe if (speck and self.SPEC_K2 and nxt is not None) else None
+        speck2 = self.SPEC_K2 if nxt2 is not None else 0
+        idx, w, scores, pred, pred2, xq, y = mk.router_shared(
+            x, self.gate_bf16, sw13.w, sw13.scales, sw2.w, sw2.scales, bias, rsc, lim, topk=self.topk,
+            gate_next=nxt.gate_bf16 if speck else None, bias_next=nxt.bias if speck else None, spec_k=speck,
+            gate_next2=nxt2.gate_bf16 if speck2 else None, bias_next2=nxt2.bias if speck2 else None, spec_k2=speck2)
+        sub = self.SUB_RANK is not None and hasattr(self.experts, "resident_ids")
+        mx.eval(idx, w, *((pred,) if speck else ()), *((pred2,) if speck2 else ()), *((scores,) if sub else ()))
+        idx_np = np.array(idx)[None]
+        w_np = np.array(w)[None]
+        if self.FIXED_EXPERTS is not None:  # benchmark only: compute path without SSD
+            idx_np = np.array([self.FIXED_EXPERTS[: self.topk]], dtype=idx_np.dtype)
+        if speck:
+            self._spec = [(nxt.key, np.array(pred).tolist())]
+            if speck2:
+                self._spec.append((nxt2.key, np.array(pred2).tolist()))
+        if sub:
+            new_idx, new_w = self._substitute(np.array(scores), idx_np, self._bias_np(bias))
+            if new_idx is not None:
+                idx_np, w_np = new_idx, new_w
+        return self._slab_moe_mk(x, xq, w_np[0], idx_np, y, lim)
+
+    def _slab_moe_mk(self, x, xq, w_np, idx_np, y, lim):
+        from . import mk
+
+        ids = idx_np[0].tolist()
+        st = self.experts
+        if hasattr(st, "cancel_unneeded"):
+            st.cancel_unneeded(self.key, ids)
+        st.prefetch(self.key, ids)
+        spec = getattr(self, "_spec", None)
+        if spec:
+            self._spec = None
+            after = [st.inflight.get((self.key, e)) for e in ids]
+            for skey, sids in spec:
+                st.speculate(skey, sids, after)
+        wmap = dict(zip(ids, w_np.tolist()))
+        hits = [e for e in ids if st.resident(self.key, e)]
+        groups = [g for g in (hits, [e for e in ids if e not in hits]) if g]
+        for gi, group in enumerate(groups):
+            slab, slots = st.get_slots(self.key, group)
+            order = np.argsort(np.array(slots), kind="stable")  # slot order, like the gather_qmm path
+            sl = mx.array(np.array(slots, dtype=np.uint32)[order])
+            wk = mx.array(np.array([wmap[group[i]] for i in order], dtype=np.float32))
+            last = gi == len(groups) - 1
+            y = mk.moe_experts(xq, sl, wk, lim, slab.proj("w1"), slab.proj("w3"), slab.proj("w2"), y,
+                               out_dtype=x.dtype if last else mx.float32)
+            mx.async_eval(y)
+        return y[None]
+
+    def _bias_np(self, bias):
+        if bias is self.bias:
+            if getattr(self, "_bias_cache", None) is None:
+                self._bias_cache = np.array(self.bias, dtype=np.float32)
+            return self._bias_cache
+        return np.array(bias, dtype=np.float32)[0]
 
     def _bias(self, x, image_mask):
         if image_mask is not None and self.bias_vl is not None:
@@ -725,9 +948,13 @@ class MoE:
     def __call__(self, x: mx.array, image_mask=None) -> mx.array:
         if not hasattr(self, "_rs_c"):
             self._rs_c = mx.compile(self._route_shared)
-        w, idx, xq, y = self._rs_c(x, self._bias(x, image_mask))
+        bias = self._bias(x, image_mask)
+        if self.MK and x.shape[0] == 1 and hasattr(self.experts, "get_slots"):
+            return self._decode_mk(x, bias)
+        w, idx, xq, y, scores = self._rs_c(x, bias)
         if self.FIXED_EXPERTS is not None and x.shape[0] == 1:  # benchmark only: compute path without SSD
             idx = mx.array([self.FIXED_EXPERTS[: self.topk]], dtype=mx.uint32)
+        sub = self.SUB_RANK is not None and x.shape[0] == 1 and hasattr(self.experts, "resident_ids")
         nxt = self.next_moe
         if nxt is not None and self.LOOKAHEAD and hasattr(self.experts, "prefetch"):
             # router lookahead: the next layer's gate on this layer's input predicts most of its
@@ -735,29 +962,35 @@ class MoE:
             # compute
             # LOOKAHEAD_K: prefetch only the k most confident predictions (mispredictions cost reads)
             k = min(self.LOOKAHEAD_K or nxt.topk, nxt.topk)
-            sc = mx.sqrt(mx.logaddexp(x[-1:].astype(mx.float32) @ nxt.gate_w.T, 0.0)) + nxt.bias  # the router's scoring
+            sc = mx.sqrt(mx.logaddexp(x[-1:].astype(mx.float32) @ nxt.gate_bf16.astype(mx.float32).T, 0.0)) + nxt.bias  # the router's scoring
             pred = mx.argpartition(-sc, kth=k - 1, axis=-1)[:, :k]
             idx_np, pred_np = (np.array(a) for a in (idx, pred))
             self.experts.prefetch(nxt.key, pred_np[0].tolist(), optional=True)
         elif nxt is not None and self.SPEC_K and x.shape[0] == 1 and hasattr(self.experts, "speculate"):
             # the next layer's router (its exact scoring) on this layer's input; one sync for both
-            sc = mx.sqrt(mx.logaddexp(x[-1:].astype(mx.float32) @ nxt.gate_w.T, 0.0)) + nxt.bias
+            sc = mx.sqrt(mx.logaddexp(x[-1:].astype(mx.float32) @ nxt.gate_bf16.astype(mx.float32).T, 0.0)) + nxt.bias
             pred = mx.argpartition(-sc, kth=self.SPEC_K - 1, axis=-1)[:, : self.SPEC_K]
             # opt-iter4: second-level speculation -- layer l+2's router on the same input is still
             # 92% precise for its top-2 (measured), so two more experts per layer can be read while
             # the SSD would otherwise idle. One host sync for everything.
             nxt2 = nxt.next_moe if self.SPEC_K2 else None
             if nxt2 is not None:
-                sc2 = mx.sqrt(mx.logaddexp(x[-1:].astype(mx.float32) @ nxt2.gate_w.T, 0.0)) + nxt2.bias
+                sc2 = mx.sqrt(mx.logaddexp(x[-1:].astype(mx.float32) @ nxt2.gate_bf16.astype(mx.float32).T, 0.0)) + nxt2.bias
                 pred2 = mx.argpartition(-sc2, kth=self.SPEC_K2 - 1, axis=-1)[:, : self.SPEC_K2]
                 mx.eval(idx, pred, pred2)
                 self._spec = [(nxt.key, np.array(pred)[0].tolist()), (nxt2.key, np.array(pred2)[0].tolist())]
             else:
-                mx.eval(idx, pred)  # one host sync for both (was two)
+                mx.eval(idx, pred, *((scores,) if sub else ()))  # one host sync for both (was two)
                 self._spec = [(nxt.key, np.array(pred)[0].tolist())]
             idx_np = np.array(idx)
         else:
+            if sub:
+                mx.eval(idx, scores)
             idx_np = np.array(idx)  # the one host sync per layer: which experts to fetch
+        if sub:
+            new_idx, new_w = self._substitute(np.array(scores)[0], idx_np, self._bias_np(bias))
+            if new_idx is not None:
+                idx_np, w = new_idx, mx.array(new_w)
         if hasattr(self.experts, "get_slots"):
             w, idx_np = self._prune(x, w, idx_np)
             return self._slab_moe(x, xq, w, idx_np, y)
@@ -983,6 +1216,10 @@ class Transformer:
         start = st.pos
         positions = mx.arange(start, start + 1)
         hash_ids = self.ngram(st, [token], None) if self.ngram is not None else None
+        tab = self.w.engram if hash_ids is not None else None
+        if tab is not None and hasattr(tab, "prefetch"):  # rows read while the first layers run
+            for j, lid in enumerate(a.engram_layer_ids):
+                tab.prefetch(lid, hash_ids[:, j])
         st.tokens.append(token)
         h0 = self.embed_tokens([token])[0]
         X = mx.broadcast_to(h0[None], (a.hc_mult, a.dim))

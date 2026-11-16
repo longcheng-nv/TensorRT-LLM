@@ -41,7 +41,7 @@ def default_expert_budget(root: Path, margin_gb: float = 4.0, os_reserve_gb: flo
 
 
 class DiskWeights:
-    def __init__(self, root: Path, dim: int, engram_layers, expert_budget: int | None = None, io_threads: int = 8):
+    def __init__(self, root: Path, dim: int, engram_layers, expert_budget: int | None = None, io_threads: int = int(__import__("os").environ.get("DEEPINFER_IO_THREADS", "8"))):
         self.root = root = Path(root)
         layout = json.loads((root / "layout.json").read_text())
         self.globals = mx.load(str(root / "dense" / "globals.safetensors"))

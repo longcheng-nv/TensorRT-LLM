@@ -175,14 +175,33 @@ class SSDEngramTable:
             out[i] = np.frombuffer(os.pread(fd, self.row, int(r) * self.row), dtype=np.uint8)
         return out
 
+    def prefetch(self, layer_id: int, ids: np.ndarray) -> None:
+        """Start reading the rows `ids` of layer `layer_id` that are not cached (hash ids are known
+        before the forward pass starts, so the reads overlap the first layers' GPU work)."""
+        if not hasattr(self, "pending"):
+            self.pending = {}
+        uniq = np.unique(ids.reshape(-1))
+        need = [int(r) for r in uniq.tolist() if (layer_id, int(r)) not in self.cache and (layer_id, int(r)) not in self.pending]
+        if not need:
+            return
+        fd = self.fds[layer_id]
+        for r in need:
+            self.pending[(layer_id, r)] = self.pool.submit(lambda r=r: np.frombuffer(os.pread(fd, self.row, r * self.row), dtype=np.uint8))
+
     def lookup(self, layer_id: int, ids: np.ndarray) -> mx.array:
         uniq, inv = np.unique(ids.reshape(-1), return_inverse=True)
         raw = np.empty((len(uniq), self.row), dtype=np.uint8)
         miss = []
+        pend = getattr(self, "pending", {})
         for i, r in enumerate(uniq.tolist()):
             hit = self.cache.get((layer_id, r))
             if hit is None:
-                miss.append(i)
+                f = pend.pop((layer_id, r), None)
+                if f is not None:
+                    raw[i] = f.result()
+                    self.cache[(layer_id, r)] = raw[i].copy()
+                else:
+                    miss.append(i)
             else:
                 self.cache.move_to_end((layer_id, r))
                 raw[i] = hit
