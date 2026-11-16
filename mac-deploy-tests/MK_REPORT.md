@@ -7,9 +7,11 @@
 |---|---|---|---|
 | 计算路径（专家全部命中、无 SSD）| 87 ms/token（11.5 tok/s）| **68 ms/token（14.7 tok/s）** | megakernel 后 GPU 内核合计 ~54 ms（各 kernel 无依赖回放吞吐之和），权重带宽下限 ~48 ms；新的两次 dispatch 稀疏注意力再省 2.0 ms/token（4K 上下文 5.4 ms/token；电池供电下同会话 A/B）|
 | 无损端到端解码（中位）| 3.4 tok/s（单个提示，`scripts/decode_speed.py`）| **4.7 tok/s**（4 类提示各 200 token；同一提示为 4.58 tok/s）| SSD 受限 |
-| `--fast`（有损，`--sub-rank 2 --spec-k 2`）| — | **10.2–10.6 tok/s**（4 类提示 200 token 稳态，中位/均值）；**经 HTTP 服务流式实测 10.06 tok/s**（4 个提示各 300 token，含开头预热）| 达到 TPS=10；质量代价见下 |
+| `--fast`（有损，`--sub-rank 2 --spec-k 2`；CLI 默认）| — | **10.2–10.6 tok/s**（4 类提示 200 token 稳态，中位/均值）；**经 HTTP 服务流式实测 10.06 tok/s**（4 个提示各 300 token，含开头预热）| 达到 TPS=10；质量代价见下 |
 
 **TPS=10 只在有损的「缓存感知路由」下达到。** 16 GiB 缓存时 LRU 命中率约 67%，每 token 约 78 次专家读盘 × 2.56 ms（15.5 MB / 6 GB/s）；即使未来全知的 Belady 缓存也要约 46 次读盘（~120 ms），所以无损 10 TPS 在这台机器上物理不可达。kernel 融合只能压缩计算（87→68 ms），压不掉 SSD。
+
+**2026-11-16 起 CLI 默认即 `--fast`**（`serve` / `chat` / `bench`，启动时在 stderr 打印当前模式）；需要确定性、可复现的输出时加 `--lossless`（部署验证脚本已自动加）。Python API `LLM(...)` 仍是无损。
 
 ## 做了什么
 | 改动 | 无损? | 实测收益 |
@@ -26,7 +28,7 @@
 | top-p 采样只排序前 2048 候选（60 次随机校验结果一致）| 是 | 采样 11→2 ms/token |
 | **缓存感知专家替换** `--sub-rank N`：第 N 名及以后的专家若不在缓存，用缓存里分数最高的未选专家替代，权重重新归一 | **否** | 见下表 |
 
-所有 kernel 均对照 MLX 参考链验证（多数逐位一致，其余在 fp32 求和顺序误差内）；端到端偏差与「只改 fp32 求和分组」的偏差同量级（模型对数值扰动本身是混沌的）。`pytest tests/` 33/33 通过；部署期的 API 端到端套件 `test_api_e2e.py` 在新引擎（无损默认）上 **28/28 通过**（流式、贪心确定性+logprobs、seed、多轮前缀复用、工具调用、JSON schema+thinking、6K/12K 长上下文 needle、视觉、/v1/messages、/v1/responses）。
+所有 kernel 均对照 MLX 参考链验证（多数逐位一致，其余在 fp32 求和顺序误差内）；端到端偏差与「只改 fp32 求和分组」的偏差同量级（模型对数值扰动本身是混沌的）。`pytest tests/` 33/33 通过；部署期的 API 端到端套件 `test_api_e2e.py` 在新引擎的无损模式（`--lossless`）上 **28/28 通过**（流式、贪心确定性+logprobs、seed、多轮前缀复用、工具调用、JSON schema+thinking、6K/12K 长上下文 needle、视觉、/v1/messages、/v1/responses）。
 
 **更正（稀疏注意力）**：此前报告的「注意力核心 ~100 µs/层 → 30 µs」是把各层调用无数据依赖地批量回放得到的吞吐，多个 kernel 可以重叠执行，不代表解码时的时延。按解码方式串行测（每次调用的 ring 输出喂给下一次），原来的单 dispatch 版本（64 头 ÷ 每组 4 头 = 16 个 threadgroup，每个串行走完全部 640 个 key 两遍）在短上下文为 86 µs/层，在 4K 上下文为 195 µs/层，比参考算子链（133 µs）还慢。现已改为上表的两次并行 dispatch 版本。逐元素比对（`logs/mk/attn_exactness.log`）：新旧 kernel 在短上下文完全一致，4K 上下文 40 层中有 5 层各差 1 个元素（PV 求和分 8 段）；新 kernel 与参考算子链每层至多 12 / 32768 个输出元素相差一个 fp8 量化步（最差余弦 0.9999996），与旧 kernel 对参考的差异相同（来自 QK 的 fp32 求和顺序），ring 逐位一致；`DEEPINFER_MK_ATTN_SPLIT=0` 可切回旧版。表中其他单项 kernel 数字同样是无依赖回放的吞吐；端到端数字（计算路径 87→68 ms、各解码 tok/s）是解码循环实测，不受影响。数据：`logs/mk/attn_speedup_split2_rerun.log`（逐层时延）、`logs/mk/attn_e2e.log`（解码循环 A/B）。实际解码（4 类短提示各 200 token，同一会话新旧 kernel A/B）：`--fast` 10.37 vs 10.31 tok/s，无损 4.54 vs 4.41 tok/s（中位），在运行间波动之内：短上下文时省下的 ~2 ms/token 被 SSD 等待淹没，收益主要在长上下文（`logs/mk/multi_prompt_split_ab.log`）。这三组新数据都在电池供电下测得（旧 kernel 在电池下为 85.7 / 194.7 µs/层，与首次测量的 85.5 / 192.3 µs 一致）；本报告其余速度数字（含计算路径 68 ms 与各解码 tok/s）仍是此前接电源时的实测。
 
@@ -35,7 +37,7 @@
 
 | 配置 | 解码 tok/s | ΔNLL | Δ API top-1 一致率 |
 |---|---|---|---|
-| 无损（默认）| 4.5–4.7 | 0 | 0（噪声地板 ±0.01 NLL）|
+| 无损（`--lossless`）| 4.5–4.7 | 0 | 0（噪声地板 ±0.01 NLL）|
 | `--sub-rank 4`（替换第 5–6 名）| ~5 | +0.025 [+0.003, +0.047] | −0.8 pp |
 | `--sub-rank 3`（替换第 4–6 名）| ~7.6 | +0.053 [+0.013, +0.090] | −2.2 pp |
 | `--sub-rank 2 --sub-gap 0.2`（第 3 名限 gap，4–6 名放开）| ~9.1 | +0.065 [+0.024, +0.108] | −3.0 pp |
@@ -44,7 +46,7 @@
 
 规律：速度与质量代价都随「被替换的专家数」近似线性变化；替换优于丢弃；分数差（gap）限制每次替换的质量代价最低，但换来的速度也少。
 
-`--fast` 功能回归：API 端到端套件 **26/28 通过**——精确答案、生成代码可执行、JSON schema、工具调用、6K/12K 长上下文检索、视觉全部通过；失败的 2 项是「同一贪心请求两次输出一致」与「同 seed 可复现」。这是缓存感知路由的固有性质：替换哪个专家取决于当时缓存里有什么（受之前的请求和 SSD 时序影响），所以 **`--fast` 的输出不可复现**；需要确定性输出时请用默认无损模式。
+`--fast` 功能回归：API 端到端套件 **26/28 通过**——精确答案、生成代码可执行、JSON schema、工具调用、6K/12K 长上下文检索、视觉全部通过；失败的 2 项是「同一贪心请求两次输出一致」与「同 seed 可复现」。这是缓存感知路由的固有性质：替换哪个专家取决于当时缓存里有什么（受之前的请求和 SSD 时序影响），所以 **`--fast` 的输出不可复现**；需要确定性输出时请加 `--lossless`。
 
 ## 为什么无损做不到 10 TPS（复核用的数据）
 - 计算侧：每 token 读 ~11 GB 常驻权重（dense mxfp8 5.2 GB + 共享专家/路由 1.8 GB + 6 个路由专家 3.5 GB + head 0.7 GB）；现在 GPU 内核 ~54 ms（各 kernel 无依赖回放吞吐之和），带宽下限 ~48 ms。
@@ -55,10 +57,10 @@
 ## 怎么用
 ```bash
 cd /Users/loncheng/Models/DeepInfer-Mac
-# 无损（默认，融合 kernel 已默认开启）
+# 默认：--fast（有损，约 10 tok/s，输出不可复现；融合 kernel 默认开启）
 .venv/bin/python -m deepinfer_mac serve --model /Users/loncheng/Models/dsv41-mac --cache-gb 16 --port 8000
-# ~10 tok/s（有损，见上表）
-.venv/bin/python -m deepinfer_mac serve --model /Users/loncheng/Models/dsv41-mac --cache-gb 16 --fast --port 8000
+# 无损（确定性、可复现，约 4.5–4.7 tok/s）
+.venv/bin/python -m deepinfer_mac serve --model /Users/loncheng/Models/dsv41-mac --cache-gb 16 --lossless --port 8000
 # 关闭融合 kernel（回到参考 MLX 路径）
 ... --no-mk
 ```

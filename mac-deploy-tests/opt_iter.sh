@@ -17,6 +17,7 @@ export PYTHONDONTWRITEBYTECODE=1 DSV41_REF=/Users/loncheng/Models/DeepSeek-V4.1-
 cd "$REPO"
 git rev-parse --verify -q opt/compute-side >/dev/null || git branch opt/compute-side
 git checkout -q opt/compute-side
+LOSSLESS=$(cd "$REPO" && "$PY" -m deepinfer_mac serve --help 2>/dev/null | grep -q -- --lossless && echo --lossless)  # exact routing; since 2026-11-16 the CLI default is the lossy fast mode
 N=$(ls "$J"/iter-*.json 2>/dev/null | wc -l | tr -d ' ')
 git add -A deepinfer_mac scripts && git commit -q -m "opt-iter$N: $DESC" --allow-empty && git tag -f "opt-iter$N" >/dev/null
 SHA=$(git rev-parse --short HEAD)
@@ -38,12 +39,12 @@ done
 ms_med=$(printf '%s\n' "${ms_list[@]}" | sort -n | sed -n '2p')
 
 # ISL=1024 bench
-"$PY" -m deepinfer_mac bench --model "$MODEL" --cache-gb 18 --spec-k $SPEC_K --prompt-len 1024 --gen 32 --rounds 2 2>&1 | grep round >> "$LOG"
+"$PY" -m deepinfer_mac bench $LOSSLESS --model "$MODEL" --cache-gb 18 --spec-k $SPEC_K --prompt-len 1024 --gen 32 --rounds 2 2>&1 | grep round >> "$LOG"
 r2=$(grep '"round": 1' "$LOG" | tail -1)
 pf=$(echo "$r2" | sed -n 's/.*"prefill_s": \([0-9.]*\).*/\1/p'); dtk=$(echo "$r2" | sed -n 's/.*"decode_tok_s": \([0-9.]*\).*/\1/p'); bhr=$(echo "$r2" | sed -n 's/.*"expert_hit_rate": \([0-9.]*\).*/\1/p')
 
 # greedy probe
-probe=$(printf 'What is 17 * 23? Answer with the number only.\n\n' | "$PY" -m deepinfer_mac chat --model "$MODEL" --cache-gb 18 --temperature 0 --max-tokens 8 2>/dev/null | grep 'ds>' | grep -q 391 && echo ok || echo WRONG)
+probe=$(printf 'What is 17 * 23? Answer with the number only.\n\n' | "$PY" -m deepinfer_mac chat $LOSSLESS --model "$MODEL" --cache-gb 18 --temperature 0 --max-tokens 8 2>/dev/null | grep 'ds>' | grep -q 391 && echo ok || echo WRONG)
 
 python3 - "$N" "$SHA" "$DESC" "$ms_med" "$tk" "$hr" "$gb" "$sw" "$pf" "$dtk" "$bhr" "$PAR" "$par_line" "$probe" <<'EOF'
 import json, sys, time

@@ -200,12 +200,12 @@ footer.foot{border-top:1px solid var(--rule);padding-top:14px;color:var(--fg-3);
 
   <div class="tiles">
     <div class="tile">
-      <div class="k"><span>解码速度 · --fast</span><span class="chip warn"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1.2 11 10.4H1z" fill="currentColor"/><path d="M6 4.6v2.8M6 8.5v.4" stroke="#0b0b0b" stroke-width="1.2" stroke-linecap="round"/></svg>有损</span></div>
+      <div class="k"><span>解码速度 · 默认（--fast）</span><span class="chip warn"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1.2 11 10.4H1z" fill="currentColor"/><path d="M6 4.6v2.8M6 8.5v.4" stroke="#0b0b0b" stroke-width="1.2" stroke-linecap="round"/></svg>有损</span></div>
       <div class="v">10.06<small>tok/s</small></div>
       <div class="d">经 HTTP 服务流式实测（4 个提示各 300 token，含开头预热）；200 token 稳态 10.2–10.6</div>
     </div>
     <div class="tile">
-      <div class="k"><span>解码速度 · 无损</span><span class="chip good"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.2 6.3 4.8 8.8 9.8 3.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>无损</span></div>
+      <div class="k"><span>解码速度 · 无损（--lossless）</span><span class="chip good"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.2 6.3 4.8 8.8 9.8 3.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>无损</span></div>
       <div class="v">4.7<small>tok/s</small></div>
       <div class="d">4 类提示各 200 token 的中位；本轮开始 3.4 tok/s（单个提示实测，同一提示现在 4.58）；SSD 受限</div>
     </div>
@@ -223,6 +223,11 @@ footer.foot{border-top:1px solid var(--rule);padding-top:14px;color:var(--fg-3);
 
   <div class="verdict">
     <p><strong>TPS=10 只在有损的「缓存感知路由」下达到。</strong> 16 GiB 缓存时 LRU 命中率约 67%，每 token 约 78 次专家读盘 × 2.56 ms（15.5 MB / 6 GB/s）；即使未来全知的 Belady 缓存也要约 46 次读盘（~120 ms），所以无损 10 TPS 在这台机器上物理不可达。kernel 融合只能压缩计算（87→68 ms），压不掉 SSD。</p>
+  </div>
+
+  <div class="note">
+    <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5 15 14H1z" fill="currentColor"/><path d="M8 6v4M8 11.6v.4" stroke="#0b0b0b" stroke-width="1.5" stroke-linecap="round"/></svg>
+    <p><strong>2026-11-16 起 CLI 默认即 <code>--fast</code></strong>（<code>serve</code> / <code>chat</code> / <code>bench</code>，启动时在 stderr 打印当前模式）；需要确定性、可复现的输出时加 <code>--lossless</code>（部署验证脚本已自动加）。Python API <code>LLM(...)</code> 仍是无损。</p>
   </div>
 
   <figure class="fig" id="fig-speed">
@@ -271,7 +276,7 @@ footer.foot{border-top:1px solid var(--rule);padding-top:14px;color:var(--fg-3);
       <tbody>
         <tr><td>计算路径（专家全部命中、无 SSD）</td><td class="num">87 ms/token（11.5 tok/s）</td><td class="num"><strong>68 ms/token（14.7 tok/s）</strong></td><td>megakernel 后 GPU 内核合计 ~54 ms（各 kernel 无依赖回放吞吐之和），权重带宽下限 ~48 ms；新的两次 dispatch 稀疏注意力再省 2.0 ms/token（4K 上下文 5.4 ms/token；电池供电下同会话 A/B）</td></tr>
         <tr><td>无损端到端解码（中位）</td><td>3.4 tok/s（单个提示，<code>scripts/decode_speed.py</code>）</td><td><strong>4.7 tok/s</strong>（4 类提示各 200 token；同一提示为 4.58 tok/s）</td><td>SSD 受限</td></tr>
-        <tr class="em"><td><code>--fast</code>（有损，<code>--sub-rank 2 --spec-k 2</code>）</td><td>—</td><td><strong>10.2–10.6 tok/s</strong>（4 类提示 200 token 稳态，中位/均值）；<strong>经 HTTP 服务流式实测 10.06 tok/s</strong>（4 个提示各 300 token，含开头预热）</td><td>达到 TPS=10；质量代价见下</td></tr>
+        <tr class="em"><td><code>--fast</code>（有损，<code>--sub-rank 2 --spec-k 2</code>；CLI 默认）</td><td>—</td><td><strong>10.2–10.6 tok/s</strong>（4 类提示 200 token 稳态，中位/均值）；<strong>经 HTTP 服务流式实测 10.06 tok/s</strong>（4 个提示各 300 token，含开头预热）</td><td>达到 TPS=10；质量代价见下</td></tr>
       </tbody>
     </table>
   </div>
@@ -297,7 +302,7 @@ footer.foot{border-top:1px solid var(--rule);padding-top:14px;color:var(--fg-3);
       </tbody>
     </table>
   </div>
-  <p>所有 kernel 均对照 MLX 参考链验证（多数逐位一致，其余在 fp32 求和顺序误差内）；端到端偏差与「只改 fp32 求和分组」的偏差同量级（模型对数值扰动本身是混沌的）。<code>pytest tests/</code> 33/33 通过；部署期的 API 端到端套件 <code>test_api_e2e.py</code> 在新引擎（无损默认）上 <strong>28/28 通过</strong>（流式、贪心确定性 + logprobs、seed、多轮前缀复用、工具调用、JSON schema + thinking、6K/12K 长上下文 needle、视觉、/v1/messages、/v1/responses）。</p>
+  <p>所有 kernel 均对照 MLX 参考链验证（多数逐位一致，其余在 fp32 求和顺序误差内）；端到端偏差与「只改 fp32 求和分组」的偏差同量级（模型对数值扰动本身是混沌的）。<code>pytest tests/</code> 33/33 通过；部署期的 API 端到端套件 <code>test_api_e2e.py</code> 在新引擎的无损模式（<code>--lossless</code>）上 <strong>28/28 通过</strong>（流式、贪心确定性 + logprobs、seed、多轮前缀复用、工具调用、JSON schema + thinking、6K/12K 长上下文 needle、视觉、/v1/messages、/v1/responses）。</p>
 
   <figure class="fig" id="fig-attn">
     <div class="fig-head">
@@ -395,13 +400,13 @@ footer.foot{border-top:1px solid var(--rule);padding-top:14px;color:var(--fg-3);
           <text class="s-title" x="380" y="342" text-anchor="middle">解码速度（tok/s）</text>
           <line class="s-ref" x1="601.4" x2="601.4" y1="30" y2="300"/>
           <text class="s-reflab" x="607" y="294">目标 10 tok/s</text>
-          <text class="s-lab" x="134" y="296">无损（默认）</text>
+          <text class="s-lab" x="134" y="296">无损（--lossless）</text>
           <text class="s-lab" x="170" y="233">--sub-rank 4</text>
           <text class="s-lab" x="400" y="183">--sub-rank 3</text>
           <text class="s-lab" x="521.7" y="256" text-anchor="middle">--sub-rank 2 + gap</text>
           <text class="s-lab" x="630.9" y="42" text-anchor="middle">--fast</text>
         </g>
-        <g class="s-pt" tabindex="0" role="img" aria-label="无损（默认）：4.5–4.7 tok/s，ΔNLL 0" data-tv="4.5–4.7 tok/s · ΔNLL 0" data-tt="无损（默认）" data-tn="参考配置；噪声地板 ±0.01 NLL">
+        <g class="s-pt" tabindex="0" role="img" aria-label="无损（--lossless）：4.5–4.7 tok/s，ΔNLL 0" data-tv="4.5–4.7 tok/s · ΔNLL 0" data-tt="无损（--lossless）" data-tn="参考配置；噪声地板 ±0.01 NLL">
           <line class="s-wh" x1="114.3" x2="132" y1="282" y2="282"/>
           <circle class="s-dot" cx="123.1" cy="282" r="5"/>
           <circle class="s-hit" cx="123.1" cy="282" r="14"/>
@@ -439,7 +444,7 @@ footer.foot{border-top:1px solid var(--rule);padding-top:14px;color:var(--fg-3);
       <table>
         <thead><tr><th>配置</th><th>解码 tok/s</th><th>ΔNLL [95% 区间]</th><th>Δ API top-1</th><th>样本</th></tr></thead>
         <tbody>
-          <tr><td>无损（默认）</td><td class="num">4.5–4.7</td><td class="num">0</td><td class="num">0</td><td>参考</td></tr>
+          <tr><td>无损（--lossless）</td><td class="num">4.5–4.7</td><td class="num">0</td><td class="num">0</td><td>参考</td></tr>
           <tr><td>--sub-rank 4</td><td class="num">~5</td><td class="num">+0.025 [+0.003, +0.047]</td><td class="num">−0.8 pp</td><td>general 20 例</td></tr>
           <tr><td>--sub-rank 3</td><td class="num">~7.6</td><td class="num">+0.053 [+0.013, +0.090]</td><td class="num">−2.2 pp</td><td>general 20 例</td></tr>
           <tr><td>--sub-rank 2 --sub-gap 0.2</td><td class="num">~9.1</td><td class="num">+0.065 [+0.024, +0.108]</td><td class="num">−3.0 pp</td><td>general 20 例</td></tr>
@@ -454,7 +459,7 @@ footer.foot{border-top:1px solid var(--rule);padding-top:14px;color:var(--fg-3);
     <table>
       <thead><tr><th>配置</th><th>解码 tok/s</th><th>ΔNLL</th><th>Δ API top-1 一致率</th></tr></thead>
       <tbody>
-        <tr><td>无损（默认）</td><td class="num">4.5–4.7</td><td class="num">0</td><td>0（噪声地板 ±0.01 NLL）</td></tr>
+        <tr><td>无损（--lossless）</td><td class="num">4.5–4.7</td><td class="num">0</td><td>0（噪声地板 ±0.01 NLL）</td></tr>
         <tr><td><code>--sub-rank 4</code>（替换第 5–6 名）</td><td class="num">~5</td><td class="num">+0.025 [+0.003, +0.047]</td><td class="num">−0.8 pp</td></tr>
         <tr><td><code>--sub-rank 3</code>（替换第 4–6 名）</td><td class="num">~7.6</td><td class="num">+0.053 [+0.013, +0.090]</td><td class="num">−2.2 pp</td></tr>
         <tr><td><code>--sub-rank 2 --sub-gap 0.2</code>（第 3 名限 gap，4–6 名放开）</td><td class="num">~9.1</td><td class="num">+0.065 [+0.024, +0.108]</td><td class="num">−3.0 pp</td></tr>
@@ -466,7 +471,7 @@ footer.foot{border-top:1px solid var(--rule);padding-top:14px;color:var(--fg-3);
   <p>规律：速度与质量代价都随「被替换的专家数」近似线性变化；替换优于丢弃；分数差（gap）限制每次替换的质量代价最低，但换来的速度也少。</p>
   <div class="note">
     <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5 15 14H1z" fill="currentColor"/><path d="M8 6v4M8 11.6v.4" stroke="#0b0b0b" stroke-width="1.5" stroke-linecap="round"/></svg>
-    <p><strong><code>--fast</code> 功能回归：API 端到端套件 26/28 通过</strong>：精确答案、生成代码可执行、JSON schema、工具调用、6K/12K 长上下文检索、视觉全部通过；失败的 2 项是「同一贪心请求两次输出一致」与「同 seed 可复现」。这是缓存感知路由的固有性质：替换哪个专家取决于当时缓存里有什么（受之前的请求和 SSD 时序影响），所以 <strong><code>--fast</code> 的输出不可复现</strong>；需要确定性输出时请用默认无损模式。</p>
+    <p><strong><code>--fast</code> 功能回归：API 端到端套件 26/28 通过</strong>：精确答案、生成代码可执行、JSON schema、工具调用、6K/12K 长上下文检索、视觉全部通过；失败的 2 项是「同一贪心请求两次输出一致」与「同 seed 可复现」。这是缓存感知路由的固有性质：替换哪个专家取决于当时缓存里有什么（受之前的请求和 SSD 时序影响），所以 <strong><code>--fast</code> 的输出不可复现</strong>；需要确定性输出时请加 <code>--lossless</code>。</p>
   </div>
 </section>
 
@@ -523,14 +528,14 @@ footer.foot{border-top:1px solid var(--rule);padding-top:14px;color:var(--fg-3);
   <h2 id="t-use">怎么用</h2>
   <div class="cmds">
     <div class="cmd">
-      <div class="cmd-head"><span>无损（默认，融合 kernel 已默认开启）</span><button class="copy" type="button" data-copy="cmd-1">复制</button></div>
+      <div class="cmd-head"><span>默认：--fast（有损，约 10 tok/s，输出不可复现；融合 kernel 默认开启）</span><button class="copy" type="button" data-copy="cmd-1">复制</button></div>
 <pre id="cmd-1">cd /Users/loncheng/Models/DeepInfer-Mac
 .venv/bin/python -m deepinfer_mac serve --model /Users/loncheng/Models/dsv41-mac --cache-gb 16 --port 8000</pre>
     </div>
     <div class="cmd">
-      <div class="cmd-head"><span>~10 tok/s（有损，见<a href="#frontier">速度—质量前沿</a>）</span><button class="copy" type="button" data-copy="cmd-2">复制</button></div>
+      <div class="cmd-head"><span>无损（<code>--lossless</code>，确定性、可复现，约 4.5–4.7 tok/s）</span><button class="copy" type="button" data-copy="cmd-2">复制</button></div>
 <pre id="cmd-2">cd /Users/loncheng/Models/DeepInfer-Mac
-.venv/bin/python -m deepinfer_mac serve --model /Users/loncheng/Models/dsv41-mac --cache-gb 16 --fast --port 8000</pre>
+.venv/bin/python -m deepinfer_mac serve --model /Users/loncheng/Models/dsv41-mac --cache-gb 16 --lossless --port 8000</pre>
     </div>
     <div class="cmd">
       <div class="cmd-head"><span>关闭融合 kernel（回到参考 MLX 路径）：在任一命令后加 <code>--no-mk</code></span><button class="copy" type="button" data-copy="cmd-3">复制</button></div>

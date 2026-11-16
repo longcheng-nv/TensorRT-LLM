@@ -9,6 +9,7 @@ set -u
 REPO=/Users/loncheng/Models/DeepInfer-Mac
 PY=$REPO/.venv/bin/python
 MODEL=/Users/loncheng/Models/dsv41-mac
+LOSSLESS=$(cd "$REPO" && "$PY" -m deepinfer_mac serve --help 2>/dev/null | grep -q -- --lossless && echo --lossless)  # exact routing; since 2026-11-16 the CLI default is the lossy fast mode
 TESTS=/Users/loncheng/Models/dsv41-mac-tests
 LOGS=/Users/loncheng/Models/logs/verify
 CACHE_GB=${CACHE_GB:-10}
@@ -44,9 +45,9 @@ STEP=engram;      want "${ARGS[@]}" && run_step engram "ENGRAM CHECK OK" "$PY" s
 STEP=realcheck;   want "${ARGS[@]}" && run_step realcheck "RESULT: worst layer cosine 0\.999[9]|RESULT: worst layer cosine 1\.0" "$PY" scripts/real_check.py 6 --noquant
 STEP=quantdamage; want "${ARGS[@]}" && run_step quantdamage "cos|cosine" "$PY" scripts/quant_damage.py 6
 STEP=speed;       want "${ARGS[@]}" && run_step speed "tok/s" "$PY" scripts/decode_speed.py "$CACHE_GB" --real-engram
-STEP=bench;       want "${ARGS[@]}" && run_step bench '"decode_tok_s"' "$PY" -m deepinfer_mac bench --model "$MODEL" --cache-gb "$CACHE_GB" --prompt-len 256 --gen 32 --rounds 2
-STEP=cli;         want "${ARGS[@]}" && run_step cli "ds> .*391" sh -c "printf 'What is 17 * 23? Answer with the number only.\n\n' | $PY -m deepinfer_mac chat --model $MODEL --cache-gb $CACHE_GB --temperature 0 --max-tokens 16"
-STEP=cli_zh;      want "${ARGS[@]}" && run_step cli_zh "ds> .*北京" sh -c "printf '中国的首都是哪里？只回答城市名。\n\n' | $PY -m deepinfer_mac chat --model $MODEL --cache-gb $CACHE_GB --temperature 0 --max-tokens 16"
+STEP=bench;       want "${ARGS[@]}" && run_step bench '"decode_tok_s"' "$PY" -m deepinfer_mac bench $LOSSLESS --model "$MODEL" --cache-gb "$CACHE_GB" --prompt-len 256 --gen 32 --rounds 2
+STEP=cli;         want "${ARGS[@]}" && run_step cli "ds> .*391" sh -c "printf 'What is 17 * 23? Answer with the number only.\n\n' | $PY -m deepinfer_mac chat $LOSSLESS --model $MODEL --cache-gb $CACHE_GB --temperature 0 --max-tokens 16"
+STEP=cli_zh;      want "${ARGS[@]}" && run_step cli_zh "ds> .*北京" sh -c "printf '中国的首都是哪里？只回答城市名。\n\n' | $PY -m deepinfer_mac chat $LOSSLESS --model $MODEL --cache-gb $CACHE_GB --temperature 0 --max-tokens 16"
 STEP=structured;  want "${ARGS[@]}" && run_step structured "STRUCTURED OUTPUT PASS" "$PY" "$TESTS/structured_output_check.py" --cache-gb "$CACHE_GB" --thinking
 STEP=offline;     want "${ARGS[@]}" && run_step offline "OFFLINE PROMPTS PASS" "$PY" "$TESTS/offline_prompts_check.py" --cache-gb "$CACHE_GB"
 
@@ -54,7 +55,7 @@ STEP=api
 if want "${ARGS[@]}"; then
   echo "=== [$(date '+%H:%M:%S')] api: starting server on :$PORT ===" | tee -a "$LOGS/all.log"
   pkill -f "deepinfer_mac serve" 2>/dev/null; sleep 1
-  ( cd "$REPO" && nohup "$PY" -m deepinfer_mac serve --model "$MODEL" --cache-gb "$CACHE_GB" --host 127.0.0.1 --port "$PORT" > "$LOGS/serve.log" 2>&1 & )
+  ( cd "$REPO" && nohup "$PY" -m deepinfer_mac serve $LOSSLESS --model "$MODEL" --cache-gb "$CACHE_GB" --host 127.0.0.1 --port "$PORT" > "$LOGS/serve.log" 2>&1 & )
   for i in $(seq 1 120); do curl -s -o /dev/null "http://127.0.0.1:$PORT/v1/models" && break; sleep 2; done
   if curl -s "http://127.0.0.1:$PORT/v1/models" | grep -q deepseek-flash; then
     t0=$(date +%s)

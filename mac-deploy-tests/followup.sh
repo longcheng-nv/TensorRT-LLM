@@ -4,6 +4,7 @@
 # then bring the API server back up and leave it running.
 set -u
 REPO=/Users/loncheng/Models/DeepInfer-Mac; PY=$REPO/.venv/bin/python; MODEL=/Users/loncheng/Models/dsv41-mac
+LOSSLESS=$(cd "$REPO" && "$PY" -m deepinfer_mac serve --help 2>/dev/null | grep -q -- --lossless && echo --lossless)  # exact routing; since 2026-11-16 the CLI default is the lossy fast mode
 TESTS=/Users/loncheng/Models/dsv41-mac-tests; LOGS=/Users/loncheng/Models/logs/verify; CACHE_GB=${CACHE_GB:-9}
 unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy
 export PYTHONDONTWRITEBYTECODE=1
@@ -26,7 +27,7 @@ step quantdamage2 "cos" perl -e 'alarm 1500; exec @ARGV' "$PY" scripts/quant_dam
 ( CACHE_GB=$CACHE_GB "$TESTS/tune_runtime_knobs.sh" ) > "$LOGS/followup-knobs.log" 2>&1 && rec PASS knobs "see $LOGS/tune/results.tsv" || rec FAIL knobs "see $LOGS/followup-knobs.log"
 
 # 3. bring the server back
-( cd "$REPO" && nohup "$PY" -m deepinfer_mac serve --model "$MODEL" --cache-gb "$CACHE_GB" --host 127.0.0.1 --port 8000 > "$LOGS/serve3.log" 2>&1 < /dev/null & )
+( cd "$REPO" && nohup "$PY" -m deepinfer_mac serve $LOSSLESS --model "$MODEL" --cache-gb "$CACHE_GB" --host 127.0.0.1 --port 8000 > "$LOGS/serve3.log" 2>&1 < /dev/null & )
 for i in $(seq 1 90); do curl -s -o /dev/null http://127.0.0.1:8000/v1/models && break; sleep 2; done
 curl -s http://127.0.0.1:8000/v1/models | grep -q deepseek-flash && rec PASS server_up "127.0.0.1:8000 /v1/models ok" || rec FAIL server_up "server not responding"
 echo "===== FOLLOWUP DONE $(date '+%F %T') ====="; cat "$S"

@@ -1,6 +1,8 @@
 # HANDOFF — DeepSeek-V4.1-Flash 本地部署（M4 Pro 48 GB MacBook）
 
 更新时间：2026-10-27 22:20（用户要求「先暂停」，所有进程已停止）
+
+> 2026-11-16 更新：转换已完成；CLI（serve/chat/bench）默认改为有损的 `--fast`（约 10 tok/s，输出不可复现），部署验证与确定性测试一律加 `--lossless`（`verify_deployment.sh` 已自动加）。最新状态见 `/Users/loncheng/Models/CLAUDE.md` 与 `MK_REPORT.md`。
 会话 ID：`60697234-ef74-4285-9fb6-da2f8011ce9b`（`claude --resume 60697234-ef74-4285-9fb6-da2f8011ce9b` 可恢复完整对话）
 
 ## 目标
