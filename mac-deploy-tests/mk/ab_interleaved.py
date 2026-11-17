@@ -5,7 +5,7 @@ which hides 1-3% effects. Here the arms take turns token by token (round robin, 
 slow drifts hit every arm alike; the paired difference of neighbouring tokens gives a tight estimate.
 
 usage: ab_interleaved.py fast|lossless N_TOKENS ARM [ARM ...]
-  ARM = comma list of io, engram, defer, tick, split ("base" = none); e.g. base io,engram,tick,defer
+  ARM = comma list of io, engram, defer, tick, split, specN ("base" = none; specN overrides --spec-k); e.g. base io,engram,tick,defer
 """
 import sys
 import time
@@ -28,8 +28,14 @@ PROMPTS = ["Write a long paragraph about the history of tea.",
            "写一篇关于秋天的短文，大约三百字。"]
 
 
+SPEC0 = M.MoE.SPEC_K
+
+
 def setting(s: str):
     on = set(s.split(",")) - {"base"}
+    spec = [x for x in on if x.startswith("spec") and x[4:].isdigit()]  # specN: speculation width N
+    on -= set(spec)
+    M.MoE.SPEC_K = int(spec[0][4:]) if spec else SPEC0
     assert on <= {"io", "engram", "defer", "tick", "split"}, s
     M.MoE.IO_FIRST = "io" in on
     M.Transformer.ENGRAM_EARLY = "engram" in on

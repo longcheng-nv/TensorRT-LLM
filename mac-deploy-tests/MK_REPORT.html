@@ -382,7 +382,7 @@ footer.foot{border-top:1px solid var(--rule);padding-top:14px;color:var(--fg-3);
       </tbody>
     </table>
   </div>
-  <p>6 类提示每一类都变快。无损模式受 SSD 吞吐限制，测不出变化：+0.4 ms [−4.8, +5.8]（780 个 token）。HTTP 服务实测（最终代码不加参数，接电源）为 <strong>10.53 tok/s</strong>（4 个提示 10.45 / 9.47 / 11.38 / 10.83；生成代码的提示仍低于 10）。API 端到端：无损 <strong>28/28</strong>，默认 27/28（只挂「贪心两次一致」这项确定性测试，<code>--fast</code> 本来就不可复现）。</p>
+  <p>6 类提示每一类都变快。mk-7 后复测推测宽度（同法）：<code>--spec-k</code> 1 / 0 / 3 分别比 2 慢 1.2 / 6.5 / 8.6 ms/token，<code>--fast</code> 预设不变。无损模式受 SSD 吞吐限制，测不出变化：+0.4 ms [−4.8, +5.8]（780 个 token）。HTTP 服务实测（最终代码不加参数，接电源）为 <strong>10.53 tok/s</strong>（4 个提示 10.45 / 9.47 / 11.38 / 10.83；生成代码的提示仍低于 10）。API 端到端：无损 <strong>28/28</strong>，默认 27/28（只挂「贪心两次一致」这项确定性测试，<code>--fast</code> 本来就不可复现）。</p>
   <p><strong>正确性。</strong></p>
   <ul class="plain">
     <li><code>test_mk_forward.py --cache-gb 6</code>：关掉推测，让每个未命中层都走延迟提交，新旧两条路径 12 步的 logits 指标逐位相同，与参考实现的 argmax 12/12 一致。</li>
