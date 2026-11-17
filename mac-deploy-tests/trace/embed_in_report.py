@@ -22,8 +22,8 @@ EMBED_CSS = ('<style id="embedded-in-report">header.top,#intro,footer.foot{displ
 SECTION = """<!-- TIMELINE:BEGIN -->
 <section id="timeline" aria-labelledby="t-timeline">
   <h2 id="t-timeline"><span class="num">06</span>解码时间线（实测，类似 nsys）</h2>
-  <p>真实引擎上逐 token 的事件时间线，默认 <code>--fast</code> 与 <code>--lossless</code> 各预热 8 个 token 后连续记录 5 个。CPU 轨是主线程每层的各个阶段；SSD 轨来自原生 IO 层的追踪（每个 2 MB 块、所在 IO 线程、需求读 / 推测读）；GPU 轨是推断的：本机拿不到 GPU 时间戳，注意力块的结束时刻取路由同步返回的实测值，MoE 块的时长为估计。采集时为电池供电，且插桩有少量开销，所以每 token 比本报告其余（接电源）数字慢。</p>
-  <p class="muted" style="font-size:13px">滚轮缩放、拖动平移，选择单个 token 可放大；悬停或聚焦查看详情。同一份数据的独立页面在 <code>trace/DECODE_TRACE.html</code>；Perfetto 格式在 <code>trace/perfetto_fast.json</code>、<code>trace/perfetto_lossless.json</code>（可拖进 ui.perfetto.dev 或 Chrome 的 chrome://tracing）。采集脚本 <code>mac-deploy-tests/mk/trace_decode.py</code>。</p>
+  <p>真实引擎上逐 token 的事件时间线：mk-6（关掉 mk-7 的开关）与 mk-7 两版代码，默认 <code>--fast</code> 与 <code>--lossless</code> 各一组，每组预热 60 个 token 后连续记录 5 个，接电源。CPU 轨是主线程每层的各个阶段；SSD 轨来自原生 IO 层的追踪（每个 2 MB 块、所在 IO 线程、需求读 / 推测读）；GPU 轨是推断的：本机拿不到 GPU 时间戳，注意力块的结束时刻取路由同步返回的实测值，MoE、共享专家与 Engram 块的时长为估计。插桩有少量开销，且只有 5 个 token，单个 token 的时长会受当时缓存内容影响，比较两版时以第 05 节的同进程 A/B 为准。</p>
+  <p class="muted" style="font-size:13px">滚轮缩放、拖动平移，选择单个 token 可放大；悬停或聚焦查看详情。同一份数据的独立页面在 <code>trace/DECODE_TRACE.html</code>；Perfetto 格式在 <code>trace/perfetto_fast.json</code>、<code>trace/perfetto_lossless.json</code>（mk-7）与 <code>trace/perfetto_mk6_fast.json</code>、<code>trace/perfetto_mk6_lossless.json</code>（可拖进 ui.perfetto.dev 或 Chrome 的 chrome://tracing）。采集脚本 <code>mac-deploy-tests/mk/trace_decode.py</code>。</p>
   <div id="tl-bleed" style="align-self:flex-start;max-width:none;width:100%">
     <iframe id="tl-frame" title="解码时间线查看器" style="display:block;width:100%;height:1500px;border:0;background:var(--bg)"></iframe>
   </div>

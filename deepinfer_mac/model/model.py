@@ -722,6 +722,19 @@ class MoE:
     PREFILL_KEEP = 140  # measured no gain when SSD-bound; flash-moe saw speculative routing cost 38%
     FIXED_EXPERTS = None  # benchmark only (mk_bench --mode fixed): override decode routing
     ASYNC_LAST = True  # decode: async_eval the last expert group as well (overlaps next layer's graph build)
+    # decode, layers that need a full read: start it (and promote guesses in flight) before launching the
+    # resident experts. Measured 2026-11-17 (interleaved A/B, --fast, 1548 tokens): no gain on top of
+    # ENGRAM_EARLY + DEFER_MISS + the timed hot-wait (-3.7 vs -4.1 ms/token), so off.
+    IO_FIRST = os.environ.get("DEEPINFER_IO_FIRST", "0") == "1"
+    # the routing sync waits for the router only; the shared expert (~35 MB of mxfp8 weights) runs after it
+    SPLIT_SHARED = os.environ.get("DEEPINFER_SPLIT_SHARED", "1") != "0"
+    # GPU work that does not depend on the residual stream (the Engram value projections of this
+    # token), launched at the first layer that waits for a fresh read: {layer: thunk -> array}
+    fill: dict = {}
+    # set by Transformer.forward_mk only: a layer's misses may return their MoE graph unlaunched, with
+    # (finish, y) in `pending`; the caller must call finish() before anything evaluates y
+    defer_ok = False
+    pending = None
     next_moe = None
 
     def __init__(self, a: Args, layer_id: int, d: dict, experts, key: str):
@@ -919,10 +932,12 @@ class MoE:
         sw13, sw2 = self.shared_w13, self.shared_w2
         nxt2 = nxt.next_moe if (speck and self.SPEC_K2 and nxt is not None) else None
         speck2 = self.SPEC_K2 if nxt2 is not None else 0
+        split = self.SPLIT_SHARED
         idx, w, scores, pred, pred2, xq, y = mk.router_shared(
             x, self.gate_bf16, sw13.w, sw13.scales, sw2.w, sw2.scales, bias, rsc, lim, topk=self.topk,
             gate_next=nxt.gate_bf16 if speck else None, bias_next=nxt.bias if speck else None, spec_k=speck,
-            gate_next2=nxt2.gate_bf16 if speck2 else None, bias_next2=nxt2.bias if speck2 else None, spec_k2=speck2)
+            gate_next2=nxt2.gate_bf16 if speck2 else None, bias_next2=nxt2.bias if speck2 else None, spec_k2=speck2,
+            split=split)
         rank = self.SUB_RANK
         if rank is not None and self.SUB_TARGET_MS > 0:
             import time as _t
@@ -932,7 +947,11 @@ class MoE:
                 rank = self.SUB_RANK_MILD
                 MoE.sub_stats["mild_layers"] = MoE.sub_stats.get("mild_layers", 0) + 1
         sub = rank is not None and hasattr(self.experts, "resident_ids")
-        mx.eval(idx, w, *((pred,) if speck else ()), *((pred2,) if speck2 else ()), *((scores,) if sub else ()))
+        routing = (idx, w, *((pred,) if speck else ()), *((pred2,) if speck2 else ()), *((scores,) if sub else ()))
+        if split:  # the shared expert is queued right behind the routing and runs while the host reads it back
+            mx.async_eval(*routing)
+            mx.async_eval(xq, y)
+        mx.eval(*routing)
         idx_np = np.array(idx)[None]
         w_np = np.array(w)[None]
         if self.FIXED_EXPERTS is not None:  # benchmark only: compute path without SSD
@@ -950,7 +969,8 @@ class MoE:
     def _slab_moe_mk(self, x, xq, w_np, idx_np, y, lim):
         """Resident experts are launched first (the GPU computes them while the IO bookkeeping of
         this layer -- cancels, demand reads, speculation -- runs on the CPU), then the misses once
-        their reads land."""
+        their reads land. With IO_FIRST a layer that needs a full read starts it before launching the
+        resident experts; with MoE.defer_ok the misses' graph is returned unlaunched (MoE.pending)."""
         from . import mk
 
         ids = idx_np[0].tolist()
@@ -959,21 +979,53 @@ class MoE:
         hits = [e for e in ids if st.resident(self.key, e)]
         misses = [e for e in ids if e not in hits]
 
-        def launch(group, last):
-            slab, slots = st.get_slots(self.key, group)
+        def build(group, last, reserved=None):
+            slab, slots = reserved if reserved is not None else st.get_slots(self.key, group)
             order = np.argsort(np.array(slots), kind="stable")  # slot order, like the gather_qmm path
             sl = mx.array(np.array(slots, dtype=np.uint32)[order])
             wk = mx.array(np.array([wmap[group[i]] for i in order], dtype=np.float32))
-            out = mk.moe_experts(xq, sl, wk, lim, slab.proj("w1"), slab.proj("w3"), slab.proj("w2"), y,
-                                 out_dtype=x.dtype if last else mx.float32)
+            return mk.moe_experts(xq, sl, wk, lim, slab.proj("w1"), slab.proj("w3"), slab.proj("w2"), y,
+                                  out_dtype=x.dtype if last else mx.float32)
+
+        def launch(group, last):
+            out = build(group, last)
             mx.async_eval(out)
             return out
 
+        # a miss with no read in flight gets a full read now (>= ~2 ms ahead): its layer is SSD-bound
+        fresh = any((self.key, e) not in st.inflight for e in misses)
+        io_first = fresh and self.IO_FIRST
+
+        def io():
+            if hasattr(st, "cancel_unneeded"):
+                st.cancel_unneeded(self.key, ids)
+            st.prefetch(self.key, ids)
+            if misses and self.IO_FIRST and hasattr(st, "promote"):  # needed guesses jump the queue now
+                st.promote(self.key, misses)
+            self._speculate(st, ids)
+
+        if io_first:  # the reads start before the resident experts are launched
+            io()
         if hits:
             y = launch(hits, not misses)
-        if hasattr(st, "cancel_unneeded"):
-            st.cancel_unneeded(self.key, ids)
-        st.prefetch(self.key, ids)
+        if not io_first:  # the GPU computes the resident experts while the IO bookkeeping runs
+            io()
+        if not misses:
+            return y[None]
+        if fresh and MoE.fill:  # the GPU would idle until the read lands: give it this token's spare work
+            fill, MoE.fill = MoE.fill, {}
+            mx.async_eval(*[f() for f in fill.values()])
+        if MoE.defer_ok and hasattr(st, "reserve_slots") and not st.all_done(self.key, misses):
+            # the decode loop builds the next layer's attention graph while the reads land, then
+            # waits (MoE.pending[0]) and launches this graph together with that attention
+            slab, slots, finish = st.reserve_slots(self.key, misses)
+            y = build(misses, True, (slab, slots))
+            MoE.pending = (finish, y)
+            return y[None]
+        y = launch(misses, True)
+        return y[None]
+
+    def _speculate(self, st, ids):
         spec = getattr(self, "_spec", None)
         if spec:
             self._spec = None
@@ -984,9 +1036,6 @@ class MoE:
                     sids = sids[self.SPEC_HI :]
                 if sids:
                     st.speculate(skey, sids, after)
-        if misses:
-            y = launch(misses, True)
-        return y[None]
 
     def _bias_np(self, bias):
         if bias is self.bias:
@@ -1087,9 +1136,15 @@ class Engram:
         self.qk = (d["engram.q_weight"].astype(mx.float32) * d["engram.k_weight"].astype(mx.float32))
 
     def __call__(self, h: mx.array, hash_ids: np.ndarray, token_mask: mx.array | None) -> mx.array:
-        a = self.a
+        return self.apply(h, self.kv(hash_ids), token_mask)
+
+    def kv(self, hash_ids: np.ndarray) -> mx.array:
+        """Key / value projection of the table rows: depends on the tokens only, not on h."""
         rows = self.table.lookup(self.layer_id, hash_ids)  # [L, n_cols, head_dim] bf16
-        kv = self.wkv(rows.reshape(rows.shape[0], -1))
+        return self.wkv(rows.reshape(rows.shape[0], -1))
+
+    def apply(self, h: mx.array, kv: mx.array, token_mask: mx.array | None) -> mx.array:
+        a = self.a
         key = kv[:, : a.hc_mult * a.dim].astype(mx.float32).reshape(-1, a.hc_mult, a.dim)
         value = kv[:, a.hc_mult * a.dim :].astype(mx.float32)
         hf = h.astype(mx.float32)
@@ -1264,6 +1319,22 @@ class Transformer:
 
     MK = True  # fused decode path (mk.py) for single-token text decode
     ASYNC_ATTN = os.environ.get('DEEPINFER_ASYNC_ATTN', '1') == '1'
+    # the Engram value projections (2 x 162 MB GEMV) leave the routing path of layers 1 / 14 and fill a
+    # GPU-idle SSD wait of an earlier layer instead (MoE.fill)
+    ENGRAM_EARLY = os.environ.get("DEEPINFER_ENGRAM_EARLY", "1") != "0"
+    # a layer that waits for SSD reads hands its misses' MoE back unlaunched; the next layer's hc +
+    # attention graph is built during the wait and launched with it (MoE.pending)
+    DEFER_MISS = os.environ.get("DEEPINFER_DEFER_MISS", "1") != "0"
+
+    @staticmethod
+    def _resolve_pending(launch: bool = True):
+        p = MoE.pending
+        if p is not None:
+            MoE.pending = None
+            finish, y = p
+            finish()
+            if launch:
+                mx.async_eval(y)
 
     def _mk_ok(self) -> bool:
         ok = getattr(self, "_mk_supported", None)
@@ -1286,6 +1357,15 @@ class Transformer:
         if tab is not None and hasattr(tab, "prefetch"):  # rows read while the first layers run
             for j, lid in enumerate(a.engram_layer_ids):
                 tab.prefetch(lid, hash_ids[:, j])
+        kvs = {}
+        if tab is not None and self.ENGRAM_EARLY:  # the value projections run while an early layer waits for SSD
+            def early(i, j):
+                def go():
+                    kvs[i] = self.layers[i].engram.kv(hash_ids[:, j])
+                    return kvs[i]
+                return go
+
+            MoE.fill = {lid: early(lid, j) for j, lid in enumerate(a.engram_layer_ids)}
         st.tokens.append(token)
         h0 = self.embed_tokens([token])[0]
         X = mx.broadcast_to(h0[None], (a.hc_mult, a.dim))
@@ -1297,6 +1377,24 @@ class Transformer:
             import time as _t
 
             MoE.tok_t0 = _t.perf_counter()
+        MoE.pending, MoE.defer_ok = None, self.DEFER_MISS
+        try:
+            carry, pre_mix = self._layers_mk(st, X, pre_mix, carry, positions, start, eps, sh, hash_ids, kvs)
+            self._resolve_pending()
+        finally:
+            MoE.defer_ok = False
+            if MoE.pending is not None:  # an exception mid-token: release the reservation
+                self._resolve_pending(launch=False)
+        MoE.fill = {}
+        st.pos = start + 1
+        X = _hc_post_c(carry[0][None], carry[1][None], carry[2][None], carry[3][None])
+        h = Block.hc_pre(X, pre_mix[None])
+        return self.head(rms_norm(h, self.norm, a.norm_eps)).astype(mx.float32)
+
+    def _layers_mk(self, st, X, pre_mix, carry, positions, start, eps, sh, hash_ids, kvs):
+        from . import mk
+
+        a = self.a
         for i, layer in enumerate(self.layers):
             hc = layer.hc
             layer.ffn.layer_frac = (i + 0.6) / len(self.layers)
@@ -1304,7 +1402,11 @@ class Transformer:
                 if carry is not None:
                     X = _hc_post_c(carry[0][None], carry[1][None], carry[2][None], carry[3][None])[0]
                     carry = None
-                X = layer.engram(X[None], hash_ids[:, a.engram_layer_ids.index(i)], None)[0]
+                MoE.fill.pop(i, None)
+                kv = kvs.pop(i, None)
+                if kv is None:
+                    kv = layer.engram.kv(hash_ids[:, a.engram_layer_ids.index(i)])
+                X = layer.engram.apply(X[None], kv, None)[0]
             ca, cf = mk.hc_counter((i, 0)), mk.hc_counter((i, 1))
             if carry is not None:
                 X, h, a_pre, a_post, a_comb = mk.hc_stage(carry[1], pre_mix, hc["attn_fn"], hc["attn_scale"], hc["attn_base"],
@@ -1313,6 +1415,7 @@ class Transformer:
                 X, h, a_pre, a_post, a_comb = mk.hc_stage(X, pre_mix, hc["attn_fn"], hc["attn_scale"], hc["attn_base"], layer.attn_norm, eps,
                                                           counter=ca)
             ha = layer.attn(h[None], positions, st, st.rings[i], sh, start)
+            self._resolve_pending(launch=not self.ASYNC_ATTN)  # previous layer's reads, then its misses' MoE
             if self.ASYNC_ATTN:  # the GPU starts on attention while Python builds the rest of the layer
                 mx.async_eval(ha)
             X, h, f_pre, f_post, f_comb = mk.hc_stage(X, a_pre, hc["ffn_fn"], hc["ffn_scale"], hc["ffn_base"], layer.ffn_norm, eps,
@@ -1320,10 +1423,7 @@ class Transformer:
             hm = layer.ffn(h[None])
             carry = (hm[0], X, f_post, f_comb)
             pre_mix = f_pre
-        st.pos = start + 1
-        X = _hc_post_c(carry[0][None], carry[1][None], carry[2][None], carry[3][None])
-        h = Block.hc_pre(X, pre_mix[None])
-        return self.head(rms_norm(h, self.norm, a.norm_eps)).astype(mx.float32)
+        return carry, pre_mix
 
     def forward(
         self,

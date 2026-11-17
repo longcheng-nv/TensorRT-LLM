@@ -1132,7 +1132,7 @@ _RS_UP = r"""
   constexpr int SGN = 8;
   const int lane = thread_index_in_simdgroup;
   const int sg = simdgroup_index_in_threadgroup;
-  const int tg = threadgroup_position_in_grid.y;
+  const int tg = threadgroup_position_in_grid.y + OFF;  // OFF: first threadgroup of a partial dispatch
   constexpr int ITERS = K / 256;
   constexpr int GTG = NG / 32;                      // router threadgroups
   if (tg < GTG) {                                   // router rows (bf16 weights), 4 per simdgroup
@@ -1229,7 +1229,8 @@ _RS_UP = r"""
 _RS_DOWN = r"""
   const int lane = thread_index_in_simdgroup;
   const int sg = simdgroup_index_in_threadgroup;
-  if (threadgroup_position_in_grid.y == 0) {
+  const int tg = threadgroup_position_in_grid.y + OFF;  // OFF: first threadgroup of a partial dispatch
+  if (tg == 0) {
     if (sg != 0) return;
     // ---- routing: one simdgroup, each lane owns NE/32 experts
     constexpr int PER = NE / 32;
@@ -1305,7 +1306,7 @@ _RS_DOWN = r"""
   // ---- shared expert down projection: rows r0 .. r0+RS of w2 (mxfp8 [DIM, INTER]) on hq
   constexpr int RS = 8;
   constexpr int SGS = 2;
-  const int r0 = ((threadgroup_position_in_grid.y - 1) * SGS + sg) * RS;
+  const int r0 = ((tg - 1) * SGS + sg) * RS;
   constexpr int K = INTER;
   float acc[RS] = {0};
   const device uint8_t* wb = (const device uint8_t*)w2;
@@ -1340,21 +1341,23 @@ _RS_DOWN = r"""
 
 @lru_cache(maxsize=None)
 def _rs_up_kernel():
-    return mx.fast.metal_kernel(name="mk_rs_up3", input_names=["x", "gw", "gwn", "gwn2", "w13", "w13s", "limit"], output_names=["logits", "hq", "xq"],
+    return mx.fast.metal_kernel(name="mk_rs_up4", input_names=["x", "gw", "gwn", "gwn2", "w13", "w13s", "limit"], output_names=["logits", "hq", "xq"],
                                 header=_GEMV_MXFP8_HDR, source=_RS_UP)
 
 
 @lru_cache(maxsize=None)
 def _rs_down_kernel():
-    return mx.fast.metal_kernel(name="mk_rs_down3", input_names=["logits", "bias", "bias_n", "bias_n2", "route_scale", "hq", "w2", "w2s"],
+    return mx.fast.metal_kernel(name="mk_rs_down4", input_names=["logits", "bias", "bias_n", "bias_n2", "route_scale", "hq", "w2", "w2s"],
                                 output_names=["idx", "w", "scores", "pred", "pred2", "y"], header=_GEMV_MXFP8_HDR, source=_RS_DOWN)
 
 
 def router_shared(x: mx.array, gate_w: mx.array, w13: mx.array, w13s: mx.array, w2: mx.array, w2s: mx.array,
                   bias: mx.array, route_scale: mx.array, limit: mx.array, topk: int = 6,
                   gate_next: mx.array | None = None, bias_next: mx.array | None = None, spec_k: int = 0,
-                  gate_next2: mx.array | None = None, bias_next2: mx.array | None = None, spec_k2: int = 0):
-    """Decode router + shared expert in two dispatches.
+                  gate_next2: mx.array | None = None, bias_next2: mx.array | None = None, spec_k2: int = 0,
+                  split: bool = False):
+    """Decode router + shared expert in two dispatches (split: four -- the routing outputs then do not
+    wait for the shared expert, which the caller can queue behind the routing sync; same numerics).
     gate_w, gate_next, gate_next2: bf16 [NE, DIM] (this layer's router; the next two layers', used on
     this layer's input to predict their experts when spec_k / spec_k2 > 0); w13/w13s: shared w1|w3
     mxfp8 [2*INTER, DIM]; w2/w2s: shared w2 mxfp8 [DIM, INTER].
@@ -1370,22 +1373,37 @@ def router_shared(x: mx.array, gate_w: mx.array, w13: mx.array, w13s: mx.array, 
     x = x.reshape(-1)
     gn = gate_next if spec else gate_w
     gn2 = gate_next2 if spec2 else gate_w
-    logits, hq, xq = _rs_up_kernel()(
-        inputs=[x, gate_w, gn, gn2, w13, w13s, limit.reshape(1)],
-        template=[("K", D), ("NG", NG), ("NE", NE), ("INTER", inter)],
-        grid=(256, NG // 32 + inter // 32, 1), threadgroup=(256, 1, 1),
-        output_shapes=[(NG,), (inter,), (D,)], output_dtypes=[mx.float32, mx.bfloat16, mx.bfloat16],
-    )
+
+    def up(off, n):
+        return _rs_up_kernel()(
+            inputs=[x, gate_w, gn, gn2, w13, w13s, limit.reshape(1)],
+            template=[("K", D), ("NG", NG), ("NE", NE), ("INTER", inter), ("OFF", off)],
+            grid=(256, n, 1), threadgroup=(256, 1, 1),
+            output_shapes=[(NG,), (inter,), (D,)], output_dtypes=[mx.float32, mx.bfloat16, mx.bfloat16],
+        )
+
+    logits, hq, xq = up(0, NG // 32 if split else NG // 32 + inter // 32)
     bn = bias_next if spec else bias
     bn2 = bias_next2 if spec2 else bias
-    idx, w, scores, pred, pred2, y = _rs_down_kernel()(
-        inputs=[logits, bias, bn, bn2, route_scale.reshape(1), hq, w2, w2s],
-        template=[("NE", NE), ("TOPK", topk), ("SPECK", spec_k if spec else 0), ("SPECK2", spec_k2 if spec2 else 0),
-                  ("INTER", inter), ("DIM", D)],
-        grid=(64, 1 + D // 16, 1), threadgroup=(64, 1, 1),
-        output_shapes=[(topk,), (topk,), (NE,), (max(spec_k, 1),), (max(spec_k2, 1),), (D,)],
-        output_dtypes=[mx.uint32, mx.float32, mx.float32, mx.uint32, mx.uint32, mx.float32],
-    )
+
+    def down(lg, h, off, n):
+        return _rs_down_kernel()(
+            inputs=[lg, bias, bn, bn2, route_scale.reshape(1), h, w2, w2s],
+            template=[("NE", NE), ("TOPK", topk), ("SPECK", spec_k if spec else 0), ("SPECK2", spec_k2 if spec2 else 0),
+                      ("INTER", inter), ("DIM", D), ("OFF", off)],
+            grid=(64, n, 1), threadgroup=(64, 1, 1),
+            output_shapes=[(topk,), (topk,), (NE,), (max(spec_k, 1),), (max(spec_k2, 1),), (D,)],
+            output_dtypes=[mx.uint32, mx.float32, mx.float32, mx.uint32, mx.uint32, mx.float32],
+        )
+
+    if not split:
+        idx, w, scores, pred, pred2, y = down(logits, hq, 0, 1 + D // 16)
+        return idx, w, scores, pred, pred2, xq, y
+    # split: the routing (router rows, then the top-k threadgroup) does not wait for the shared expert;
+    # the shared expert (its w13 threadgroups, then the w2 rows) is a separate pair of dispatches
+    idx, w, scores, pred, pred2, _ = down(logits, hq, 0, 1)
+    _, hq, xq = up(NG // 32, inter // 32)
+    y = down(logits, hq, 1, D // 16)[5]
     return idx, w, scores, pred, pred2, xq, y
 
 
@@ -1415,17 +1433,39 @@ def _spin_dummy():
 
 
 SPIN_ITERS = 400
+# Keep-alive cadence while waiting for a native read: one tiny kernel is queued (not waited for) every
+# HOT_TICK_US and the thread sleeps on the read's completion in between, so it wakes when the data
+# lands. 0 = the original loop (queue a tick, wait for it, check the read), which wakes only at the
+# end of a tick: ~80 us late (median) per wait, measured with trace_decode.py.
+HOT_TICK_US = int(os.environ.get("DEEPINFER_HOT_TICK_US", "60"))
+HOT_MAX_QUEUED = 32  # bound on queued keep-alive kernels (they pile up only behind real GPU work)
+
+
+def _spin():
+    return _spin_kernel()(inputs=[_spin_dummy()], template=[("ITERS", SPIN_ITERS)], grid=(32, 1, 1), threadgroup=(32, 1, 1),
+                          output_shapes=[(32,)], output_dtypes=[mx.float32])[0]
 
 
 def gpu_tick():
     """Run one tiny kernel on the default GPU stream and wait for it (keeps the GPU clocked up)."""
-    o = _spin_kernel()(inputs=[_spin_dummy()], template=[("ITERS", SPIN_ITERS)], grid=(32, 1, 1), threadgroup=(32, 1, 1),
-                       output_shapes=[(32,)], output_dtypes=[mx.float32])[0]
-    mx.eval(o)
+    mx.eval(_spin())
 
 
 def hot_wait(fut) -> None:
     """Block until `fut` (a read request) is done, keeping the GPU busy meanwhile."""
+    wait_us = getattr(fut, "wait_us", None) if HOT_TICK_US > 0 else None
+    if wait_us is None:
+        while not fut.done():
+            gpu_tick()
+        fut.result()
+        return
+    queued = []
     while not fut.done():
-        gpu_tick()
+        o = _spin()
+        mx.async_eval(o)
+        queued.append(o)
+        if wait_us(HOT_TICK_US):
+            break
+        if len(queued) >= HOT_MAX_QUEUED:
+            mx.eval(queued.pop(0))
     fut.result()

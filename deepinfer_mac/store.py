@@ -210,6 +210,12 @@ class _NReq:
     def error(self):
         return None if self.fin >= 0 else IOError("read failed or cancelled")
 
+    def wait_us(self, us: int) -> bool:
+        """Wait at most `us` microseconds (GIL released); True once the request has finished."""
+        if self.fin == 0:
+            self.fin = self.io.lib.mkio_wait_us(self.id, us)
+        return self.fin != 0
+
     def result(self):
         if self.fin == 0:
             self.fin = self.io.lib.mkio_wait(self.id)  # ctypes drops the GIL for the call
@@ -258,6 +264,7 @@ class NativeIO:
             getattr(lib, f).argtypes = [ctypes.c_int]
             getattr(lib, f).restype = None
         lib.mkio_submit_tagged.argtypes = lib.mkio_submit.argtypes + [ctypes.c_longlong]
+        lib.mkio_wait_us.argtypes, lib.mkio_wait_us.restype = [ctypes.c_int, ctypes.c_longlong], ctypes.c_int
         lib.mkio_gen.argtypes, lib.mkio_gen.restype = [ctypes.c_int], ctypes.c_long
         lib.mkio_now.argtypes, lib.mkio_now.restype = [], ctypes.c_longlong
         lib.mkio_trace_enable.argtypes, lib.mkio_trace_enable.restype = [ctypes.c_int], ctypes.c_int
@@ -539,6 +546,17 @@ class ExpertStore:
 
         self.spec_pool.submit(go)
 
+    def promote(self, key: str, ids) -> None:
+        """Needed experts whose speculative reads are still in flight jump the demand queue now
+        (instead of when the decode thread starts waiting for them)."""
+        if self.prio is None:
+            return
+        with self.lock:
+            for e in ids:
+                fut = self.inflight.get((key, int(e)))
+                if fut is not None and not getattr(fut, "high", True) and not fut.done():
+                    self.prio.promote(fut)
+
     def resident(self, key: str, e: int) -> bool:
         k = (key, int(e))
         fut = self.inflight.get(k)
@@ -580,6 +598,15 @@ class ExpertStore:
 
     def get_slots(self, key: str, ids) -> tuple[Slab, list[int]]:
         """Make `ids` resident; return their slab and slots (blocking until loaded)."""
+        slab, slots, finish = self.reserve_slots(key, ids)
+        finish()
+        return slab, slots
+
+    def reserve_slots(self, key: str, ids):
+        """get_slots in two halves: start (or keep) the reads of `ids` and return (slab, slots, finish)
+        right away -- a slot is fixed when its read is issued and stays reserved (busy) until finish() --
+        so the caller can build the graph that reads those slots while the data lands; finish() blocks
+        until it has (hot-waiting) and releases the reservation into the usual two-call pin."""
         slab = self.slabs[key]
         ids = [int(e) for e in ids]
         with self.lock:
@@ -593,32 +620,39 @@ class ExpertStore:
                 self._prefetched.discard(k)
         self.prefetch(key, ids)
         with self.lock:
-            mine = {slab.lru[(key, e)] for e in ids}
+            slots = [slab.lru[(key, e)] for e in ids]
+            mine = set(slots)
             slab.busy |= mine
-        slots = []
-        for e in ids:
-            k = (key, e)
-            fut = self.inflight.get(k)
-            if fut is not None:
-                t = time.perf_counter()
-                if self.HOT_WAIT and not fut.done():
-                    if hasattr(fut, "high") and not fut.high:
-                        self.prio.promote(fut)
-                    from .model import mk
 
-                    mk.hot_wait(fut)
-                else:
-                    fut.result()
-                self.stats["wait_s"] += time.perf_counter() - t
+        def finish():
+            for e in ids:
+                k = (key, e)
+                fut = self.inflight.get(k)
+                if fut is not None:
+                    t = time.perf_counter()
+                    if self.HOT_WAIT and not fut.done():
+                        if hasattr(fut, "high") and not fut.high:
+                            self.prio.promote(fut)
+                        from .model import mk
+
+                        mk.hot_wait(fut)
+                    else:
+                        fut.result()
+                    self.stats["wait_s"] += time.perf_counter() - t
+                    with self.lock:
+                        self.inflight.pop(k, None)
                 with self.lock:
-                    self.inflight.pop(k, None)
+                    slab.lru.move_to_end(k)
             with self.lock:
-                slab.lru.move_to_end(k)
-                slots.append(slab.lru[k])
+                slab.pins = [slab.pins[1], set(slots)]
+                slab.busy -= mine
+
+        return slab, slots, finish
+
+    def all_done(self, key: str, ids) -> bool:
+        """No read of `ids` (layer `key`) is still in flight."""
         with self.lock:
-            slab.pins = [slab.pins[1], set(slots)]
-            slab.busy -= mine
-        return slab, slots
+            return all((f := self.inflight.get((key, int(e)))) is None or f.done() for e in ids)
 
     def get(self, key: str, ids) -> list[ExpertWeights]:
         """Per-expert views (tests, benchmarks); the model uses get_slots + gather_qmm."""

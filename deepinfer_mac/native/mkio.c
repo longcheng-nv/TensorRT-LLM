@@ -320,6 +320,29 @@ int mkio_wait(int s) {
   return rc;
 }
 
+// like mkio_wait, but gives up after `us` microseconds: 1 ok, -1 error / cancelled, 0 still running.
+// The decode thread waits here between GPU keep-alive ticks, so it wakes as soon as the read lands
+// instead of at the end of a tick.
+int mkio_wait_us(int s, long long us) {
+  pthread_mutex_lock(&mu);
+  Req *r = &reqs[s];
+  if (!r->high && !r->done) {
+    pthread_mutex_unlock(&mu);
+    mkio_promote(s);
+    pthread_mutex_lock(&mu);
+  }
+  const long long end = now_ns() + us * 1000;
+  while (!r->done) {
+    const long long left = end - now_ns();
+    if (left <= 0) break;
+    struct timespec ts = {(time_t)(left / 1000000000), (long)(left % 1000000000)};
+    pthread_cond_timedwait_relative_np(&cv_done, &mu, &ts);
+  }
+  int rc = r->done ? (r->error ? -1 : 1) : 0;
+  pthread_mutex_unlock(&mu);
+  return rc;
+}
+
 // cancel a low request none of whose chunks has started; 1 if cancelled
 int mkio_cancel(int s) {
   pthread_mutex_lock(&mu);

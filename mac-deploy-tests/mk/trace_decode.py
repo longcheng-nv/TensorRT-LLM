@@ -15,6 +15,10 @@ Tracks
        "hot" covers hot-wait keep-alive ticks; "head" ends when the logits sync returns.
 Clocks: time.perf_counter_ns() and mkio's CLOCK_UPTIME_RAW are the same clock on macOS (checked at start).
 
+Since mk-7 (2026-11-17) also: the shared expert as its own GPU block after the routing sync (MoE.SPLIT_SHARED),
+the Engram value projections launched into an SSD wait (fill), and misses whose MoE graph is built before the
+read lands and launched by the decode loop after it has built the next layer's attention (MoE.pending).
+
 usage: trace_decode.py OUT.json [--lossless] [--tokens 5] [--warm 8] [--cache-gb 16]
        trace_decode.py --combine FAST.json LOSSLESS.json OUT.json      (viewer data with both runs)
 """
@@ -31,6 +35,8 @@ import numpy as np
 sys.path.insert(0, "/Users/loncheng/Models/DeepInfer-Mac")
 
 EST_US_PER_EXPERT = (234.2 + 134.8) / 6  # moe_up + moe_down per layer of 6 experts (mk_kprof, fixed-expert replay)
+EST_US_SHARED = 35.4e6 / 225e9 * 1e6  # split shared expert: 35.4 MB of mxfp8 weights at the measured ~225 GB/s
+EST_US_ENGRAM = 162e6 / 225e9 * 1e6  # one Engram value projection (engram.wkv, 162 MB)
 now = time.perf_counter_ns
 
 
@@ -75,6 +81,9 @@ def capture(a):
     o_eval, o_aeval = mx.eval, mx.async_eval
     o_gs, o_cu, o_pf, o_sp = store.get_slots, store.cancel_unneeded, store.prefetch, store.speculate
     o_hw = mk.hot_wait
+    o_rs = store.reserve_slots
+    o_res = M.Transformer._resolve_pending
+    o_kv = M.Engram.kv
 
     def dmk(self, x, bias):
         S.update(layer=int(self.key[1:]), in_dmk=True, synced=False)
@@ -109,7 +118,28 @@ def capture(a):
             r = o_aeval(*args, **kw)
             mark("aeval_ret")
             return r
+        if not S["in_dmk"] and not S["in_hot"]:  # the decode loop launches attention (ASYNC_ATTN)
+            mark("aeval_loop")
         return o_aeval(*args, **kw)
+
+    def rs(key, ids_):
+        if S["in_slab"] and not S["in_gs"]:  # deferred misses: graph built now, launched after the read lands
+            mark("reserve", {"n": len(list(ids_))})
+        return o_rs(key, ids_)
+
+    def res(launch=True):
+        if M.MoE.pending is None:
+            return o_res(launch)
+        mark("resolve_enter")
+        try:
+            return o_res(launch)
+        finally:
+            mark("resolve_exit")
+
+    def kv(self, hash_ids):
+        if S["in_slab"]:
+            mark("fill_enter")
+        return o_kv(self, hash_ids)
 
     def gs(key, ids_):
         if S["in_slab"]:
@@ -152,6 +182,9 @@ def capture(a):
     mx.eval, mx.async_eval = ev, aev
     store.get_slots, store.cancel_unneeded, store.prefetch, store.speculate = gs, cu, pf, sp
     mk.hot_wait = hw
+    store.reserve_slots = rs
+    M.Transformer._resolve_pending = staticmethod(res)
+    M.Engram.kv = kv
     stats0 = dict(store.stats)
     toks = []
     io.trace_start()
@@ -174,6 +207,9 @@ def capture(a):
         mx.eval, mx.async_eval = o_eval, o_aeval
         store.get_slots, store.cancel_unneeded, store.prefetch, store.speculate = o_gs, o_cu, o_pf, o_sp
         mk.hot_wait = o_hw
+        store.reserve_slots = o_rs
+        M.Transformer._resolve_pending = staticmethod(o_res)
+        M.Engram.kv = o_kv
     stats = {k: (store.stats[k] - stats0.get(k, 0)) if isinstance(store.stats[k], (int, float)) else store.stats[k] for k in store.stats}
     return build_run(a, mode, M, ids, toks, raw, chunks, reqs, store, stats)
 
@@ -200,26 +236,38 @@ def build_run(a, mode, M, prompt_ids, toks, raw, chunks, reqs, store, stats):
         gpu_free[0] = max(gpu_free[0], end)
 
     # walk the host markers in order; per layer the phases are contiguous
+    BUILD = "Python 构建 hc + 注意力计算图（惰性，GPU 尚未执行）"
+    split = bool(getattr(M.MoE, "SPLIT_SHARED", False))
     cur = None  # (phase, layer, t_start)
     hits_n = 0
+    attn_submit = None  # the decode loop's async launch of the next attention (ASYNC_ATTN)
+    deferred = None  # (layer, misses) whose MoE waits in MoE.pending
+    n_fill = 0
     for tag, l, t, extra in raw:
         if tag == "tok_start":
             cur = ("build", 0, t)
             gpu_free[0] = max(gpu_free[0], t)
+            attn_submit = None
+        elif tag == "aeval_loop":
+            attn_submit = t
         elif tag == "dmk_enter":
-            C(cur[0], l, cur[2], t, "Python 构建 hc + 注意力计算图（惰性，GPU 尚未执行）" if cur[0] == "build" else "")
+            C(cur[0], cur[1] if cur[0] == "build" else l, cur[2], t, BUILD if cur[0] == "build" else "")
             cur = ("route_build", l, t)
         elif tag == "sync_call":
             C("route_build", l, cur[2], t)
             sync_call = t
             cur = ("sync", l, t)
         elif tag == "sync_ret":
-            C("sync", l, cur[2], t, "等 GPU 执行注意力与路由")
+            C("sync", l, cur[2], t, "等 GPU 执行注意力与路由" + ("（共享专家已拆到同步之后）" if split else ""))
             # the attention block cannot start before queued MoE of the previous layer ends; trim estimates
             if gpu and gpu[-1]["est"] and gpu[-1]["t1"] > ms(t):
                 gpu[-1]["t1"] = ms(max(sync_call, t - 1))
                 gpu_free[0] = min(gpu_free[0], max(sync_call, t - 1))
-            G("attn", l, sync_call, t_end=t, note="hc + 注意力 + 路由；结束时刻实测，开始时刻不早于 eval 调用")
+            sub = sync_call if attn_submit is None else min(attn_submit, sync_call)
+            G("attn", l, sub, t_end=t, note="hc + 注意力 + 路由；结束时刻实测，开始时刻不早于提交（异步提交或 eval 调用）")
+            attn_submit = None
+            if split:
+                G("shared", l, t, dur_ns=int(EST_US_SHARED * 1e3), note="共享专家（拆分后排在路由同步之后执行），时长按带宽估计")
             cur = ("post", l, t)
         elif tag == "slab_enter":
             C("post", l, cur[2], t, "读回路由结果" + ("、专家替换" if M.MoE.SUB_RANK is not None else ""))
@@ -244,8 +292,35 @@ def build_run(a, mode, M, prompt_ids, toks, raw, chunks, reqs, store, stats):
             C("wait", l, cur[2], t, f"等 SSD 读完（请求 {hot_gen}），期间 hot-wait 提交保温小 kernel")
             G("hot", l, cur[2], t_end=t, note="hot-wait 保温小 kernel")
             cur = ("launch_miss", l, t)
+        elif tag == "fill_enter":
+            if cur[0] != "fill":
+                C(cur[0], l, cur[2], t)
+                cur = ("fill", l, t)
+                n_fill = 0
+            n_fill += 1
+        elif tag == "reserve":
+            C(cur[0], l, cur[2], t)
+            miss_n = extra["n"]
+            deferred = (l, miss_n)
+            cur = ("launch_miss", l, t)
+        elif tag == "resolve_enter":
+            C(cur[0], cur[1], cur[2], t, BUILD + "；上一层的读盘仍在进行" if cur[0] == "build" else "")
+            nxt_build = cur[1] if cur[0] == "build" else min(l + 1, 39)
+            cur = ("wait", l, t)
+        elif tag == "resolve_exit":
+            C(cur[0], l, cur[2], t, "读盘完成：未命中专家的 MoE 与下一层注意力一起提交" if cur[0] == "launch_miss" else "")
+            if deferred is not None:
+                dl, dn = deferred
+                G("moe", dl, t, dur_ns=int(EST_US_PER_EXPERT * 1e3 * max(1, dn)),
+                  note=f"未命中专家 ×{dn}（图在等盘前已构建，读完后提交），时长估计")
+                deferred = None
+            cur = ("build", nxt_build, t)
         elif tag == "aeval_ret":
-            if cur[0] == "launch_hit":
+            if cur[0] == "fill":
+                C("other", l, cur[2], t, f"Engram 值投影 ×{n_fill}：取表行、构建并提交（填进等盘时的 GPU 空档）")
+                G("engram", l, t, dur_ns=int(EST_US_ENGRAM * 1e3 * n_fill), note=f"Engram 值投影 ×{n_fill}（engram.wkv GEMV），时长按带宽估计")
+                cur = ("other", l, t)
+            elif cur[0] == "launch_hit":
                 C("launch_hit", l, cur[2], t, f"命中 {hits_n} 个专家")
                 G("moe", l, t, dur_ns=int(EST_US_PER_EXPERT * 1e3 * max(1, hits_n)), note=f"命中专家 ×{hits_n}，时长估计")
                 cur = ("io_issue", l, t)

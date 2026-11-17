@@ -19,7 +19,7 @@ import sys
 import time
 
 CPU_KINDS = {"build", "route_build", "sync", "post", "launch_hit", "io_issue", "wait", "launch_miss", "tail", "other"}
-GPU_KINDS = {"attn", "moe", "hot", "head"}
+GPU_KINDS = {"attn", "moe", "shared", "engram", "hot", "head"}
 IO_NAME = re.compile(r"^(spec|demand) L(\d+) e(\d+)$")
 
 

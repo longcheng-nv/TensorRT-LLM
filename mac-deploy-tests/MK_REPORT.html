@@ -182,7 +182,7 @@ footer.foot{border-top:1px solid var(--rule);padding-top:14px;color:var(--fg-3);
   <div class="wrap">
     <span class="eyebrow">DSV4.1-Flash · M4 Pro 48 GB · BS=1 解码</span>
     <nav class="toc" aria-label="章节">
-      <a href="#summary">结论</a><a href="#work">做了什么</a><a href="#frontier">速度—质量</a><a href="#why">无损上限</a><a href="#use">怎么用</a><a href="#next">还能做什么</a>
+      <a href="#summary">结论</a><a href="#work">做了什么</a><a href="#mk7">mk-7</a><a href="#frontier">速度—质量</a><a href="#why">无损上限</a><a href="#use">怎么用</a><a href="#next">还能做什么</a>
     </nav>
   </div>
 </header>
@@ -193,8 +193,8 @@ footer.foot{border-top:1px solid var(--rule);padding-top:14px;color:var(--fg-3);
   <h1 id="t-summary">DSV4.1-Flash 单用户解码优化</h1>
   <p class="lede">在 48 GB 的 M4 Pro 上做 BS=1 解码：megakernel 把计算路径从 87 压到 68 ms/token，但端到端瓶颈是 SSD 读专家。TPS=10 只在有损的缓存感知路由（<code>--fast</code>）下达到。</p>
   <div class="meta">
-    <span>日期 2026-11-16</span>
-    <span>引擎分支 deepinfer-mac-dsv41-flash（DeepInfer-Mac，提交 mk-1 … mk-6，基于 opt/compute-side）</span>
+    <span>日期 2026-11-16（mk-7：2026-11-17）</span>
+    <span>引擎分支 deepinfer-mac-dsv41-flash（DeepInfer-Mac，提交 mk-1 … mk-7，基于 opt/compute-side）</span>
     <span>专家缓存 --cache-gb 16（CLAUDE.md 上限）</span>
   </div>
 
@@ -276,7 +276,7 @@ footer.foot{border-top:1px solid var(--rule);padding-top:14px;color:var(--fg-3);
       <tbody>
         <tr><td>计算路径（专家全部命中、无 SSD）</td><td class="num">87 ms/token（11.5 tok/s）</td><td class="num"><strong>68 ms/token（14.7 tok/s）</strong></td><td>megakernel 后 GPU 内核合计 ~54 ms（各 kernel 无依赖回放吞吐之和），权重带宽下限 ~41 ms（峰值带宽）；新的两次 dispatch 稀疏注意力再省 2.0 ms/token（4K 上下文 5.4 ms/token；电池供电下同会话 A/B）</td></tr>
         <tr><td>无损端到端解码（中位）</td><td>3.4 tok/s（单个提示，<code>scripts/decode_speed.py</code>）</td><td><strong>4.7 tok/s</strong>（4 类提示各 200 token；同一提示为 4.58 tok/s）</td><td>SSD 受限</td></tr>
-        <tr class="em"><td><code>--fast</code>（有损，<code>--sub-rank 2 --spec-k 2</code>；CLI 默认）</td><td>—</td><td><strong>10.2–10.6 tok/s</strong>（4 类提示 200 token 稳态，中位/均值）；<strong>经 HTTP 服务流式实测 10.06 tok/s</strong>（4 个提示各 300 token，含开头预热）；最终代码不加参数（默认模式）实测 <strong>10.13 tok/s</strong>（2026-11-17，电池供电）</td><td>达到 TPS=10；质量代价见下</td></tr>
+        <tr class="em"><td><code>--fast</code>（有损，<code>--sub-rank 2 --spec-k 2</code>；CLI 默认）</td><td>—</td><td><strong>10.2–10.6 tok/s</strong>（4 类提示 200 token 稳态，中位/均值）；<strong>经 HTTP 服务流式实测 10.06 tok/s</strong>（4 个提示各 300 token，含开头预热）；最终代码不加参数（默认模式）实测 <strong>10.13 tok/s</strong>（2026-11-17，电池供电）；<strong>mk-7 后 HTTP 实测 10.53 tok/s</strong>（接电源，4 个提示 10.45 / 9.47 / 11.38 / 10.83）</td><td>达到 TPS=10；质量代价见下；mk-7 见下文</td></tr>
       </tbody>
     </table>
   </div>
@@ -354,6 +354,42 @@ footer.foot{border-top:1px solid var(--rule);padding-top:14px;color:var(--fg-3);
     <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5 15 14H1z" fill="currentColor"/><path d="M8 6v4M8 11.6v.4" stroke="#0b0b0b" stroke-width="1.5" stroke-linecap="round"/></svg>
     <p><strong>更正（稀疏注意力）</strong>：此前报告的「注意力核心 ~100 µs/层 → 30 µs」是把各层调用无数据依赖地批量回放得到的吞吐，多个 kernel 可以重叠执行，不代表解码时的时延。按解码方式串行测，原来的单 dispatch 版本在 4K 上下文为 195 µs/层，比参考算子链（133 µs）还慢。现已改为两次并行 dispatch 版本。逐元素比对：新旧 kernel 在短上下文完全一致，4K 上下文 40 层中有 5 层各差 1 个元素；新 kernel 与参考算子链每层至多 12 / 32768 个输出元素相差一个 fp8 量化步（最差余弦 0.9999996），与旧 kernel 对参考的差异相同；ring 逐位一致。<code>DEEPINFER_MK_ATTN_SPLIT=0</code> 可切回旧版。表中其他单项 kernel 数字同样是无依赖回放的吞吐；端到端数字（计算路径、各解码 tok/s）是解码循环实测，不受影响。数据：<code>logs/mk/attn_speedup_split2_rerun.log</code>（逐层时延）、<code>logs/mk/attn_e2e.log</code>（解码循环 A/B）、<code>logs/mk/multi_prompt_split_ab.log</code>（实际解码 A/B）、<code>logs/mk/attn_exactness.log</code>（逐元素比对）。</p>
   </div>
+</section>
+
+<section id="mk7" aria-labelledby="t-mk7">
+  <h2 id="t-mk7">mk-7（2026-11-17）：解码循环的重叠</h2>
+  <p>接电源重新采集时间线后，把每层串行链上不必要的等待挪开。四项都不改数学（每个输出元素的计算方式不变），只改提交顺序，两种模式默认开启；每项可用环境变量关闭以做对照。</p>
+  <div class="tbl">
+    <table>
+      <thead><tr><th>改动</th><th>做法</th><th>环境变量</th><th>默认</th></tr></thead>
+      <tbody>
+        <tr><td><strong>路由与共享专家拆开</strong></td><td><code>rs_up</code> / <code>rs_down</code> 加 threadgroup 偏移，路由（router 行 + top-k）和共享专家（w13 + w2，约 35 MB）分成两组 dispatch；路由同步只等路由，共享专家排在其后，与主机读回路由、提交命中专家并行</td><td><code>DEEPINFER_SPLIT_SHARED</code></td><td><span class="chip good"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.2 6.3 4.8 8.8 9.8 3.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>开</span></td></tr>
+        <tr><td><strong>未命中专家延迟提交</strong></td><td>有读盘的层用已分配的槽位先构建未命中 MoE 的计算图并立即返回；解码循环先构建下一层的 hc + 注意力图，再等读盘，读完后与下一层注意力一起提交（<code>ExpertStore.reserve_slots</code> 把 <code>get_slots</code> 拆成两半）</td><td><code>DEEPINFER_DEFER_MISS</code></td><td><span class="chip good"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.2 6.3 4.8 8.8 9.8 3.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>开</span></td></tr>
+        <tr><td><strong>Engram 值投影提前</strong></td><td>两个 Engram 层的 wkv GEMV（各 162 MB，只依赖 token）移出第 1 / 14 层的路由路径，改在第一个要等新读盘的层提交，填进 GPU 空档</td><td><code>DEEPINFER_ENGRAM_EARLY</code></td><td><span class="chip good"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.2 6.3 4.8 8.8 9.8 3.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>开</span></td></tr>
+        <tr><td><strong>等盘按完成信号唤醒</strong></td><td>原生 IO 新增 <code>mkio_wait_us</code>（条件变量限时等待）；hot-wait 每 60 µs 提交一个不等待的保温 kernel，其间睡在读盘完成信号上。醒来延迟中位数 80 → 34 µs；保温效果不变（等盘后的 GEMV 均为 315–340 µs，完全空闲时为 660–1190 µs）</td><td><code>DEEPINFER_HOT_TICK_US</code>（0 = 原方式）</td><td><span class="chip good"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.2 6.3 4.8 8.8 9.8 3.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>开</span></td></tr>
+        <tr><td>先发读盘再提交命中专家</td><td>有新读盘的层先发读盘；在上面几项之上测不出收益（−3.7 vs −4.1 ms/token）</td><td><code>DEEPINFER_IO_FIRST</code></td><td><span class="chip">关</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p><strong>测法。</strong>不同进程之间的速度波动有 ±3–5%（缓存历史、后台负载、GPU 时钟），会盖过 1–3% 的改动：同一套代码先后两次独立运行的均值就差了 5 ms/token。所以改用同一进程内逐 token 轮换配置（<code>mac-deploy-tests/mk/ab_interleaved.py</code>）：6 类提示，每种配置至少 500 个 token，取相邻 token 的配对差，用 bootstrap 估 95% 区间。</p>
+  <div class="tbl">
+    <table>
+      <thead><tr><th>配置（默认 <code>--fast</code>，接电源）</th><th>平均 ms/token</th><th>tok/s</th><th>相对 mk-6（95% 区间）</th></tr></thead>
+      <tbody>
+        <tr><td>mk-6</td><td class="num">101.5</td><td class="num">9.86</td><td class="num">—</td></tr>
+        <tr><td>+ Engram 提前 + 快速唤醒 + 延迟提交</td><td class="num">99.3</td><td class="num">10.07</td><td class="num">−2.1 ms [−3.4, −0.7]</td></tr>
+        <tr class="em"><td><strong>+ 路由 / 共享专家拆分（mk-7）</strong></td><td class="num"><strong>95.2</strong></td><td class="num"><strong>10.51</strong></td><td class="num"><strong>−6.25 ms [−7.5, −5.0]</strong></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>6 类提示每一类都变快。无损模式受 SSD 吞吐限制，测不出变化：+0.4 ms [−4.8, +5.8]（780 个 token）。HTTP 服务实测（最终代码不加参数，接电源）为 <strong>10.53 tok/s</strong>（4 个提示 10.45 / 9.47 / 11.38 / 10.83；生成代码的提示仍低于 10）。API 端到端：无损 <strong>28/28</strong>，默认 27/28（只挂「贪心两次一致」这项确定性测试，<code>--fast</code> 本来就不可复现）。</p>
+  <p><strong>正确性。</strong></p>
+  <ul class="plain">
+    <li><code>test_mk_forward.py --cache-gb 6</code>：关掉推测，让每个未命中层都走延迟提交，新旧两条路径 12 步的 logits 指标逐位相同，与参考实现的 argmax 12/12 一致。</li>
+    <li><code>test_mk_router_split.py</code>：拆分后的路由 kernel 与原 kernel 逐位相同（4 层 × 3 组输入 × 3 种推测设置）。</li>
+    <li>无损模式 16 GiB：新旧路径各解码 2 个提示 × 60 token，logits 逐位相同。</li>
+  </ul>
+  <p>无损模式的 logits 本来就不保证逐位可复现。专家按「命中 / 未命中」分两组分别累加，分组取决于缓存状态和读盘时序。旧代码自己连跑两次，也会在某个提示上出现约 1e-2 的相对差，但 token 一致。</p>
 </section>
 
 <section id="frontier" aria-labelledby="t-frontier">
@@ -528,7 +564,7 @@ footer.foot{border-top:1px solid var(--rule);padding-top:14px;color:var(--fg-3);
   <h2 id="t-use">怎么用</h2>
   <div class="cmds">
     <div class="cmd">
-      <div class="cmd-head"><span>默认：--fast（有损，约 10 tok/s，输出不可复现；融合 kernel 默认开启）</span><button class="copy" type="button" data-copy="cmd-1">复制</button></div>
+      <div class="cmd-head"><span>默认：--fast（有损，约 10.5 tok/s，输出不可复现；融合 kernel 默认开启）</span><button class="copy" type="button" data-copy="cmd-1">复制</button></div>
 <pre id="cmd-1">cd /Users/loncheng/Models/DeepInfer-Mac
 .venv/bin/python -m deepinfer_mac serve --model /Users/loncheng/Models/dsv41-mac --cache-gb 16 --port 8000</pre>
     </div>
@@ -550,7 +586,8 @@ footer.foot{border-top:1px solid var(--rule);padding-top:14px;color:var(--fg-3);
   <ol class="plain">
     <li><strong>更大的专家缓存最有效</strong>（需要关掉其他应用、放宽 CLAUDE.md 的 16 GiB 上限）：24 GiB 时读盘 −22%，<code>--sub-rank 3</code> 有望接近 10 TPS。</li>
     <li><strong>外置 Thunderbolt 5 SSD 与内置盘条带化</strong>（专家文件分两半）：SSD 带宽翻倍是唯一能直接解决无损瓶颈的硬件手段。</li>
-    <li><strong>GPU 侧专家调度</strong>（命中专家不等 CPU 同步）：逐层同步的总开销约 6 ms/token（计算路径实测：无逐层同步 61.6 ms 对比有同步 67.8 ms），这是上限；其中路由同步到首个 MoE kernel 的 CPU 侧延迟实测 ~67 µs/层（≈ 2.7 ms/token）。</li>
+    <li><strong>GPU 侧专家调度</strong>（命中专家不等 CPU 同步）：逐层同步的总开销约 6 ms/token（计算路径实测：无逐层同步 61.6 ms 对比有同步 67.8 ms），这是上限；其中路由同步到首个 MoE kernel 的 CPU 侧延迟实测 ~67 µs/层（≈ 2.7 ms/token）。mk-7 的路由 / 共享专家拆分已经让共享专家填进这段延迟。</li>
+    <li><strong>默认模式下剩下的大头是 SSD 等待</strong>（第 1–2 名专家未命中时的需求读，以及来不及读完的推测读）。不改质量时，缓存从 16 GiB 加到 24 GiB 收益最大（需要放宽 CLAUDE.md 上限）。</li>
   </ol>
 </section>
 

@@ -272,8 +272,8 @@ footer.foot{border-top:1px solid var(--rule);padding-top:14px;color:var(--fg-3);
       <h3>各泳道</h3>
       <ul class="plain tight">
         <li><strong>Token / 层：</strong>上半格是 token 编号与墙钟，下半格按层交替着色；放大后显示层号。悬停可看 token 或层的时长。</li>
-        <li><strong>CPU 主线程：</strong>每层依次是构建 → 构建路由图 → 路由同步 → 读回 → 提交命中 MoE → 下发读盘 → 等盘 → 提交未命中 MoE；token 末尾是 head 与采样。「路由同步」是在等 GPU，「等盘」是在等需求读。</li>
-        <li><strong>GPU（推断）：</strong>没有 GPU 时间戳。注意力块的结束是路由同步返回的时刻（实测），开始取提交时刻与上一块结束中较晚者；MoE 块按专家数估计时长（斜线、半透明）；等盘期间的灰块是 hot-wait 保温 kernel，用来防止 GPU 降频。</li>
+        <li><strong>CPU 主线程：</strong>每层依次是构建 → 构建路由图 → 路由同步 → 读回 → 提交命中 MoE → 下发读盘 → 等盘 → 提交未命中 MoE；token 末尾是 head 与采样。「路由同步」是在等 GPU，「等盘」是在等需求读。mk-7 起，有读盘的层先构建未命中 MoE 的图并返回，等盘挪到下一层的构建之后（等盘块落在下一层的构建与路由图之间）；第一个要等新读盘的层还会提交 Engram 值投影。</li>
+        <li><strong>GPU（推断）：</strong>没有 GPU 时间戳。注意力块的结束是路由同步返回的时刻（实测），开始取提交时刻与上一块结束中较晚者；MoE、共享专家与 Engram 块的时长为估计（斜线、半透明）；等盘期间的灰块是 hot-wait 保温 kernel，用来防止 GPU 降频。</li>
         <li><strong>SSD IO：</strong>每行一个原生 IO 线程，每块约 2 MB，一个专家 15.5 MB 约 8 块。颜色按块开始时的优先级：需求读在前，推测预取低优先级；<svg class="lg-mk" viewBox="0 0 12 12" aria-hidden="true" style="vertical-align:-1px"><path class="ink" d="M1 1h8L1 9z"/></svg> 表示该推测请求后来被提升为需求读，<svg class="lg-mk" viewBox="0 0 12 12" aria-hidden="true" style="vertical-align:-1px"><path class="ink-line" d="M2 2l8 8M10 2l-8 8"/></svg> 表示被取消（剩余块不再读）。</li>
         <li><strong>汇总表：</strong>与时间线同源，切换运行后一起更新；它也是本页的可访问数据视图。</li>
       </ul>
@@ -320,6 +320,8 @@ footer.foot{border-top:1px solid var(--rule);padding-top:14px;color:var(--fg-3);
   var GPU_KINDS = [
     { k: "attn", label: "hc+注意力+路由（结束时刻实测）", short: "注意力", c: "k1" },
     { k: "moe", label: "MoE 专家（斜线：时长估计）", short: "MoE", c: "k2" },
+    { k: "shared", label: "共享专家（路由同步之后，估计）", short: "共享专家", c: "k4" },
+    { k: "engram", label: "Engram 值投影（填进等盘空档，估计）", short: "Engram", c: "k5" },
     { k: "hot", label: "hot-wait 保温小 kernel", short: "保温", c: "kn2" },
     { k: "head", label: "head / logits", short: "head", c: "k3" },
     { k: "other", label: "其他", short: "其他", c: "kn1" }
