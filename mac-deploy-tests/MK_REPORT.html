@@ -276,7 +276,7 @@ footer.foot{border-top:1px solid var(--rule);padding-top:14px;color:var(--fg-3);
       <tbody>
         <tr><td>计算路径（专家全部命中、无 SSD）</td><td class="num">87 ms/token（11.5 tok/s）</td><td class="num"><strong>68 ms/token（14.7 tok/s）</strong></td><td>megakernel 后 GPU 内核合计 ~54 ms（各 kernel 无依赖回放吞吐之和），权重带宽下限 ~41 ms（峰值带宽）；新的两次 dispatch 稀疏注意力再省 2.0 ms/token（4K 上下文 5.4 ms/token；电池供电下同会话 A/B）</td></tr>
         <tr><td>无损端到端解码（中位）</td><td>3.4 tok/s（单个提示，<code>scripts/decode_speed.py</code>）</td><td><strong>4.7 tok/s</strong>（4 类提示各 200 token；同一提示为 4.58 tok/s）</td><td>SSD 受限</td></tr>
-        <tr class="em"><td><code>--fast</code>（有损，<code>--sub-rank 2 --spec-k 2</code>；CLI 默认）</td><td>—</td><td><strong>10.2–10.6 tok/s</strong>（4 类提示 200 token 稳态，中位/均值）；<strong>经 HTTP 服务流式实测 10.06 tok/s</strong>（4 个提示各 300 token，含开头预热）</td><td>达到 TPS=10；质量代价见下</td></tr>
+        <tr class="em"><td><code>--fast</code>（有损，<code>--sub-rank 2 --spec-k 2</code>；CLI 默认）</td><td>—</td><td><strong>10.2–10.6 tok/s</strong>（4 类提示 200 token 稳态，中位/均值）；<strong>经 HTTP 服务流式实测 10.06 tok/s</strong>（4 个提示各 300 token，含开头预热）；最终代码不加参数（默认模式）实测 <strong>10.13 tok/s</strong>（2026-11-17，电池供电）</td><td>达到 TPS=10；质量代价见下</td></tr>
       </tbody>
     </table>
   </div>
@@ -302,7 +302,7 @@ footer.foot{border-top:1px solid var(--rule);padding-top:14px;color:var(--fg-3);
       </tbody>
     </table>
   </div>
-  <p>所有 kernel 均对照 MLX 参考链验证（多数逐位一致，其余在 fp32 求和顺序误差内）；端到端偏差与「只改 fp32 求和分组」的偏差同量级（模型对数值扰动本身是混沌的）。<code>pytest tests/</code> 33/33 通过；部署期的 API 端到端套件 <code>test_api_e2e.py</code> 在新引擎的无损模式（<code>--lossless</code>）上 <strong>28/28 通过</strong>（流式、贪心确定性 + logprobs、seed、多轮前缀复用、工具调用、JSON schema + thinking、6K/12K 长上下文 needle、视觉、/v1/messages、/v1/responses）。</p>
+  <p>所有 kernel 均对照 MLX 参考链验证（多数逐位一致，其余在 fp32 求和顺序误差内）；端到端偏差与「只改 fp32 求和分组」的偏差同量级（模型对数值扰动本身是混沌的）。<code>pytest tests/</code> 33/33 通过；部署期的 API 端到端套件 <code>test_api_e2e.py</code> 在新引擎的无损模式（<code>--lossless</code>）上 <strong>28/28 通过</strong>（最终代码 2026-11-17 复测相同）（流式、贪心确定性 + logprobs、seed、多轮前缀复用、工具调用、JSON schema + thinking、6K/12K 长上下文 needle、视觉、/v1/messages、/v1/responses）。</p>
 
   <figure class="fig" id="fig-attn">
     <div class="fig-head">
@@ -471,7 +471,7 @@ footer.foot{border-top:1px solid var(--rule);padding-top:14px;color:var(--fg-3);
   <p>规律：速度与质量代价都随「被替换的专家数」近似线性变化；替换优于丢弃；分数差（gap）限制每次替换的质量代价最低，但换来的速度也少。</p>
   <div class="note">
     <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5 15 14H1z" fill="currentColor"/><path d="M8 6v4M8 11.6v.4" stroke="#0b0b0b" stroke-width="1.5" stroke-linecap="round"/></svg>
-    <p><strong><code>--fast</code> 功能回归：API 端到端套件 26/28 通过</strong>：精确答案、生成代码可执行、JSON schema、工具调用、6K/12K 长上下文检索、视觉全部通过；失败的 2 项是「同一贪心请求两次输出一致」与「同 seed 可复现」。这是缓存感知路由的固有性质：替换哪个专家取决于当时缓存里有什么（受之前的请求和 SSD 时序影响），所以 <strong><code>--fast</code> 的输出不可复现</strong>；需要确定性输出时请加 <code>--lossless</code>。</p>
+    <p><strong><code>--fast</code> 功能回归：API 端到端套件 26/28 通过</strong>（最终代码默认模式 2026-11-17 复测相同）：精确答案、生成代码可执行、JSON schema、工具调用、6K/12K 长上下文检索、视觉全部通过；失败的 2 项是「同一贪心请求两次输出一致」与「同 seed 可复现」。这是缓存感知路由的固有性质：替换哪个专家取决于当时缓存里有什么（受之前的请求和 SSD 时序影响），所以 <strong><code>--fast</code> 的输出不可复现</strong>；需要确定性输出时请加 <code>--lossless</code>。</p>
   </div>
 </section>
 
