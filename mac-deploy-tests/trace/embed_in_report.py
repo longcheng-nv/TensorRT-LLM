@@ -14,6 +14,8 @@ import re
 import sys
 
 EMBED_CSS = ('<style id="embedded-in-report">header.top,#intro,footer.foot{display:none!important}'
+             'main.wrap,.wrap{max-width:none!important}'  # the report widens the frame to the browser width ...
+             '#summary,#howto{width:100%;max-width:960px;margin-left:auto;margin-right:auto}'  # ... text stays in the column
              'main.wrap{padding-top:0!important}h2 .num{display:none}'
              'body{padding-left:0!important;padding-right:0!important;padding-bottom:8px!important}</style>')
 
@@ -22,13 +24,29 @@ SECTION = """<!-- TIMELINE:BEGIN -->
   <h2 id="t-timeline"><span class="num">06</span>解码时间线（实测，类似 nsys）</h2>
   <p>真实引擎上逐 token 的事件时间线，默认 <code>--fast</code> 与 <code>--lossless</code> 各预热 8 个 token 后连续记录 5 个。CPU 轨是主线程每层的各个阶段；SSD 轨来自原生 IO 层的追踪（每个 2 MB 块、所在 IO 线程、需求读 / 推测读）；GPU 轨是推断的：本机拿不到 GPU 时间戳，注意力块的结束时刻取路由同步返回的实测值，MoE 块的时长为估计。采集时为电池供电，且插桩有少量开销，所以每 token 比本报告其余（接电源）数字慢。</p>
   <p class="muted" style="font-size:13px">滚轮缩放、拖动平移，选择单个 token 可放大；悬停或聚焦查看详情。同一份数据的独立页面在 <code>trace/DECODE_TRACE.html</code>；Perfetto 格式在 <code>trace/perfetto_fast.json</code>、<code>trace/perfetto_lossless.json</code>（可拖进 ui.perfetto.dev 或 Chrome 的 chrome://tracing）。采集脚本 <code>mac-deploy-tests/mk/trace_decode.py</code>。</p>
-  <iframe id="tl-frame" title="解码时间线查看器" style="display:block;width:100%;height:1500px;border:0;background:var(--bg)"></iframe>
+  <div id="tl-bleed" style="align-self:flex-start;max-width:none;width:100%">
+    <iframe id="tl-frame" title="解码时间线查看器" style="display:block;width:100%;height:1500px;border:0;background:var(--bg)"></iframe>
+  </div>
   <script type="text/plain" id="tl-src">__B64__</script>
   <script>
   (function () {
     "use strict";
     var f = document.getElementById("tl-frame"), src = document.getElementById("tl-src");
+    var box = document.getElementById("tl-bleed"), sec = document.getElementById("timeline");
     if (!f || !src) return;
+    // full-bleed: the timeline spans the browser width (minus the page gutters); the text column is untouched
+    function bleed() {
+      if (!box || !sec) return;
+      var cs = getComputedStyle(document.body);
+      var gl = parseFloat(cs.paddingLeft) || 16, gr = parseFloat(cs.paddingRight) || 16;
+      var vw = document.documentElement.clientWidth;  // excludes a classic scrollbar
+      var r = sec.getBoundingClientRect();
+      var w = Math.max(r.width, vw - gl - gr);
+      box.style.width = w + "px";
+      box.style.marginLeft = Math.min(0, gl - r.left) + "px";
+    }
+    bleed();
+    window.addEventListener("resize", bleed);
     try {
       var bin = atob(src.textContent.trim()), u8 = new Uint8Array(bin.length);
       for (var i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
