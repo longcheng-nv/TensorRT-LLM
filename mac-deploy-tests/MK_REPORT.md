@@ -6,7 +6,7 @@
 | 指标 | 本轮开始 | 现在 | 说明 |
 |---|---|---|---|
 | 计算路径（专家全部命中、无 SSD）| 87 ms/token（11.5 tok/s）| **68 ms/token（14.7 tok/s）** | megakernel 后 GPU 内核合计 ~54 ms（各 kernel 无依赖回放吞吐之和），权重带宽下限 ~41 ms（峰值带宽）；新的两次 dispatch 稀疏注意力再省 2.0 ms/token（4K 上下文 5.4 ms/token；电池供电下同会话 A/B）|
-| 无损端到端解码（中位）| 3.4 tok/s（单个提示，`scripts/decode_speed.py`）| **4.7 tok/s**（4 类提示各 200 token；同一提示为 4.58 tok/s）| SSD 受限 |
+| 无损端到端解码（中位）| 3.4 tok/s（单个提示，`scripts/decode_speed.py`）| **4.7 tok/s**（4 类提示各 200 token；同一提示为 4.58 tok/s）；mk-7 后 HTTP 实测 4.56 tok/s（接电源，与默认模式同法，4 个提示 4.11–4.92）；进程内 4 类提示各 200 token：中位 4.45、按总耗时 4.04 tok/s | SSD 受限；中位会高估实际吞吐 |
 | `--fast`（有损，`--sub-rank 2 --spec-k 2`；CLI 默认）| — | **10.2–10.6 tok/s**（4 类提示 200 token 稳态，中位/均值）；**经 HTTP 服务流式实测 10.06 tok/s**（4 个提示各 300 token，含开头预热）；最终代码不加参数（默认模式）实测 **10.13 tok/s**（2026-11-17，电池供电）；**mk-7 后 HTTP 实测 10.53 tok/s**（接电源，4 个提示 10.45 / 9.47 / 11.38 / 10.83）| 达到 TPS=10；质量代价见下；mk-7 见下文 |
 
 **TPS=10 只在有损的「缓存感知路由」下达到。** 16 GiB 缓存时 LRU 命中率约 67%，每 token 约 78 次专家读盘 × 约 2.3–2.4 ms（平均约 14.5 MB / 6 GB/s；3/3/3 位宽层 15.5 MB）；即使未来全知的 Belady 缓存也要约 46 次读盘（约 100–110 ms，已超过 100 ms 预算），所以无损 10 TPS 在这台机器上不可达。kernel 融合只能压缩计算（87→68 ms），压不掉 SSD。
@@ -87,7 +87,7 @@
 cd /Users/loncheng/Models/DeepInfer-Mac
 # 默认：--fast（有损，约 10.5 tok/s，输出不可复现；融合 kernel 默认开启）
 .venv/bin/python -m deepinfer_mac serve --model /Users/loncheng/Models/dsv41-mac --cache-gb 16 --port 8000
-# 无损（确定性、可复现，约 4.5–4.7 tok/s）
+# 无损（确定性、可复现，约 4.5 tok/s）
 .venv/bin/python -m deepinfer_mac serve --model /Users/loncheng/Models/dsv41-mac --cache-gb 16 --lossless --port 8000
 # 关闭融合 kernel（回到参考 MLX 路径）
 ... --no-mk
