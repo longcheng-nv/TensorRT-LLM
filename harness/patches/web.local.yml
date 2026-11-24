@@ -1,0 +1,64 @@
+# DeepSeek Harness overlay: the shipped `web` profile (browser UI) on the local DeepInfer-Mac
+# server. Passed with `dsh web --patch <this file>` by `dsv41 web`. Patches replace a row's whole
+# config, so every overridden row restates the fields it keeps.
+#
+# Environment knobs (set by harness/dsv41): DEEPSEEK_BASE_URL, DSV41_CONTEXT, DSV41_MAX_TOKENS,
+# DSH_PERMISSION_MODE (read-only | workspace-write (default) | danger-full-access).
+
+# Local endpoint: smaller context window (cold prefill runs ~140 tok/s), bounded output, and no
+# 5-minute stream-idle cutoff (a long cold prefill sends nothing for minutes).
+- id: llm-deepseek
+  name: '@deepseek-ai/dsh-llm-deepseek-api-key'
+  config:
+    apiKeyEnv: DEEPSEEK_API_KEY
+    defaultContextWindow: !!js Number(process.env.DSV41_CONTEXT ?? 65536)
+    maxTokens: !!js Number(process.env.DSV41_MAX_TOKENS ?? 16384)
+    streamIdleTimeoutMs: 172800000
+    models:
+      - id: deepseek-flash
+        name: DeepSeek-V4.1-Flash (local DeepInfer-Mac)
+        contextWindow: !!js Number(process.env.DSV41_CONTEXT ?? 65536)
+        maxTokens: !!js Number(process.env.DSV41_MAX_TOKENS ?? 16384)
+        inputModalities: [text, image]
+        systemPromptUpdate: in-history
+        toolUpdate: addition-only
+
+# New sessions start in the Minimal agent (the model card's DSH Minimal scaffold, ~700-token
+# prompt); Standard / PTC stay selectable in the UI but carry a much larger prompt.
+- id: agent-preset-registry
+  name: '@deepseek-ai/dsh-agent-preset-registry'
+  config:
+    default: minimal
+
+# No LLM session titles: an extra model request per session that would queue behind / evict the
+# single prefix cache of the local server. The deterministic fallback title stays.
+- id: session-title-llm
+  disabled: true
+
+# Never upload session records (the shipped default uploads the session prefix to DeepSeek's
+# collector whenever feedback or a rating is given).
+- id: session-telemetry-otel
+  name: '@deepseek-ai/dsh-session-telemetry-otel'
+  config:
+    mode: DISABLED
+    shutdownTimeoutMillis: 3000
+    maxRequestBytes: 4000000
+    exporter:
+      url: http://127.0.0.1:9/disabled
+      compression: gzip
+      timeoutMillis: 1000
+    processor:
+      scheduledDelayMillis: 10000
+      maxQueueSize: 2048
+      maxExportBatchSize: 2048
+      exportTimeoutMillis: 1500
+
+# Provider-side upload extensions (whole Session log, plugin inventory): ignored by the local server.
+- id: session-log-deepseek
+  name: '@deepseek-ai/dsh-session-log-deepseek'
+  config:
+    enabled: false
+- id: plugin-package-inventory-deepseek
+  name: '@deepseek-ai/dsh-plugin-package-inventory-deepseek'
+  config:
+    enabled: false

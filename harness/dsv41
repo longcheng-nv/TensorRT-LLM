@@ -1,0 +1,181 @@
+#!/usr/bin/env bash
+# dsv41 — DeepSeek-V4.1-Flash on this Mac, driven by DeepSeek Harness, from one command.
+#
+#   dsv41                     terminal agent in the current directory (starts the model server if needed)
+#   dsv41 -p "question"       one prompt, then exit            (all chat options: dsv41 chat --help)
+#   dsv41 --resume            continue the last session of this directory
+#   dsv41 web                 DeepSeek Harness browser UI (http://127.0.0.1:3080), Minimal agent by default
+#   dsv41 serve [--lossless] [--cache-gb N]   start only the model server (background)
+#   dsv41 stop | restart | status | log
+#   dsv41 test [--quick]      acceptance test of the whole stack
+#
+# Environment: DSV41_CACHE_GB (6-16, default: doctor's estimate from free memory), DSV41_MODE
+# (fast|lossless), DSV41_EFFORT (off|low|high|max, default low), DSV41_CONTEXT (65536),
+# DSV41_MAX_TOKENS (16384), DSV41_PORT (8000), DSH_PERMISSION_MODE (workspace-write).
+set -euo pipefail
+
+self="${BASH_SOURCE[0]}"
+while [ -L "$self" ]; do
+  link="$(readlink "$self")"
+  case "$link" in /*) self="$link" ;; *) self="$(dirname "$self")/$link" ;; esac
+done
+HARNESS="$(cd "$(dirname "$self")" && pwd)"
+ENGINE="$(cd "$HARNESS/.." && pwd)"                       # DeepInfer-Mac checkout
+MODELS="$(cd "$ENGINE/.." && pwd)"                        # ~/Models
+MODEL_DIR="${DSV41_MODEL:-$MODELS/dsv41-mac}"
+DSH_ROOT="${DSV41_DSH_ROOT:-$MODELS/dsh}"                 # venv/ (official SDK + runtime), home/ (DSH_HOME), run/
+RUN="$DSH_ROOT/run"
+PORT="${DSV41_PORT:-8000}"
+BASE="http://127.0.0.1:$PORT"
+PY_ENGINE="$ENGINE/.venv/bin/python"
+PY_DSH="$DSH_ROOT/venv/bin/python"
+mkdir -p "$RUN"
+
+export DSH_HOME="${DSH_HOME:-$DSH_ROOT/home}"
+export DEEPSEEK_BASE_URL="$BASE"
+export DEEPSEEK_API_KEY="${DEEPSEEK_API_KEY_LOCAL:-local}"   # the local server ignores it; the harness wants one
+export DSH_TELEMETRY_MODE=DISABLED
+export NO_PROXY="127.0.0.1,localhost,::1${NO_PROXY:+,$NO_PROXY}" no_proxy="127.0.0.1,localhost,::1${no_proxy:+,$no_proxy}"
+
+say()  { printf '%s\n' "$*" >&2; }
+die()  { say "dsv41: $*"; exit 1; }
+up()   { curl -s --noproxy '*' --max-time 3 "$BASE/v1/models" 2>/dev/null | grep -q deepseek-flash; }
+pid_alive() { [ -n "${1:-}" ] && kill -0 "$1" 2>/dev/null; }
+server_pid() { cat "$RUN/server.pid" 2>/dev/null || true; }
+mode_label() { case "$1" in lossless) echo "lossless（无损、确定性，约 4.5 tok/s）" ;; fast) echo "fast（有损、不可复现，约 10 tok/s）" ;; *) echo "${1:-未知}" ;; esac; }
+
+[ -x "$PY_DSH" ] || die "缺少 DeepSeek Harness 环境 $DSH_ROOT/venv（见 $HARNESS/README.md 的安装一节）"
+[ -x "$PY_ENGINE" ] || die "缺少引擎环境 $ENGINE/.venv"
+
+start_server() {   # [--lossless|--fast] [--cache-gb N]
+  local mode="${DSV41_MODE:-fast}" cache="${DSV41_CACHE_GB:-}"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --lossless) mode=lossless ;;
+      --fast) mode=fast ;;
+      --cache-gb) cache="$2"; shift ;;
+      --cache-gb=*) cache="${1#*=}" ;;
+      *) die "serve: 未知参数 $1" ;;
+    esac
+    shift
+  done
+  if up; then
+    local running; running="$(cat "$RUN/server.mode" 2>/dev/null || echo unknown)"
+    say "模型服务已在运行：${BASE}，$(mode_label "$running")"
+    if [ "$running" != unknown ] && [ "$running" != "$mode" ] && [ -n "${DSV41_MODE_EXPLICIT:-}" ]; then
+      say "  注意：你要的是 $mode 模式，切换请运行：dsv41 restart --$mode"
+    fi
+    return 0
+  fi
+  local old; old="$(server_pid)"
+  if pid_alive "$old"; then
+    say "模型服务进程 $old 还在启动中，等待就绪…"
+  else
+    local doc; doc="$("$PY_ENGINE" -m deepinfer_mac doctor --model "$MODEL_DIR" 2>&1)" || true
+    grep -q "conversion: complete" <<<"$doc" || { say "$doc"; die "doctor 未显示 conversion complete，不能启动推理"; }
+    if [ -z "$cache" ]; then   # doctor's estimate from free memory, kept inside 6-16 GB
+      cache="$(sed -n 's/.*expert cache would be: \([0-9.]*\) GB.*/\1/p' <<<"$doc" | head -1)"
+      cache="$(awk -v c="${cache:-8}" 'BEGIN { c = int(c); if (c < 6) c = 6; if (c > 16) c = 16; print c }')"
+    fi
+    awk -v c="$cache" 'BEGIN { exit !(c >= 6 && c <= 16) }' || die "--cache-gb 必须在 6–16 之间（当前 ${cache}）"
+    local flag=(); [ "$mode" = lossless ] && flag=(--lossless)
+    say "启动模型服务：$(mode_label "$mode")，专家缓存 ${cache} GB，端口 $PORT"
+    say "  日志：$RUN/server.log"
+    if pmset -g batt 2>/dev/null | grep -q "Battery Power"; then
+      say "  提示：当前用电池。合盖会让 Mac 睡眠、服务中断；长时间使用请接电源并保持开盖。"
+    fi
+    ( cd "$ENGINE" && exec nohup env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy -u ALL_PROXY -u all_proxy \
+        "$PY_ENGINE" -m deepinfer_mac serve --model "$MODEL_DIR" --cache-gb "$cache" --port "$PORT" ${flag[@]+"${flag[@]}"} \
+        >"$RUN/server.log" 2>&1 ) &
+    local pid=$!
+    echo "$pid" >"$RUN/server.pid"; echo "$mode" >"$RUN/server.mode"; echo "$cache" >"$RUN/server.cache_gb"
+    date +%s >"$RUN/server.started"
+    nohup caffeinate -i -w "$pid" >/dev/null 2>&1 &   # no idle sleep while the server runs
+    old="$pid"
+  fi
+  local t0; t0=$(date +%s)
+  while ! up; do
+    pid_alive "$old" || { tail -30 "$RUN/server.log" >&2; die "模型服务启动失败（日志见上）"; }
+    printf '\r  加载模型中… %ss ' "$(( $(date +%s) - t0 ))" >&2
+    sleep 2
+  done
+  printf '\r\033[K' >&2
+  say "模型服务就绪：${BASE}（用时 $(( $(date +%s) - t0 ))s）"
+}
+
+stop_server() {
+  local pid; pid="$(server_pid)"
+  if pid_alive "$pid"; then
+    kill "$pid"
+    for _ in $(seq 1 30); do pid_alive "$pid" || break; sleep 1; done
+    pid_alive "$pid" && kill -9 "$pid"
+    say "模型服务已停止（pid ${pid}）"
+  elif up; then
+    say "端口 $PORT 上的服务不是 dsv41 启动的，没有停止它。"
+    return 1
+  else
+    say "模型服务没有运行。"
+  fi
+  rm -f "$RUN/server.pid"
+}
+
+status() {
+  local pid; pid="$(server_pid)"
+  if up; then
+    local started; started="$(cat "$RUN/server.started" 2>/dev/null || date +%s)"
+    say "模型服务：运行中 ${BASE}，pid ${pid:-?}，$(mode_label "$(cat "$RUN/server.mode" 2>/dev/null)")，专家缓存 $(cat "$RUN/server.cache_gb" 2>/dev/null || echo ?) GB，已运行 $(( ($(date +%s) - started) / 60 )) 分钟"
+    [ -n "$pid" ] && pid_alive "$pid" && say "  内存（RSS）：$(ps -o rss= -p "$pid" | awk '{printf "%.1f GB", $1/1048576}')"
+    say "  上一次请求：$(curl -s --noproxy '*' --max-time 3 "$BASE/stats")"
+  elif pid_alive "$pid"; then
+    say "模型服务：启动中（pid ${pid}），日志 $RUN/server.log"
+  else
+    say "模型服务：未运行（dsv41 serve 启动）"
+  fi
+  say "DeepSeek Harness：$("$DSH_ROOT/venv/bin/dsh" --version 2>/dev/null)，DSH_HOME=$DSH_HOME"
+}
+
+cmd="${1:-chat}"
+case "$cmd" in
+  -*) cmd=chat ;;
+  *) shift || true ;;
+esac
+split_server_args() {   # server flags -> sargs[], everything else -> rest[]
+  sargs=(); rest=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --lossless|--fast) sargs+=("$1"); export DSV41_MODE_EXPLICIT=1 ;;
+      --cache-gb) sargs+=("$1" "${2:-}"); shift ;;
+      --cache-gb=*) sargs+=("$1") ;;
+      *) rest+=("$1") ;;
+    esac
+    shift
+  done
+}
+
+case "$cmd" in
+  chat)
+    split_server_args "$@"
+    start_server ${sargs[@]+"${sargs[@]}"}
+    export DSV41_SERVER_MODE="$(cat "$RUN/server.mode" 2>/dev/null || echo unknown)"
+    exec "$PY_DSH" "$HARNESS/dsv41_term.py" ${rest[@]+"${rest[@]}"}
+    ;;
+  web)
+    split_server_args "$@"
+    start_server ${sargs[@]+"${sargs[@]}"}
+    set -- ${rest[@]+"${rest[@]}"}
+    export DSV41_CONTEXT="${DSV41_CONTEXT:-65536}" DSV41_MAX_TOKENS="${DSV41_MAX_TOKENS:-16384}"
+    # its own home: the web profile stores sessions zstd-compressed and refuses to start on a root
+    # that holds the terminal agent's plain .jsonl sessions
+    export DSH_HOME="${DSV41_WEB_HOME:-$DSH_ROOT/home-web}"
+    say "DeepSeek Harness Web UI（默认 Minimal agent）：工作目录 $(pwd)，打开下面带 token 的地址；Ctrl+C 退出"
+    exec "$DSH_ROOT/venv/bin/dsh" web --patch "$HARNESS/patches/web.local.yml" "$@"
+    ;;
+  serve)   [ $# -gt 0 ] && export DSV41_MODE_EXPLICIT=1; start_server "$@" ;;
+  stop)    stop_server ;;
+  restart) stop_server || true; DSV41_MODE_EXPLICIT=1 start_server "$@" ;;
+  status)  status ;;
+  log|logs) exec tail -n 50 -f "$RUN/server.log" ;;
+  test)    start_server; export DSV41_SERVER_MODE="$(cat "$RUN/server.mode" 2>/dev/null || echo unknown)"; exec "$PY_DSH" "$HARNESS/test_dsv41_harness.py" "$@" ;;
+  help|-h|--help) sed -n '2,15p' "$self" | sed 's/^# \{0,1\}//' ;;
+  *) die "未知命令 ${cmd}（dsv41 help）" ;;
+esac

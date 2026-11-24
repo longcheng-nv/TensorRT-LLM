@@ -1,0 +1,702 @@
+#!/usr/bin/env python3
+"""dsv41 terminal agent: DeepSeek Harness on the local DeepSeek-V4.1-Flash server.
+
+The agent is DeepSeek's own Harness (official Python SDK, `sdk-minimal` profile = the "DSH Minimal"
+scaffold of the model card: one-line persona, a persistent bash, read_image, working_directory),
+overlaid by patches/sdk-minimal.local.yml for the local DeepInfer-Mac server. This file is only the
+terminal front end: line input, dragged-in files, live output, approvals, sessions.
+
+  * Type a request. Drag files from Finder into the Terminal window: image paths are attached as
+    images (the model sees them), every path is also kept in the text so the agent can use it.
+  * /paste attaches the image on the clipboard (e.g. a Ctrl+Shift+Cmd+4 screenshot).
+  * The agent works in the directory dsv41 was started from: the macOS sandbox confines its writes
+    to that directory and /tmp (reads are unrestricted). --full-access lifts the confinement.
+  * Ctrl+C stops the current request (the harness restarts and the session is restored).
+
+Run it through the `dsv41` launcher, which starts the model server first.
+"""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import json
+import mimetypes
+import os
+import re
+import select
+import shutil
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+PATCH = HERE / "patches" / "sdk-minimal.local.yml"
+DEFAULT_HOME = HERE.parent.parent / "dsh" / "home"  # /Users/<you>/Models/dsh/home
+IMAGE_EXT = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff", ".heic", ".heif"}
+EFFORTS = ("off", "low", "high", "max")
+
+# ------------------------------------------------------------------------------ terminal output
+
+TTY = sys.stdout.isatty() and not os.environ.get("NO_COLOR")
+
+
+def c(code: str, s: str) -> str:
+    return f"\033[{code}m{s}\033[0m" if TTY else s
+
+
+DIM, GRAY, CYAN, YELLOW, RED, GREEN, BOLD = "2", "90", "36", "33", "31", "32", "1"
+io_lock = threading.RLock()
+
+
+def out(s: str = "", end: str = "\n") -> None:
+    with io_lock:
+        sys.stdout.write(s + end)
+        sys.stdout.flush()
+
+
+def clear_status() -> None:
+    if TTY:
+        with io_lock:
+            sys.stdout.write("\r\033[K")
+            sys.stdout.flush()
+
+
+def width() -> int:
+    return max(40, min(shutil.get_terminal_size((100, 20)).columns, 160))
+
+
+# ------------------------------------------------------------------------------ server helpers
+
+
+def http_json(url: str, timeout: float = 3.0):
+    req = urllib.request.Request(url, headers={"accept": "application/json"})
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))  # localhost: never via a proxy
+    with opener.open(req, timeout=timeout) as r:
+        return json.loads(r.read().decode())
+
+
+class Live:
+    """Shows the model's output while a step runs, by polling the server's GET /live (the harness
+    SDK only delivers whole model steps). Reasoning is gray, the answer plain, DSML tool-call markup
+    hidden (the tool call is printed from the harness event instead). One server request = one
+    model step; all terminal writes happen under io_lock."""
+
+    MARKERS = ("</think>", "<｜DSML｜")
+
+    def __init__(self, base: str, thinking: bool, enabled: bool = True):
+        self.base, self.thinking, self.enabled = base.rstrip("/"), thinking, enabled
+        self.done: set[str] = set()
+        self.req: str | None = None
+        self._reset(None)
+        self.line_open = False  # a text line without its newline is on screen
+        self.status_shown, self.last_status = False, ""  # the self-overwriting status line is on screen
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def _reset(self, rid: str | None) -> None:
+        self.req, self.offset, self.pending, self.shown, self.answer_started = rid, 0, "", False, False
+        self.mode = "reason" if self.thinking else "answer"
+
+    # -- polling thread
+    def start(self) -> None:
+        if not self.enabled:
+            return
+        try:  # whatever /live shows before our request is sent belongs to someone else (or the past)
+            prev = http_json(f"{self.base}/live?offset=1000000000", timeout=2.0).get("id")
+            if prev:
+                self.done.add(prev)
+        except (urllib.error.URLError, OSError, ValueError):
+            pass
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=3)
+            self._thread = None
+        with io_lock:
+            self._settle()
+
+    def _loop(self) -> None:
+        while not self._stop.wait(0.35):
+            try:
+                self.poll()
+            except (urllib.error.URLError, OSError, ValueError):
+                pass
+
+    def _fetch(self):
+        try:
+            return http_json(f"{self.base}/live?offset={self.offset}", timeout=2.0)
+        except urllib.error.HTTPError as e:
+            if e.code == 404:  # a server without /live: whole-step output only
+                self.enabled = False
+            raise
+
+    def poll(self, final: bool = False) -> None:
+        """Consume new text of the request on the engine. `final`: the step ended; flush its text."""
+        with io_lock:
+            js = self._fetch()
+            rid = js.get("id")
+            if rid is None or rid in self.done:
+                return
+            if rid != self.req:
+                if final:  # the step's request already left /live (a newer one runs)
+                    return
+                self._settle()
+                self._reset(rid)
+                js = self._fetch()
+            phase = js.get("phase")
+            if phase == "prefill":
+                img = f"，{js['images']} 张图" if js.get("images") else ""
+                self._status(f"⏳ 读入提示 {js.get('prompt_tokens', 0):,} tok（缓存命中 {js.get('cached') or 0:,}{img}）… {js.get('elapsed_s', 0):.0f}s")
+                return
+            text = js.get("text") or ""
+            self.offset += len(text)
+            self._feed(text, flush=final or phase == "done")
+            if final:
+                self.done.add(rid)
+                self._settle()
+            elif self.mode == "hidden" and phase == "decode":
+                self._status(f"… 生成工具调用（{js.get('generated', 0)} tok）")
+
+    def step_finished(self) -> bool:
+        """Called when the harness reports a finished model step: flush it; True when its text was
+        (at least partly) shown live, so the caller prints only the tool calls."""
+        if not self.enabled or self.req is None or self.req in self.done:
+            return False
+        try:
+            self.poll(final=True)
+        except (urllib.error.URLError, OSError, ValueError):
+            pass
+        with io_lock:
+            if self.req is not None:
+                self.done.add(self.req)
+            self._settle()
+        return self.shown
+
+    # -- rendering (caller holds io_lock)
+    def _feed(self, text: str, flush: bool) -> None:
+        buf = self.pending + text
+        self.pending = ""
+        while buf and self.mode != "hidden":
+            hits = [(buf.find(m), m) for m in self.MARKERS if m in buf]
+            if hits:
+                i, m = min(hits)
+                self._emit(buf[:i])
+                buf = buf[i + len(m):]
+                if m == "</think>":
+                    self.mode = "answer"
+                    self._settle()
+                else:
+                    self.mode = "hidden"
+                continue
+            if not flush:  # hold back a tail that may be the start of a marker
+                keep = max((k for m in self.MARKERS for k in range(1, len(m)) if buf.endswith(m[:k])), default=0)
+                if keep:
+                    self.pending, buf = buf[-keep:], buf[:-keep]
+            self._emit(buf)
+            return
+
+    def _emit(self, s: str) -> None:
+        if (self.mode == "answer" and not self.answer_started) or (self.mode == "reason" and not self.shown):
+            s = s.lstrip("\n")  # no blank lines at the start of the reasoning or of the answer
+        if not s:
+            return
+        self._clear_status()
+        sys.stdout.write(c(GRAY, s) if self.mode == "reason" else s)
+        sys.stdout.flush()
+        self.shown = True
+        self.answer_started = self.answer_started or self.mode == "answer"
+        self.line_open = not s.endswith("\n")
+
+    def _status(self, s: str) -> None:
+        if not TTY or (self.status_shown and s == self.last_status):
+            return
+        if self.line_open:
+            sys.stdout.write("\n")
+            self.line_open = False
+        sys.stdout.write("\r\033[K" + c(GRAY, s))
+        sys.stdout.flush()
+        self.status_shown, self.last_status = True, s
+
+    def _clear_status(self) -> None:
+        if self.status_shown:
+            sys.stdout.write("\r\033[K")
+            sys.stdout.flush()
+            self.status_shown, self.last_status = False, ""
+
+    def _settle(self) -> None:
+        """Leave the cursor at the start of an empty line."""
+        self._clear_status()
+        if self.line_open:
+            sys.stdout.write("\n")
+            sys.stdout.flush()
+            self.line_open = False
+
+
+# ------------------------------------------------------------------------------ input parsing
+
+_PATH = re.compile(r"""'([^']+)'|"([^"]+)"|((?:~|/)(?:\\.|[^\s\\'"])+)""")
+
+
+def find_paths(line: str) -> list[tuple[str, str]]:
+    """(raw text, resolved absolute path) for every existing file or directory named in `line`,
+    in the forms Terminal / iTerm2 / VS Code insert on drag-and-drop: `\\ `-escaped or quoted."""
+    found = []
+    for m in _PATH.finditer(line):
+        raw = m.group(0)
+        cand = m.group(1) or m.group(2) or re.sub(r"\\(.)", r"\1", m.group(3))
+        p = os.path.abspath(os.path.expanduser(cand))
+        if os.path.exists(p):
+            found.append((raw, p))
+    return found
+
+
+def image_block(path: str) -> dict:
+    p = Path(path)
+    data = p.read_bytes()
+    mime = mimetypes.guess_type(p.name)[0] or "image/png"
+    if p.suffix.lower() in (".heic", ".heif", ".tif", ".tiff", ".bmp"):  # re-encode with macOS sips
+        with tempfile.TemporaryDirectory() as d:
+            dst = Path(d) / (p.stem + ".jpg")
+            subprocess.run(["sips", "-s", "format", "jpeg", str(p), "--out", str(dst)], check=True, capture_output=True)
+            data, mime = dst.read_bytes(), "image/jpeg"
+    return {"type": "image", "data": base64.b64encode(data).decode(), "mimeType": mime}
+
+
+def clipboard_image() -> str | None:
+    """Save the clipboard image (PNG) to a temp file; None when the clipboard holds no image."""
+    dst = Path(tempfile.gettempdir()) / f"dsv41-clipboard-{int(time.time())}.png"
+    script = (
+        'set f to POSIX file "%s"\n'
+        "try\n set d to (the clipboard as «class PNGf»)\non error\n return \"none\"\nend try\n"
+        "set h to open for access f with write permission\nset eof of h to 0\nwrite d to h\nclose access h\nreturn \"ok\""
+    ) % dst
+    r = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
+    return str(dst) if r.stdout.strip() == "ok" and dst.exists() else None
+
+
+def build_input(line: str, extra_images: list[str] | None = None) -> tuple[list[dict], list[str]]:
+    """-> (content blocks, attached image paths). Paths stay in the text, unescaped and quoted."""
+    text, images = line, list(extra_images or [])
+    for raw, path in find_paths(line):
+        if raw != path:  # escaped / quoted / ~ forms become one plain quoted path
+            text = text.replace(raw, f'"{path}"', 1)
+        if Path(path).is_file() and Path(path).suffix.lower() in IMAGE_EXT and path not in images:
+            images.append(path)
+    text = text.strip() or ("请看这张图片。" if images else "")
+    blocks = [{"type": "text", "text": text}]
+    blocks += [image_block(p) for p in images]
+    return blocks, images
+
+
+# ------------------------------------------------------------------------------ the session
+
+
+class Term:
+    def __init__(self, a):
+        self.a = a
+        self.base = a.base_url.rstrip("/")
+        self.effort = a.effort
+        self.home = Path(a.home)
+        self.cwd = str(Path.cwd().resolve())
+        self.h = None
+        self.session = None
+        self.live = Live(self.base, thinking=self.effort != "off", enabled=TTY)
+        self.approver: threading.Thread | None = None
+
+    # -- harness lifecycle
+    def _config(self):
+        from deepseek_harness import DeepSeekHarnessConfig
+
+        env = {
+            "DSH_TELEMETRY_MODE": "DISABLED",
+            "DSV41_CONTEXT": str(self.a.context),
+            "DSV41_MAX_TOKENS": str(self.a.max_tokens),
+            "DSH_PERMISSION_MODE": self.a.permission,
+        }
+        return DeepSeekHarnessConfig(
+            dsh_home=str(self.home), cwd=self.cwd, profile="sdk-minimal", patches=(str(PATCH),),
+            provider="deepseek-official", model="deepseek-flash",
+            reasoning_effort=self.effort, max_tokens=self.a.max_tokens,
+            base_url=self.base, api_key=os.environ.get("DEEPSEEK_API_KEY") or "local",
+            approval_requests=True, env=env, initialize_timeout_seconds=120, shutdown_timeout_seconds=5,
+        )
+
+    def start(self, resume: str | None = None) -> None:
+        from deepseek_harness import DeepSeekHarness
+
+        self.h = DeepSeekHarness(self._config())
+        self.h.start()
+        self.approver = threading.Thread(target=self._approvals, args=(self.h,), daemon=True)
+        self.approver.start()
+        self.session = self.h.resume_session(resume) if resume else self.h.start_session()
+        self.live = Live(self.base, thinking=self.effort != "off", enabled=TTY)
+
+    def restart(self, effort: str | None = None) -> None:
+        sid = self.session.id if self.session else None
+        self.close()
+        if effort:
+            self.effort = effort
+        started = self._session_exists(sid)
+        self.start(resume=sid if started else None)
+        if not started and sid:  # nothing persisted yet: keep the id for the next prompt
+            self.session = self.h.start_session(sid)
+
+    def close(self) -> None:
+        if self.h is not None:
+            try:
+                self.h.close()
+            except Exception:  # noqa: BLE001 - shutting down anyway
+                pass
+            self.h = None
+
+    def _approvals(self, h) -> None:
+        """Answer the runtime's approval requests from the terminal (fail closed on anything else)."""
+        while True:
+            try:
+                req = h.client.next_request()
+            except Exception:  # noqa: BLE001 - runtime closed
+                return
+            try:
+                if req.method != "approval/request":
+                    h.client.respond_error(req.id, code=-32601, message="unsupported by dsv41 terminal")
+                    continue
+                p = req.payload if isinstance(req.payload, dict) else {}
+                with io_lock:
+                    clear_status()
+                    out(c(YELLOW, f"\n⚠ 需要授权：{p.get('toolName', '?')} — {p.get('reason') or ''}"))
+                    detail = json.dumps({k: v for k, v in p.items() if k not in ('toolName', 'reason')}, ensure_ascii=False)
+                    out(c(YELLOW, "  " + detail[:600]))
+                    ans = input(c(YELLOW, "  允许这一次？[y/N] ")).strip().lower()
+                h.client.respond(req.id, {"outcome": "allowed-once" if ans in ("y", "yes", "是") else "rejected"})
+            except Exception:  # noqa: BLE001 - never leave a request hanging open
+                try:
+                    h.client.respond(req.id, {"outcome": "rejected"})
+                except Exception:  # noqa: BLE001
+                    pass
+
+    # -- sessions
+    def _sessions(self) -> list[tuple[float, str, str]]:
+        """(mtime, id, title) of this workspace's sessions, newest first."""
+        rows = []
+        for f in (self.home / "sessions").glob("*/session-*/session.v*.jsonl"):
+            try:
+                with f.open() as fh:
+                    head = json.loads(fh.readline())
+                    if head.get("cwd") != self.cwd:
+                        continue
+                    title = ""
+                    for line in fh:
+                        if '"session/title"' in line:
+                            title = json.loads(line).get("data", {}).get("title", title)
+                rows.append((f.stat().st_mtime, head["id"], title))
+            except (OSError, ValueError, KeyError):
+                continue
+        return sorted(rows, reverse=True)
+
+    def _session_exists(self, sid: str | None) -> bool:
+        return bool(sid) and any(s[1] == sid for s in self._sessions())
+
+    # -- one prompt
+    def ask(self, blocks: list[dict]) -> str | None:
+        t0 = time.time()
+        steps = {"n": 0}
+        final = {"reason": None}
+
+        def on(n):
+            ev = n.payload.get("event") if isinstance(n.payload, dict) else None
+            if n.method != "session.event" or not isinstance(ev, dict) or n.payload.get("sessionId") != self.session.id:
+                return
+            kind, data = ev.get("type"), ev.get("data") or {}
+            if kind == "assistant/message":
+                steps["n"] += 1
+                shown = self.live.step_finished()
+                self._show_message(data.get("message") or {}, shown)
+            elif kind == "tool/result":
+                self._show_result(data.get("message") or {})
+            elif kind == "llm/retry":
+                out(c(YELLOW, f"↻ 模型请求重试：{json.dumps(data, ensure_ascii=False)[:200]}"))
+            elif kind == "turn/end":
+                final["reason"] = (data.get("reason") or {}).get("kind")
+                if final["reason"] not in ("completed", None):
+                    out(c(RED, f"■ 本轮结束：{json.dumps(data.get('reason'), ensure_ascii=False)[:400]}"))
+
+        self.live.start()
+        try:
+            r = self.session.run(blocks, on_notification=on)
+        finally:
+            self.live.stop()
+        took = time.time() - t0
+        out(c(GRAY, f"── {steps['n']} 步 · {took:.0f}s · {r.finish_reason}"))
+        return r.final_response
+
+    def _show_message(self, msg: dict, shown_live: bool) -> None:
+        with io_lock:
+            clear_status()
+            for b in msg.get("content") or []:
+                t = b.get("type")
+                if t == "reasoning" and not shown_live and b.get("text"):
+                    out(c(GRAY, b["text"].strip()))
+                elif t == "text" and not shown_live and b.get("text"):
+                    out(b["text"].strip())
+                elif t == "tool-call":
+                    try:
+                        args = json.loads(b.get("arguments") or "{}")
+                    except ValueError:
+                        args = {"arguments": b.get("arguments")}
+                    if b.get("name") == "bash" and "command" in args:
+                        body = args["command"]
+                    else:
+                        body = json.dumps(args, ensure_ascii=False)
+                    lines = body.splitlines() or [""]
+                    out(c(CYAN, f"⚙ {b.get('name')}: ") + c(CYAN, lines[0][: width() - 12]))
+                    for ln in lines[1:8]:
+                        out(c(CYAN, "    " + ln[: width() - 6]))
+                    if len(lines) > 8:
+                        out(c(CYAN, f"    … 另有 {len(lines) - 8} 行"))
+
+    def _show_result(self, msg: dict) -> None:
+        texts, n_img = [], 0
+        for b in msg.get("content") or []:
+            if b.get("type") == "text":
+                texts.append(b.get("text") or "")
+            elif b.get("type") == "image":
+                n_img += 1
+        lines = "\n".join(texts).rstrip().splitlines()
+        color = RED if msg.get("isError") else GRAY
+        with io_lock:
+            clear_status()
+            for ln in lines[:10]:
+                out(c(color, "  │ " + ln[: width() - 6]))
+            if len(lines) > 10:
+                out(c(color, f"  │ … 另有 {len(lines) - 10} 行"))
+            if n_img:
+                out(c(color, f"  │ [{n_img} 张图片已交给模型]"))
+
+    # -- REPL
+    def banner(self) -> None:
+        mode = os.environ.get("DSV41_SERVER_MODE", "?")
+        perm = {"workspace-write": "只能写当前目录和 /tmp", "read-only": "只读", "danger-full-access": "完全访问（不受沙箱限制）"}
+        out(c(BOLD, "DeepSeek-V4.1-Flash · DeepSeek Harness（minimal）· 本地 DeepInfer-Mac"))
+        out(c(GRAY, f"  服务 {self.base}（{mode}）· 推理强度 {self.effort} · 上下文 {self.a.context:,} · 单步输出上限 {self.a.max_tokens:,}"))
+        out(c(GRAY, f"  工作目录 {self.cwd} · 权限：{perm.get(self.a.permission, self.a.permission)}"))
+        out(c(GRAY, f"  会话 {self.session.id}"))
+        out(c(GRAY, "  拖入文件 = 附上路径（图片会直接给模型看）· /paste 贴剪贴板图片 · /help 帮助 · Ctrl+C 中断 · Ctrl+D 退出"))
+
+    HELP = """命令：
+  /help                 本帮助
+  /new                  开始新会话
+  /sessions             列出本目录的历史会话
+  /resume [id|序号]     恢复会话（默认最近一个）
+  /effort off|low|high|max   推理强度（off = 不思考，最快；high/max 更强更慢）
+  /img <路径> [问题]     附上图片（路径里有空格时可加引号）
+  /paste [问题]          附上剪贴板里的图片（截图用 Ctrl+Shift+Cmd+4）
+  /stats                服务端上一次请求的统计
+  /exit                 退出（或 Ctrl+D）
+多行输入：行尾加 \\ 续行；直接粘贴多行文本会合并成一条。"""
+
+    def command(self, line: str) -> bool:
+        """Handle a slash command; False when it is not one of ours (then it goes to the model)."""
+        cmd, _, rest = line.partition(" ")
+        rest = rest.strip()
+        if cmd in ("/exit", "/quit"):
+            raise EOFError
+        if cmd == "/help":
+            out(self.HELP)
+        elif cmd == "/new":
+            self.session = self.h.start_session()
+            out(c(GREEN, f"新会话 {self.session.id}"))
+        elif cmd == "/sessions":
+            rows = self._sessions()[:20]
+            if not rows:
+                out("本目录还没有保存的会话。")
+            for i, (mt, sid, title) in enumerate(rows, 1):
+                cur = " ←当前" if self.session and sid == self.session.id else ""
+                out(f"  {i:2d}. {time.strftime('%m-%d %H:%M', time.localtime(mt))}  {sid}  {title[:40]}{cur}")
+        elif cmd == "/resume":
+            rows = self._sessions()
+            if self.session:
+                rows = [r for r in rows if r[1] != self.session.id] or rows
+            if not rows:
+                out("本目录没有可恢复的会话。")
+                return True
+            sid = rows[0][1]
+            if rest.isdigit() and 1 <= int(rest) <= len(self._sessions()):
+                sid = self._sessions()[int(rest) - 1][1]
+            elif rest:
+                sid = rest
+            self.close()
+            self.start(resume=sid)
+            out(c(GREEN, f"已恢复会话 {sid}"))
+        elif cmd == "/effort":
+            if rest not in EFFORTS:
+                out(f"用法：/effort {'|'.join(EFFORTS)}（当前 {self.effort}）")
+            else:
+                self.restart(effort=rest)
+                out(c(GREEN, f"推理强度 = {rest}（会话 {self.session.id} 已保留）"))
+        elif cmd == "/stats":
+            for path in ("/stats", "/live"):
+                try:
+                    js = http_json(self.base + path)
+                    js.pop("text", None)
+                    out(f"{path}: {json.dumps(js, ensure_ascii=False)}")
+                except Exception as e:  # noqa: BLE001
+                    out(f"{path}: {e}")
+        elif cmd in ("/img", "/paste"):
+            if cmd == "/paste":
+                img = clipboard_image()
+                if not img:
+                    out(c(RED, "剪贴板里没有图片。"))
+                    return True
+                self.send(rest, [img])
+            else:
+                paths = find_paths(rest)
+                if not paths:
+                    out(c(RED, "找不到文件。用法：/img <路径> [问题]"))
+                    return True
+                raw, path = paths[0]
+                self.send(rest.replace(raw, "", 1), [path])
+        else:
+            return False
+        return True
+
+    def send(self, text: str, images: list[str] | None = None) -> None:
+        blocks, attached = build_input(text, images)
+        if attached:
+            out(c(GRAY, "📎 " + "，".join(Path(p).name for p in attached)))
+        try:
+            self.ask(blocks)
+        except KeyboardInterrupt:
+            self.live.stop()
+            out(c(YELLOW, "\n⏹ 已中断。重启 harness 并恢复会话…"))
+            self.restart()
+            out(c(GRAY, "（服务端会在当前这一步收尾后再处理下一个请求）"))
+        except Exception as e:  # noqa: BLE001 - keep the REPL alive; the session is persisted
+            self.live.stop()
+            out(c(RED, f"\n✗ harness 出错：{type(e).__name__}: {str(e)[:500]}"))
+            out(c(YELLOW, "  重启 harness 并恢复会话…"))
+            self.restart()
+
+    def read(self) -> str:
+        prompt = "\001\033[1;36m\002dsv41 ❯\001\033[0m\002 " if TTY else "dsv41> "
+        line = input(prompt)
+        lines = [line]
+        while lines[-1].endswith("\\"):
+            lines[-1] = lines[-1][:-1]
+            lines.append(input("… "))
+        if sys.stdin.isatty():  # a multi-line paste arrives at once: keep it as one prompt
+            while select.select([sys.stdin], [], [], 0.05)[0]:
+                lines.append(input(""))
+        return "\n".join(lines).strip()
+
+    def repl(self) -> None:
+        self.banner()
+        while True:
+            try:
+                line = self.read()
+            except KeyboardInterrupt:
+                out("")
+                continue
+            except EOFError:
+                out("")
+                return
+            if not line:
+                continue
+            try:
+                if line.startswith("/") and self.command(line):
+                    continue
+            except EOFError:
+                return
+            except KeyboardInterrupt:
+                out("")
+                continue
+            except Exception as e:  # noqa: BLE001 - a failed command must not end the REPL
+                out(c(RED, f"✗ {type(e).__name__}: {str(e)[:500]}"))
+                if self.h is None:
+                    self.start()
+                continue
+            self.send(line)
+
+
+def server_ok(base: str) -> bool:
+    try:
+        return any(m.get("id") == "deepseek-flash" for m in http_json(base.rstrip("/") + "/v1/models", timeout=3).get("data", []))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(prog="dsv41", description="DeepSeek Harness terminal agent on the local DeepSeek-V4.1-Flash")
+    ap.add_argument("-p", "--prompt", action="append", help="run this prompt (repeatable) and exit")
+    ap.add_argument("--image", action="append", default=[], help="attach an image to the first --prompt")
+    ap.add_argument("--resume", nargs="?", const="last", help="resume a session of this directory (id, or the last one)")
+    ap.add_argument("--effort", choices=EFFORTS, default=os.environ.get("DSV41_EFFORT", "low"))
+    ap.add_argument("--context", type=int, default=int(os.environ.get("DSV41_CONTEXT", 65536)))
+    ap.add_argument("--max-tokens", type=int, default=int(os.environ.get("DSV41_MAX_TOKENS", 16384)))
+    g = ap.add_mutually_exclusive_group()
+    g.add_argument("--full-access", dest="permission", action="store_const", const="danger-full-access")
+    g.add_argument("--read-only", dest="permission", action="store_const", const="read-only")
+    ap.set_defaults(permission=os.environ.get("DSH_PERMISSION_MODE", "workspace-write"))
+    ap.add_argument("--base-url", default=os.environ.get("DEEPSEEK_BASE_URL", "http://127.0.0.1:8000"))
+    ap.add_argument("--home", default=os.environ.get("DSH_HOME", str(DEFAULT_HOME)))
+    a = ap.parse_args(argv)
+
+    if not server_ok(a.base_url):
+        print(f"本地模型服务 {a.base_url} 没有响应。先运行：dsv41 serve", file=sys.stderr)
+        return 2
+    Path(a.home).mkdir(parents=True, exist_ok=True)
+    t = Term(a)
+    resume = None
+    if a.resume:
+        rows = t._sessions()
+        resume = (rows[0][1] if rows else None) if a.resume == "last" else a.resume
+        if a.resume == "last" and not resume:
+            print("本目录没有可恢复的会话，开始新会话。", file=sys.stderr)
+    try:
+        t.start(resume=resume)
+    except Exception as e:  # noqa: BLE001
+        print(f"DeepSeek Harness 启动失败：{e}", file=sys.stderr)
+        return 3
+    try:
+        if a.prompt:
+            for i, p in enumerate(a.prompt):
+                blocks, attached = build_input(p, a.image if i == 0 else None)
+                if attached:
+                    out(c(GRAY, "📎 " + "，".join(Path(x).name for x in attached)))
+                t.ask(blocks)
+            return 0
+        try:
+            import readline  # noqa: F401 - line editing (CJK backspace, arrows) and history for input()
+
+            hist = Path(a.home).parent / "repl_history"
+            try:
+                readline.read_history_file(hist)
+            except OSError:
+                pass
+            readline.set_history_length(2000)
+        except ImportError:
+            hist = None
+        try:
+            t.repl()
+        finally:
+            if hist is not None:
+                try:
+                    readline.write_history_file(hist)
+                except OSError:
+                    pass
+        return 0
+    finally:
+        t.close()
+
+
+if __name__ == "__main__":
+    sys.exit(main())

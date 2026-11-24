@@ -107,6 +107,10 @@ def create_app(llm: LLM) -> FastAPI:
     from concurrent.futures import ThreadPoolExecutor
 
     engine_worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="deepinfer-engine")
+    # The request on the engine right now, for terminal clients whose agent protocol only delivers
+    # whole model steps (DeepSeek Harness SDK): GET /live shows prefill/decode progress and the text
+    # generated so far. Replaced (never mutated across requests) when the engine picks up a request.
+    live: dict = {"id": None, "phase": "idle"}
 
     @app.exception_handler(ConversionError)
     async def conversion_error(_req: Request, exc: ConversionError) -> Response:
@@ -118,8 +122,12 @@ def create_app(llm: LLM) -> FastAPI:
         stop = threading.Event()
 
         def run():
+            nonlocal live
             with gate:
                 cached = llm.cached_prefix_len(prompt_ids)
+                cur = {"id": str(uuid4()), "phase": "prefill", "prompt_tokens": len(prompt_ids), "cached": cached,
+                       "images": len(images or []), "t0": time(), "t_first": None, "t_end": None, "tokens": []}
+                live = cur
                 loop.call_soon_threadsafe(q.put_nowait, ("ready", cached))
                 n, last = 0, None
                 try:
@@ -127,11 +135,15 @@ def create_app(llm: LLM) -> FastAPI:
                         if stop.is_set():
                             break
                         n, last = n + 1, out.token_id
+                        if cur["t_first"] is None:
+                            cur["t_first"], cur["phase"] = time(), "decode"
                         if last != EOS_ID:
+                            cur["tokens"].append(last)
                             lps = [(out.token_logprobs, out.top_logprobs)] if getattr(sp, "want_logprobs", False) else None
                             loop.call_soon_threadsafe(q.put_nowait, ("tok", (out.token_id, lps)))
                 except Exception as e:  # noqa: BLE001 - surfaced to the client as a finish
                     loop.call_soon_threadsafe(q.put_nowait, ("err", repr(e)))
+                cur["t_end"], cur["phase"] = time(), "done"
                 reason = InferenceFinishReason.Stop if last == EOS_ID or n < sp.max_tokens else InferenceFinishReason.Length
                 loop.call_soon_threadsafe(q.put_nowait, ("end", reason))
 
@@ -218,5 +230,24 @@ def create_app(llm: LLM) -> FastAPI:
     @app.get("/stats")
     async def stats():
         return {**llm.last_stats, "expert_cache_GB": round(llm.weights.experts.used / 2**30, 2)}
+
+    @app.get("/live")
+    async def live_view(offset: int = 0):
+        """Progress of the request on the engine (or the last one): phase idle|prefill|decode|done,
+        prompt/cached/generated token counts, timings, and the generated text from char `offset`
+        (special tokens kept, so a client can split <think> reasoning and DSML tool-call markup)."""
+        cur = live
+        if cur.get("id") is None:
+            return {"id": None, "phase": "idle"}
+        toks = list(cur["tokens"])
+        text = llm.tokenizer.decode(toks, skip_special_tokens=False) if toks else ""
+        now = cur["t_end"] or time()
+        return {
+            "id": cur["id"], "phase": cur["phase"], "prompt_tokens": cur["prompt_tokens"], "cached": cur["cached"],
+            "images": cur["images"], "generated": len(toks), "elapsed_s": round(now - cur["t0"], 2),
+            "ttft_s": round(cur["t_first"] - cur["t0"], 2) if cur["t_first"] else None,
+            "decode_tps": round((len(toks) - 1) / (now - cur["t_first"]), 2) if cur["t_first"] and len(toks) > 1 and now > cur["t_first"] else None,
+            "text_len": len(text), "text": text[max(0, offset):],
+        }
 
     return app

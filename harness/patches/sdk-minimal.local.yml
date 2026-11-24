@@ -1,0 +1,56 @@
+# DeepSeek Harness overlay: the shipped `sdk-minimal` profile (the "DSH Minimal" scaffold of
+# the DeepSeek-V4.1-Flash model card: one-line persona, bash + read_image + working_directory)
+# pointed at the local DeepInfer-Mac server. Passed with --patch / SDK patches=(...), so the
+# profile under $DSH_HOME stays the shipped one. Each row restates its whole config (patches
+# replace a row's config, they never merge).
+#
+# Environment knobs (set by harness/dsv41):
+#   DEEPSEEK_BASE_URL     local server root, e.g. http://127.0.0.1:8000  (adapter appends /v1/messages)
+#   DSV41_CONTEXT         context window the harness plans for (compaction threshold), default 65536
+#   DSV41_MAX_TOKENS      output cap per model request, default 16384
+#   DSH_PERMISSION_MODE   read-only | workspace-write (default) | danger-full-access
+
+# Local endpoint: smaller context window (cold prefill runs ~140 tok/s, so 64K is ~8 min), a
+# bounded output cap, and the 48 h stream-idle budget the shipped profile already uses.
+- id: llm-deepseek
+  name: '@deepseek-ai/dsh-llm-deepseek-api-key'
+  config:
+    apiKeyEnv: DEEPSEEK_API_KEY
+    defaultContextWindow: !!js Number(process.env.DSV41_CONTEXT ?? 65536)
+    maxTokens: !!js Number(process.env.DSV41_MAX_TOKENS ?? 16384)
+    streamIdleTimeoutMs: 172800000
+    models:
+      - id: deepseek-flash
+        name: DeepSeek-V4.1-Flash (local DeepInfer-Mac)
+        contextWindow: !!js Number(process.env.DSV41_CONTEXT ?? 65536)
+        maxTokens: !!js Number(process.env.DSV41_MAX_TOKENS ?? 16384)
+        inputModalities: [text, image]
+        systemPromptUpdate: in-history
+        toolUpdate: addition-only
+
+# Provider-side upload extensions: the whole Session log (up to 8 MiB) and the plugin inventory
+# ride along with every model request. The local server ignores both; skip the overhead.
+- id: session-log-deepseek
+  name: '@deepseek-ai/dsh-session-log-deepseek'
+  config:
+    enabled: false
+- id: plugin-package-inventory-deepseek
+  name: '@deepseek-ai/dsh-plugin-package-inventory-deepseek'
+  config:
+    enabled: false
+
+# The shipped profile runs bash with full access (it is meant for disposable containers). On a
+# real Mac: Seatbelt-confined writes (workspace + /tmp) by default, reads stay unrestricted.
+- id: sandbox-policy
+  name: '@deepseek-ai/dsh-sandbox-policy'
+  config:
+    mode: !!js process.env.DSH_PERMISSION_MODE ?? 'workspace-write'
+    workspaceRoot: !!js process.cwd()
+
+# Escalation requests (a command asking to run outside the sandbox) go to the SDK client, which
+# asks in the terminal; danger-full-access never asks.
+- insert:
+    - id: approval
+      name: '@deepseek-ai/dsh-user-approval'
+      config:
+        policy: !!js "(process.env.DSH_PERMISSION_MODE ?? 'workspace-write') === 'danger-full-access' ? 'never' : 'ask'"
