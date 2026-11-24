@@ -1,0 +1,706 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>DSV4.1 Mac 部署报告</title>
+<meta name="description" content="在 M4 Pro 48 GB MacBook 上本地运行 DeepSeek-V4.1-Flash，并用 DeepSeek Harness 做成终端 agent：架构、性能、测试、一键部署与限制。">
+<style>
+/* Same visual language as MK_REPORT.html / OPT_REPORT.html (this report continues that series). */
+:root{
+  --bg:#f7f7f4; --surface:#fcfcfb; --fg:#1d1f22; --fg-2:#4a4e55; --fg-3:#666b73; --rule:#dcdcd6;
+  --grid:#e1e0d9; --axis:#c3c2b7; --code-bg:#efeee9;
+  --accent:#2a78d6; --accent-soft:#e3eefb; --mute-mark:#898781; --link:#1f63b8;
+  --good:#0ca30c; --warn:#fab219;
+  --tip-bg:#1d1f22; --tip-fg:#f7f7f4; --tip-2:#c3c2b7;
+  --sans:"IBM Plex Sans","PingFang SC","Hiragino Sans GB","Noto Sans SC","Microsoft YaHei",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,monospace;
+  --display:"Source Serif 4","Songti SC","Noto Serif SC",Georgia,serif;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#121313; --surface:#1a1a19; --fg:#f0efec; --fg-2:#c3c2b7; --fg-3:#9a9992; --rule:#30302d;
+  --grid:#2c2c2a; --axis:#46463f; --code-bg:#222220;
+  --accent:#3987e5; --accent-soft:#16263a; --mute-mark:#898781; --link:#5a9cf0;
+  --good:#0ca30c; --warn:#fab219;
+  --tip-bg:#f0efec; --tip-fg:#121313; --tip-2:#52514e; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#121313; --surface:#1a1a19; --fg:#f0efec; --fg-2:#c3c2b7; --fg-3:#9a9992; --rule:#30302d;
+  --grid:#2c2c2a; --axis:#46463f; --code-bg:#222220;
+  --accent:#3987e5; --accent-soft:#16263a; --mute-mark:#898781; --link:#5a9cf0;
+  --good:#0ca30c; --warn:#fab219;
+  --tip-bg:#f0efec; --tip-fg:#121313; --tip-2:#52514e; color-scheme:dark}
+
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.65 var(--sans);
+  padding-block:0 72px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--bg)}
+.wrap{max-width:960px;margin:0 auto}
+a{color:var(--link)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:3px}
+
+header.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);border-bottom:1px solid var(--rule)}
+header.top .wrap{display:flex;align-items:center;justify-content:space-between;gap:8px 16px;flex-wrap:wrap;padding-block:10px}
+.eyebrow{font:500 11.5px/1.3 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--fg-3)}
+nav.toc{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:13px}
+nav.toc a{color:var(--fg-2);text-decoration:none}
+nav.toc a:hover{color:var(--link)}
+
+main.wrap{display:flex;flex-direction:column;gap:44px;padding-top:28px}
+section{display:flex;flex-direction:column;gap:14px;min-width:0;scroll-margin-top:64px}
+h1{font:600 clamp(28px,4.6vw,38px)/1.18 var(--display);margin:0;letter-spacing:-.01em;text-wrap:balance}
+h2{font:600 22px/1.3 var(--display);margin:0;text-wrap:balance}
+h3{font:600 15px/1.4 var(--sans);margin:0}
+p{margin:0;max-width:74ch}
+.lede{font-size:17px;color:var(--fg-2);max-width:68ch}
+.meta{display:flex;flex-wrap:wrap;gap:4px 18px;color:var(--fg-3);font:400 12.5px/1.6 var(--mono)}
+code{font:13px/1.5 var(--mono);background:var(--code-bg);border-radius:4px;padding:1px 5px;overflow-wrap:anywhere}
+strong{font-weight:600}
+
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px}
+.tile{background:var(--surface);border:1px solid var(--rule);border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.tile .k{display:flex;align-items:center;justify-content:space-between;gap:8px;font:500 12px/1.3 var(--sans);color:var(--fg-3)}
+.tile .v{font:600 28px/1.1 var(--sans);letter-spacing:-.01em}
+.tile .v small{font-size:15px;font-weight:500;color:var(--fg-2);margin-left:3px}
+.tile .d{font-size:12.5px;line-height:1.5;color:var(--fg-2)}
+
+.chip{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--rule);border-radius:999px;padding:1px 8px 1px 6px;
+  font:500 12px/1.5 var(--sans);color:var(--fg-2);white-space:nowrap;background:var(--surface)}
+.chip svg{width:12px;height:12px;flex:none}
+.chip.good svg{color:var(--good)}
+.chip.warn svg{color:var(--warn)}
+
+.verdict{border-left:3px solid var(--accent);background:var(--accent-soft);padding:14px 18px;border-radius:0 8px 8px 0;display:flex;flex-direction:column;gap:8px}
+.verdict p{max-width:none}
+.note{border:1px solid var(--rule);background:var(--surface);border-radius:8px;padding:12px 16px;display:flex;gap:10px;align-items:flex-start}
+.note svg{width:16px;height:16px;flex:none;margin-top:3px;color:var(--warn)}
+.note p{max-width:none}
+
+.tbl{overflow-x:auto;border:1px solid var(--rule);border-radius:8px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:13.5px;line-height:1.55;font-variant-numeric:tabular-nums}
+th,td{padding:9px 12px;border-bottom:1px solid var(--rule);text-align:left;vertical-align:top}
+th{font:500 11.5px/1.35 var(--mono);letter-spacing:.04em;color:var(--fg-3);background:var(--bg);white-space:nowrap}
+tr:last-child td{border-bottom:0}
+td.num{white-space:nowrap}
+td code{font-size:12.5px}
+tr.em td{background:var(--accent-soft)}
+
+figure.fig{margin:0;background:var(--surface);border:1px solid var(--rule);border-radius:10px;padding:16px 18px 14px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.fig-head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px 16px;flex-wrap:wrap}
+.fig-title{font:600 15px/1.4 var(--sans);margin:0}
+.fig-sub{font-size:12.5px;color:var(--fg-3);margin:2px 0 0}
+.fig-btn{font:500 12px/1 var(--sans);color:var(--fg-2);background:var(--bg);border:1px solid var(--rule);border-radius:6px;padding:7px 10px;cursor:pointer}
+.fig-btn:hover{color:var(--fg)}
+figcaption{font-size:12.5px;color:var(--fg-3);line-height:1.55}
+
+/* horizontal bar chart (HTML, so labels stay readable at phone width) */
+.hb{display:grid;grid-template-columns:minmax(7.5rem,16rem) minmax(0,1fr);column-gap:12px;--row:40px}
+.hb-labels,.hb-plot{display:flex;flex-direction:column;padding-top:26px}
+.hb-labels > div{height:var(--row);display:flex;align-items:center;align-content:center;font-size:13px;line-height:1.3;color:var(--fg-2);gap:2px 6px;flex-wrap:wrap}
+.hb-labels .axis-gap{height:22px}
+.hb-plot{position:relative;margin-right:3.6rem}
+.hb-row{position:relative;height:var(--row);display:flex;align-items:center;cursor:default;outline-offset:-2px}
+.hb-bar{height:20px;width:var(--w);background:var(--accent);border-radius:0 4px 4px 0;position:relative;z-index:1}
+.hb-bar.mute{background:var(--mute-mark)}
+.hb-row:hover .hb-bar,.hb-row:focus-visible .hb-bar{filter:brightness(1.12)}
+.hb-v{position:absolute;left:calc(var(--w) + 6px);font:600 13px/1 var(--sans);color:var(--fg);white-space:nowrap;z-index:1}
+.hb-grid{position:absolute;top:26px;bottom:22px;width:0;border-left:1px solid var(--grid)}
+.hb-base{position:absolute;top:26px;bottom:22px;left:0;width:0;border-left:1px solid var(--axis)}
+.hb-ref{position:absolute;top:22px;bottom:22px;width:0;border-left:2px solid var(--fg);z-index:2}
+.hb-ref span{position:absolute;bottom:100%;left:-1px;transform:translateY(-1px);font:500 11.5px/1.3 var(--sans);color:var(--fg);white-space:nowrap;padding-left:5px;border-left:2px solid var(--fg)}
+.hb-axis{position:relative;height:22px;border-top:1px solid var(--axis)}
+.hb-axis span{position:absolute;top:4px;transform:translateX(-50%);font:400 11.5px/1 var(--mono);color:var(--fg-3)}
+
+/* architecture diagram */
+.svgbox{overflow-x:auto}
+.svgbox svg{display:block;width:100%;min-width:640px;height:auto;color:var(--fg-2)}
+svg text{font-family:var(--sans)}
+.d-box{fill:var(--surface);stroke:currentColor;stroke-width:1.2}
+.d-box.acc{stroke:var(--accent);stroke-width:1.6}
+.d-grp{fill:none;stroke:var(--axis);stroke-width:1;stroke-dasharray:4 4}
+.d-t{fill:var(--fg);font-size:13px;font-weight:600}
+.d-s{fill:var(--fg-3);font-size:11.5px}
+.d-l{fill:var(--fg-2);font-size:11.5px}
+.d-la{fill:var(--accent);font-size:11.5px;font-weight:500}
+.d-e{stroke:currentColor;stroke-width:1.2;fill:none}
+.d-e.acc{stroke:var(--accent);stroke-width:1.8}
+.d-e.dash{stroke-dasharray:5 4}
+.d-ah{fill:currentColor}
+.d-ah.acc{fill:var(--accent)}
+
+.cmds{display:flex;flex-direction:column;gap:10px}
+.cmd{border:1px solid var(--rule);border-radius:8px;background:var(--code-bg);min-width:0}
+.cmd-head{display:flex;justify-content:space-between;align-items:center;gap:6px 12px;flex-wrap:wrap;padding:8px 10px 8px 14px;border-bottom:1px solid var(--rule);font-size:13px;color:var(--fg-2)}
+.cmd pre{margin:0;padding:12px 14px;overflow-x:auto;font:13px/1.65 var(--mono);color:var(--fg)}
+.copy{font:500 12px/1 var(--sans);color:var(--fg-2);background:var(--surface);border:1px solid var(--rule);border-radius:6px;padding:6px 9px;cursor:pointer}
+.copy:hover{color:var(--fg)}
+
+ul.plain,ol.plain{margin:0;padding-left:1.3em;display:flex;flex-direction:column;gap:8px;max-width:78ch}
+ul.plain li::marker,ol.plain li::marker{color:var(--fg-3)}
+.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
+.card{background:var(--surface);border:1px solid var(--rule);border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.card ul{margin:0;padding-left:1.2em;display:flex;flex-direction:column;gap:6px;font-size:14px}
+
+footer.foot{border-top:1px solid var(--rule);padding-top:14px;color:var(--fg-3);font:400 12px/1.6 var(--mono);display:flex;flex-wrap:wrap;gap:4px 18px}
+
+.tip{position:fixed;z-index:20;max-width:300px;background:var(--tip-bg);color:var(--tip-fg);border-radius:8px;padding:9px 11px;
+  font:12.5px/1.45 var(--sans);box-shadow:0 6px 20px rgba(0,0,0,.18);pointer-events:none;display:flex;flex-direction:column;gap:2px}
+.tip .tv{font-weight:600;font-size:14px}
+.tip .tt{color:var(--tip-2)}
+.tip .tn{color:var(--tip-2);font-size:12px}
+
+@media (max-width:560px){
+  body{font-size:14.5px}
+  .hb{grid-template-columns:7.5rem minmax(0,1fr);--row:46px}
+  .hb-labels > div{font-size:12px}
+  .tile .v{font-size:25px}
+  header.top nav.toc{display:none}
+}
+@media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-good" viewBox="0 0 12 12"><circle cx="6" cy="6" r="5.4" fill="currentColor"/><path d="M3.4 6.2 5.2 8 8.7 4.3" fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-warn" viewBox="0 0 12 12"><path d="M6 1.2 11 10.4H1z" fill="currentColor"/><path d="M6 4.6v2.8M6 8.5v.4" stroke="#0b0b0b" stroke-width="1.2" stroke-linecap="round"/></symbol>
+  </defs>
+</svg>
+
+<header class="top">
+  <div class="wrap">
+    <span class="eyebrow">DeepInfer-Mac · DSV4.1-Flash · 2026-11-24</span>
+    <nav class="toc" aria-label="目录">
+      <a href="#summary">结论</a><a href="#arch">架构</a><a href="#engine">模型与引擎</a><a href="#harness">Harness</a>
+      <a href="#web">联网与登录</a><a href="#perf">性能</a><a href="#tests">测试</a><a href="#deploy">部署</a>
+      <a href="#security">安全</a><a href="#limits">限制</a><a href="#appendix">附录</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+
+<section id="summary" aria-labelledby="h-summary">
+  <h1 id="h-summary">DeepSeek-V4.1-Flash 在 Mac 上：本地推理 + DeepSeek Harness 终端 agent</h1>
+  <p class="lede">一台 M4 Pro 48 GB MacBook 本地运行 552B 参数的 DeepSeek-V4.1-Flash：模型转换后 338 GB 放在 SSD 上，路由专家按需读取。再用 DeepSeek 官方的 DeepSeek Harness（minimal 配置）把它做成终端 agent：能读写本地文件、看图、搜索、读网页、处理需要登录的网站。日常使用只要一条命令；新 Mac 也是一条命令部署。</p>
+  <div class="meta">
+    <span>分支 deepinfer-mac-dsv41-flash（代码 5b97c97）</span>
+    <span>Apple M4 Pro · 48 GB · macOS 26.7</span>
+    <span>DeepSeek Harness 0.2.2-rc.2</span>
+    <span>mlx 0.32.4 · deepseek-recipe 0.2.0</span>
+  </div>
+
+  <div class="tiles">
+    <div class="tile">
+      <div class="k">默认模式解码 <span class="chip warn"><svg aria-hidden="true"><use href="#i-warn"/></svg>有损</span></div>
+      <div class="v">10.53<small>tok/s</small></div>
+      <div class="d"><code>--fast</code> 经 HTTP 实测（专家缓存 16 GiB，接电源）；质量代价 ΔNLL +0.05–0.09</div>
+    </div>
+    <div class="tile">
+      <div class="k">无损模式解码</div>
+      <div class="v">4.56<small>tok/s</small></div>
+      <div class="d"><code>--lossless</code>：路由与参考实现一致、可复现；受 SSD 带宽限制</div>
+    </div>
+    <div class="tile">
+      <div class="k">验收测试 <span class="chip good"><svg aria-hidden="true"><use href="#i-good"/></svg>通过</span></div>
+      <div class="v">15/15</div>
+      <div class="d">问答、文件、图片、沙箱、记忆、搜索、读网页、登录、截图、<code>@</code> 引用、Web UI</div>
+    </div>
+    <div class="tile">
+      <div class="k">部署</div>
+      <div class="v">1<small>条命令</small></div>
+      <div class="d"><code>install.sh</code> 幂等可续跑；模型转换要流式读取约 510 GB 源权重，按 20–35 MB/s 估约 5–8 小时</div>
+    </div>
+  </div>
+
+  <div class="verdict">
+    <p><strong>结论</strong></p>
+    <ul class="plain">
+      <li><strong>本地推理可用。</strong>默认 <code>--fast</code> 模式约 10 tok/s；无损模式约 4.5 tok/s，瓶颈在 SSD 读专家，不在 GPU 计算（计算路径上限 14.7 tok/s）。</li>
+      <li><strong>Harness 用官方的 DeepSeek Harness minimal 配置。</strong>模型卡里它（DSH Minimal）的 DeepSWE 72.6、Terminal-Bench 2.1 90.6，高于 Claude Code 的 69.8 / 88.0；它本身的首轮提示只有约 710 token（加上本地的联网和浏览器工具后约 1,580），适合 prefill 受限的本机。</li>
+      <li><strong>终端体验。</strong>一条命令 <code>dsv41</code>：逐字输出、拖入或 <code>@</code> 引用文件、剪贴板截图、沙箱限制写入、搜索与读网页、在专用 Chrome 窗口里登录后继续操作。</li>
+      <li><strong>主要瓶颈在前缀缓存。</strong>每个新会话第一轮要冷算约 1,580 token 的提示（首字约 30 s）；会话里有图片后每一步都不复用缓存（约 33 s）。同一会话的后续请求复用 84–99% 的提示，首字 4–20 s。</li>
+    </ul>
+  </div>
+</section>
+
+<section id="arch" aria-labelledby="h-arch">
+  <h2 id="h-arch">架构：一次请求经过哪里</h2>
+  <figure class="fig">
+    <div class="svgbox">
+      <svg viewBox="0 0 960 420" role="img" aria-label="请求路径：终端把输入交给 DeepSeek Harness 运行时，运行时用 Anthropic Messages 协议请求本地 DeepInfer-Mac 服务，服务驱动 MLX 引擎从 SSD 按需读取专家；终端轮询 /live 逐字显示；工具在运行时里执行，bash 在沙箱内，联网工具在沙箱外。">
+        <defs>
+          <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z" class="d-ah"/></marker>
+          <marker id="aha" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z" class="d-ah acc"/></marker>
+        </defs>
+        <!-- /live: serve -> terminal (dashed, above the main row) -->
+        <path class="d-e acc dash" d="M615 70 V36 H105 V64" marker-end="url(#aha)"/>
+        <text class="d-la" x="360" y="28" text-anchor="middle">GET /live 每 0.35 s：已生成的文字（逐字显示）</text>
+
+        <!-- main row -->
+        <rect class="d-box acc" x="20" y="70" width="170" height="64" rx="8"/>
+        <text class="d-t" x="105" y="98" text-anchor="middle">dsv41 终端</text>
+        <text class="d-s" x="105" y="117" text-anchor="middle">输入 · 拖入 · @文件 · 审批</text>
+
+        <rect class="d-box acc" x="250" y="70" width="210" height="64" rx="8"/>
+        <text class="d-t" x="355" y="98" text-anchor="middle">DeepSeek Harness 运行时</text>
+        <text class="d-s" x="355" y="117" text-anchor="middle">官方 SDK · sdk-minimal + overlay</text>
+
+        <rect class="d-box acc" x="520" y="70" width="190" height="64" rx="8"/>
+        <text class="d-t" x="615" y="98" text-anchor="middle">DeepInfer-Mac serve</text>
+        <text class="d-s" x="615" y="117" text-anchor="middle">deepseek-recipe · 前缀复用</text>
+
+        <rect class="d-box acc" x="770" y="70" width="170" height="64" rx="8"/>
+        <text class="d-t" x="855" y="98" text-anchor="middle">引擎 · MLX GPU</text>
+        <text class="d-s" x="855" y="117" text-anchor="middle">megakernel · 专家缓存</text>
+
+        <path class="d-e acc" d="M190 102 H246" marker-end="url(#aha)"/>
+        <text class="d-l" x="218" y="94" text-anchor="middle">stdio</text>
+        <path class="d-e acc" d="M460 102 H516" marker-end="url(#aha)"/>
+        <text class="d-l" x="490" y="62" text-anchor="middle">POST /v1/messages</text>
+        <path class="d-e acc" d="M710 102 H766" marker-end="url(#aha)"/>
+        <text class="d-l" x="738" y="94" text-anchor="middle">一次一个</text>
+
+        <!-- SSD -->
+        <rect class="d-box" x="770" y="232" width="170" height="60" rx="8"/>
+        <text class="d-t" x="855" y="258" text-anchor="middle">SSD · dsv41-mac</text>
+        <text class="d-s" x="855" y="277" text-anchor="middle">338 GB · 专家 2–4 bit</text>
+        <path class="d-e" d="M855 232 V138" marker-end="url(#ah)"/>
+        <text class="d-l" x="845" y="186" text-anchor="end">未命中的专家</text>
+        <text class="d-l" x="845" y="201" text-anchor="end">按需读取</text>
+
+        <!-- tools -->
+        <rect class="d-grp" x="240" y="176" width="230" height="230" rx="10"/>
+        <text class="d-l" x="252" y="194">工具（运行时里执行）</text>
+        <path class="d-e" d="M355 134 V172" marker-end="url(#ah)"/>
+
+        <rect class="d-box" x="254" y="204" width="202" height="42" rx="6"/>
+        <text class="d-t" x="355" y="222" text-anchor="middle">bash · read_image</text>
+        <text class="d-s" x="355" y="238" text-anchor="middle">macOS 沙箱：只写工作目录与 /tmp</text>
+
+        <rect class="d-box" x="254" y="254" width="202" height="42" rx="6"/>
+        <text class="d-t" x="355" y="272" text-anchor="middle">web_fetch</text>
+        <text class="d-s" x="355" y="288" text-anchor="middle">dsh 自带 · 本机匿名 HTTP</text>
+
+        <rect class="d-box" x="254" y="304" width="202" height="42" rx="6"/>
+        <text class="d-t" x="355" y="322" text-anchor="middle">MCP web · 搜索</text>
+        <text class="d-s" x="355" y="338" text-anchor="middle">Bing / DuckDuckGo · 无需 key</text>
+
+        <rect class="d-box" x="254" y="354" width="202" height="42" rx="6"/>
+        <text class="d-t" x="355" y="372" text-anchor="middle">MCP browser</text>
+        <text class="d-s" x="355" y="388" text-anchor="middle">open · read · 截图 · 点击 · 等待登录</text>
+
+        <!-- outside world -->
+        <rect class="d-box" x="540" y="254" width="190" height="92" rx="8"/>
+        <text class="d-t" x="635" y="294" text-anchor="middle">互联网</text>
+        <text class="d-s" x="635" y="313" text-anchor="middle">网页 · 搜索引擎</text>
+        <path class="d-e" d="M456 275 H536" marker-end="url(#ah)"/>
+        <path class="d-e" d="M456 325 H536" marker-end="url(#ah)"/>
+
+        <rect class="d-box" x="540" y="354" width="190" height="52" rx="8"/>
+        <text class="d-t" x="635" y="376" text-anchor="middle">Chrome · 专用配置</text>
+        <text class="d-s" x="635" y="394" text-anchor="middle">可见窗口 · 你在这里登录</text>
+        <path class="d-e" d="M456 375 H536" marker-end="url(#ah)"/>
+        <text class="d-l" x="505" y="368" text-anchor="middle">Playwright</text>
+      </svg>
+    </div>
+    <figcaption>蓝色是请求的主路径。终端把输入交给 DeepSeek Harness 运行时（官方 Python SDK 自带的 macOS 运行时，经 stdio JSON-RPC）；运行时按 Anthropic Messages 协议请求本地 serve，serve 一次只跑一个请求，并复用上一轮已经算过的前缀；引擎每个 token 从 SSD 读取缓存里没有的路由专家。官方 SDK 只在每一步结束时交付完整消息，所以终端另外轮询服务端新增的 <code>/live</code> 做逐字显示。工具在运行时里执行：bash 跑在 macOS 沙箱（Seatbelt）里；联网工具（<code>web_fetch</code>、两个本地 MCP 服务）在沙箱外。</figcaption>
+  </figure>
+</section>
+
+<section id="engine" aria-labelledby="h-engine">
+  <h2 id="h-engine">模型与引擎</h2>
+  <p>官方 <code>DeepInfer</code> 只支持 NVIDIA SM100 和华为 Ascend，Mac 上不能运行，这里只把它当参考实现。实际引擎是社区的 MLX 移植 DeepInfer-Mac，加上本机做的 mk-1…mk-7 优化（融合 mxfp8 GEMV、MoE megakernel、两次 dispatch 的稀疏注意力、Engram 预取、GPU 热等待、解码循环重叠），细节见 <a href="MK_REPORT.html">MK_REPORT.html</a>。</p>
+  <div class="tbl">
+    <table>
+      <thead><tr><th>部分</th><th>内容</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td>模型</td><td>DeepSeek-V4.1-Flash（1017，固定 revision 1bae0e1）；552B 骨干参数，40 层 CED，每层 384 个路由专家取 6 个</td><td>多模态：自带 ViT，每张图最多 1,024 个 token</td></tr>
+        <tr><td>本地格式</td><td>338 GB：线性层 mxfp8（由官方 FP8 逐位无损转换）；路由专家由官方 FP4 重新量化为 2–4 位（25 层 3 位、17 层 2/2/3 位、第 39 层 4 位，每个 12.5 / 15.5 / 19.9 MB）；LM head 8 位；Engram 4 位；门控、norm、embedding BF16</td><td>转换器从 Hugging Face 流式读取约 510 GB 源权重，原始权重不落盘</td></tr>
+        <tr><td>每个 token 的读取量</td><td>常驻约 11 GB（dense 5.2 + 共享专家与路由 1.8 + 6 个路由专家 3.5 + head 0.7）；未命中的专家从 SSD 读取，平均约 14.5 MB / 次</td><td>16 GiB 缓存时命中率约 67%，每 token 约 78 次读盘</td></tr>
+        <tr><td>服务</td><td>OpenAI / Anthropic / Responses 兼容（deepseek-recipe，与 DeepSeek API 同一套请求转换），127.0.0.1:8000</td><td>一次一个请求；复用上一轮前缀；新增只读 <code>GET /live</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <figure class="fig">
+    <div class="fig-head">
+      <div>
+        <p class="fig-title">解码速度（tok/s）</p>
+        <p class="fig-sub">单用户；默认模式与无损模式为 HTTP 流式实测（mk-7，接电源，专家缓存 16 GiB）</p>
+      </div>
+      <button class="fig-btn" id="btn-speed" type="button" aria-expanded="false" aria-controls="tbl-speed">显示数据表</button>
+    </div>
+    <div class="hb" role="group" aria-label="解码速度（tok/s）">
+      <div class="hb-labels" aria-hidden="true">
+        <div>无损 <code>--lossless</code></div>
+        <div>默认 <code>--fast</code> <span class="chip warn"><svg aria-hidden="true"><use href="#i-warn"/></svg>有损</span></div>
+        <div>计算路径上限（无 SSD）</div>
+        <div class="axis-gap"></div>
+      </div>
+      <div class="hb-plot">
+        <div class="hb-base"></div>
+        <div class="hb-grid" style="left:25%"></div><div class="hb-grid" style="left:50%"></div><div class="hb-grid" style="left:75%"></div><div class="hb-grid" style="left:100%"></div>
+        <div class="hb-row" tabindex="0" role="img" aria-label="无损：4.56 tok/s" data-tv="4.56 tok/s" data-tt="无损 --lossless" data-tn="HTTP 实测，4 个提示 4.11–4.92；进程内中位 4.45"><div class="hb-bar mute" style="--w:28.5%"></div><span class="hb-v" style="--w:28.5%">4.56</span></div>
+        <div class="hb-row" tabindex="0" role="img" aria-label="默认 --fast（有损）：10.53 tok/s" data-tv="10.53 tok/s" data-tt="默认 --fast（有损）" data-tn="HTTP 实测，4 个提示 9.47–11.38；ΔNLL +0.05–0.09"><div class="hb-bar" style="--w:65.8%"></div><span class="hb-v" style="--w:65.8%">10.53</span></div>
+        <div class="hb-row" tabindex="0" role="img" aria-label="计算路径上限：14.7 tok/s" data-tv="14.7 tok/s（68 ms/token）" data-tt="计算路径上限" data-tn="专家全部命中、没有 SSD 读盘时的速度"><div class="hb-bar mute" style="--w:91.9%"></div><span class="hb-v" style="--w:91.9%">14.7</span></div>
+        <div class="hb-axis" aria-hidden="true"><span style="left:0">0</span><span style="left:25%">4</span><span style="left:50%">8</span><span style="left:75%">12</span><span style="left:100%">16</span></div>
+      </div>
+    </div>
+    <div class="tbl" id="tbl-speed" hidden>
+      <table>
+        <thead><tr><th>配置</th><th>解码 tok/s</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td>无损 <code>--lossless</code></td><td class="num">4.56</td><td>HTTP 实测，4 个提示 4.88 / 4.11 / 4.92 / 4.35</td></tr>
+          <tr><td>默认 <code>--fast</code>（有损）</td><td class="num">10.53</td><td>HTTP 实测，4 个提示 10.45 / 9.47 / 11.38 / 10.83</td></tr>
+          <tr><td>计算路径上限</td><td class="num">14.7</td><td>68 ms/token，专家全部命中</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <figcaption>无损模式受 SSD 限制：即使用知道未来的理想缓存，每个 token 也要约 46 次读盘（约 100–110 ms），所以无损 10 tok/s 在这台机器上做不到。<code>--fast</code> 把排名第 3–6、又不在缓存里的专家换成缓存里得分最高的专家，用一点质量换速度。</figcaption>
+  </figure>
+
+  <div class="tbl">
+    <table>
+      <thead><tr><th>模式</th><th>解码 tok/s</th><th>ΔNLL（95% 区间）</th><th>与官方 API 的 top-1 一致率</th><th>可复现</th></tr></thead>
+      <tbody>
+        <tr><td><code>--lossless</code></td><td class="num">4.5–4.7</td><td class="num">0（噪声地板 ±0.01）</td><td class="num">基准</td><td>是</td></tr>
+        <tr class="em"><td><code>--fast</code>（默认）</td><td class="num">10.2–10.6</td><td class="num">+0.087 [+0.046, +0.129]（40 例）<br>+0.050 [+0.033, +0.068]（60 例，3,786 位置）</td><td class="num">−2.6 / −2.4 pp</td><td>否</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>prefill：长提示约 120–150 tok/s（12.6K token 用 89–108 s，25.6K token 用 170–183 s）；同一提示再发一次，前缀全部复用，只要 0.4 s。下文 agent 测试时服务以默认模式运行，专家缓存 8 GB（启动时按当时空闲内存估计），所以 agent 里的解码约 6–8 tok/s。</p>
+</section>
+
+<section id="harness" aria-labelledby="h-harness">
+  <h2 id="h-harness">DeepSeek Harness 集成</h2>
+  <p>"操作本地文件"不是模型能力，是 harness 的能力：模型输出工具调用，harness 在本机执行并回填结果。这里没有自己写 harness，用的是 DeepSeek 官方开源的 DeepSeek Harness（<code>dsh</code>）的 <code>sdk-minimal</code> 配置，也就是模型卡里的 "DSH Minimal"：一句话人设，加持久 bash、<code>read_image</code>、<code>working_directory</code> 三个工具。</p>
+  <div class="tbl">
+    <table>
+      <thead><tr><th>脚手架（模型卡，max effort）</th><th>DeepSWE v1.1</th><th>Terminal-Bench 2.1</th></tr></thead>
+      <tbody>
+        <tr><td>mini-SWE</td><td class="num">74.2</td><td class="num">90.3</td></tr>
+        <tr class="em"><td><strong>DSH Minimal（本方案）</strong></td><td class="num">72.6</td><td class="num">90.6</td></tr>
+        <tr><td>DSH Standard</td><td class="num">70.5</td><td class="num">85.8</td></tr>
+        <tr><td>Claude Code</td><td class="num">69.8</td><td class="num">88.0</td></tr>
+        <tr><td>DSH PTC</td><td class="num">67.6</td><td class="num">85.8</td></tr>
+        <tr><td>Pi</td><td class="num">66.2</td><td class="num">86.1</td></tr>
+        <tr><td>Codex</td><td class="num">65.6</td><td class="num">84.1</td></tr>
+        <tr><td>OpenCode</td><td class="num">65.5</td><td class="num">85.0</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>官方 SDK（<code>deepseek-harness-sdk==0.2.2rc2</code>）自带 macOS arm64 运行时，不需要 Node.js。它的 <code>deepseek-official</code> 适配器走 Anthropic Messages 协议，本地 serve 正好兼容：按 dsh 源码拼的 10 种请求形状里，9 种能直接被服务端接受；唯一不支持的 Files API 图片引用，dsh 在上传失败后会自动改为内联 base64。</p>
+
+  <h3>本地 overlay 改了什么</h3>
+  <div class="tbl">
+    <table>
+      <thead><tr><th>项目</th><th>官方默认</th><th>本地</th><th>原因</th></tr></thead>
+      <tbody>
+        <tr><td>上下文窗口 / 单步输出</td><td>1M / 256K</td><td>64K / 16K</td><td>冷 prefill 约 140 tok/s，64K 就要约 8 分钟；输出上限防止失控生成</td></tr>
+        <tr><td>流空闲超时</td><td>5 分钟（Web 配置）</td><td>48 小时</td><td>长时间 prefill 期间服务端没有输出，不应被当成断流</td></tr>
+        <tr><td>bash 权限</td><td>sdk-minimal 不加限制（面向一次性容器）</td><td>workspace-write 沙箱 + 审批服务</td><td>真机上只允许写启动目录和 /tmp；读不受限</td></tr>
+        <tr><td>上传扩展</td><td>每个请求附带整段会话日志（≤ 8 MiB）和插件清单</td><td>关闭</td><td>本地服务用不到</td></tr>
+        <tr><td>联网</td><td>无（sdk-minimal）</td><td><code>web_fetch</code> + MCP 搜索 + MCP 浏览器</td><td>dsh 内置的搜索后端都是 DeepSeek 云端 API</td></tr>
+        <tr><td>MCP 资源工具</td><td>挂 MCP 时自动加 3 个</td><td>关闭</td><td>这两个服务没有资源，省约 300 token</td></tr>
+        <tr><td>遥测（Web）</td><td>FEEDBACK_ONLY：一评分就上传会话</td><td>DISABLED</td><td>工作内容不出本机</td></tr>
+        <tr><td>会话标题（Web）</td><td>每个会话多一次 LLM 请求</td><td>关闭</td><td>单请求服务上会排队，还会挤掉唯一的前缀缓存</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>终端里能做什么</h3>
+  <div class="two">
+    <div class="card">
+      <h3>输入</h3>
+      <ul>
+        <li>从 Finder 拖文件进终端：路径里的空格转义、中文目录都能识别，图片直接给模型看</li>
+        <li><code>@path</code> 引用文件（Tab 补全，按名称或路径）：文本内容随问题发送（超过 48 KB 只附开头），<code>@file:40-80</code> 只附这几行，<code>@dir/</code> 附目录树</li>
+        <li><code>/paste</code>：附上剪贴板里的截图</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>输出与会话</h3>
+      <ul>
+        <li>逐字显示：思考灰色、回答正常色，工具调用和输出单独一行</li>
+        <li><code>/new</code> <code>/sessions</code> <code>/resume</code> <code>/effort off|low|high|max</code> <code>/browser on|off</code></li>
+        <li><code>Ctrl+C</code> 中断：重启运行时并恢复会话</li>
+        <li><code>dsv41 -p "…"</code> 一次性提问；<code>dsv41 web</code> 浏览器界面（默认 Minimal agent）</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="web" aria-labelledby="h-web">
+  <h2 id="h-web">联网与登录</h2>
+  <p>没有搜索工具时，模型会自己在 bash 里写脚本抓 Bing 结果页：能答对，但要 5 步、269 s，而且容易被反爬挡住。现在有三样工具：</p>
+  <div class="tbl">
+    <table>
+      <thead><tr><th>工具</th><th>来源</th><th>做什么</th><th>实测</th></tr></thead>
+      <tbody>
+        <tr><td><code>mcp__web__search</code></td><td><code>harness/dsv41_tools.py</code>（MCP）</td><td>Bing，失败时换 DuckDuckGo；还原 Bing 跳转链接；不需要 API key</td><td class="num">1 次调用，64–68 s 答对</td></tr>
+        <tr><td><code>web_fetch</code></td><td>DeepSeek Harness 自带</td><td>本机匿名抓取网页正文，标注为不可信内容</td><td class="num">48–49 s 答对</td></tr>
+        <tr><td><code>mcp__browser__*</code></td><td><code>harness/dsv41_tools.py</code>（MCP + Playwright）</td><td>本机 Chrome 的专用配置、可见窗口：open / read / screenshot / click / type / wait_for_login</td><td class="num">登录流程 91–93 s；截图 84–89 s</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>需要登录的网站怎么走</h3>
+  <ol class="plain">
+    <li>agent 调 <code>open</code> 打开网址；遇到登录页（可见的密码框，或网址像登录页），工具结果会注明，Chrome 窗口切到前台。</li>
+    <li>终端用黄字提示 🔐，请你在那个窗口里登录。密码和两步验证只在浏览器里输入；agent 往密码框输入会被工具直接拒绝。</li>
+    <li>agent 调 <code>wait_for_login</code>，每 2 s 检查一次，直到离开登录页（最多 600 s），然后返回登录后的页面正文和链接。</li>
+    <li>之后 agent 继续读页面、点击、填表、截图（截图直接作为图片给模型看）。登录状态保存在 <code>~/Models/dsh/browser-profile</code>，下次不用再登录；会话结束时窗口关闭。</li>
+  </ol>
+  <p>验收里用一个本地测试站模拟这个流程（<code>harness/testdata/login_site.py</code>）：浏览器打开 <code>/login</code> 后，测试脚本扮演用户调用 <code>/approve</code>，页面自己跳转，agent 读出受保护页面上的 4242。</p>
+</section>
+
+<section id="perf" aria-labelledby="h-perf">
+  <h2 id="h-perf">性能：agent 里感受到的速度</h2>
+  <figure class="fig">
+    <div class="fig-head">
+      <div>
+        <p class="fig-title">首字时间（TTFT，秒）按请求类型</p>
+        <p class="fig-sub">2026-11-24 完整验收（15/15）里服务端 <code>/live</code> 记录的 21 个请求；默认模式，专家缓存 8 GB</p>
+      </div>
+      <button class="fig-btn" id="btn-ttft" type="button" aria-expanded="false" aria-controls="tbl-ttft">显示数据表</button>
+    </div>
+    <div class="hb" role="group" aria-label="首字时间（秒）按请求类型">
+      <div class="hb-labels" aria-hidden="true">
+        <div>同会话后续请求（复用 84–99%）</div>
+        <div>新会话第一个请求（约 1,580 token）</div>
+        <div>带图请求（不复用缓存）</div>
+        <div class="axis-gap"></div>
+      </div>
+      <div class="hb-plot">
+        <div class="hb-base"></div>
+        <div class="hb-grid" style="left:25%"></div><div class="hb-grid" style="left:50%"></div><div class="hb-grid" style="left:75%"></div><div class="hb-grid" style="left:100%"></div>
+        <div class="hb-row" tabindex="0" role="img" aria-label="同会话后续请求：中位 8.7 秒" data-tv="中位 8.7 s" data-tt="同会话后续请求" data-tn="10 个请求，4.4–19.5 s；新增的 token 越多越慢（搜索结果回填那一步只复用 84%，19.5 s）"><div class="hb-bar" style="--w:21.75%"></div><span class="hb-v" style="--w:21.75%">8.7</span></div>
+        <div class="hb-row" tabindex="0" role="img" aria-label="新会话第一个请求：中位 29.9 秒" data-tv="中位 29.9 s" data-tt="新会话第一个请求" data-tn="7 个请求，29.5–30.4 s；提示 1,565–1,597 token，缓存命中 0"><div class="hb-bar" style="--w:74.75%"></div><span class="hb-v" style="--w:74.75%">29.9</span></div>
+        <div class="hb-row" tabindex="0" role="img" aria-label="带图请求：中位 33.3 秒" data-tv="中位 33.3 s" data-tt="带图请求" data-tn="4 个请求，32.2–35.9 s；会话里一旦有图，之后每一步都从头算（服务端报告的命中数此时偏高，见数据表）"><div class="hb-bar" style="--w:83.25%"></div><span class="hb-v" style="--w:83.25%">33.3</span></div>
+        <div class="hb-axis" aria-hidden="true"><span style="left:0">0</span><span style="left:25%">10</span><span style="left:50%">20</span><span style="left:75%">30</span><span style="left:100%">40</span></div>
+      </div>
+    </div>
+    <div class="tbl" id="tbl-ttft" hidden>
+      <table>
+        <thead><tr><th>请求类型</th><th>个数</th><th>中位 TTFT</th><th>范围</th></tr></thead>
+        <tbody>
+          <tr><td>同会话后续请求</td><td class="num">10</td><td class="num">8.7 s</td><td class="num">4.36–19.47 s（复用 84–99% 的提示）</td></tr>
+          <tr><td>新会话第一个请求</td><td class="num">7</td><td class="num">29.9 s</td><td class="num">29.48–30.40 s</td></tr>
+          <tr><td>带图请求</td><td class="num">4</td><td class="num">33.3 s</td><td class="num">32.20–35.91 s（截图后的那一个，服务端报告命中 1,704 token，但带图路径实际不复用：命中数是按未展开图片的 token 算的）</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <figcaption>引擎只复用"完全相同的前缀"（当前序列，或上一个请求末尾的快照）。新会话的 system 提示和工具定义（约 1,500 token）每次都一样，但因为后面的用户消息不同，仍要从头算；带图请求则完全不走前缀复用。这两点是 agent 延迟里最大的两块，改进办法见"限制与下一步"。</figcaption>
+  </figure>
+</section>
+
+<section id="tests" aria-labelledby="h-tests">
+  <h2 id="h-tests">测试与验证</h2>
+  <div class="tbl">
+    <table>
+      <thead><tr><th>验收项（<code>dsv41 test</code>，2026-11-24）</th><th>结果</th><th>耗时</th><th>看什么</th></tr></thead>
+      <tbody>
+        <tr><td>问答：17×23</td><td><span class="chip good"><svg aria-hidden="true"><use href="#i-good"/></svg>通过</span></td><td class="num">34.0 s</td><td>答案 391</td></tr>
+        <tr><td>文件：创建 notes.txt</td><td><span class="chip good"><svg aria-hidden="true"><use href="#i-good"/></svg>通过</span></td><td class="num">46.9 s</td><td>磁盘上的文件内容</td></tr>
+        <tr><td>文件：修改 + 追加</td><td><span class="chip good"><svg aria-hidden="true"><use href="#i-good"/></svg>通过</span></td><td class="num">25.7 s</td><td>磁盘上的文件内容</td></tr>
+        <tr><td>前缀缓存</td><td><span class="chip good"><svg aria-hidden="true"><use href="#i-good"/></svg>通过</span></td><td class="num">—</td><td>后续请求 ≥ 80% 命中（实测 98%）</td></tr>
+        <tr><td>图片：附上 carrots.jpeg</td><td><span class="chip good"><svg aria-hidden="true"><use href="#i-good"/></svg>通过</span></td><td class="num">35.9 s</td><td>答"胡萝卜"</td></tr>
+        <tr><td>图片：<code>read_image</code> 读 corn.jpeg</td><td><span class="chip good"><svg aria-hidden="true"><use href="#i-good"/></svg>通过</span></td><td class="num">80.7 s</td><td>调用了工具，答"玉米"</td></tr>
+        <tr><td>沙箱：往工作目录外写</td><td><span class="chip good"><svg aria-hidden="true"><use href="#i-good"/></svg>通过</span></td><td class="num">71.9 s</td><td>Operation not permitted，文件未生成</td></tr>
+        <tr><td>多轮记忆</td><td><span class="chip good"><svg aria-hidden="true"><use href="#i-good"/></svg>通过</span></td><td class="num">5.3 s</td><td>答出暗号</td></tr>
+        <tr><td>联网：搜索</td><td><span class="chip good"><svg aria-hidden="true"><use href="#i-good"/></svg>通过</span></td><td class="num">64.5 s</td><td>调用 <code>mcp__web__search</code>，答出 docs.astral.sh</td></tr>
+        <tr><td>联网：<code>web_fetch</code></td><td><span class="chip good"><svg aria-hidden="true"><use href="#i-good"/></svg>通过</span></td><td class="num">49.1 s</td><td>答 "Example Domain"</td></tr>
+        <tr><td>联网：登录 → 用户登录 → 继续读页面</td><td><span class="chip good"><svg aria-hidden="true"><use href="#i-good"/></svg>通过</span></td><td class="num">92.5 s</td><td>open + wait_for_login，答 4242</td></tr>
+        <tr><td>联网：截图给模型看</td><td><span class="chip good"><svg aria-hidden="true"><use href="#i-good"/></svg>通过</span></td><td class="num">89.3 s</td><td>答"红色"</td></tr>
+        <tr><td>终端：<code>dsv41 -p</code></td><td><span class="chip good"><svg aria-hidden="true"><use href="#i-good"/></svg>通过</span></td><td class="num">33.6 s</td><td>启动器 + 终端前端</td></tr>
+        <tr><td>终端：<code>@</code> 引用文件</td><td><span class="chip good"><svg aria-hidden="true"><use href="#i-good"/></svg>通过</span></td><td class="num">33.5 s</td><td>带空格的路径；一步答对、没有调用工具</td></tr>
+        <tr><td>Web UI 启动</td><td><span class="chip good"><svg aria-hidden="true"><use href="#i-good"/></svg>通过</span></td><td class="num">4.1 s</td><td>所有插件激活，带 token 的地址返回页面</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <ul class="plain">
+    <li><strong>服务端回归：</strong>原有 API e2e 24 项通过（另 2 项长上下文慢测试跳过；2 项确定性测试在有损的 fast 模式下本来就不成立，排除）。新增的 <code>/live</code> 只读，不影响原有接口。</li>
+    <li><strong>请求兼容：</strong>dsh 的真实请求（工具、thinking 回放、对话中途的 system 更新、tool_addition、图片、工具结果里的图片、dsh_* 扩展字段）都被服务端的转换接受。</li>
+    <li><strong>浏览器流程（假模型）：</strong>7/7：识别登录页 → 等待登录 → 读取登录后页面、截图作为图片返回、拒绝往密码框输入、搜索、<code>web_fetch</code>；测试结束没有残留 Chrome 进程。</li>
+    <li><strong>终端：</strong>伪终端里实测逐字显示、拖入中文带空格的图片路径、Tab 补全 <code>@</code> 路径；<code>@</code> 解析离线用例 26 个全部通过。</li>
+    <li><strong>部署：</strong>在全新目录里从本地提交跑完 <code>install.sh</code>（加入联网工具之前的版本），快速验收 6/6；之后新增的联网工具环境，单独验证过能按锁定版本从零装上；GitHub 上的安装脚本地址返回的内容与提交一致。</li>
+  </ul>
+</section>
+
+<section id="deploy" aria-labelledby="h-deploy">
+  <h2 id="h-deploy">部署与日常使用</h2>
+  <div class="cmds">
+    <div class="cmd">
+      <div class="cmd-head"><span>新 Mac 一键部署（Apple Silicon，macOS 14+，内存 ≥ 32 GB，磁盘约 360 GB）</span><button class="copy" type="button" data-copy="c-install">复制</button></div>
+      <pre id="c-install">curl -fsSL https://raw.githubusercontent.com/longcheng-nv/TensorRT-LLM/deepinfer-mac-dsv41-flash/harness/install.sh | bash</pre>
+    </div>
+    <div class="cmd">
+      <div class="cmd-head"><span>日常使用</span><button class="copy" type="button" data-copy="c-daily">复制</button></div>
+      <pre id="c-daily">dsv41                     # 当前目录的终端 agent（需要时自动在后台启动模型服务）
+dsv41 -p "问题"            # 问一句就退出
+dsv41 --resume            # 继续本目录上次的会话
+dsv41 web                 # 浏览器界面
+dsv41 status | stop       # 查看 / 停止模型服务
+dsv41 test                # 完整验收（15 项）</pre>
+    </div>
+  </div>
+  <ol class="plain">
+    <li><strong>预检：</strong>Apple Silicon、macOS 版本、内存、Xcode 命令行工具。</li>
+    <li><strong>代码与环境：</strong>uv → 克隆本分支 → 引擎环境、DeepSeek Harness 环境、联网工具环境，版本分别按 <code>harness/constraints-*.txt</code> 锁定 → 链接 <code>~/.local/bin/dsv41</code>。</li>
+    <li><strong>模型转换：</strong>要求接电源、不在 iPhone 热点上，下载默认绕过 shell 代理；中断后重跑同一条命令即可断点续传。</li>
+    <li><strong>验收：</strong>doctor 确认 conversion complete，然后跑 <code>dsv41 test --quick</code>。</li>
+  </ol>
+  <p>启动模型服务时，<code>dsv41</code> 先跑 doctor，专家缓存取 doctor 按当时空闲内存估计的值，并限制在 6–16 GB 之间；服务运行期间用 <code>caffeinate</code> 阻止空闲睡眠。所有组件和改动说明见 <code>harness/README.md</code>。</p>
+</section>
+
+<section id="security" aria-labelledby="h-security">
+  <h2 id="h-security">安全与隐私</h2>
+  <ul class="plain">
+    <li><strong>模型与数据不出本机。</strong>推理在本机完成；Web 版遥测设为 DISABLED，会话日志和插件清单不随请求上传。</li>
+    <li><strong>写入受限。</strong>bash 跑在 macOS Seatbelt 沙箱里，只能写启动目录和 /tmp；<code>working_directory</code> 工具切走目录也写不出去（已测）。需要时可以用 <code>--full-access</code> 放开，或用 <code>--read-only</code> 只读。</li>
+    <li><strong>浏览器隔离。</strong>使用和日常 Chrome 分开的专用配置，窗口可见；密码不经过模型。删掉 <code>~/Models/dsh/browser-profile</code> 就等于全部退出登录。</li>
+    <li><strong>对外请求。</strong>搜索会把查询词发给 Bing / DuckDuckGo；<code>web_fetch</code> 和浏览器会访问你让它访问的网站。</li>
+    <li><strong>不可逆操作靠模型自觉。</strong>工具说明要求 agent 在付款、发消息、删除这类不可逆的提交之前先问你，但这不是强制拦截。只想让它看不想让它点，用 <code>DSV41_BROWSER_ACTIONS=0</code>。</li>
+    <li><strong>DeepSeek Harness 还是开发者预览。</strong>官方说明它没有经过安全审计，所以这里固定在 0.2.2rc2；升级后要先跑一遍 <code>dsv41 test</code>。</li>
+  </ul>
+</section>
+
+<section id="limits" aria-labelledby="h-limits">
+  <h2 id="h-limits">限制与下一步</h2>
+  <div class="tbl">
+    <table>
+      <thead><tr><th>限制</th><th>现状</th><th>下一步</th></tr></thead>
+      <tbody>
+        <tr><td>新会话首轮慢</td><td>每个会话都冷算约 1,580 token，首字约 30 s</td><td>引擎在第一条用户消息之前多存一个快照（快照本来就是可截断的回滚点），预计降到约 5 s</td></tr>
+        <tr><td>带图会话不走缓存</td><td>有图之后每一步首字约 33 s；服务端报告的命中数此时偏高（统计没有考虑图片）</td><td>按图片内容哈希做前缀匹配；复用部分跳过视觉编码。改动只在 <code>engine.py</code></td></tr>
+        <tr><td>单请求、单缓存槽</td><td>终端和 Web 同时用会互相排队、挤掉缓存</td><td>多个快照按 LRU 保留</td></tr>
+        <tr><td>无损 10 tok/s</td><td>SSD 受限，理想缓存也要约 46 次读盘 / token</td><td>在这台机器上不可达；需要更大的内存或更快的存储</td></tr>
+        <tr><td>浏览器工具占提示</td><td>约 740 token；0.2.2-rc.2 的 MCP 客户端还不支持按需加载</td><td>dsh 升级后改为按需加载；现在可以 <code>--no-browser</code></td></tr>
+        <tr><td>部分网站拒绝自动化登录</td><td>例如 Google 账号</td><td>换用该站的其他登录方式</td></tr>
+        <tr><td>Web 界面没有本地联网工具</td><td>Standard 预设的搜索需要 DeepSeek API key</td><td>把同样的 MCP 服务挂到 Web 配置</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="appendix" aria-labelledby="h-appendix">
+  <h2 id="h-appendix">附录</h2>
+  <h3>提交（<code>nv/deepinfer-mac-dsv41-flash</code>）</h3>
+  <div class="tbl">
+    <table>
+      <thead><tr><th>提交</th><th>内容</th></tr></thead>
+      <tbody>
+        <tr><td><code>269cde2</code></td><td><code>dsv41</code> 启动器、终端前端、两个 overlay、验收测试、一键安装脚本、服务端 <code>GET /live</code></td></tr>
+        <tr><td><code>a66c765</code></td><td>启动器：服务不是本启动器拉起时如实说明</td></tr>
+        <tr><td><code>921e4eb</code></td><td><code>@</code> 引用文件（内联、目录树、行号范围、Tab 补全）</td></tr>
+        <tr><td><code>5b97c97</code></td><td>搜索、<code>web_fetch</code>、可登录的浏览器（MCP + Playwright），本地登录测试站</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>文件</h3>
+  <div class="tbl">
+    <table>
+      <thead><tr><th>路径</th><th>作用</th></tr></thead>
+      <tbody>
+        <tr><td><code>harness/dsv41</code></td><td>启动器：doctor、后台服务、终端 / Web / 测试</td></tr>
+        <tr><td><code>harness/dsv41_term.py</code></td><td>终端前端（官方 SDK 之上）：逐字显示、拖入与 <code>@</code>、审批、会话</td></tr>
+        <tr><td><code>harness/dsv41_tools.py</code></td><td>MCP 服务：<code>web</code>（搜索）、<code>browser</code>（可登录的 Chrome）</td></tr>
+        <tr><td><code>harness/patches/*.local.yml</code></td><td>官方 profile 之上的本地 overlay（终端 sdk-minimal、Web）</td></tr>
+        <tr><td><code>harness/install.sh</code></td><td>一键部署；<code>constraints-*.txt</code> 锁定三个环境的版本</td></tr>
+        <tr><td><code>harness/test_dsv41_harness.py</code></td><td>验收测试（15 项）；<code>testdata/</code> 是示例图片和本地登录测试站</td></tr>
+        <tr><td><code>deepinfer_mac/server.py</code></td><td>OpenAI / Anthropic / Responses 兼容服务；新增 <code>GET /live</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>数据来源：<code>~/Models/logs/dsh/test-20261124-152953.json</code>（完整验收）、<code>test-20261124-152332.json</code>（联网组）、<code>MK_REPORT.md</code>（引擎速度与质量）、<code>DeepSeek-V4.1-Flash</code> 模型卡（脚手架对比）、API e2e 结果 <code>dsv41-mac-tests/results.jsonl</code>。</p>
+</section>
+
+<footer class="foot">
+  <span>DeepInfer-Mac · deepinfer-mac-dsv41-flash</span>
+  <span>2026-11-24</span>
+  <span>前作：MK_REPORT.html（解码优化）· OPT_REPORT.html</span>
+</footer>
+</main>
+
+<div class="tip" id="tip" role="tooltip" hidden></div>
+
+<script>
+(function () {
+  "use strict";
+  var tip = document.getElementById("tip");
+
+  function fill(el) {
+    tip.replaceChildren();
+    var v = document.createElement("div"); v.className = "tv"; v.textContent = el.getAttribute("data-tv") || "";
+    var t = document.createElement("div"); t.className = "tt"; t.textContent = el.getAttribute("data-tt") || "";
+    tip.append(v, t);
+    var n = el.getAttribute("data-tn");
+    if (n) { var ne = document.createElement("div"); ne.className = "tn"; ne.textContent = n; tip.append(ne); }
+    tip.hidden = false;
+  }
+  function place(x, y) {
+    var r = tip.getBoundingClientRect();
+    var left = x + 14, top = y + 14;
+    if (left + r.width > window.innerWidth - 8) left = x - r.width - 14;
+    if (top + r.height > window.innerHeight - 8) top = y - r.height - 14;
+    tip.style.left = Math.max(8, left) + "px";
+    tip.style.top = Math.max(8, top) + "px";
+  }
+  function hide() { tip.hidden = true; }
+  function showAt(el) {
+    fill(el);
+    var b = el.getBoundingClientRect();
+    place(b.left + b.width / 2, b.top + b.height / 2);
+  }
+
+  document.querySelectorAll("[data-tv]").forEach(function (el) {
+    el.addEventListener("pointerenter", function (e) { fill(el); place(e.clientX, e.clientY); });
+    el.addEventListener("pointermove", function (e) { if (!tip.hidden) place(e.clientX, e.clientY); });
+    el.addEventListener("pointerleave", function (e) { if (e.pointerType !== "touch") hide(); });
+    el.addEventListener("click", function () { showAt(el); });
+    el.addEventListener("focus", function () { showAt(el); });
+    el.addEventListener("blur", hide);
+  });
+  document.addEventListener("pointerdown", function (e) {
+    var t = e.target;
+    if (!(t && t.closest && t.closest("[data-tv]"))) hide();
+  });
+  window.addEventListener("scroll", hide, { passive: true });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape") hide(); });
+
+  [["btn-speed", "tbl-speed"], ["btn-ttft", "tbl-ttft"]].forEach(function (p) {
+    var b = document.getElementById(p[0]), t = document.getElementById(p[1]);
+    if (!b || !t) return;
+    b.addEventListener("click", function () {
+      t.hidden = !t.hidden;
+      b.setAttribute("aria-expanded", String(!t.hidden));
+      b.textContent = t.hidden ? "显示数据表" : "隐藏数据表";
+    });
+  });
+
+  document.querySelectorAll("[data-copy]").forEach(function (btn) {
+    var pre = document.getElementById(btn.getAttribute("data-copy"));
+    if (!pre) return;
+    btn.addEventListener("click", function () {
+      var text = pre.textContent.trim();
+      function done(ok) {
+        btn.textContent = ok ? "已复制" : "已选中，请按 ⌘C";
+        setTimeout(function () { btn.textContent = "复制"; }, 1800);
+      }
+      function selectFallback() {
+        var r = document.createRange(); r.selectNodeContents(pre);
+        var s = window.getSelection(); s.removeAllRanges(); s.addRange(r); done(false);
+      }
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(function () { done(true); }, selectFallback);
+        } else { selectFallback(); }
+      } catch (err) { selectFallback(); }
+    });
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,5 +1,7 @@
 # dsv41：在 Mac 终端里用 DeepSeek Harness 驱动本地 DeepSeek-V4.1-Flash
 
+完整报告（架构、性能、测试、限制）：[`mac-deploy-tests/DSV41_MAC_REPORT.html`](../mac-deploy-tests/DSV41_MAC_REPORT.html)。
+
 一条命令：`dsv41`。它会先确认本地模型服务在跑（没跑就在后台启动），然后在**当前目录**打开一个终端 agent。这个 agent 是 DeepSeek 官方的 DeepSeek Harness（`dsh`），用的是 `sdk-minimal` 配置，也就是模型卡里 "DSH Minimal" 那套脚手架：一句话人设，加持久 bash、`read_image`、`working_directory` 三个工具。
 
 ```
