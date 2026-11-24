@@ -42,7 +42,7 @@ die()  { say "dsv41: $*"; exit 1; }
 up()   { curl -s --noproxy '*' --max-time 3 "$BASE/v1/models" 2>/dev/null | grep -q deepseek-flash; }
 pid_alive() { [ -n "${1:-}" ] && kill -0 "$1" 2>/dev/null; }
 server_pid() { cat "$RUN/server.pid" 2>/dev/null || true; }
-mode_label() { case "$1" in lossless) echo "lossless（无损、确定性，约 4.5 tok/s）" ;; fast) echo "fast（有损、不可复现，约 10 tok/s）" ;; *) echo "${1:-未知}" ;; esac; }
+mode_label() { case "$1" in lossless) echo "lossless（无损、确定性，约 4.5 tok/s）" ;; fast) echo "fast（有损、不可复现，约 10 tok/s）" ;; unknown|"") echo "模式未知（不是这份 dsv41 启动的服务）" ;; *) echo "${1}" ;; esac; }
 
 [ -x "$PY_DSH" ] || die "缺少 DeepSeek Harness 环境 $DSH_ROOT/venv（见 $HARNESS/README.md 的安装一节）"
 [ -x "$PY_ENGINE" ] || die "缺少引擎环境 $ENGINE/.venv"
