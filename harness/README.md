@@ -10,7 +10,7 @@ dsv41 web                 浏览器界面（默认 Minimal agent，可拖图片�
                           地址是终端里打印的 http://127.0.0.1:3080/?token=…（需要带 token 访问）
 dsv41 serve [--lossless] [--cache-gb N]   只启动模型服务（后台）
 dsv41 stop | restart | status | log
-dsv41 test [--quick]      整套验收测试（11 项），结果写到 ~/Models/logs/dsh/
+dsv41 test [--quick]      整套验收测试（15 项，含搜索、web_fetch、登录流程、截图），结果写到 ~/Models/logs/dsh/
 ```
 
 ## 一键部署（新 Mac）
@@ -50,6 +50,13 @@ curl -fsSL https://raw.githubusercontent.com/longcheng-nv/TensorRT-LLM/deepinfer
   - **二进制文件：** 只传路径。
   - **和拖入的区别：** 拖入文件时不加 `@`，只把路径交给 agent，由它自己决定读不读、读哪部分。
 - **截图提问。** 用 `Ctrl+Shift+Cmd+4` 截图到剪贴板，再输入 `/paste 这个报错是什么意思？`。
+- **联网。** 直接说"搜索一下…""读一下这个网址…"就行，agent 会自己选工具：
+  - **搜索：** `mcp__web__search`，查 Bing，失败时退到 DuckDuckGo，不需要 API key，也不经过 DeepSeek 云端。
+  - **读网页：** `web_fetch` 是 DeepSeek Harness 自带的工具，走本机匿名 HTTP，得到的是网页正文。
+  - **需要登录的网站：** `mcp__browser__*`。agent 会弹出一个**专用的 Chrome 窗口**（配置在 `~/Models/dsh/browser-profile`，和你日常用的 Chrome 分开）。遇到登录页时终端会提示 🔐，你在这个窗口里自己登录（密码和两步验证都不经过模型，往密码框输入会被拒绝），agent 等你登录完成后接着读页面、点击、填表、截图（截图模型直接能看）。登录状态保存在这个配置里，下次不用重新登录；会话结束时窗口会关闭。
+  - **安全约束：** 工具说明里要求 agent 在付款、发消息、删除这类不可逆的提交之前先问你。窗口是可见的，它做了什么你都能看到。只想让它看不想让它点，用 `DSV41_BROWSER_ACTIONS=0`。
+  - **关掉浏览器工具：** `dsv41 --no-browser` 或 `/browser off`，每个新会话的提示少约 740 token。
+  - **已知限制：** 部分网站（比如 Google 账号）会拒绝在自动化控制的浏览器里登录。
 - **它能动哪些文件。**
   - 默认只能**写**启动时所在的目录和 `/tmp`，这是 macOS 沙箱（Seatbelt）强制的；**读**不受限制。
   - 想让它改别处的文件，就到那个目录里启动 `dsv41`；确实需要不受限制时用 `dsv41 --full-access`；只想让它看不想让它改，用 `--read-only`。
@@ -85,6 +92,8 @@ curl -fsSL https://raw.githubusercontent.com/longcheng-nv/TensorRT-LLM/deepinfer
 | `~/Models/dsh/home` | 终端 agent 的 `DSH_HOME`：会话（`sessions/<目录>/session-*/`）、附件、profile |
 | `~/Models/dsh/home-web` | `dsv41 web` 的 `DSH_HOME`。必须和终端分开：Web profile 用 zstd 存会话，遇到终端的 `.jsonl` 会话目录会启动失败 |
 | `~/Models/dsh/run` | 模型服务的 pid、模式、日志（`server.log`） |
+| `~/Models/dsh/tools-venv` | 联网工具（`dsv41_tools.py` 的 MCP 服务：搜索、浏览器；`mcp`、`playwright` 版本按 `constraints-tools.txt` 锁定） |
+| `~/Models/dsh/browser-profile` | 浏览器工具的专用 Chrome 配置（登录状态保存在这里；删掉这个目录就等于全部退出登录） |
 | `patches/sdk-minimal.local.yml` | 终端 agent 用的 overlay，见下 |
 | `patches/web.local.yml` | `dsv41 web` 用的 overlay，见下 |
 | `~/.local/bin/dsv41` | 指向本目录 `dsv41` 的软链接 |
@@ -96,6 +105,8 @@ curl -fsSL https://raw.githubusercontent.com/longcheng-nv/TensorRT-LLM/deepinfer
 - **关掉上传扩展。** 官方默认每个请求都附带整段会话日志（最多 8 MiB）和插件清单，本地服务用不到，所以关掉。
 - **沙箱。** 官方 `sdk-minimal` 不加限制地执行 bash（它面向一次性容器）；这里改成 `workspace-write`。
 - **审批。** 需要越权的操作会在终端里问 y/N。
+- **联网。** 加上 dsh 自带的 `web_fetch`（只开抓取，走本地 HTTP 后端：dsh 内置的搜索后端都是 DeepSeek 云端 API）；用 dsh 的 MCP 客户端挂两个本地服务：`web`（搜索）和 `browser`（可登录的专用 Chrome，`DSV41_BROWSER=0` 时不挂）。
+- **去掉 MCP 资源工具。** MCP 客户端会顺带加 3 个资源工具，这两个服务没有资源，所以关掉，省约 300 token。
 
 `patches/web.local.yml` 改了这些：
 - **端点和上下文。** 与上面相同的本地端点和上下文设置。

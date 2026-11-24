@@ -449,7 +449,7 @@ class Completer:
     """Tab completion of @ mentions (and slash commands) for readline/libedit: `@src/ma<Tab>` completes
     the path, `@main<Tab>` searches the workspace by name (git-tracked files when in a repo)."""
 
-    COMMANDS = ["/help", "/new", "/sessions", "/resume", "/effort", "/img", "/paste", "/stats", "/exit"]
+    COMMANDS = ["/help", "/new", "/sessions", "/resume", "/effort", "/img", "/paste", "/browser", "/stats", "/exit"]
 
     def __init__(self, cwd: str):
         self.cwd, self.index, self.t_index, self.matches = cwd, [], 0.0, []
@@ -544,6 +544,7 @@ class Term:
         self.a = a
         self.base = a.base_url.rstrip("/")
         self.effort = a.effort
+        self.browser = not a.no_browser and os.environ.get("DSV41_BROWSER", "1") != "0"
         self.home = Path(a.home)
         self.cwd = str(Path.cwd().resolve())
         self.h = None
@@ -555,11 +556,17 @@ class Term:
     def _config(self):
         from deepseek_harness import DeepSeekHarnessConfig
 
+        dsh_root = self.home.parent  # ~/Models/dsh: tools-venv/ and browser-profile/ live beside the homes
         env = {
             "DSH_TELEMETRY_MODE": "DISABLED",
             "DSV41_CONTEXT": str(self.a.context),
             "DSV41_MAX_TOKENS": str(self.a.max_tokens),
             "DSH_PERMISSION_MODE": self.a.permission,
+            # web search + login-capable browser (MCP servers in harness/dsv41_tools.py)
+            "DSV41_TOOLS_PYTHON": os.environ.get("DSV41_TOOLS_PYTHON") or str(dsh_root / "tools-venv" / "bin" / "python"),
+            "DSV41_TOOLS_SCRIPT": str(HERE / "dsv41_tools.py"),
+            "DSV41_BROWSER_PROFILE": os.environ.get("DSV41_BROWSER_PROFILE") or str(dsh_root / "browser-profile"),
+            "DSV41_BROWSER": "1" if self.browser else "0",
         }
         return DeepSeekHarnessConfig(
             dsh_home=str(self.home), cwd=self.cwd, profile="sdk-minimal", patches=(str(PATCH),),
@@ -691,12 +698,26 @@ class Term:
                         args = json.loads(b.get("arguments") or "{}")
                     except ValueError:
                         args = {"arguments": b.get("arguments")}
-                    if b.get("name") == "bash" and "command" in args:
-                        body = args["command"]
-                    else:
-                        body = json.dumps(args, ensure_ascii=False)
+                    name = b.get("name") or "?"
+                    pretty = {
+                        "mcp__web__search": ("🔎 搜索", "query"), "web_fetch": ("🌐 读取网页", "url"),
+                        "mcp__browser__open": ("🧭 浏览器打开", "url"), "mcp__browser__click": ("🖱 点击", "target"),
+                        "mcp__browser__read": ("🧭 读取当前页", "start"), "mcp__browser__screenshot": ("📸 截图", None),
+                    }.get(name)
+                    if name == "mcp__browser__wait_for_login":
+                        out(c(YELLOW, f"🔐 请在弹出的 Chrome 窗口里登录（密码只在浏览器里输入），完成后 agent 自动继续"
+                                      f"（最多等 {args.get('timeout_seconds', 300)} 秒）"))
+                        continue
+                    if name == "mcp__browser__type":
+                        out(c(CYAN, f"⌨ 输入 {args.get('target')} ← {str(args.get('text'))[:60]}" + ("（并回车）" if args.get("submit") else "")))
+                        continue
+                    if pretty:
+                        label, key = pretty
+                        out(c(CYAN, f"{label}：{args.get(key, '') if key else ''}"[: width()]))
+                        continue
+                    body = args["command"] if name == "bash" and "command" in args else json.dumps(args, ensure_ascii=False)
                     lines = body.splitlines() or [""]
-                    out(c(CYAN, f"⚙ {b.get('name')}: ") + c(CYAN, lines[0][: width() - 12]))
+                    out(c(CYAN, f"⚙ {name}: ") + c(CYAN, lines[0][: width() - 12]))
                     for ln in lines[1:8]:
                         out(c(CYAN, "    " + ln[: width() - 6]))
                     if len(lines) > 8:
@@ -727,7 +748,8 @@ class Term:
         out(c(BOLD, "DeepSeek-V4.1-Flash · DeepSeek Harness（minimal）· 本地 DeepInfer-Mac"))
         out(c(GRAY, f"  服务 {self.base}（{mode}）· 推理强度 {self.effort} · 上下文 {self.a.context:,} · 单步输出上限 {self.a.max_tokens:,}"))
         out(c(GRAY, f"  工作目录 {self.cwd} · 权限：{perm.get(self.a.permission, self.a.permission)}"))
-        out(c(GRAY, f"  会话 {self.session.id}"))
+        web = "web_fetch + 搜索" + (" + 浏览器（可登录，/browser off 关闭）" if self.browser else "（浏览器已关，/browser on 打开）")
+        out(c(GRAY, f"  会话 {self.session.id} · 联网：{web}"))
         out(c(GRAY, "  @文件 引用（Tab 补全）· 拖入文件 = 附上路径（图片直接给模型看）· /paste 贴剪贴板图片 · /help · Ctrl+C 中断 · Ctrl+D 退出"))
 
     HELP = """引用本地文件（@，Tab 补全）：
@@ -739,6 +761,7 @@ class Term:
   @ma<Tab>                 按文件名在工作目录里查找；@src/<Tab> 按路径补全
   相对路径从工作目录算起；也可以写绝对路径或 ~/…；邮箱里的 @ 不算。
   拖入文件（不加 @）只把路径交给 agent，由它自己去读；拖入的图片会直接附上。
+联网：直接让它搜索 / 读网页；要登录的网站会弹出专用 Chrome 窗口（🔐 提示时在窗口里自己登录，密码不经过模型）。
 命令：
   /help                 本帮助
   /new                  开始新会话
@@ -747,6 +770,7 @@ class Term:
   /effort off|low|high|max   推理强度（off = 不思考，最快；high/max 更强更慢）
   /img <路径> [问题]     附上图片（路径里有空格时可加引号）
   /paste [问题]          附上剪贴板里的图片（截图用 Ctrl+Shift+Cmd+4）
+  /browser on|off       浏览器工具开关（可登录的 Chrome 窗口；关掉后每个新会话的提示少约 740 token）
   /stats                服务端上一次请求的统计
   /exit                 退出（或 Ctrl+D）
 多行输入：行尾加 \\ 续行；直接粘贴多行文本会合并成一条。"""
@@ -790,6 +814,13 @@ class Term:
             else:
                 self.restart(effort=rest)
                 out(c(GREEN, f"推理强度 = {rest}（会话 {self.session.id} 已保留）"))
+        elif cmd == "/browser":
+            if rest not in ("on", "off"):
+                out(f"用法：/browser on|off（当前 {'on' if self.browser else 'off'}）")
+            else:
+                self.browser = rest == "on"
+                self.restart()
+                out(c(GREEN, f"浏览器工具 {rest}（会话 {self.session.id} 已保留）"))
         elif cmd == "/stats":
             for path in ("/stats", "/live"):
                 try:
@@ -893,6 +924,7 @@ def main(argv=None) -> int:
     g.add_argument("--full-access", dest="permission", action="store_const", const="danger-full-access")
     g.add_argument("--read-only", dest="permission", action="store_const", const="read-only")
     ap.set_defaults(permission=os.environ.get("DSH_PERMISSION_MODE", "workspace-write"))
+    ap.add_argument("--no-browser", action="store_true", help="without the login-capable browser tools (DSV41_BROWSER=0)")
     ap.add_argument("--base-url", default=os.environ.get("DEEPSEEK_BASE_URL", "http://127.0.0.1:8000"))
     ap.add_argument("--home", default=os.environ.get("DSH_HOME", str(DEFAULT_HOME)))
     a = ap.parse_args(argv)

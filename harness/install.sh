@@ -11,6 +11,7 @@
 #   dsv41-mac/       converted model (~338 GB, streamed + converted from the official FP8 weights)
 #   dsh/venv/        official DeepSeek Harness SDK (bundled macOS runtime, no Node.js)
 #   dsh/home/        harness sessions        ~/.local/bin/dsv41 -> DeepInfer-Mac/harness/dsv41
+#   dsh/tools-venv/  web search + login-capable browser tools (MCP; uses the installed Google Chrome)
 #
 # Environment:
 #   DSV41_ROOT=~/Models        install root            DSV41_WORKERS=6     converter workers
@@ -105,6 +106,17 @@ else
   dshv >/dev/null || die "DeepSeek Harness 安装失败"
   ok "已安装（dsh $(dshv)）"
 fi
+# web search + login-capable browser for the agent (MCP servers in harness/dsv41_tools.py)
+tools_ok() { "$DSH_ROOT/tools-venv/bin/python" -c "import mcp.server.mcpserver, playwright.async_api" >/dev/null 2>&1; }
+if tools_ok; then
+  ok "联网工具环境已就绪（${DSH_ROOT}/tools-venv）"
+else
+  [ -x "$DSH_ROOT/tools-venv/bin/python" ] || direct uv venv --python 3.12 "$DSH_ROOT/tools-venv"
+  direct uv pip install --python "$DSH_ROOT/tools-venv/bin/python" mcp playwright -c "$HARNESS/constraints-tools.txt"
+  tools_ok || die "联网工具环境安装失败"
+  ok "联网工具环境已安装（搜索 + 浏览器，版本按 constraints-tools.txt 锁定）"
+fi
+[ -d "/Applications/Google Chrome.app" ] || warn "没有找到 Google Chrome：搜索和 web_fetch 照常可用，浏览器（登录）工具需要先安装 Chrome"
 if [ -z "${DSV41_NO_LINK:-}" ]; then
   mkdir -p "$HOME/.local/bin"
   ln -sfn "$HARNESS/dsv41" "$HOME/.local/bin/dsv41"

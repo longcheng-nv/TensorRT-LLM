@@ -84,7 +84,10 @@ class Runner:
             dsh_home=HOME, cwd=str(workspace), profile="sdk-minimal", patches=(str(PATCH),),
             provider="deepseek-official", model="deepseek-flash", reasoning_effort=effort, max_tokens=4096,
             base_url=BASE, api_key="local", initialize_timeout_seconds=120, shutdown_timeout_seconds=5,
-            env={"DSH_TELEMETRY_MODE": "DISABLED", "DSH_PERMISSION_MODE": "workspace-write"},
+            env={"DSH_TELEMETRY_MODE": "DISABLED", "DSH_PERMISSION_MODE": "workspace-write",
+                 "DSV41_TOOLS_PYTHON": str(MODELS / "dsh" / "tools-venv" / "bin" / "python"),
+                 "DSV41_TOOLS_SCRIPT": str(HERE / "dsv41_tools.py"), "DSV41_BROWSER": "1",
+                 "DSV41_BROWSER_PROFILE": str(MODELS / "dsh" / "browser-profile-test")},
         )
         self.h = DeepSeekHarness(self.cfg)
         self.h.start()
@@ -134,10 +137,12 @@ def lines(p: Path) -> list[str]:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--quick", action="store_true", help="chat + file + image checks only")
-    ap.add_argument("--only", choices=["agent", "term", "web"], help="one group: agent (SDK checks 1-7), term (dsv41 -p), web (UI boot)")
+    ap.add_argument("--only", choices=["agent", "net", "term", "web"],
+                    help="one group: agent (SDK checks 1-7), net (search / fetch / login browser), term (dsv41 -p, @), web (UI boot)")
     ap.add_argument("--effort", default="low")
     a = ap.parse_args()
-    want = {g: a.only in (None, g) for g in ("agent", "term", "web")}
+    want = {g: a.only in (None, g) for g in ("agent", "net", "term", "web")}
+    want["net"] = want["net"] and not a.quick
     want["web"] = want["web"] and not a.quick
 
     results: list[dict] = []
@@ -207,6 +212,47 @@ def main() -> int:
                 check("memory: recall across turns", "4721" in d["final"], d)
         finally:
             r.close()
+
+    # net. web search, web_fetch, and the login-capable browser (a local site with a login wall; the
+    #      test plays the user: once the browser shows the login page it "signs in" via /approve)
+    if want["net"]:
+        sys.path.insert(0, str(HERE / "testdata"))
+        import login_site
+
+        site, site_state, site_srv = login_site.start()
+        r = Runner(ws, a.effort, live)
+        try:
+            s = r.session()
+            d = r.turn(s, "搜索一下 uv 这个 Python 包管理器的官方文档网址，只回答网址。")
+            used = [c["name"] for c in d["tool_calls"]]
+            check("net: web search (mcp__web__search)", "docs.astral.sh" in d["final"] and "mcp__web__search" in used, d, f"tools={used}")
+
+            s = r.session()
+            d = r.turn(s, "用 web_fetch 读取 https://example.com ，页面的标题是什么？只回答标题。")
+            used = [c["name"] for c in d["tool_calls"]]
+            check("net: web_fetch", "Example Domain" in d["final"] and "web_fetch" in used, d, f"tools={used}")
+
+            def user_signs_in():
+                t_end = time.time() + 600
+                while time.time() < t_end and "/login" not in site_state.paths:
+                    time.sleep(1)
+                time.sleep(8)  # a person takes a moment
+                OPENER.open(f"{site}/approve", timeout=5)
+
+            threading.Thread(target=user_signs_in, daemon=True).start()
+            s = r.session()
+            d = r.turn(s, f"打开 {site}/secret ，告诉我页面上的 secret 是什么。如果需要登录，就让我在弹出的浏览器窗口里登录，并等我登录完成。")
+            used = [c["name"] for c in d["tool_calls"]]
+            check("net: login wall -> user signs in -> agent reads the page", "4242" in d["final"] and "mcp__browser__open" in used
+                  and "/login" in site_state.paths, d, f"tools={used}")
+
+            s = r.session()
+            d = r.turn(s, f"用浏览器打开 {site}/color 并截图，页面背景是什么颜色？只回答颜色。")
+            used = [c["name"] for c in d["tool_calls"]]
+            check("net: browser screenshot seen by the model", "红" in d["final"] and "mcp__browser__screenshot" in used, d, f"tools={used}")
+        finally:
+            r.close()
+            site_srv.shutdown()
 
     # 8. the terminal front end, as a user would call it (non-interactive one-shot)
     if want["term"]:

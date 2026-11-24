@@ -54,3 +54,53 @@
       name: '@deepseek-ai/dsh-user-approval'
       config:
         policy: !!js "(process.env.DSH_PERMISSION_MODE ?? 'workspace-write') === 'danger-full-access' ? 'never' : 'ask'"
+
+# Web access (2026-11-24):
+#  - web_fetch: dsh's own tool over its local, anonymous HTTP backend (no DeepSeek account, and no
+#    search provider: dsh's only search backends are DeepSeek cloud APIs)
+#  - mcp__web__search: no-key search from harness/dsv41_tools.py (Bing, DuckDuckGo fallback)
+#  - mcp__browser__*: a visible Chrome on a dedicated profile for pages behind a login
+#    (DSV41_BROWSER=0 / dsv41 --no-browser leaves it out: ~800 fewer prompt tokens)
+# DSV41_TOOLS_PYTHON / DSV41_TOOLS_SCRIPT / DSV41_BROWSER_PROFILE come from dsv41_term.py; without
+# them the two MCP servers fail to start and the agent simply runs without those tools.
+- insert:
+    - id: web
+      name: '@deepseek-ai/dsh-web'
+      config:
+        fetchProvider: http
+    - id: web-fetch-http
+      name: '@deepseek-ai/dsh-web-fetch-http'
+    - id: tool-web
+      name: '@deepseek-ai/dsh-tool-web'
+      config:
+        search: false
+        fetch: true
+    - id: mcp-web
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: web
+        transport: stdio
+        command: !!js process.env.DSV41_TOOLS_PYTHON ?? 'python3'
+        args: [!!js process.env.DSV41_TOOLS_SCRIPT ?? 'dsv41_tools.py', search]
+        env:
+          HTTP_PROXY: !!js process.env.HTTP_PROXY ?? ''
+          HTTPS_PROXY: !!js process.env.HTTPS_PROXY ?? ''
+          NO_PROXY: !!js process.env.NO_PROXY ?? ''
+        toolCallTimeoutMs: 60000
+    - id: mcp-browser
+      name: '@deepseek-ai/dsh-mcp-client'
+      disabled: !!js process.env.DSV41_BROWSER === '0'
+      config:
+        serverName: browser
+        transport: stdio
+        command: !!js process.env.DSV41_TOOLS_PYTHON ?? 'python3'
+        args: [!!js process.env.DSV41_TOOLS_SCRIPT ?? 'dsv41_tools.py', browser]
+        env:
+          DSV41_BROWSER_PROFILE: !!js process.env.DSV41_BROWSER_PROFILE ?? ''
+          DSV41_BROWSER_ACTIONS: !!js process.env.DSV41_BROWSER_ACTIONS ?? '1'
+        toolCallTimeoutMs: 660000
+
+# The MCP client would also add three resource tools (list/read MCP resources); these servers have
+# no resources, so drop them and their prompt section.
+- id: mcp-resources
+  disabled: true
