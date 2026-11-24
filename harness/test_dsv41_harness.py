@@ -216,6 +216,16 @@ def main() -> int:
         check("dsv41 -p (terminal front end)", p.returncode == 0 and "5" in p.stdout,
               {"seconds": round(time.time() - t0, 1), "final": p.stdout.strip()[-200:]}, f"rc={p.returncode} {p.stderr.strip()[-200:]}")
 
+        # 8b. @ mention: the file goes along with the prompt, so the answer needs no tool step
+        (ws / "mention dir").mkdir(exist_ok=True)
+        (ws / "mention dir" / "plan.txt").write_text("红\n橙\n紫罗兰\n绿\n")
+        t0 = time.time()
+        p = subprocess.run([str(HERE / "dsv41"), "-p", '看 @"mention dir/plan.txt"，第三行是什么？只回答内容。', "--effort", "off"],
+                           cwd=ws, capture_output=True, text=True, timeout=900, env={**os.environ, "NO_COLOR": "1", "DSH_HOME": HOME})
+        one_step = "── 1 步" in p.stdout
+        check("@ mention: file inlined, answered without a tool step", p.returncode == 0 and "紫罗兰" in p.stdout and one_step,
+              {"seconds": round(time.time() - t0, 1), "final": p.stdout.strip()[-200:]}, f"rc={p.returncode} one_step={one_step}")
+
     if want["web"]:
         # 9. the browser UI boots on the local profile (its own home, as `dsv41 web` sets it), every
         #    plugin activates, and the tokenized URL it prints serves the page

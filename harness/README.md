@@ -10,7 +10,7 @@ dsv41 web                 浏览器界面（默认 Minimal agent，可拖图片�
                           地址是终端里打印的 http://127.0.0.1:3080/?token=…（需要带 token 访问）
 dsv41 serve [--lossless] [--cache-gb N]   只启动模型服务（后台）
 dsv41 stop | restart | status | log
-dsv41 test [--quick]      整套验收测试，结果写到 ~/Models/logs/dsh/
+dsv41 test [--quick]      整套验收测试（11 项），结果写到 ~/Models/logs/dsh/
 ```
 
 ## 一键部署（新 Mac）
@@ -42,6 +42,13 @@ curl -fsSL https://raw.githubusercontent.com/longcheng-nv/TensorRT-LLM/deepinfer
   - 图片（png/jpg/gif/webp/heic…）会作为图片附上，模型能直接看到；
   - 其他文件只把路径整理好留在文字里，agent 会用 bash 自己去读；
   - 同一行可以拖多个文件，再接着写问题。
+- **用 `@` 引用文件。** 语法沿用 DeepSeek Harness 的：`@path`，路径有空格时写 `@"path"`，相对路径从工作目录算起。引用的内容会随问题一起发给模型，省掉 agent 再读一次文件的那一步（在约 10 tok/s 下大约省 5–10 s）。
+  - **补全：** 按 Tab。`@ma<Tab>` 按文件名在工作目录里查找（在 git 仓库里时只找受管文件），`@src/<Tab>` 按路径补全。
+  - **文本文件：** 内容内联，超过约 48 KB 只附开头（`DSV41_MENTION_MAX_BYTES` 可调）；`@file.py:40-80` 只附这几行。
+  - **目录：** `@src/` 附上两层目录树。
+  - **图片：** `@shot.png` 直接给模型看。
+  - **二进制文件：** 只传路径。
+  - **和拖入的区别：** 拖入文件时不加 `@`，只把路径交给 agent，由它自己决定读不读、读哪部分。
 - **截图提问。** 用 `Ctrl+Shift+Cmd+4` 截图到剪贴板，再输入 `/paste 这个报错是什么意思？`。
 - **它能动哪些文件。**
   - 默认只能**写**启动时所在的目录和 `/tmp`，这是 macOS 沙箱（Seatbelt）强制的；**读**不受限制。

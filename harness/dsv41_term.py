@@ -284,18 +284,256 @@ def clipboard_image() -> str | None:
     return str(dst) if r.stdout.strip() == "ok" and dst.exists() else None
 
 
-def build_input(line: str, extra_images: list[str] | None = None) -> tuple[list[dict], list[str]]:
-    """-> (content blocks, attached image paths). Paths stay in the text, unescaped and quoted."""
-    text, images = line, list(extra_images or [])
-    for raw, path in find_paths(line):
+# ------------------------------------------------------------------------------ @ mentions
+# DeepSeek Harness's own grammar: `@path` at the start of input or after whitespace (an e-mail
+# address does not count), `@"path with spaces"`, relative paths from the workspace root. dsh
+# sends a mention as plain text and leaves reading to the model; here the file goes along with the
+# prompt instead (one model step less at ~10 tok/s): text files inline, images attached,
+# directories as a short tree. `@path:10-40` sends only those lines.
+
+MENTION = re.compile(r'(?<!\S)@(?:"([^"\n]+)"|((?:\\.|[^\s"\\])+))')
+MENTION_MAX_BYTES = int(os.environ.get("DSV41_MENTION_MAX_BYTES", 48_000))  # ~12K tokens of code
+BINARY_EXT = {".pdf", ".zip", ".gz", ".tgz", ".bz2", ".xz", ".7z", ".rar", ".dmg", ".pkg", ".app", ".so", ".dylib",
+              ".o", ".a", ".bin", ".safetensors", ".npy", ".npz", ".pt", ".pth", ".onnx", ".mp3", ".mp4", ".mov",
+              ".wav", ".docx", ".xlsx", ".pptx", ".key", ".numbers", ".pages", ".sqlite", ".db", ".jar", ".class"}
+IGNORE_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", ".mypy_cache", ".pytest_cache", ".ruff_cache",
+               ".tox", "build", "dist", ".idea", ".vscode", ".DS_Store", ".next", "target"}
+
+
+def est_tokens(s: str) -> int:
+    cjk = sum(1 for ch in s if ord(ch) >= 0x2E80)
+    return int((len(s) - cjk) / 3.6 + cjk * 0.8) + 1
+
+
+def resolve_mention(token: str, cwd: str) -> tuple[str | None, tuple[int, int] | None, str]:
+    """-> (absolute existing path or None, line range, trailing text the token swallowed)."""
+    def find(t: str):
+        p = os.path.abspath(os.path.join(cwd, os.path.expanduser(t)))
+        if os.path.exists(p):
+            return p, None
+        m = re.fullmatch(r"(.+?):(\d+)(?:-(\d+))?", t)
+        if m:
+            p = os.path.abspath(os.path.join(cwd, os.path.expanduser(m.group(1))))
+            if os.path.isfile(p):
+                a = int(m.group(2))
+                return p, (a, int(m.group(3) or a))
+        return None, None
+
+    # Chinese text often runs straight on after the path ("看 @notes.txt，第一行是什么"): take the
+    # longest prefix that exists, cutting only where a non-path character follows (so a typo such
+    # as @notes.txtx stays unresolved instead of quietly matching notes.txt)
+    for i in range(len(token), 0, -1):
+        if i < len(token) and re.match(r"[A-Za-z0-9_.~/\-]", token[i]):
+            continue
+        p, rng = find(token[:i])
+        if p:
+            return p, rng, token[i:]
+    return None, None, ""
+
+
+def dir_tree(path: str, depth: int = 2, limit: int = 200) -> tuple[str, int]:
+    """Indented listing of `path`, `depth` levels deep, directories first, hidden and build/VCS
+    directories skipped. -> (listing, entries seen); scanning stops after 5000 entries."""
+    out: list[str] = []
+    seen = [0]
+
+    def walk(d: str, level: int) -> None:
+        try:
+            entries = sorted(os.scandir(d), key=lambda e: (not e.is_dir(follow_symlinks=False), e.name.lower()))
+        except OSError:
+            return
+        for e in entries:
+            if e.name.startswith(".") or e.name in IGNORE_DIRS or seen[0] > 5000:
+                continue
+            seen[0] += 1
+            is_dir = e.is_dir(follow_symlinks=False)
+            if len(out) < limit:
+                out.append("  " * level + e.name + ("/" if is_dir else ""))
+            if is_dir and level + 1 < depth:
+                walk(e.path, level + 1)
+
+    walk(path, 0)
+    more = seen[0] - len(out)
+    return "\n".join(out) + (f"\n… 另有 {more} 项未列出" if more > 0 else ""), seen[0]
+
+
+def read_text(path: str, rng: tuple[int, int] | None) -> tuple[str | None, int, bool]:
+    """-> (text or None when binary, total lines, truncated)."""
+    if Path(path).suffix.lower() in BINARY_EXT:
+        return None, 0, False
+    with open(path, "rb") as f:
+        raw = f.read(MENTION_MAX_BYTES * 8 if rng else MENTION_MAX_BYTES + 1)
+    if b"\0" in raw[:8192]:
+        return None, 0, False
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as e:
+        if e.start < len(raw) - 4:  # a cut multi-byte char at the end is fine, anything earlier is binary
+            return None, 0, False
+        text = raw[: e.start].decode("utf-8")
+    lines = text.splitlines()
+    if rng:
+        a, b = max(1, rng[0]), max(rng[0], rng[1])
+        return "\n".join(lines[a - 1 : b]), len(lines), False
+    truncated = os.path.getsize(path) > MENTION_MAX_BYTES
+    if truncated:
+        text = text[:MENTION_MAX_BYTES].rsplit("\n", 1)[0]
+    return text, len(lines), truncated
+
+
+def expand_mentions(line: str, cwd: str) -> tuple[str, list[dict], list[str], list[str]]:
+    """-> (prompt text, extra text blocks with file contents, image paths, one note per mention)."""
+    blocks, images, notes = [], [], []
+    out, last = [], 0
+    for m in MENTION.finditer(line):
+        token = m.group(1) if m.group(1) is not None else re.sub(r"\\(.)", r"\1", m.group(2))
+        path, rng, tail = resolve_mention(token, cwd)
+        out.append(line[last : m.start()])
+        last = m.end()
+        if path is None:
+            out.append(m.group(0))
+            notes.append(c(GRAY, f"？未找到 @{token}，按原文发送"))
+            continue
+        shown = os.path.relpath(path, cwd) if path == cwd or path.startswith(cwd + os.sep) else path
+        if os.path.isdir(path):
+            shown = shown.rstrip("/") + "/"
+        mention = f'@"{shown}"' if " " in shown else f"@{shown}"
+        if rng:
+            mention += f":{rng[0]}-{rng[1]}"
+        out.append(mention + tail)
+        name = os.path.basename(path.rstrip("/")) or path
+        if os.path.isdir(path):
+            tree, n = dir_tree(path)
+            blocks.append({"type": "text", "text": f'<directory path="{path}">\n{tree}\n</directory>'})
+            notes.append(f"📁 {name}/（{n} 项，约 {est_tokens(tree):,} tok）")
+        elif Path(path).suffix.lower() in IMAGE_EXT:
+            if path not in images:
+                images.append(path)
+            notes.append(f"🖼 {name}")
+        else:
+            text, n_lines, truncated = read_text(path, rng)
+            if text is None:
+                notes.append(f"📦 {name}（二进制，只传路径，agent 可自行处理）")
+                continue
+            attr = f' lines="{rng[0]}-{rng[1]}"' if rng else ""
+            more = "\n[文件较大，只附上了开头部分；需要其余内容请用 sed 分段读取]" if truncated else ""
+            blocks.append({"type": "text", "text": f'<file path="{path}"{attr}>\n{text}\n</file>{more}'})
+            span = f"第 {rng[0]}-{rng[1]} 行" if rng else f"{n_lines} 行"
+            notes.append(f"📄 {name}（{span}，约 {est_tokens(text):,} tok{'，已截断' if truncated else ''}）")
+    out.append(line[last:])
+    return "".join(out), blocks, images, notes
+
+
+def build_input(line: str, extra_images: list[str] | None = None, cwd: str | None = None) -> tuple[list[dict], list[str]]:
+    """-> (content blocks, notes to show). @ mentions first (see above); then dragged-in paths:
+    images among them are attached, every path stays in the text, unescaped and quoted."""
+    cwd = cwd or os.getcwd()
+    text, file_blocks, images, notes = expand_mentions(line, cwd)
+    images = list(extra_images or []) + [p for p in images if p not in (extra_images or [])]
+    for raw, path in find_paths(text):
+        if raw.startswith("@"):
+            continue
         if raw != path:  # escaped / quoted / ~ forms become one plain quoted path
             text = text.replace(raw, f'"{path}"', 1)
         if Path(path).is_file() and Path(path).suffix.lower() in IMAGE_EXT and path not in images:
             images.append(path)
-    text = text.strip() or ("请看这张图片。" if images else "")
-    blocks = [{"type": "text", "text": text}]
-    blocks += [image_block(p) for p in images]
-    return blocks, images
+            notes.append(f"🖼 {Path(path).name}")
+    for p in extra_images or []:
+        notes.append(f"🖼 {Path(p).name}")
+    text = text.strip() or ("请看这张图片。" if images else "请看附上的内容。")
+    blocks = [{"type": "text", "text": text}] + file_blocks + [image_block(p) for p in images]
+    return blocks, notes
+
+
+class Completer:
+    """Tab completion of @ mentions (and slash commands) for readline/libedit: `@src/ma<Tab>` completes
+    the path, `@main<Tab>` searches the workspace by name (git-tracked files when in a repo)."""
+
+    COMMANDS = ["/help", "/new", "/sessions", "/resume", "/effort", "/img", "/paste", "/stats", "/exit"]
+
+    def __init__(self, cwd: str):
+        self.cwd, self.index, self.t_index, self.matches = cwd, [], 0.0, []
+
+    def complete(self, text: str, state: int):
+        if state == 0:
+            try:
+                self.matches = self._matches(text)
+            except Exception:  # noqa: BLE001 - completion must never break input
+                self.matches = []
+        return self.matches[state] if state < len(self.matches) else None
+
+    def _matches(self, text: str) -> list[str]:
+        if text.startswith("/") and not text.startswith("//"):
+            hits = [x for x in self.COMMANDS if x.startswith(text)]
+            if hits:
+                return hits
+        if not text.startswith("@"):
+            return []
+        frag = text[1:].lstrip('"')
+        if frag.startswith(("~", "/", ".")) or "/" in frag:
+            return self._paths(frag)
+        return self._search(frag)
+
+    @staticmethod
+    def _mention(rel: str, is_dir: bool) -> str:
+        rel = rel + ("/" if is_dir and not rel.endswith("/") else "")
+        return f'@"{rel}' + ("" if is_dir else '"') if " " in rel else f"@{rel}"
+
+    def _paths(self, frag: str) -> list[str]:
+        head, part = os.path.split(frag)
+        base = os.path.join(self.cwd, os.path.expanduser(head)) if head else self.cwd
+        try:
+            names = sorted(os.listdir(base))
+        except OSError:
+            return []
+        out = []
+        for n in names:
+            if n.startswith(".") and not part.startswith("."):
+                continue
+            if n.lower().startswith(part.lower()):
+                out.append(self._mention(os.path.join(head, n) if head else n, os.path.isdir(os.path.join(base, n))))
+        return out[:200]
+
+    def _files(self) -> list[str]:
+        if self.index and time.time() - self.t_index < 30:
+            return self.index
+        files: list[str] = []
+        try:
+            r = subprocess.run(["git", "ls-files", "-co", "--exclude-standard"], cwd=self.cwd, capture_output=True,
+                               text=True, timeout=3)
+            if r.returncode == 0:
+                files = r.stdout.splitlines()[:50_000]
+        except (OSError, subprocess.SubprocessError):
+            pass
+        if not files:
+            t0 = time.time()
+            for root, dirs, fs in os.walk(self.cwd):
+                dirs[:] = [d for d in dirs if d not in IGNORE_DIRS and not d.startswith(".")]
+                rel = os.path.relpath(root, self.cwd)
+                files += [f if rel == "." else os.path.join(rel, f) for f in fs if not f.startswith(".")]
+                if len(files) > 20_000 or time.time() - t0 > 0.5:
+                    break
+        dirs = sorted({os.path.dirname(f) + "/" for f in files if os.path.dirname(f)})
+        self.index, self.t_index = files + dirs, time.time()
+        return self.index
+
+    def _search(self, frag: str) -> list[str]:
+        if not frag:
+            return self._paths("")
+        q = frag.lower()
+        ranked = []
+        for f in self._files():
+            name = os.path.basename(f.rstrip("/")).lower()
+            if name.startswith(q):
+                rank = 0
+            elif q in name:
+                rank = 1
+            elif q in f.lower():
+                rank = 2
+            else:
+                continue
+            ranked.append((rank, len(f), f))
+        return [self._mention(f.rstrip("/"), f.endswith("/")) for _, _, f in sorted(ranked)[:40]]
 
 
 # ------------------------------------------------------------------------------ the session
@@ -490,9 +728,18 @@ class Term:
         out(c(GRAY, f"  服务 {self.base}（{mode}）· 推理强度 {self.effort} · 上下文 {self.a.context:,} · 单步输出上限 {self.a.max_tokens:,}"))
         out(c(GRAY, f"  工作目录 {self.cwd} · 权限：{perm.get(self.a.permission, self.a.permission)}"))
         out(c(GRAY, f"  会话 {self.session.id}"))
-        out(c(GRAY, "  拖入文件 = 附上路径（图片会直接给模型看）· /paste 贴剪贴板图片 · /help 帮助 · Ctrl+C 中断 · Ctrl+D 退出"))
+        out(c(GRAY, "  @文件 引用（Tab 补全）· 拖入文件 = 附上路径（图片直接给模型看）· /paste 贴剪贴板图片 · /help · Ctrl+C 中断 · Ctrl+D 退出"))
 
-    HELP = """命令：
+    HELP = """引用本地文件（@，Tab 补全）：
+  @notes.txt 解释一下      文本文件：内容随问题一起发给模型（超过约 48 KB 只附开头）
+  @src/main.py:40-80 …     只附这几行
+  @"my file.md" …          路径有空格时加引号（Tab 补全会自动加）
+  @src/ 有哪些模块？        目录：附上两层目录树
+  @截图.png 这是什么？      图片：直接给模型看
+  @ma<Tab>                 按文件名在工作目录里查找；@src/<Tab> 按路径补全
+  相对路径从工作目录算起；也可以写绝对路径或 ~/…；邮箱里的 @ 不算。
+  拖入文件（不加 @）只把路径交给 agent，由它自己去读；拖入的图片会直接附上。
+命令：
   /help                 本帮助
   /new                  开始新会话
   /sessions             列出本目录的历史会话
@@ -570,9 +817,9 @@ class Term:
         return True
 
     def send(self, text: str, images: list[str] | None = None) -> None:
-        blocks, attached = build_input(text, images)
-        if attached:
-            out(c(GRAY, "📎 " + "，".join(Path(p).name for p in attached)))
+        blocks, notes = build_input(text, images, cwd=self.cwd)
+        for n in notes:
+            out(c(GRAY, "  " + n))
         try:
             self.ask(blocks)
         except KeyboardInterrupt:
@@ -669,13 +916,13 @@ def main(argv=None) -> int:
     try:
         if a.prompt:
             for i, p in enumerate(a.prompt):
-                blocks, attached = build_input(p, a.image if i == 0 else None)
-                if attached:
-                    out(c(GRAY, "📎 " + "，".join(Path(x).name for x in attached)))
+                blocks, notes = build_input(p, a.image if i == 0 else None, cwd=t.cwd)
+                for n in notes:
+                    out(c(GRAY, "  " + n))
                 t.ask(blocks)
             return 0
         try:
-            import readline  # noqa: F401 - line editing (CJK backspace, arrows) and history for input()
+            import readline  # line editing (CJK backspace, arrows), history and @ completion for input()
 
             hist = Path(a.home).parent / "repl_history"
             try:
@@ -683,6 +930,13 @@ def main(argv=None) -> int:
             except OSError:
                 pass
             readline.set_history_length(2000)
+            completer = Completer(t.cwd)
+            readline.set_completer(completer.complete)
+            readline.set_completer_delims(" \t\n")
+            if "libedit" in (readline.__doc__ or ""):  # macOS / uv Pythons ship libedit
+                readline.parse_and_bind("bind ^I rl_complete")
+            else:
+                readline.parse_and_bind("tab: complete")
         except ImportError:
             hist = None
         try:
