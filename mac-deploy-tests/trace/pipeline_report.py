@@ -29,6 +29,7 @@ REF = {
     # dsv41 test --quick through the launcher with the final code (filled in by --quick-log)
     "quick": None,
     # mk/bench_prefill_vl.py and the grouping run (logs/mk/agent/bench_prefill_vl.log, vl_pairs.log): image prompt, 1,500 tokens
+    # (measured before the slab cap of 2fcc4a4: k 125 instead of 117 on the 17 2-2-3 layers)
     "vl": {"off_s": (28.31, 27.12, 30.52, 27.61), "on_s": (23.58, 22.70, 23.47, 23.36), "max_diff": 1.125},
 }
 
@@ -103,6 +104,54 @@ def load(a):
     return cap, base, look, alt
 
 
+def parse_anchor_log(path):
+    """mk/test_prefix_anchor.py output -> [{q, tokens, exact, cold, make, reuse, reused, same_cold, same_anchor, cos_cold, cos_anchor}]"""
+    out, cur = [], None
+    for line in open(path, encoding="utf-8"):
+        m = re.match(r"B: '(.*)' \((\d+) tokens\)", line)
+        if m:
+            cur = {"q": m.group(1), "tokens": int(m.group(2))}
+            out.append(cur)
+            continue
+        if cur is None:
+            continue
+        m = re.match(r"\s+(exact|cold, no anchor|A: first time seen|A2?: makes the anchor|B: restores the anchor)[^\d]*?\s+([\d.]+) s\s+reused\s+(\d+)", line)
+        if m:
+            key = {"exact": "exact", "cold, no anchor": "cold", "A: first time seen": "first", "A: makes the anchor": "make",
+                   "A2: makes the anchor": "make", "B: restores the anchor": "reuse"}[m.group(1)]
+            cur[key] = float(m.group(2))
+            if key == "reuse":
+                cur["reused"] = int(m.group(3))
+            continue
+        m = re.match(r"\s+(cold|anchor)\s+vs exact: cos ([\d.]+), max \|diff\| ([\d.]+), top-1 same (\w+), greedy tokens same (\w+)", line)
+        if m:
+            cur[f"cos_{m.group(1)}"] = float(m.group(2))
+            cur[f"diff_{m.group(1)}"] = float(m.group(3))
+            cur[f"top1_{m.group(1)}"] = m.group(4) == "True"
+            cur[f"same_{m.group(1)}"] = m.group(5) == "True"
+    return out
+
+
+def suite_s(path):
+    return sum(r.get("seconds") or 0 for r in json.load(open(path))["results"])
+
+
+def harness_ttft(path, anchor_len=1500):
+    """dsv41 test JSON -> (first requests of new sessions [(check, ttft, cached)], requests with images [(check, ttft, cached)])"""
+    d = json.load(open(path))
+    new, img = [], []
+    for r in d["results"]:
+        reqs = r.get("requests") or []
+        if r["check"].startswith("prefix cache"):
+            continue
+        for i, q in enumerate(reqs):
+            if q.get("images"):
+                img.append((r["check"], q["ttft_s"], q["cached"]))
+            elif i == 0 and q["cached"] <= anchor_len:
+                new.append((r["check"], q["ttft_s"], q["cached"]))
+    return new, img
+
+
 # ------------------------------------------------------------------------------ html pieces
 
 def tip(tv, tt, tn=""):
@@ -169,7 +218,6 @@ def build(a):
     B, L = base["summary"], look["summary"]
     split_b, split_l = idle_split(base["runs"][0]), idle_split(look["runs"][0])
     n = len(B)
-    live_ttft = [c["t_tokens"][0] for c in cap]
     b_first = [r["first_token_s"] for r in B]
     l_first = [r["first_token_s"] for r in L]
     pf_T = sum(r["prefill"]["T"] for r in B) / 1e3
@@ -184,7 +232,6 @@ def build(a):
 
     rs_b, rs_l = cat_sum(split_b, "route_sync"), cat_sum(split_l, "route_sync")
     idle_b = sum(s["idle"] for s in split_b) / 1e3
-    idle_l = sum(s["idle"] for s in split_l) / 1e3
     cold_rs = split_b[0]["cats"]["route_sync"][1] / 1e3
     cold_T = split_b[0]["T"] / 1e3
     sum_b, sum_l = sum(b_first), sum(l_first)
@@ -192,7 +239,6 @@ def build(a):
     gb_l = [r["prefill"]["GB"] + r["first"]["GB"] for r in L]
     dec_ms = [r["decode"]["T"] for r in B if r["decode"]]
     dec_n = sum(r["decode"]["n"] for r in B if r["decode"])
-    dec_mean = statistics.mean(dec_ms)
     first_ms = [r["first"]["T"] for r in B]
     first_gb = [r["first"]["GB"] for r in B]
 
@@ -229,7 +275,7 @@ td.nw{white-space:nowrap}
         dt = d["T"] * d["n"] / 1e3
         rowsA.append((f"请求 {r['req']} <small>新 {r['new']:,} · 出 {r['generated']}</small>", [ttft, dt], f"{ttft + dt:.1f} s",
                       f"请求 {r['req']}（新 {r['new']:,} token，生成 {r['generated']} token）"))
-    figA = figure("一次请求的时间花在哪（秒）", f"回放（专家缓存 8 GiB，默认 <code>--fast</code>）· 首字前 = prefill + 首个输出 token",
+    figA = figure("一次请求的时间花在哪（秒）", "回放（专家缓存 8 GiB，默认 <code>--fast</code>）· 首字前 = prefill + 首个输出 token",
                   stacked(rowsA, [("首字前（prefill + 首个 token）", "s2"), ("解码", "sn")], 60, [0, 15, 30, 45, 60], " s",
                           "每个请求的首字前时间与解码时间（秒）"),
                   table(["请求", "新 token", "首字前（回放）", "实际运行首字", "解码 token", "解码耗时", "解码 ms/token"],
@@ -284,7 +330,7 @@ td.nw{white-space:nowrap}
         rowsD.append((f"请求 {r['req']} · 跨层预读", q["first_token_s"], "acc", f"请求 {r['req']} 跨层预读",
                       f"{q['first_token_s'] - r['first_token_s']:+.2f} s（{(q['first_token_s'] / r['first_token_s'] - 1) * 100:+.0f}%）"))
     alt_col = alt if alt and len(alt) >= n else [None] * n
-    figD = figure("prefill 跨层预读：首字前时间（秒）", "同一段会话回放：基线（<code>DEEPINFER_PREFILL_LOOKAHEAD=0</code>）与跨层预读（默认 16：每层预读 max(16, 行数 ÷ 12) 个下一层专家）",
+    figD = figure("prefill 跨层预读：首字前时间（秒）", "同一段会话回放：基线（<code>DEEPINFER_PREFILL_LOOKAHEAD=0</code>）与跨层预读（默认：每层预读 max(16, 行数 ÷ 12) 个下一层专家，受 slab 上限约束）",
                   bars(rowsD, 32, [0, 8, 16, 24, 32], " s", "基线与跨层预读的首字前时间（秒）", fmt=lambda v: f"{v:.1f}"),
                   table(["请求", "新 token", "基线", "基线（另一次）", "跨层预读", "变化", "路由同步时 SSD 空闲（基线 → 预读）", "读盘（基线 → 预读）"],
                         [[f"请求 {r['req']}", f"{r['new']:,}", f"{r['first_token_s']:.2f} s", f"{x:.2f} s" if x else "—", f"{q['first_token_s']:.2f} s",
@@ -300,7 +346,7 @@ td.nw{white-space:nowrap}
                   f"只改读盘时机，不改计算：文本 prompt（600 token 两块 prefill）的 {REF['bitexact']['logits']:,} 个 logits 开关前后逐位相同。")
 
     # ---------------------------------------------------------------- chart E: decode per token
-    rowsE = [(f"11-17 · 16 GiB <small>短提示</small>", [REF["dec16"]["gpu_only"], REF["dec16"]["ssd_only"], REF["dec16"]["both"], REF["dec16"]["idle"]],
+    rowsE = [("11-17 · 16 GiB <small>短提示</small>", [REF["dec16"]["gpu_only"], REF["dec16"]["ssd_only"], REF["dec16"]["both"], REF["dec16"]["idle"]],
               f"{REF['dec16']['T']:.0f}", "11-17 mk-7 trace，16 GiB")]
     for r in B:
         d = r["decode"]
@@ -321,12 +367,59 @@ td.nw{white-space:nowrap}
                   f"解码没有明显的流水线空泡：两者都空闲每 token 只有 1–2 ms。8 GiB 缓存下每 token 要读 0.5–0.8 GB，GPU 等盘 42–77 ms，是 16 GiB 时（15.6 ms）的 3–5 倍，"
                   f"所以 agent 里只有 {1e3 / max(dec_ms):.1f}–{1e3 / min(dec_ms):.1f} tok/s。这是缓存容量问题，不是调度气泡。prefill 之后的前 5 个解码 token 在多数请求里还要再慢 10–45 ms（缓存被 prefill 冲掉了）。")
 
+    anchor_html, anchor_tile, anchor_li, anchor_step = "", "", "", "下一步"
+    if a.anchor_log and os.path.exists(a.anchor_log):
+        AN = [q for q in parse_anchor_log(a.anchor_log) if "reuse" in q]
+        rows_an = []
+        for q in AN:
+            rows_an.append([e(q["q"]), f"{q['tokens']:,}", f"{q['cold']:.1f} s", f"{q['reuse']:.1f} s（{(q['reuse'] / q['cold'] - 1) * 100:+.0f}%）",
+                            f"{q['make']:.1f} s", f"{q.get('cos_cold', 0):.4f} / {q.get('cos_anchor', 0):.4f}",
+                            "相同" if q.get("same_cold") and q.get("same_anchor") else "不同"])
+        hb_new = hb_img = ha_new = ha_img = None
+        if a.harness_before and a.harness_after:
+            hb_new, hb_img = harness_ttft(a.harness_before)
+            ha_new, ha_img = harness_ttft(a.harness_after)
+        med = lambda xs: statistics.median([x[1] for x in xs]) if xs else float("nan")  # noqa: E731
+        harness_rows = ""
+        if hb_new and ha_new:
+            cold_a = [x for x in ha_new if x[2] == 0]  # the first new session (cold) and the one that made the anchor
+            reuse_a = [x for x in ha_new if x[2] > 0]
+            img_reuse = [x for x in ha_img if x[2] > 0]
+            harness_rows = table(["<code>dsv41 test</code>，缓存 8 GiB", "11-24（无锚点）", "本次", "说明"], [
+                ["新会话第一个请求，首字中位", f"{med(hb_new):.1f} s（{len(hb_new)} 个）", f"{med(reuse_a):.1f} s（{len(reuse_a)} 个复用锚点）",
+                 "服务启动后的前两个新会话没有锚点可用：" + " / ".join(f"{x[1]:.1f} s" for x in cold_a) + "（第二个建锚点）"],
+                ["带图请求，首字中位", f"{med(hb_img):.1f} s（{len(hb_img)} 个）", f"{med(ha_img):.1f} s（{len(ha_img)} 个，其中 {len(img_reuse)} 个复用锚点）",
+                 "带图请求从锚点开始算，不再从头算"],
+                ["15 项验收的总耗时", f"{suite_s(a.harness_before):.0f} s", f"{suite_s(a.harness_after):.0f} s（{(suite_s(a.harness_after) / suite_s(a.harness_before) - 1) * 100:+.0f}%）",
+                 "已含两次建锚点的一次性开销（测试脚本和终端 dsv41 的 system 提示略有不同，各建一个锚点）"],
+            ], None, hidden=False, text=True)
+        q0 = AN[0] if AN else None
+        anchor_tile = (f'<div class="tile"><div class="k">新会话首字（复用固定前缀）</div><div class="v">{(q0["reuse"] / q0["cold"] - 1) * 100:+.0f}%</div>'
+                       f'<div class="d">{q0["cold"]:.1f} → {q0["reuse"]:.1f} s；服务启动后第二个新会话建锚点，一次性多 {q0["make"] - q0["cold"]:.0f} s</div></div>') if q0 else ""
+        anchor_li = (f'<li><strong>已实现：新会话复用固定前缀（锚点快照，默认打开，<code>DEEPINFER_PREFIX_ANCHOR=0</code> 关闭）。</strong>'
+                     f'dsh 每个会话开头约 1,488 token 的 system 提示和工具定义只算一次；新会话首字 {q0["cold"]:.1f} → {q0["reuse"]:.1f} s，'
+                     f'贪心生成的 token 与冷 prefill、精确计算相同。</li>') if q0 else ""
+        anchor_step = f"已实现（默认打开）：新会话首字 {(q0['reuse'] / q0['cold'] - 1) * 100:+.0f}%" if q0 else "下一步"
+        anchor_html = f"""
+<section id="anchor" aria-labelledby="h-anchor">
+  <h2 id="h-anchor">新会话复用固定前缀：锚点快照</h2>
+  <p>dsh 发来的每个请求都以同一段约 1,488 token 的 system 提示和工具定义开头（到第一个 <code style="white-space:nowrap">&lt;｜User｜&gt;</code> 为止）。当前目录、时间这类会变的内容都在用户消息之后。引擎原来只复用当前会话的状态和上一个请求的快照，每个新会话都要把这段从头算一遍；带图请求则完全不复用前缀，每次都从头算。</p>
+  <ul class="plain">
+    <li><strong>做法：</strong>同一段前缀（≥ 512 token）第二次出现在新会话开头时，把它单独 prefill：最后一块让 decoder 重放前缀末尾，所以状态和一次完整 prompt 结束时一样，对后面接什么内容都有效。然后保存快照和它的状态，即锚点，最多保留 2 个，按最近使用排序。之后的新会话、带图请求只要以它开头，就恢复锚点，只 prefill 后面的部分。恢复时复制 ring（前向会原地写 <code>Ring.pos</code>），所以同一个锚点可以反复用。只出现过一次的前缀不建锚点：有的客户端把日期之类的内容写进 system 提示，每次都建只会白花时间。</li>
+    <li><strong>语义：</strong>和同会话多轮复用一样，decoder 从前缀末尾开始重放，而不是只重放整个 prompt 的最后 140 个 token。和精确计算（不截断 decoder）相比，锚点路径与冷 prefill 的接近程度是同一量级，贪心生成的 token 都相同（见下表）。</li>
+    <li><strong>代价：</strong>建锚点的那个会话（服务启动后的第二个新会话）多一次 decoder 重放，后面的内容也要单独再读一遍专家，一次性多约 {q0["make"] - q0["cold"]:.0f} s。服务常驻，锚点在进程里一直有效；<code>reset()</code> 会清掉。</li>
+    <li><strong>验证：</strong><code>tests/test_engine.py::test_shared_prefix_anchor</code>：恢复两次（第二次在解码改写过状态之后）都和手工构建的状态完全一致（最大差 0.0），建锚点的请求报告复用 0。真实模型见下表（<code>mk/test_prefix_anchor.py</code>，lossless 解码）。{('API 端到端：' + e(a.e2e) + '。') if a.e2e else ''}</li>
+  </ul>
+  {table(["新会话 B 的用户消息", "提示 token", "冷 prefill", "复用锚点", "建锚点的会话", "与精确计算的余弦（冷 / 锚点）", "24 个贪心 token（三条路径）"], rows_an, None, hidden=False, text=True)}
+  {harness_rows}
+</section>
+""" if q0 else ""
     # ---------------------------------------------------------------- next steps table
     steps = [
         ["每层 prefill 的路由同步：SSD 等下一层路由", f"{rs_b:.1f} s（prefill 的 {pct(rs_b / pf_T)}）", "跨层预读（本次实现，默认打开）",
          "无损：只改读盘时机，不改计算", f"已测：首字前合计 {(sum_l / sum_b - 1) * 100:+.0f}%，带图约 −17%"],
         ["新会话重算同一段 system + 工具定义（约 1,489 token）", f"冷 prefill 约 {b_first[0]:.0f} s / 新会话", "缓存这段共享前缀的状态（锚点快照），新会话直接复用",
-         "无损：与同会话多轮复用相同的语义", "下一步"],
+         "无损：与同会话多轮复用相同的语义", anchor_step],
         ["prefill 之后的首个输出 token 走解码路径、缓存是冷的", f"{min(first_ms):.0f}–{max(first_ms):.0f} ms / 请求，读 {min(first_gb):.1f}–{max(first_gb):.1f} GB", "把最后一个 prompt token 的专家留在缓存里 / 预读",
          "无损", "待评估"],
         ["层交界处的 Python 建图、Engram 查表", f"{tot_idle['build'] + tot_idle['other']:.1f} s", "跨层预读同时覆盖（读盘在这段时间继续）", "无损", "随第一项"],
@@ -365,7 +458,7 @@ td.nw{white-space:nowrap}
 <header class="top"><div class="wrap">
   <span class="eyebrow">DeepInfer-Mac · DSV4.1-Flash · agent 流水线 · {e(base['generated'][:10])}</span>
   <nav class="toc" aria-label="目录"><a href="#summary">结论</a><a href="#method">方法</a><a href="#time">时间去向</a><a href="#prefill">prefill</a>
-  <a href="#lookahead">跨层预读</a><a href="#decode">解码</a><a href="#next">下一步</a><a href="#viewer">时间线</a><a href="#repro">复现</a></nav>
+  <a href="#lookahead">跨层预读</a><a href="#anchor">前缀复用</a><a href="#decode">解码</a><a href="#next">下一步</a><a href="#viewer">时间线</a><a href="#repro">复现</a></nav>
 </div></header>
 <main class="wrap">
 
@@ -382,6 +475,7 @@ td.nw{white-space:nowrap}
       <div class="d">占 prefill 的 {pct(rs_b / pf_T)}；冷 prefill 里 {cold_rs:.1f} s（{pct(cold_rs / cold_T)}）</div></div>
     <div class="tile"><div class="k">跨层预读之后 <span class="chip good"><svg aria-hidden="true"><use href="#i-good"/></svg>计算不变</span></div><div class="v">{look_gain:+.0f}%</div>
       <div class="d">首字前合计 {sum_b:.1f} → {sum_l:.1f} s；冷 prefill {b_first[0]:.1f} → {l_first[0]:.1f} s</div></div>
+    {anchor_tile}
   </div>
   <div class="verdict"><p><strong>结论</strong></p><ul class="plain">
     <li><strong>prefill 是读盘受限，而且读得很多。</strong>新 token 只有 14–15 个的请求也要读约 22 GB、首字前 4 s 多：prefill 必须精确路由，每层要把这些 token 用到的专家都读进来，8 GiB 缓存几乎留不住上一层的专家。</li>
@@ -389,7 +483,7 @@ td.nw{white-space:nowrap}
     <li><strong>已实现跨层预读，默认打开（<code>DEEPINFER_PREFILL_LOOKAHEAD=16</code>，设 0 关闭）。</strong>在本层最后一批时，用下一层的路由器对本层输入预测、按行数读入最可能的专家。首字前合计 {look_gain:+.0f}%，冷 prefill {(l_first[0] / b_first[0] - 1) * 100:+.0f}%，带图 prefill 约 −17%；只改读盘时机，不改计算。</li>
     <li><strong>顺带查清：prefill 本身不能逐位复现。</strong>专家结果用 MLX 的 scatter-add 加回各行，GPU 上是原子加；一行在同一批里命中两个专家时，累加顺序不固定。带图 prompt 上同一设置的两次运行 logits 最多差 {REF['vl']['max_diff']}（top-1 不变）。与预读无关，修法见「下一步」。</li>
     <li><strong>解码没有明显空泡。</strong>两者都空闲每 token 只有 1–2 ms；慢在 8 GiB 缓存下每 token 要等盘 42–77 ms（16 GiB 时 15.6 ms），这是缓存容量问题。</li>
-    <li><strong>更大的一块是重复工作，不是气泡。</strong>每个新会话都要重算同一段约 1,489 token 的 system 提示和工具定义（这部分不含当前目录、时间等动态内容），冷 prefill {b_first[0]:.0f} s。给这段共享前缀留一个快照，新会话就能直接复用。</li>
+    {anchor_li or f'<li><strong>更大的一块是重复工作，不是气泡。</strong>每个新会话都要重算同一段约 1,489 token 的 system 提示和工具定义（这部分不含当前目录、时间等动态内容），冷 prefill {b_first[0]:.0f} s。给这段共享前缀留一个快照，新会话就能直接复用。</li>'}
   </ul></div>
 </section>
 
@@ -419,18 +513,20 @@ td.nw{white-space:nowrap}
 
 <section id="lookahead" aria-labelledby="h-lookahead">
   <h2 id="h-lookahead">跨层预读：把层交界的 SSD 空泡填上</h2>
-  <p>做法：每层算路由时，顺带用下一层的路由器对本层的输入打分，在同一次主机同步里拿回每行的 top-6，按被预测的次数排序。本层进入最后一批专家时（本层已经没有要读的了），按低优先级读入下一层最可能的 max(16, 行数 ÷ 12) 个专家。下一层路由出来以后，还没开始读的猜错项会被取消。专家批的顺序和计算都不变。只在 prefill 里生效（<code>LLM._prefill</code> / <code>_prefill_vl</code> 打开 <code>Transformer.prefilling</code>），解码与 DSpark 的多 token 前向不受影响。代码在 <code>deepinfer_mac/model/model.py</code>（<code>MoE.PREFILL_LOOKAHEAD</code>），默认打开，<code>DEEPINFER_PREFILL_LOOKAHEAD=0</code> 关闭。</p>
+  <p>做法：每层算路由时，顺带用下一层的路由器对本层的输入打分，在同一次主机同步里拿回每行的 top-6，按被预测的次数排序。本层进入最后一批专家时（本层已经没有要读的了），按低优先级读入下一层最可能的 max(16, 行数 ÷ 12) 个专家，最多占目标 slab 的一半，并给固定槽、当前批和预读批留出余量（8 GiB 时上限 173 / 117 / 16 个）。下一层路由出来以后，还没开始读的猜错项会被取消。专家批的顺序和计算都不变。只在 prefill 里生效（<code>LLM._prefill</code> / <code>_prefill_vl</code> 打开 <code>Transformer.prefilling</code>），解码与 DSpark 的多 token 前向不受影响。代码在 <code>deepinfer_mac/model/model.py</code>（<code>MoE.PREFILL_LOOKAHEAD</code>），默认打开，<code>DEEPINFER_PREFILL_LOOKAHEAD=0</code> 关闭。</p>
   <ul class="plain">
     <li><strong>文本 prefill：</strong><code>mk/test_prefill_lookahead.py</code> 用真实模型做「非末块 + 末块（Bounded Replay）」两块 prefill，开 / 关交替各两次：{REF['bitexact']['logits']:,} 个 logits 四次逐位相同；耗时 {REF['bitexact']['off_s'][0]:.1f} / {REF['bitexact']['off_s'][1]:.1f} s → {REF['bitexact']['on_s'][0]:.1f} / {REF['bitexact']['on_s'][1]:.1f} s，读盘 {REF['bitexact']['off_gb']:.1f} → {REF['bitexact']['on_gb']:.1f} GB。</li>
-    <li><strong>带图 prefill：</strong><code>mk/bench_prefill_vl.py</code>（dsh 的 system 文本 + 测试图片，1,500 token）：{" / ".join(f"{v:.1f}" for v in REF['vl']['off_s'])} s → {" / ".join(f"{v:.1f}" for v in REF['vl']['on_s'])} s（约 −17%）。这条路径上 prefill 本身就不能逐位复现（见下一条），按结果分组时，组别与开关无关。</li>
+    <li><strong>带图 prefill：</strong><code>mk/bench_prefill_vl.py</code>（dsh 的 system 文本 + 测试图片，1,500 token，加上限前测）：{" / ".join(f"{v:.1f}" for v in REF['vl']['off_s'])} s → {" / ".join(f"{v:.1f}" for v in REF['vl']['on_s'])} s（约 −17%）。这条路径上 prefill 本身就不能逐位复现（见下一条），按结果分组时，组别与开关无关。</li>
     <li><strong>prefill 的运行间差异（原有）：</strong>连续 7 次带图 prefill 分成两组逐位相同的结果，组别与开关、是否清空缓存都无关；逐层校验和显示前 21 层完全相同，第一处差异在第 21 层 MoE 的输出，而它的输入、路由、共享专家都相同，槽里的专家字节也与模型文件一致。原因是 MLX 的 scatter-add（<code>y.at[r].add(o)</code>）在 GPU 上用原子加：同样的输入重复 30 次，结果就不逐位相同。记录在 <code>logs/mk/agent/prefill_nondeterminism.md</code>。</li>
     <li><strong>单测：</strong><code>pytest tests/</code> {REF['unit']} 通过（tiny checkpoint 上的引擎、与参考实现的一致性、视觉、存储、服务端）。</li>
     <li><strong>端到端：</strong>{QUICK}</li>
+    <li><strong>长提示（API 套件发现并已修复）：</strong>最初没有上限时，4,096 行的块会要 341 个专家；预读中的槽不能被挤掉，于是占满了 slab，本层最后一批按需读盘找不到槽，报 MemoryError。<code>test_api_e2e.py</code> 的两项长提示测试（12.6K / 25.6K token）因此失败；加上 slab 上限后两项都通过，其余 26 项不受影响。</li>
     <li><strong>解码：</strong>预读只在 prefill 里；两次回放的解码均值 {dec_b:.1f} → {dec_l:.1f} ms/token，差 {(dec_l / dec_b - 1) * 100:+.1f}%，在运行间 ±3–5% 的波动范围内（稳态 token 也差这么多，与 prefill 后的缓存内容无关）。</li>
   </ul>
   {figD}
 </section>
 
+{anchor_html}
 <section id="decode" aria-labelledby="h-decode">
   <h2 id="h-decode">解码：没有明显空泡，慢在缓存容量</h2>
   {figE}
@@ -521,6 +617,10 @@ def main():
     ap.add_argument("look")
     ap.add_argument("--base-alt", help="log of another baseline replay (its 'first token' lines), shown in the lookahead table")
     ap.add_argument("--quick", help="one-line result of `dsv41 test --quick` with this code")
+    ap.add_argument("--anchor-log", help="output of mk/test_prefix_anchor.py")
+    ap.add_argument("--harness-before", help="dsv41 test JSON without anchors (logs/dsh/test-*.json)")
+    ap.add_argument("--harness-after", help="dsv41 test JSON with anchors")
+    ap.add_argument("--e2e", help="one-line result of the API e2e suite with this code")
     a = ap.parse_args()
     REF["quick"] = a.quick
     page = build(a)

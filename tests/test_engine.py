@@ -137,3 +137,71 @@ def test_snapshot_reuse_when_history_diverges(setup):
     a, b = np.array(logits[-1]), np.array(ref_logits[-1])
     print("snapshot restore vs hand-built: max abs diff", float(np.abs(a - b).max()))
     assert np.allclose(a, b, atol=1e-4) and int(a.argmax()) == int(b.argmax())
+
+
+def test_shared_prefix_anchor(setup):
+    """A new conversation that starts with an earlier one's system prompt (everything up to the first
+    <｜User｜>) restores the anchor state kept for it and prefills only the rest. The anchor is made the second
+    time the prefix starts a conversation; the call that makes it reports no reuse. Restoring must give exactly
+    the state built by hand with the same chunking -- also the second time, after decoding wrote into the
+    restored state (the anchor's rings are copied on restore)."""
+    _, llm = setup
+    llm.reset()
+    llm.ANCHOR_MIN = 8
+    try:
+        rng = np.random.default_rng(21)
+        user = llm._user_id
+        assert user is not None
+        prefix = rng.integers(100, 120000, size=20).tolist() + [user]
+        sp = SamplingParams(temperature=0, max_tokens=6, ignore_eos=True)
+        a = prefix + rng.integers(100, 120000, size=7).tolist()
+        list(llm.stream(a, sp))
+        assert llm.last_stats["reused_tokens"] == 0 and not llm._anchors  # seen once: no anchor yet
+        a2 = prefix + rng.integers(100, 120000, size=5).tolist()
+        list(llm.stream(a2, sp))
+        assert llm.last_stats["reused_tokens"] == 0  # this call made the anchor
+        assert len(llm._anchors) == 1 and llm._anchors[0][1] == prefix
+        m = llm.model
+        for seed in (22, 23):
+            b = prefix + np.random.default_rng(seed).integers(100, 120000, size=6).tolist()
+            assert llm.cached_prefix_len(b) == len(prefix)
+            st, logits, _, reused = llm._prefill(b, want_hidden=False)
+            assert reused == len(prefix)
+            ref = m.new_state()
+            m.forward(ref, prefix)  # same chunking: anchor, rest of the body, last token
+            m.forward(ref, b[len(prefix):-1])
+            ref_logits = m.forward(ref, b[-1:])
+            x, y = np.array(logits[-1]), np.array(ref_logits[-1])
+            print(f"anchor restore #{seed - 21} vs hand-built: max abs diff", float(np.abs(x - y).max()))
+            assert np.allclose(x, y, atol=1e-4) and int(x.argmax()) == int(y.argmax())
+            llm._state = st
+            list(llm.stream(b + [5, 6], sp))  # decode moves the restored state on before the next restore
+    finally:
+        del llm.ANCHOR_MIN
+        llm.reset()
+
+
+def test_chunked_bounded_prefill_matches_hand_built(setup):
+    """_feed's chunking with bounded replay: earlier chunks skip the decoder, the last one (at least keep_tokens)
+    replays it over its tail -- the same as forwarding those chunks by hand."""
+    _, llm = setup
+    llm.reset()
+    saved = llm.bounded_replay, llm.keep_tokens, llm.prefill_chunk
+    llm.bounded_replay, llm.keep_tokens, llm.prefill_chunk = True, 8, 20
+    try:
+        p = np.random.default_rng(31).integers(100, 120000, size=61).tolist()
+        st, logits, _, reused = llm._prefill(p, want_hidden=False)
+        assert reused == 0
+        m = llm.model
+        ref = m.new_state()
+        body = p[:-1]  # 60 tokens -> chunks of 20, 20, 20 (the last keeps >= 8 for the decoder)
+        m.forward(ref, body[:20], replay_from=20)
+        m.forward(ref, body[20:40], replay_from=20)
+        m.forward(ref, body[40:], replay_from=12)
+        ref_logits = m.forward(ref, p[-1:])
+        x, y = np.array(logits[-1]), np.array(ref_logits[-1])
+        print("chunked bounded prefill vs hand-built: max abs diff", float(np.abs(x - y).max()))
+        assert np.allclose(x, y, atol=1e-4) and int(x.argmax()) == int(y.argmax())
+    finally:
+        llm.bounded_replay, llm.keep_tokens, llm.prefill_chunk = saved
+        llm.reset()

@@ -5,13 +5,16 @@ Single-sequence, Mac-sized version of what DeepInfer does on a GPU cluster:
     prompt but replays only the last `keep_tokens` (DeepInfer default 140) through the decoder
     layers, which see the prompt only through the shared compressed KV and a 128-token window.
   * chunked, expert-major prefill and prefix reuse across calls (multi-turn chat pays only for
-    the new tokens).
+    the new tokens), plus shared-prefix anchors: a new conversation that starts with a system prompt
+    seen before (DeepSeek Harness: ~1,500 tokens of instructions and tool definitions) restores the
+    state after it and prefills only the rest (`_from_anchor`).
   * structured output (regex / JSON schema / EBNF / JSON object) via xgrammar.
   * DSpark speculative decoding (engine/dspark.py), opt-in.
 
 Environment knobs mirror DeepInfer's names where one exists:
   DEEPINFER_YOCO_PREFILL_KEEP_TOKENS (140), DEEPINFER_YOCO_PREFILL_TRUNCATION_MODE (compact|off),
   DEEPINFER_ENABLE_MTP_VARLEN (0), DEEPINFER_USE_NEXTN_DECODE (5).
+Local: DEEPINFER_PREFIX_ANCHOR (1 = on), DEEPINFER_PREFIX_ANCHOR_MIN (512 tokens).
 """
 
 from __future__ import annotations
@@ -229,6 +232,10 @@ def build_chat(root: Path, messages: list[dict], thinking: bool = False, **reque
 
 
 class LLM:
+    PREFIX_ANCHOR = os.environ.get("DEEPINFER_PREFIX_ANCHOR", "1") != "0"
+    ANCHOR_MIN = int(os.environ.get("DEEPINFER_PREFIX_ANCHOR_MIN", "512"))  # shorter shared prefixes are not kept
+    ANCHOR_KEEP = 2  # anchors kept, most recently used first (one per distinct system prompt)
+
     def __init__(
         self,
         model: str | Path = DEFAULT_MODEL_DIR,
@@ -268,6 +275,9 @@ class LLM:
             self.dspark = DSpark(args, self.weights, self.model)
         self._state: SeqState | None = None
         self._snap = None  # (snapshot, its tokens, the state it belongs to)
+        self._anchors: list = []  # [(snapshot, its tokens, the state it belongs to)], see _from_anchor
+        self._anchor_seen: list[int] = []  # hashes of prefixes that started a conversation once, most recent first
+        self._user_id = self.tokenizer.token_to_id("<｜User｜>")
         self.last_stats: dict = {}
 
     # -- prefill
@@ -276,23 +286,31 @@ class LLM:
         """Feed `prompt`, reusing earlier work. Returns (state, last logits, main hidden or None,
         number of reused tokens).
 
-        Two reuse points: the live sequence when the new prompt extends it, and a snapshot taken
-        one token before the previous prompt's end (DeepInfer stores its cache the same way). The
-        API template drops a turn's reasoning from the next prompt, so in thinking mode a follow-up
-        turn diverges right after the previous prompt's last token -- the snapshot still matches."""
+        Reuse points: the live sequence when the new prompt extends it, a snapshot taken one token
+        before the previous prompt's end (DeepInfer stores its cache the same way; the API template
+        drops a turn's reasoning from the next prompt, so in thinking mode a follow-up turn diverges
+        right after the previous prompt's last token -- the snapshot still matches), and for a new
+        conversation a shared-prefix anchor (_from_anchor)."""
         st, reused = self._state, 0
         snap = self._snap
         if st is not None and len(st.tokens) < len(prompt) and prompt[: len(st.tokens)] == st.tokens:
-            reused = len(st.tokens)
+            start = reused = len(st.tokens)
         elif snap is not None and len(snap[1]) < len(prompt) and prompt[: len(snap[1])] == snap[1]:
             st = snap[2]
             st.restore(snap[0])
-            reused = len(snap[1])
+            start = reused = len(snap[1])
         else:
-            st = self.model.new_state()
-        new = prompt[reused:]
-        body, last = new[:-1], new[-1:]
-        # chunking: the last chunk carries at least keep_tokens so bounded replay sees them all
+            st, start, reused = self._from_anchor(prompt)
+        self._feed(st, prompt[start:-1])
+        self._snap = (st.snapshot(), list(prompt[:-1]), st)
+        out = self.model.forward(st, prompt[-1:], want_hidden=want_hidden)
+        logits, hidden = out if want_hidden else (out, None)
+        return st, logits, hidden, reused
+
+    def _feed(self, st: SeqState, body: list[int]):
+        """Prefill `body` into `st` in chunks. The last chunk carries at least keep_tokens and replays the
+        decoder over them (bounded replay), so the state ends valid for any continuation; earlier chunks
+        skip the decoder."""
         chunks, i = [], 0
         while len(body) - i > self.prefill_chunk:
             cut = min(self.prefill_chunk, len(body) - i - self.keep_tokens)
@@ -303,28 +321,80 @@ class LLM:
         self.model.prefilling = True
         try:
             for ci, ch in enumerate(chunks):
-                final = ci == len(chunks) - 1
                 if not self.bounded_replay:
                     replay = None
-                elif not final:
+                elif ci < len(chunks) - 1:
                     replay = len(ch)  # decoder skipped entirely for this chunk
                 else:
                     replay = max(0, len(ch) - self.keep_tokens)
                 self.model.forward(st, ch, replay_from=replay)
         finally:
             self.model.prefilling = False
-        self._snap = (st.snapshot(), list(prompt[:-1]), st)
-        out = self.model.forward(st, last, want_hidden=want_hidden)
-        logits, hidden = out if want_hidden else (out, None)
-        return st, logits, hidden, reused
+
+    # -- shared-prefix anchors
+
+    def _anchor_len(self, prompt: list[int]) -> int:
+        """Where an anchor would end in `prompt`: just after its first <｜User｜>, if what comes before it (the
+        system prompt and tool definitions, the same in every conversation of a client) is at least ANCHOR_MIN
+        tokens, holds no image and is not the whole prompt; else 0."""
+        if not self.PREFIX_ANCHOR or self._user_id is None or self._user_id not in prompt:
+            return 0
+        end = prompt.index(self._user_id) + 1
+        if end < self.ANCHOR_MIN or end >= len(prompt) - 1 or self.args.image_token_id in prompt[:end]:
+            return 0
+        return end
+
+    def _matching_anchor(self, prompt: list[int]):
+        for j, a in enumerate(self._anchors):
+            if len(a[1]) < len(prompt) and prompt[: len(a[1])] == a[1]:
+                return j, a
+        return None, None
+
+    def _from_anchor(self, prompt: list[int]):
+        """The start for a prompt that neither the live state nor the snapshot covers -> (state, tokens already in
+        it, of which reused from an earlier call).
+
+        A new conversation of the same client starts with the same system prompt and tool definitions (DeepSeek
+        Harness: ~1,500 tokens) while the live state holds the previous conversation. The second time such a
+        prefix starts a conversation it is prefilled on its own -- its last chunk replaying the decoder, so the
+        state there is valid for any continuation, as at the end of any prompt -- and a snapshot of it is kept with
+        its state; later prompts that start with it restore that state and prefill only what follows. (Making one
+        costs that conversation an extra decoder replay and a second pass over the experts for what follows --
+        ~9 s on a 1,500-token prefix -- so a prefix seen once, which may hold a per-session date, is not kept.) Prompts with images
+        use it too (their image spans come after the text prefix). Same reuse semantics as a multi-turn
+        follow-up: the decoder replays from the prefix's tail instead of the whole prompt's."""
+        j, a = self._matching_anchor(prompt)
+        if a is not None:
+            snap, toks, st = a
+            self._anchors.insert(0, self._anchors.pop(j))
+            if self._snap is not None and self._snap[2] is st:
+                self._snap = None  # rewinding the state below it invalidates that snapshot
+            # restore() hands the snapshot's rings to the state and the forward pass writes into them (Ring.pos):
+            # copies keep the anchor reusable
+            st.restore({**snap, "rings": [r.copy() for r in snap["rings"]], "mtp_rings": [r.copy() for r in snap["mtp_rings"]]})
+            st.tokens[:] = toks  # a prompt with images marks the tokens it fed as -1
+            return st, len(toks), len(toks)
+        st = self.model.new_state()
+        end = self._anchor_len(prompt)
+        if not end:
+            return st, 0, 0
+        key = hash(tuple(prompt[:end]))
+        if key not in self._anchor_seen:
+            self._anchor_seen = ([key] + self._anchor_seen)[:8]
+            return st, 0, 0
+        self._feed(st, prompt[:end])
+        self._anchors.insert(0, (st.snapshot(), list(prompt[:end]), st))
+        del self._anchors[self.ANCHOR_KEEP :]
+        return st, end, 0
 
     def _prefill_vl(self, prompt: list[int], images: list, want_hidden: bool):
-        """A prompt with images: spans expanded, one chunk, no prefix reuse (image positions all
-        carry the same token id, so token-level prefix matching cannot tell images apart)."""
+        """A prompt with images: spans expanded, one chunk. No reuse of the live state or the snapshot (image
+        positions all carry the same token id, so token-level prefix matching cannot tell images apart); a
+        shared-prefix anchor (text only, before the first <｜User｜>) is reused or made."""
         from .model.vision import expand_images
 
-        toks, types, inputs = expand_images(prompt, images, self.args)
-        st = self.model.new_state()
+        st, start, reused = self._from_anchor(prompt)
+        toks, types, inputs = expand_images(prompt[start:], images, self.args)
         replay = max(0, len(toks) - self.keep_tokens) if self.bounded_replay else None
         self.model.prefilling = True
         try:
@@ -333,7 +403,7 @@ class LLM:
             self.model.prefilling = False
         logits, hidden = out if want_hidden else (out, None)
         st.tokens[:] = [-1] * len(st.tokens)  # never reused as a text prefix
-        return st, logits, hidden, 0
+        return st, logits, hidden, reused
 
     # -- generation
 
@@ -418,16 +488,24 @@ class LLM:
         return build_chat(self.root, messages, thinking, **request)
 
     def cached_prefix_len(self, prompt: list[int]) -> int:
-        st, snap = self._state, self._snap
-        if st is not None and len(st.tokens) < len(prompt) and prompt[: len(st.tokens)] == st.tokens:
-            return len(st.tokens)
-        if snap is not None and len(snap[1]) < len(prompt) and prompt[: len(snap[1])] == snap[1]:
-            return len(snap[1])
-        return 0
+        """Prompt tokens the next stream() of `prompt` will not prefill (the servers' cached-token count)."""
+        if self.args.image_token_id not in prompt:  # prompts with images reuse anchors only (_prefill_vl)
+            st, snap = self._state, self._snap
+            if st is not None and len(st.tokens) < len(prompt) and prompt[: len(st.tokens)] == st.tokens:
+                return len(st.tokens)
+            if snap is not None and len(snap[1]) < len(prompt) and prompt[: len(snap[1])] == snap[1]:
+                return len(snap[1])
+        _, a = self._matching_anchor(prompt)
+        return len(a[1]) if a is not None else 0
 
     def reset(self):
+        """Forget every reusable state: the live one, the snapshot and the shared-prefix anchors."""
         self._state = None
         self._snap = None
+        self._anchors = []
+        self._anchor_seen = []
 
     def close(self):
         self._state = None
+        self._snap = None
+        self._anchors = []
