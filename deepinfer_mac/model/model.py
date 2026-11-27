@@ -736,6 +736,17 @@ class MoE:
     defer_ok = False
     pending = None
     next_moe = None
+    # prefill, cross-layer lookahead: a layer reads its experts in batches, and once its last batch is under way it
+    # has nothing more to read, so the SSD idles through that batch's compute and the next layer's attention and
+    # routing (the routing sync). Read the next layer's k most likely experts meanwhile: its router applied to this
+    # layer's input, counted over the chunk's rows (one host sync together with this layer's routing). Only the
+    # reads move; the batches and the arithmetic are unchanged. 0 = off.
+    # The gap grows with the chunk (its attention and its last batch): ~25 ms a layer at 176 rows, 200-300 ms at 1,585,
+    # where ~350 of 384 experts are needed anyway. So read max(PREFILL_LOOKAHEAD, rows // PREFILL_LOOKAHEAD_ROWS)
+    # experts; guesses not yet started when the layer has routed are cancelled (cancel_unneeded).
+    PREFILL_LOOKAHEAD = int(os.environ.get("DEEPINFER_PREFILL_LOOKAHEAD", "16"))
+    PREFILL_LOOKAHEAD_ROWS = int(os.environ.get("DEEPINFER_PREFILL_LOOKAHEAD_ROWS", "12"))
+    look_from = None  # set by Transformer.forward in a prefill: the rows of this chunk the next layer processes (None: off)
 
     def __init__(self, a: Args, layer_id: int, d: dict, experts, key: str):
         self.a, self.key, self.experts = a, key, experts
@@ -875,9 +886,15 @@ class MoE:
         else:
             B = self.EXPERT_BATCH
             groups = [ids[i : i + B] for i in range(0, len(ids), B)]
+        look, self._look = getattr(self, "_look", None), None
+        if x.shape[0] > 1 and self.PREFILL_LOOKAHEAD and hasattr(self.experts, "cancel_unneeded"):
+            self.experts.cancel_unneeded(self.key, ids)  # the previous layer's guesses for this one that missed
         for gi, group in enumerate(groups):
             if x.shape[0] > 1 and gi + 1 < len(groups):
                 self.experts.prefetch(self.key, groups[gi + 1], optional=True)
+            elif x.shape[0] > 1 and look is not None and look[1]:
+                # the last batch: nothing of this layer left to read (see PREFILL_LOOKAHEAD)
+                self.experts.prefetch(look[0], look[1], optional=True)
             y = self._experts_into(y, x, xq, w, idx_np, group)
             if x.shape[0] == 1 and self.ASYNC_LAST:
                 # decode: submit every group, the last one too, so the GPU computes this layer's
@@ -1037,6 +1054,20 @@ class MoE:
                 if sids:
                     st.speculate(skey, sids, after)
 
+    def _look_ids(self, key: str, look_np, k: int) -> list[int]:
+        """PREFILL_LOOKAHEAD's reads for layer `key`: its predicted experts, the most often predicted first, that are
+        neither resident nor already being read."""
+        counts = np.bincount(np.asarray(look_np, dtype=np.int64).ravel(), minlength=self.a.n_routed_experts)
+        order = np.argsort(-counts, kind="stable")[: int((counts > 0).sum())]
+        slabs = getattr(self.experts, "slabs", None)
+        lru, out = (slabs[key].lru if slabs else {}), []
+        for e in order.tolist():
+            if (key, e) not in lru:
+                out.append(e)
+                if len(out) == k:
+                    break
+        return out
+
     def _bias_np(self, bias):
         if bias is self.bias:
             if getattr(self, "_bias_cache", None) is None:
@@ -1090,8 +1121,19 @@ class MoE:
                 self._spec = [(nxt.key, np.array(pred)[0].tolist())]
             idx_np = np.array(idx)
         else:
+            look = None
+            if (x.shape[0] > 1 and nxt is not None and self.PREFILL_LOOKAHEAD and self.look_from is not None
+                    and hasattr(self.experts, "get_slots")):
+                xl = x[self.look_from:] if self.look_from else x
+                if xl.shape[0]:
+                    sc = mx.sqrt(mx.logaddexp(xl.astype(mx.float32) @ nxt.gate_bf16.astype(mx.float32).T, 0.0)) + nxt.bias
+                    look = mx.argpartition(-sc, kth=nxt.topk - 1, axis=-1)[:, : nxt.topk]
             if sub:
                 mx.eval(idx, scores)
+            if look is not None:
+                mx.eval(idx, look)  # the same host sync as the routing
+                k = max(self.PREFILL_LOOKAHEAD, look.shape[0] // max(1, self.PREFILL_LOOKAHEAD_ROWS))
+                self._look = (nxt.key, self._look_ids(nxt.key, np.array(look), k))
             idx_np = np.array(idx)  # the one host sync per layer: which experts to fetch
         if sub:
             new_idx, new_w = self._substitute(np.array(scores)[0], idx_np, self._bias_np(bias))
@@ -1285,6 +1327,8 @@ def materialize(*objs) -> None:
 
 
 class Transformer:
+    prefilling = False  # set by LLM._prefill / _prefill_vl around their forwards (MoE.PREFILL_LOOKAHEAD)
+
     def __init__(self, a: Args, weights, ngram=None):
         self.a, self.w, self.ngram = a, weights, ngram
         self.layers = [
@@ -1485,6 +1529,10 @@ class Transformer:
                 hiddens.append(h.mean(axis=1))
             replayed = bool(replay_from) and i > last_source
             q0 = start + (replay_from if replayed else 0)
+            # which rows of this chunk the next layer sees (MoE.PREFILL_LOOKAHEAD; prefills only): past the last KV source
+            # only the replayed rows, none at all for a chunk whose replay is empty
+            layer.ffn.look_from = (None if not self.prefilling else
+                                   (None if replay_from >= L else replay_from) if (replay_from and i == last_source) else 0)
             h, pre_mix = layer(h, positions, pre_mix, st, st.rings[i], sh, image_mask, start=q0, floor=q0 if replayed else 0)
         st.pos = start + L
         h = Block.hc_pre(h, pre_mix)

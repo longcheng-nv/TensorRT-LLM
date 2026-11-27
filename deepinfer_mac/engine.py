@@ -300,15 +300,19 @@ class LLM:
             i += cut
         if i < len(body):
             chunks.append(body[i:])
-        for ci, ch in enumerate(chunks):
-            final = ci == len(chunks) - 1
-            if not self.bounded_replay:
-                replay = None
-            elif not final:
-                replay = len(ch)  # decoder skipped entirely for this chunk
-            else:
-                replay = max(0, len(ch) - self.keep_tokens)
-            self.model.forward(st, ch, replay_from=replay)
+        self.model.prefilling = True
+        try:
+            for ci, ch in enumerate(chunks):
+                final = ci == len(chunks) - 1
+                if not self.bounded_replay:
+                    replay = None
+                elif not final:
+                    replay = len(ch)  # decoder skipped entirely for this chunk
+                else:
+                    replay = max(0, len(ch) - self.keep_tokens)
+                self.model.forward(st, ch, replay_from=replay)
+        finally:
+            self.model.prefilling = False
         self._snap = (st.snapshot(), list(prompt[:-1]), st)
         out = self.model.forward(st, last, want_hidden=want_hidden)
         logits, hidden = out if want_hidden else (out, None)
@@ -322,7 +326,11 @@ class LLM:
         toks, types, inputs = expand_images(prompt, images, self.args)
         st = self.model.new_state()
         replay = max(0, len(toks) - self.keep_tokens) if self.bounded_replay else None
-        out = self.model.forward(st, toks, replay_from=replay, want_hidden=want_hidden, images=inputs, token_types=types)
+        self.model.prefilling = True
+        try:
+            out = self.model.forward(st, toks, replay_from=replay, want_hidden=want_hidden, images=inputs, token_types=types)
+        finally:
+            self.model.prefilling = False
         logits, hidden = out if want_hidden else (out, None)
         st.tokens[:] = [-1] * len(st.tokens)  # never reused as a text prefix
         return st, logits, hidden, 0
