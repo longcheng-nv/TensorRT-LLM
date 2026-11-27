@@ -48,29 +48,10 @@ def power_source() -> str:
         return "unknown"
 
 
-def capture(a):
-    import mlx.core as mx
-
-    from deepinfer_mac import LLM
-    from deepinfer_mac.__main__ import build_parser, decode_mode
-    from deepinfer_mac.model import mk
-    from deepinfer_mac.model import model as M
-
-    mode = decode_mode(build_parser().parse_args(["bench", "--cache-gb", str(a.cache_gb)] + (["--lossless"] if a.lossless else [])))
-    print(mode, flush=True)
-    llm = LLM("/Users/loncheng/Models/dsv41-mac", expert_cache_gb=a.cache_gb)
-    store = llm.weights.experts
-    io = store.prio
-    assert hasattr(io, "trace_start"), "native IO with tracing is required"
-    off = [io.lib.mkio_now() - (now() + now()) // 2 for _ in range(5)]
-    assert max(abs(o) for o in off) < 50_000, f"clocks differ: {off}"
-
-    ids, _ = llm.chat_prompt([{"role": "user", "content": a.prompt}], thinking=False)
-    st, logits, _, _ = llm._prefill(ids, False)
-    tok = int(np.argmax(np.array(logits[-1])))
-    for _ in range(a.warm):
-        tok = int(np.argmax(np.array(llm.model.forward(st, [tok])[-1])))
-
+def install_hooks(M, mk, mx, store):
+    """Wrap the decode loop (MoE._decode_mk / _slab_moe_mk, mx.eval / async_eval, the store's IO calls, hot-wait,
+    deferred misses, Engram) to record host markers. Returns (raw, S, mark, uninstall): raw is the list of
+    (tag, layer, t_ns, extra) markers, S the shared state (S["layer"], S["in_hot"], ...); also used by trace_agent.py."""
     raw = []  # (tag, layer, t_ns, extra)
     S = {"layer": -1, "in_dmk": False, "in_slab": False, "in_hot": False, "in_gs": False, "synced": False}
 
@@ -185,6 +166,43 @@ def capture(a):
     store.reserve_slots = rs
     M.Transformer._resolve_pending = staticmethod(res)
     M.Engram.kv = kv
+
+    def uninstall():
+        M.MoE._decode_mk, M.MoE._slab_moe_mk = o_dmk, o_slab
+        mx.eval, mx.async_eval = o_eval, o_aeval
+        store.get_slots, store.cancel_unneeded, store.prefetch, store.speculate = o_gs, o_cu, o_pf, o_sp
+        mk.hot_wait = o_hw
+        store.reserve_slots = o_rs
+        M.Transformer._resolve_pending = staticmethod(o_res)
+        M.Engram.kv = o_kv
+
+    return raw, S, mark, uninstall
+
+
+def capture(a):
+    import mlx.core as mx
+
+    from deepinfer_mac import LLM
+    from deepinfer_mac.__main__ import build_parser, decode_mode
+    from deepinfer_mac.model import mk
+    from deepinfer_mac.model import model as M
+
+    mode = decode_mode(build_parser().parse_args(["bench", "--cache-gb", str(a.cache_gb)] + (["--lossless"] if a.lossless else [])))
+    print(mode, flush=True)
+    llm = LLM("/Users/loncheng/Models/dsv41-mac", expert_cache_gb=a.cache_gb)
+    store = llm.weights.experts
+    io = store.prio
+    assert hasattr(io, "trace_start"), "native IO with tracing is required"
+    off = [io.lib.mkio_now() - (now() + now()) // 2 for _ in range(5)]
+    assert max(abs(o) for o in off) < 50_000, f"clocks differ: {off}"
+
+    ids, _ = llm.chat_prompt([{"role": "user", "content": a.prompt}], thinking=False)
+    st, logits, _, _ = llm._prefill(ids, False)
+    tok = int(np.argmax(np.array(logits[-1])))
+    for _ in range(a.warm):
+        tok = int(np.argmax(np.array(llm.model.forward(st, [tok])[-1])))
+
+    raw, S, mark, uninstall = install_hooks(M, mk, mx, store)
     stats0 = dict(store.stats)
     toks = []
     io.trace_start()
@@ -203,13 +221,7 @@ def capture(a):
             toks.append((t0, t1, t2))
     finally:
         chunks, reqs = io.trace_stop()
-        M.MoE._decode_mk, M.MoE._slab_moe_mk = o_dmk, o_slab
-        mx.eval, mx.async_eval = o_eval, o_aeval
-        store.get_slots, store.cancel_unneeded, store.prefetch, store.speculate = o_gs, o_cu, o_pf, o_sp
-        mk.hot_wait = o_hw
-        store.reserve_slots = o_rs
-        M.Transformer._resolve_pending = staticmethod(o_res)
-        M.Engram.kv = o_kv
+        uninstall()
     stats = {k: (store.stats[k] - stats0.get(k, 0)) if isinstance(store.stats[k], (int, float)) else store.stats[k] for k in store.stats}
     return build_run(a, mode, M, ids, toks, raw, chunks, reqs, store, stats)
 

@@ -432,7 +432,7 @@ footer.foot{border-top:1px solid var(--rule);padding-top:14px;color:var(--fg-3);
       t = obj(t);
       var t0 = num(t.t0), t1 = num(t.t1);
       if (t0 === null || t1 === null || !(t1 > t0)) return;
-      tokens.push({ t0: t0, t1: t1 });
+      tokens.push({ t0: t0, t1: t1, name: str(t.name) });
     });
     tokens.sort(byStart);
     var rq = normReqs(r.reqs);
@@ -493,7 +493,10 @@ footer.foot{border-top:1px solid var(--rule);padding-top:14px;color:var(--fg-3);
   function fx(v, d) { return v === null || v === undefined || !isFinite(v) ? "—" : v.toFixed(d); }
   function pct(v) { return v === null || v === undefined || !isFinite(v) ? "—" : (v * 100).toFixed(0) + "%"; }
   function dur(ms) { return !isFinite(ms) ? "—" : ms < 1 ? ms.toFixed(3) + " ms" : ms < 100 ? ms.toFixed(2) + " ms" : ms.toFixed(1) + " ms"; }
-  function tokName(j) { return "token " + (j + 1); }
+  function tokName(j) {  // trace_agent.py names its segments (prefill / first token / decode n)
+    var R = cur(), t = R && R.tokens[j];
+    return t && t.name ? t.name : "token " + (j + 1);
+  }
 
   function tokenStats(R, j) {
     var tk = R.tokens[j], a = tk.t0, b = tk.t1, wall = b - a, last = j === R.tokens.length - 1;

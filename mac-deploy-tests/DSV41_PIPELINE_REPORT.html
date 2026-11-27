@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>DSV4.1 推理流水线报告</title>
+<meta name="description" content="回放一段真实的 DeepSeek Harness 会话，在 Mac 上逐层记录 DSV4.1-Flash 的 CPU、GPU 与 SSD 活动：prefill 与解码的时间去向、层交界的 SSD 空泡，以及跨层预读的效果。">
+<style>
+/* Same visual language as DSV41_MAC_REPORT.html / MK_REPORT.html (this report continues that series). */
+:root{
+  --bg:#f7f7f4; --surface:#fcfcfb; --fg:#1d1f22; --fg-2:#4a4e55; --fg-3:#666b73; --rule:#dcdcd6;
+  --grid:#e1e0d9; --axis:#c3c2b7; --code-bg:#efeee9;
+  --accent:#2a78d6; --accent-soft:#e3eefb; --mute-mark:#898781; --link:#1f63b8;
+  --good:#0ca30c; --warn:#fab219;
+  --tip-bg:#1d1f22; --tip-fg:#f7f7f4; --tip-2:#c3c2b7;
+  --sans:"IBM Plex Sans","PingFang SC","Hiragino Sans GB","Noto Sans SC","Microsoft YaHei",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,monospace;
+  --display:"Source Serif 4","Songti SC","Noto Serif SC",Georgia,serif;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#121313; --surface:#1a1a19; --fg:#f0efec; --fg-2:#c3c2b7; --fg-3:#9a9992; --rule:#30302d;
+  --grid:#2c2c2a; --axis:#46463f; --code-bg:#222220;
+  --accent:#3987e5; --accent-soft:#16263a; --mute-mark:#898781; --link:#5a9cf0;
+  --good:#0ca30c; --warn:#fab219;
+  --tip-bg:#f0efec; --tip-fg:#121313; --tip-2:#52514e; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#121313; --surface:#1a1a19; --fg:#f0efec; --fg-2:#c3c2b7; --fg-3:#9a9992; --rule:#30302d;
+  --grid:#2c2c2a; --axis:#46463f; --code-bg:#222220;
+  --accent:#3987e5; --accent-soft:#16263a; --mute-mark:#898781; --link:#5a9cf0;
+  --good:#0ca30c; --warn:#fab219;
+  --tip-bg:#f0efec; --tip-fg:#121313; --tip-2:#52514e; color-scheme:dark}
+
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.65 var(--sans);
+  padding-block:0 72px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--bg)}
+.wrap{max-width:960px;margin:0 auto}
+a{color:var(--link)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:3px}
+
+header.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);border-bottom:1px solid var(--rule)}
+header.top .wrap{display:flex;align-items:center;justify-content:space-between;gap:8px 16px;flex-wrap:wrap;padding-block:10px}
+.eyebrow{font:500 11.5px/1.3 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--fg-3)}
+nav.toc{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:13px}
+nav.toc a{color:var(--fg-2);text-decoration:none}
+nav.toc a:hover{color:var(--link)}
+
+main.wrap{display:flex;flex-direction:column;gap:44px;padding-top:28px}
+section{display:flex;flex-direction:column;gap:14px;min-width:0;scroll-margin-top:64px}
+h1{font:600 clamp(28px,4.6vw,38px)/1.18 var(--display);margin:0;letter-spacing:-.01em;text-wrap:balance}
+h2{font:600 22px/1.3 var(--display);margin:0;text-wrap:balance}
+h3{font:600 15px/1.4 var(--sans);margin:0}
+p{margin:0;max-width:74ch}
+.lede{font-size:17px;color:var(--fg-2);max-width:68ch}
+.meta{display:flex;flex-wrap:wrap;gap:4px 18px;color:var(--fg-3);font:400 12.5px/1.6 var(--mono)}
+code{font:13px/1.5 var(--mono);background:var(--code-bg);border-radius:4px;padding:1px 5px;overflow-wrap:anywhere}
+strong{font-weight:600}
+
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px}
+.tile{background:var(--surface);border:1px solid var(--rule);border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.tile .k{display:flex;align-items:center;justify-content:space-between;gap:8px;font:500 12px/1.3 var(--sans);color:var(--fg-3)}
+.tile .v{font:600 28px/1.1 var(--sans);letter-spacing:-.01em}
+.tile .v small{font-size:15px;font-weight:500;color:var(--fg-2);margin-left:3px}
+.tile .d{font-size:12.5px;line-height:1.5;color:var(--fg-2)}
+
+.chip{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--rule);border-radius:999px;padding:1px 8px 1px 6px;
+  font:500 12px/1.5 var(--sans);color:var(--fg-2);white-space:nowrap;background:var(--surface)}
+.chip svg{width:12px;height:12px;flex:none}
+.chip.good svg{color:var(--good)}
+.chip.warn svg{color:var(--warn)}
+
+.verdict{border-left:3px solid var(--accent);background:var(--accent-soft);padding:14px 18px;border-radius:0 8px 8px 0;display:flex;flex-direction:column;gap:8px}
+.verdict p{max-width:none}
+.note{border:1px solid var(--rule);background:var(--surface);border-radius:8px;padding:12px 16px;display:flex;gap:10px;align-items:flex-start}
+.note svg{width:16px;height:16px;flex:none;margin-top:3px;color:var(--warn)}
+.note p{max-width:none}
+
+.tbl{overflow-x:auto;border:1px solid var(--rule);border-radius:8px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:13.5px;line-height:1.55;font-variant-numeric:tabular-nums}
+th,td{padding:9px 12px;border-bottom:1px solid var(--rule);text-align:left;vertical-align:top}
+th{font:500 11.5px/1.35 var(--mono);letter-spacing:.04em;color:var(--fg-3);background:var(--bg);white-space:nowrap}
+tr:last-child td{border-bottom:0}
+td.num{white-space:nowrap}
+td code{font-size:12.5px}
+tr.em td{background:var(--accent-soft)}
+
+figure.fig{margin:0;background:var(--surface);border:1px solid var(--rule);border-radius:10px;padding:16px 18px 14px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.fig-head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px 16px;flex-wrap:wrap}
+.fig-title{font:600 15px/1.4 var(--sans);margin:0}
+.fig-sub{font-size:12.5px;color:var(--fg-3);margin:2px 0 0}
+.fig-btn{font:500 12px/1 var(--sans);color:var(--fg-2);background:var(--bg);border:1px solid var(--rule);border-radius:6px;padding:7px 10px;cursor:pointer}
+.fig-btn:hover{color:var(--fg)}
+figcaption{font-size:12.5px;color:var(--fg-3);line-height:1.55}
+
+/* horizontal bar chart (HTML, so labels stay readable at phone width) */
+.hb{display:grid;grid-template-columns:minmax(7.5rem,16rem) minmax(0,1fr);column-gap:12px;--row:40px}
+.hb-labels,.hb-plot{display:flex;flex-direction:column;padding-top:26px}
+.hb-labels > div{height:var(--row);display:flex;align-items:center;align-content:center;font-size:13px;line-height:1.3;color:var(--fg-2);gap:2px 6px;flex-wrap:wrap}
+.hb-labels .axis-gap{height:22px}
+.hb-plot{position:relative;margin-right:3.6rem}
+.hb-row{position:relative;height:var(--row);display:flex;align-items:center;cursor:default;outline-offset:-2px}
+.hb-bar{height:20px;width:var(--w);background:var(--accent);border-radius:0 4px 4px 0;position:relative;z-index:1}
+.hb-bar.mute{background:var(--mute-mark)}
+.hb-row:hover .hb-bar,.hb-row:focus-visible .hb-bar{filter:brightness(1.12)}
+.hb-v{position:absolute;left:calc(var(--w) + 6px);font:600 13px/1 var(--sans);color:var(--fg);white-space:nowrap;z-index:1}
+.hb-grid{position:absolute;top:26px;bottom:22px;width:0;border-left:1px solid var(--grid)}
+.hb-base{position:absolute;top:26px;bottom:22px;left:0;width:0;border-left:1px solid var(--axis)}
+.hb-ref{position:absolute;top:22px;bottom:22px;width:0;border-left:2px solid var(--fg);z-index:2}
+.hb-ref span{position:absolute;bottom:100%;left:-1px;transform:translateY(-1px);font:500 11.5px/1.3 var(--sans);color:var(--fg);white-space:nowrap;padding-left:5px;border-left:2px solid var(--fg)}
+.hb-axis{position:relative;height:22px;border-top:1px solid var(--axis)}
+.hb-axis span{position:absolute;top:4px;transform:translateX(-50%);font:400 11.5px/1 var(--mono);color:var(--fg-3)}
+
+/* architecture diagram */
+.svgbox{overflow-x:auto}
+.svgbox svg{display:block;width:100%;min-width:640px;height:auto;color:var(--fg-2)}
+svg text{font-family:var(--sans)}
+.d-box{fill:var(--surface);stroke:currentColor;stroke-width:1.2}
+.d-box.acc{stroke:var(--accent);stroke-width:1.6}
+.d-grp{fill:none;stroke:var(--axis);stroke-width:1;stroke-dasharray:4 4}
+.d-t{fill:var(--fg);font-size:13px;font-weight:600}
+.d-s{fill:var(--fg-3);font-size:11.5px}
+.d-l{fill:var(--fg-2);font-size:11.5px}
+.d-la{fill:var(--accent);font-size:11.5px;font-weight:500}
+.d-e{stroke:currentColor;stroke-width:1.2;fill:none}
+.d-e.acc{stroke:var(--accent);stroke-width:1.8}
+.d-e.dash{stroke-dasharray:5 4}
+.d-ah{fill:currentColor}
+.d-ah.acc{fill:var(--accent)}
+
+.cmds{display:flex;flex-direction:column;gap:10px}
+.cmd{border:1px solid var(--rule);border-radius:8px;background:var(--code-bg);min-width:0}
+.cmd-head{display:flex;justify-content:space-between;align-items:center;gap:6px 12px;flex-wrap:wrap;padding:8px 10px 8px 14px;border-bottom:1px solid var(--rule);font-size:13px;color:var(--fg-2)}
+.cmd pre{margin:0;padding:12px 14px;overflow-x:auto;font:13px/1.65 var(--mono);color:var(--fg)}
+.copy{font:500 12px/1 var(--sans);color:var(--fg-2);background:var(--surface);border:1px solid var(--rule);border-radius:6px;padding:6px 9px;cursor:pointer}
+.copy:hover{color:var(--fg)}
+
+ul.plain,ol.plain{margin:0;padding-left:1.3em;display:flex;flex-direction:column;gap:8px;max-width:78ch}
+ul.plain li::marker,ol.plain li::marker{color:var(--fg-3)}
+.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
+.card{background:var(--surface);border:1px solid var(--rule);border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.card ul{margin:0;padding-left:1.2em;display:flex;flex-direction:column;gap:6px;font-size:14px}
+
+footer.foot{border-top:1px solid var(--rule);padding-top:14px;color:var(--fg-3);font:400 12px/1.6 var(--mono);display:flex;flex-wrap:wrap;gap:4px 18px}
+
+.tip{position:fixed;z-index:20;max-width:300px;background:var(--tip-bg);color:var(--tip-fg);border-radius:8px;padding:9px 11px;
+  font:12.5px/1.45 var(--sans);box-shadow:0 6px 20px rgba(0,0,0,.18);pointer-events:none;display:flex;flex-direction:column;gap:2px}
+.tip .tv{font-weight:600;font-size:14px}
+.tip .tt{color:var(--tip-2)}
+.tip .tn{color:var(--tip-2);font-size:12px}
+
+@media (max-width:560px){
+  body{font-size:14.5px}
+  .hb{grid-template-columns:7.5rem minmax(0,1fr);--row:46px}
+  .hb-labels > div{font-size:12px}
+  .tile .v{font-size:25px}
+  header.top nav.toc{display:none}
+}
+@media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important}}
+
+/* stacked bars + legend (series colours: the reference palette's first slots, fixed order; idle = neutral) */
+:root{--c1:#2a78d6;--c2:#eb6834;--c3:#1baf7a;--cn:#b9b8b0}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--c1:#3987e5;--c2:#d95926;--c3:#199e70;--cn:#5c5b56}}
+:root[data-theme="dark"]{--c1:#3987e5;--c2:#d95926;--c3:#199e70;--cn:#5c5b56}
+.hb-bar.stack{display:flex;background:none;overflow:hidden;border-radius:0 4px 4px 0}
+.hb-bar.stack > i{display:block;height:100%;flex:0 0 var(--f);min-width:0;cursor:default;outline-offset:-2px}
+.hb-bar.stack > i + i{box-shadow:inset 2px 0 0 var(--surface)}
+.hb-bar.stack > i:hover,.hb-bar.stack > i:focus-visible{filter:brightness(1.12)}
+.s1{background:var(--c1)}.s2{background:var(--c2)}.s3{background:var(--c3)}.sn{background:var(--cn)}
+.hb-bar.acc{background:var(--accent)}
+.legend{display:flex;flex-wrap:wrap;gap:4px 16px;font-size:12.5px;color:var(--fg-2)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend .sw{width:12px;height:12px;border-radius:3px;display:inline-block}
+.hb-labels small{color:var(--fg-3);font-size:11.5px}
+.kv{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;font-size:13.5px}
+.kv dt{color:var(--fg-3)}.kv dd{margin:0}
+.hb-axis span{white-space:nowrap}
+td.txt{min-width:9em}
+td.nw{white-space:nowrap}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<symbol id="i-good" viewBox="0 0 12 12"><circle cx="6" cy="6" r="5.4" fill="currentColor"/><path d="M3.4 6.2 5.2 8 8.7 4.3" fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+</defs></svg>
+<header class="top"><div class="wrap">
+  <span class="eyebrow">DeepInfer-Mac · DSV4.1-Flash · agent 流水线 · 2026-11-27</span>
+  <nav class="toc" aria-label="目录"><a href="#summary">结论</a><a href="#method">方法</a><a href="#time">时间去向</a><a href="#prefill">prefill</a>
+  <a href="#lookahead">跨层预读</a><a href="#decode">解码</a><a href="#next">下一步</a><a href="#viewer">时间线</a><a href="#repro">复现</a></nav>
+</div></header>
+<main class="wrap">
+
+<section id="summary" aria-labelledby="h-summary">
+  <h1 id="h-summary">DSV4.1-Flash 在 agent 里的推理流水线：气泡在哪</h1>
+  <p class="lede">在服务端录下一段真实的 DeepSeek Harness 会话（三轮，6 个请求），再在同一个引擎上按服务端的方式回放：逐层记录 CPU 主线程的各阶段、由主机同步推断的 GPU 区间，以及原生 IO 每个 2 MB 读块。配置与平时用 <code>dsv41</code> 时一致：默认 <code>--fast</code>，专家缓存 8 GiB。<code>dsv41</code> 启动时按当时的空闲内存选缓存（6–16 GiB）：11-24 是 8 GiB，今天先后是 6 和 14 GiB，所以 agent 里的解码速度会跟着变。</p>
+  <div class="meta"><span>代码 deepinfer-mac-dsv41-flash（mk-7 引擎 + 本次改动）</span><span>Apple M4 Pro · 48 GB</span><span>decode mode: LOSSY (--sub-rank 2, spec-k 2)</span><span>专家缓存 8 GiB · 接电源</span><span>采集 2026-11-27 09:39</span></div>
+  <div class="tiles">
+    <div class="tile"><div class="k">首字前（prefill）占请求时间</div><div class="v">49%</div>
+      <div class="d">本次会话（回复较长）；11-24 验收的 21 个请求为 76%</div></div>
+    <div class="tile"><div class="k">prefill 时 SSD 忙</div><div class="v">73%–93%</div>
+      <div class="d">忙时 5.4–6.1 GB/s，接近盘的上限；prefill 是读盘受限</div></div>
+    <div class="tile"><div class="k">层交界的 SSD 空泡</div><div class="v">10.5<small>s</small></div>
+      <div class="d">占 prefill 的 12%；冷 prefill 里 6.2 s（21%）</div></div>
+    <div class="tile"><div class="k">跨层预读之后 <span class="chip good"><svg aria-hidden="true"><use href="#i-good"/></svg>计算不变</span></div><div class="v">-12%</div>
+      <div class="d">首字前合计 93.2 → 82.4 s；冷 prefill 30.7 → 26.4 s</div></div>
+  </div>
+  <div class="verdict"><p><strong>结论</strong></p><ul class="plain">
+    <li><strong>prefill 是读盘受限，而且读得很多。</strong>新 token 只有 14–15 个的请求也要读约 22 GB、首字前 4 s 多：prefill 必须精确路由，每层要把这些 token 用到的专家都读进来，8 GiB 缓存几乎留不住上一层的专家。</li>
+    <li><strong>最明显的气泡在层与层之间。</strong>每层最后一批专家读完后，SSD 要等下一层算完注意力和路由才知道读什么，这段时间完全空闲：全会话 10.5 s，冷 prefill 每层 200–300 ms。</li>
+    <li><strong>已实现跨层预读，默认打开（<code>DEEPINFER_PREFILL_LOOKAHEAD=16</code>，设 0 关闭）。</strong>在本层最后一批时，用下一层的路由器对本层输入预测、按行数读入最可能的专家。首字前合计 -12%，冷 prefill -14%，带图 prefill 约 −17%；只改读盘时机，不改计算。</li>
+    <li><strong>顺带查清：prefill 本身不能逐位复现。</strong>专家结果用 MLX 的 scatter-add 加回各行，GPU 上是原子加；一行在同一批里命中两个专家时，累加顺序不固定。带图 prompt 上同一设置的两次运行 logits 最多差 1.125（top-1 不变）。与预读无关，修法见「下一步」。</li>
+    <li><strong>解码没有明显空泡。</strong>两者都空闲每 token 只有 1–2 ms；慢在 8 GiB 缓存下每 token 要等盘 42–77 ms（16 GiB 时 15.6 ms），这是缓存容量问题。</li>
+    <li><strong>更大的一块是重复工作，不是气泡。</strong>每个新会话都要重算同一段约 1,489 token 的 system 提示和工具定义（这部分不含当前目录、时间等动态内容），冷 prefill 31 s。给这段共享前缀留一个快照，新会话就能直接复用。</li>
+  </ul></div>
+</section>
+
+<section id="method" aria-labelledby="h-method">
+  <h2 id="h-method">方法：录一段真实会话，在引擎上逐层回放</h2>
+  <ul class="plain">
+    <li><strong>录制。</strong><code>mk/agent_capture.py</code> 在 8000 端口起与 <code>dsv41</code> 相同的服务（默认 <code>--fast</code>，缓存 8 GiB），记录每个请求的提示 token、生成 token 和服务端统计；然后用真实的 <code>dsv41 -p … -p … -p …</code> 跑三轮任务：列文件并总结 README、追问依赖、把总结写进文件。</li>
+    <li><strong>回放。</strong><code>mk/trace_agent.py</code> 在一个新进程里按服务端的方式逐个请求做 prefill（前缀复用、分块、Bounded Replay 都与服务端相同），再把当时生成的 token 逐个喂回（teacher forcing）。这样每个请求的 prefill 量、解码工作量和下一请求能复用的前缀都和实际运行一致。</li>
+    <li><strong>记录。</strong>CPU 主线程逐层的阶段（prefill 时每层按 16 个专家一批：预读下一批 → 等这一批读完 → 构建 → 等 GPU 算完），原生 IO 每个 2 MB 读块所在的线程与起止时刻。GPU 区间是推断的：这台 Mac 拿不到 GPU 时间戳，块的结束取主机同步返回的时刻。</li>
+  </ul>
+  <p>回放与实际运行吻合：复用的前缀长度完全一致，读盘量相差不到 1%；首字时间差 −10% 到 +5%（实际运行多了 HTTP、分词，以及服务刚启动时的冷页缓存）。</p>
+  <div class="tbl"><table><thead><tr><th>请求</th><th>提示 token</th><th>复用（回放 / 实际）</th><th>新 token</th><th>首字前：实际运行</th><th>回放</th><th>读盘：实际运行</th><th>回放</th></tr></thead><tbody><tr><td class="nw">请求 1</td><td class="num">1,586</td><td class="num">0 / 0</td><td class="num">1,586</td><td class="num">34.26 s</td><td class="num">30.68 s</td><td class="num">154.2 GB</td><td class="num">154.2 GB</td></tr><tr><td class="nw">请求 2</td><td class="num">1,801</td><td class="num">1,625 / 1,625</td><td class="num">176</td><td class="num">14.40 s</td><td class="num">15.12 s</td><td class="num">95.5 GB</td><td class="num">95.3 GB</td></tr><tr><td class="nw">请求 3</td><td class="num">2,166</td><td class="num">1,841 / 1,841</td><td class="num">325</td><td class="num">22.34 s</td><td class="num">20.86 s</td><td class="num">260.9 GB</td><td class="num">261.2 GB</td></tr><tr><td class="nw">请求 4</td><td class="num">2,408</td><td class="num">2,393 / 2,393</td><td class="num">15</td><td class="num">4.61 s</td><td class="num">4.67 s</td><td class="num">32.1 GB</td><td class="num">32.2 GB</td></tr><tr><td class="nw">请求 5</td><td class="num">2,431</td><td class="num">2,417 / 2,417</td><td class="num">14</td><td class="num">4.54 s</td><td class="num">4.37 s</td><td class="num">186.0 GB</td><td class="num">185.8 GB</td></tr><tr><td class="nw">请求 6</td><td class="num">2,825</td><td class="num">2,642 / 2,642</td><td class="num">183</td><td class="num">18.12 s</td><td class="num">17.50 s</td><td class="num">231.6 GB</td><td class="num">230.4 GB</td></tr></tbody></table></div>
+</section>
+
+<section id="time" aria-labelledby="h-time">
+  <h2 id="h-time">时间去向：首字前与解码</h2>
+  <figure class="fig"><div class="fig-head"><div><p class="fig-title">一次请求的时间花在哪（秒）</p><p class="fig-sub">回放（专家缓存 8 GiB，默认 <code>--fast</code>）· 首字前 = prefill + 首个输出 token</p></div><button class="fig-btn" type="button" data-toggle="tbl-a" aria-expanded="false" aria-controls="tbl-a">显示数据表</button></div><div class="legend" aria-hidden="true"><span><i class="sw s2"></i>首字前（prefill + 首个 token）</span><span><i class="sw sn"></i>解码</span></div><div class="hb" role="group" aria-label="每个请求的首字前时间与解码时间（秒）"><div class="hb-labels" aria-hidden="true"><div>请求 1 <small>新 1,586 · 出 40</small></div><div>请求 2 <small>新 176 · 出 41</small></div><div>请求 3 <small>新 325 · 出 228</small></div><div>请求 4 <small>新 15 · 出 10</small></div><div>请求 5 <small>新 14 · 出 212</small></div><div>请求 6 <small>新 183 · 出 178</small></div><div class="axis-gap"></div></div><div class="hb-plot"><div class="hb-base"></div><div class="hb-grid" style="left:25.00%"></div><div class="hb-grid" style="left:50.00%"></div><div class="hb-grid" style="left:75.00%"></div><div class="hb-grid" style="left:100.00%"></div><div class="hb-row"><div class="hb-bar stack" style="--w:58.43%"><i class="s2" style="--f:87.513%" role="img" aria-label="请求 1（新 1,586 token，生成 40 token） · 首字前（prefill + 首个 token）：30.7 s" tabindex="0" data-tv="30.7 s（88%）" data-tt="请求 1（新 1,586 token，生成 40 token） · 首字前（prefill + 首个 token）"></i><i class="sn" style="--f:12.487%" role="img" aria-label="请求 1（新 1,586 token，生成 40 token） · 解码：4.4 s" tabindex="0" data-tv="4.4 s（12%）" data-tt="请求 1（新 1,586 token，生成 40 token） · 解码"></i></div><span class="hb-v" style="--w:58.43%">35.1 s</span></div><div class="hb-row"><div class="hb-bar stack" style="--w:32.99%"><i class="s2" style="--f:76.360%" role="img" aria-label="请求 2（新 176 token，生成 41 token） · 首字前（prefill + 首个 token）：15.1 s" tabindex="0" data-tv="15.1 s（76%）" data-tt="请求 2（新 176 token，生成 41 token） · 首字前（prefill + 首个 token）"></i><i class="sn" style="--f:23.640%" role="img" aria-label="请求 2（新 176 token，生成 41 token） · 解码：4.7 s" tabindex="0" data-tv="4.7 s（24%）" data-tt="请求 2（新 176 token，生成 41 token） · 解码"></i></div><span class="hb-v" style="--w:32.99%">19.8 s</span></div><div class="hb-row"><div class="hb-bar stack" style="--w:86.31%"><i class="s2" style="--f:40.290%" role="img" aria-label="请求 3（新 325 token，生成 228 token） · 首字前（prefill + 首个 token）：20.9 s" tabindex="0" data-tv="20.9 s（40%）" data-tt="请求 3（新 325 token，生成 228 token） · 首字前（prefill + 首个 token）"></i><i class="sn" style="--f:59.710%" role="img" aria-label="请求 3（新 325 token，生成 228 token） · 解码：30.9 s" tabindex="0" data-tv="30.9 s（60%）" data-tt="请求 3（新 325 token，生成 228 token） · 解码"></i></div><span class="hb-v" style="--w:86.31%">51.8 s</span></div><div class="hb-row"><div class="hb-bar stack" style="--w:10.03%"><i class="s2" style="--f:77.643%" role="img" aria-label="请求 4（新 15 token，生成 10 token） · 首字前（prefill + 首个 token）：4.7 s" tabindex="0" data-tv="4.7 s（78%）" data-tt="请求 4（新 15 token，生成 10 token） · 首字前（prefill + 首个 token）"></i><i class="sn" style="--f:22.357%" role="img" aria-label="请求 4（新 15 token，生成 10 token） · 解码：1.3 s" tabindex="0" data-tv="1.3 s（22%）" data-tt="请求 4（新 15 token，生成 10 token） · 解码"></i></div><span class="hb-v" style="--w:10.03%">6.0 s</span></div><div class="hb-row"><div class="hb-bar stack" style="--w:58.65%"><i class="s2" style="--f:12.432%" role="img" aria-label="请求 5（新 14 token，生成 212 token） · 首字前（prefill + 首个 token）：4.4 s" tabindex="0" data-tv="4.4 s（12%）" data-tt="请求 5（新 14 token，生成 212 token） · 首字前（prefill + 首个 token）"></i><i class="sn" style="--f:87.568%" role="img" aria-label="请求 5（新 14 token，生成 212 token） · 解码：30.8 s" tabindex="0" data-tv="30.8 s（88%）" data-tt="请求 5（新 14 token，生成 212 token） · 解码"></i></div><span class="hb-v" style="--w:58.65%">35.2 s</span></div><div class="hb-row"><div class="hb-bar stack" style="--w:72.82%"><i class="s2" style="--f:40.061%" role="img" aria-label="请求 6（新 183 token，生成 178 token） · 首字前（prefill + 首个 token）：17.5 s" tabindex="0" data-tv="17.5 s（40%）" data-tt="请求 6（新 183 token，生成 178 token） · 首字前（prefill + 首个 token）"></i><i class="sn" style="--f:59.939%" role="img" aria-label="请求 6（新 183 token，生成 178 token） · 解码：26.2 s" tabindex="0" data-tv="26.2 s（60%）" data-tt="请求 6（新 183 token，生成 178 token） · 解码"></i></div><span class="hb-v" style="--w:72.82%">43.7 s</span></div><div class="hb-axis" aria-hidden="true"><span style="left:0.00%">0</span><span style="left:25.00%">15</span><span style="left:50.00%">30</span><span style="left:75.00%">45</span><span style="left:100.00%">60 s</span></div></div></div><div class="tbl" id="tbl-a" hidden><table><thead><tr><th>请求</th><th>新 token</th><th>首字前（回放）</th><th>实际运行首字</th><th>解码 token</th><th>解码耗时</th><th>解码 ms/token</th></tr></thead><tbody><tr><td class="nw">请求 1</td><td class="num">1,586</td><td class="num">30.68 s</td><td class="num">34.26 s</td><td class="num">39</td><td class="num">4.4 s</td><td class="num">112</td></tr><tr><td class="nw">请求 2</td><td class="num">176</td><td class="num">15.12 s</td><td class="num">14.40 s</td><td class="num">40</td><td class="num">4.7 s</td><td class="num">117</td></tr><tr><td class="nw">请求 3</td><td class="num">325</td><td class="num">20.86 s</td><td class="num">22.34 s</td><td class="num">227</td><td class="num">30.9 s</td><td class="num">136</td></tr><tr><td class="nw">请求 4</td><td class="num">15</td><td class="num">4.67 s</td><td class="num">4.61 s</td><td class="num">9</td><td class="num">1.3 s</td><td class="num">150</td></tr><tr><td class="nw">请求 5</td><td class="num">14</td><td class="num">4.37 s</td><td class="num">4.54 s</td><td class="num">211</td><td class="num">30.8 s</td><td class="num">146</td></tr><tr><td class="nw">请求 6</td><td class="num">183</td><td class="num">17.50 s</td><td class="num">18.12 s</td><td class="num">177</td><td class="num">26.2 s</td><td class="num">148</td></tr></tbody></table></div><figcaption>这段会话三轮共 6 个请求：首字前合计 93 s，解码 98 s（703 个 token），首字前占 49%。这次回复较长；11-24 验收的 21 个请求回复更短，首字前占 76%。新 token 只有十几个的请求（4、5）首字前也要 4 s 多。</figcaption></figure>
+</section>
+
+<section id="prefill" aria-labelledby="h-prefill">
+  <h2 id="h-prefill">prefill：读盘受限，空泡在层交界</h2>
+  <figure class="fig"><div class="fig-head"><div><p class="fig-title">prefill 期间 SSD 与 GPU 各自在不在忙（秒）</p><p class="fig-sub">每个请求的 prefill 窗口（不含首个输出 token）；SSD 忙 = 任一 IO 线程在读；GPU 区间由主机同步推断</p></div><button class="fig-btn" type="button" data-toggle="tbl-b" aria-expanded="false" aria-controls="tbl-b">显示数据表</button></div><div class="legend" aria-hidden="true"><span><i class="sw s1"></i>只有 GPU 忙（SSD 空着）</span><span><i class="sw s2"></i>只有 SSD 忙（GPU 在等盘）</span><span><i class="sw s3"></i>两者都忙</span><span><i class="sw sn"></i>都空闲</span></div><div class="hb" role="group" aria-label="prefill 窗口按 SSD / GPU 状态分解（秒）"><div class="hb-labels" aria-hidden="true"><div>请求 1 <small>新 1,586</small></div><div>请求 2 <small>新 176</small></div><div>请求 3 <small>新 325</small></div><div>请求 4 <small>新 15</small></div><div>请求 5 <small>新 14</small></div><div>请求 6 <small>新 183</small></div><div class="axis-gap"></div></div><div class="hb-plot"><div class="hb-base"></div><div class="hb-grid" style="left:33.33%"></div><div class="hb-grid" style="left:66.67%"></div><div class="hb-grid" style="left:100.00%"></div><div class="hb-row"><div class="hb-bar stack" style="--w:99.79%"><i class="s1" style="--f:23.017%" role="img" aria-label="请求 1 prefill · 只有 GPU 忙（SSD 空着）：6.9 s" tabindex="0" data-tv="6.9 s（23%）" data-tt="请求 1 prefill · 只有 GPU 忙（SSD 空着）"></i><i class="s2" style="--f:53.568%" role="img" aria-label="请求 1 prefill · 只有 SSD 忙（GPU 在等盘）：16.0 s" tabindex="0" data-tv="16.0 s（54%）" data-tt="请求 1 prefill · 只有 SSD 忙（GPU 在等盘）"></i><i class="s3" style="--f:19.678%" role="img" aria-label="请求 1 prefill · 两者都忙：5.9 s" tabindex="0" data-tv="5.9 s（20%）" data-tt="请求 1 prefill · 两者都忙"></i><i class="sn" style="--f:3.738%" role="img" aria-label="请求 1 prefill · 都空闲：1.1 s" tabindex="0" data-tv="1.1 s（4%）" data-tt="请求 1 prefill · 都空闲"></i></div><span class="hb-v" style="--w:99.79%">29.9 s</span></div><div class="hb-row"><div class="hb-bar stack" style="--w:48.45%"><i class="s1" style="--f:6.895%" role="img" aria-label="请求 2 prefill · 只有 GPU 忙（SSD 空着）：1.0 s" tabindex="0" data-tv="1.0 s（7%）" data-tt="请求 2 prefill · 只有 GPU 忙（SSD 空着）"></i><i class="s2" style="--f:76.733%" role="img" aria-label="请求 2 prefill · 只有 SSD 忙（GPU 在等盘）：11.2 s" tabindex="0" data-tv="11.2 s（77%）" data-tt="请求 2 prefill · 只有 SSD 忙（GPU 在等盘）"></i><i class="s3" style="--f:13.623%" role="img" aria-label="请求 2 prefill · 两者都忙：2.0 s" tabindex="0" data-tv="2.0 s（14%）" data-tt="请求 2 prefill · 两者都忙"></i><i class="sn" style="--f:2.748%" role="img" aria-label="请求 2 prefill · 都空闲：0.4 s" tabindex="0" data-tv="0.4 s（3%）" data-tt="请求 2 prefill · 都空闲"></i></div><span class="hb-v" style="--w:48.45%">14.5 s</span></div><div class="hb-row"><div class="hb-bar stack" style="--w:67.38%"><i class="s1" style="--f:9.293%" role="img" aria-label="请求 3 prefill · 只有 GPU 忙（SSD 空着）：1.9 s" tabindex="0" data-tv="1.9 s（9%）" data-tt="请求 3 prefill · 只有 GPU 忙（SSD 空着）"></i><i class="s2" style="--f:74.521%" role="img" aria-label="请求 3 prefill · 只有 SSD 忙（GPU 在等盘）：15.1 s" tabindex="0" data-tv="15.1 s（75%）" data-tt="请求 3 prefill · 只有 SSD 忙（GPU 在等盘）"></i><i class="s3" style="--f:14.375%" role="img" aria-label="请求 3 prefill · 两者都忙：2.9 s" tabindex="0" data-tv="2.9 s（14%）" data-tt="请求 3 prefill · 两者都忙"></i><i class="sn" style="--f:1.811%" role="img" aria-label="请求 3 prefill · 都空闲：0.4 s" tabindex="0" data-tv="0.4 s（2%）" data-tt="请求 3 prefill · 都空闲"></i></div><span class="hb-v" style="--w:67.38%">20.2 s</span></div><div class="hb-row"><div class="hb-bar stack" style="--w:13.99%"><i class="s1" style="--f:7.029%" role="img" aria-label="请求 4 prefill · 只有 GPU 忙（SSD 空着）：0.3 s" tabindex="0" data-tv="0.3 s（7%）" data-tt="请求 4 prefill · 只有 GPU 忙（SSD 空着）"></i><i class="s2" style="--f:80.483%" role="img" aria-label="请求 4 prefill · 只有 SSD 忙（GPU 在等盘）：3.4 s" tabindex="0" data-tv="3.4 s（80%）" data-tt="请求 4 prefill · 只有 SSD 忙（GPU 在等盘）"></i><i class="s3" style="--f:9.723%" role="img" aria-label="请求 4 prefill · 两者都忙：0.4 s" tabindex="0" data-tv="0.4 s（10%）" data-tt="请求 4 prefill · 两者都忙"></i><i class="sn" style="--f:2.765%" role="img" aria-label="请求 4 prefill · 都空闲：0.1 s" tabindex="0" data-tv="0.1 s（3%）" data-tt="请求 4 prefill · 都空闲"></i></div><span class="hb-v" style="--w:13.99%">4.2 s</span></div><div class="hb-row"><div class="hb-bar stack" style="--w:13.01%"><i class="s1" style="--f:7.123%" role="img" aria-label="请求 5 prefill · 只有 GPU 忙（SSD 空着）：0.3 s" tabindex="0" data-tv="0.3 s（7%）" data-tt="请求 5 prefill · 只有 GPU 忙（SSD 空着）"></i><i class="s2" style="--f:80.853%" role="img" aria-label="请求 5 prefill · 只有 SSD 忙（GPU 在等盘）：3.2 s" tabindex="0" data-tv="3.2 s（81%）" data-tt="请求 5 prefill · 只有 SSD 忙（GPU 在等盘）"></i><i class="s3" style="--f:9.551%" role="img" aria-label="请求 5 prefill · 两者都忙：0.4 s" tabindex="0" data-tv="0.4 s（10%）" data-tt="请求 5 prefill · 两者都忙"></i><i class="sn" style="--f:2.474%" role="img" aria-label="请求 5 prefill · 都空闲：0.1 s" tabindex="0" data-tv="0.1 s（2%）" data-tt="请求 5 prefill · 都空闲"></i></div><span class="hb-v" style="--w:13.01%">3.9 s</span></div><div class="hb-row"><div class="hb-bar stack" style="--w:56.43%"><i class="s1" style="--f:6.216%" role="img" aria-label="请求 6 prefill · 只有 GPU 忙（SSD 空着）：1.1 s" tabindex="0" data-tv="1.1 s（6%）" data-tt="请求 6 prefill · 只有 GPU 忙（SSD 空着）"></i><i class="s2" style="--f:79.225%" role="img" aria-label="请求 6 prefill · 只有 SSD 忙（GPU 在等盘）：13.4 s" tabindex="0" data-tv="13.4 s（79%）" data-tt="请求 6 prefill · 只有 SSD 忙（GPU 在等盘）"></i><i class="s3" style="--f:13.451%" role="img" aria-label="请求 6 prefill · 两者都忙：2.3 s" tabindex="0" data-tv="2.3 s（13%）" data-tt="请求 6 prefill · 两者都忙"></i><i class="sn" style="--f:1.109%" role="img" aria-label="请求 6 prefill · 都空闲：0.2 s" tabindex="0" data-tv="0.2 s（1%）" data-tt="请求 6 prefill · 都空闲"></i></div><span class="hb-v" style="--w:56.43%">16.9 s</span></div><div class="hb-axis" aria-hidden="true"><span style="left:0.00%">0</span><span style="left:33.33%">10</span><span style="left:66.67%">20</span><span style="left:100.00%">30 s</span></div></div></div><div class="tbl" id="tbl-b" hidden><table><thead><tr><th>请求</th><th>prefill</th><th>只有 GPU 忙</th><th>只有 SSD 忙</th><th>两者都忙</th><th>都空闲</th><th>SSD 忙占比</th><th>读盘</th><th>SSD 忙时带宽</th><th>平均并发 IO 线程</th></tr></thead><tbody><tr><td class="nw">请求 1（新 1,586）</td><td class="num">29.94 s</td><td class="num">6.89 s</td><td class="num">16.04 s</td><td class="num">5.89 s</td><td class="num">1.12 s</td><td class="num">73%</td><td class="num">131.9 GB</td><td class="num">6.02 GB/s</td><td class="num">5.1 / 8</td></tr><tr><td class="nw">请求 2（新 176）</td><td class="num">14.54 s</td><td class="num">1.00 s</td><td class="num">11.15 s</td><td class="num">1.98 s</td><td class="num">0.40 s</td><td class="num">90%</td><td class="num">71.2 GB</td><td class="num">5.42 GB/s</td><td class="num">5.4 / 8</td></tr><tr><td class="nw">请求 3（新 325）</td><td class="num">20.21 s</td><td class="num">1.88 s</td><td class="num">15.06 s</td><td class="num">2.91 s</td><td class="num">0.37 s</td><td class="num">89%</td><td class="num">105.4 GB</td><td class="num">5.87 GB/s</td><td class="num">5.3 / 8</td></tr><tr><td class="nw">请求 4（新 15）</td><td class="num">4.20 s</td><td class="num">0.30 s</td><td class="num">3.38 s</td><td class="num">0.41 s</td><td class="num">0.12 s</td><td class="num">90%</td><td class="num">22.7 GB</td><td class="num">6.00 GB/s</td><td class="num">6.2 / 8</td></tr><tr><td class="nw">请求 5（新 14）</td><td class="num">3.90 s</td><td class="num">0.28 s</td><td class="num">3.16 s</td><td class="num">0.37 s</td><td class="num">0.10 s</td><td class="num">90%</td><td class="num">21.6 GB</td><td class="num">6.12 GB/s</td><td class="num">6.2 / 8</td></tr><tr><td class="nw">请求 6（新 183）</td><td class="num">16.93 s</td><td class="num">1.05 s</td><td class="num">13.41 s</td><td class="num">2.28 s</td><td class="num">0.19 s</td><td class="num">93%</td><td class="num">87.9 GB</td><td class="num">5.60 GB/s</td><td class="num">5.4 / 8</td></tr></tbody></table></div><figcaption>prefill 基本是读盘：SSD 忙的时间占 73%–93%，忙时 5.4–6.1 GB/s，接近这块盘逐专家读取时的 6.0–6.4 GB/s。冷 prefill（请求 1）的「只有 GPU 忙」最多（6.9 s）：1,585 行的注意力、路由和专家计算都更重，SSD 在这段时间里没有活干。</figcaption></figure>
+  <figure class="fig"><div class="fig-head"><div><p class="fig-title">SSD 空闲时主线程在做什么（整段会话的 prefill，秒）</p><p class="fig-sub">6 个请求的 prefill 共 89.7 s，其中 SSD 完全空闲 13.7 s（15%）</p></div><button class="fig-btn" type="button" data-toggle="tbl-c" aria-expanded="false" aria-controls="tbl-c">显示数据表</button></div><div class="hb" role="group" aria-label="SSD 空闲时间按主线程阶段归因（秒）"><div class="hb-labels" aria-hidden="true"><div>每层的路由同步</div><div>构建下一层的计算图</div><div>Engram 查表与其他</div><div>等 GPU 算完一批专家</div><div>等这一批专家读完</div><div>构建 / 下发一批</div><div class="axis-gap"></div></div><div class="hb-plot"><div class="hb-base"></div><div class="hb-grid" style="left:25.00%"></div><div class="hb-grid" style="left:50.00%"></div><div class="hb-grid" style="left:75.00%"></div><div class="hb-grid" style="left:100.00%"></div><div class="hb-row" role="img" aria-label="每层的路由同步：10.50 s" tabindex="0" data-tv="10.50 s" data-tt="每层的路由同步" data-tn="SSD 空闲 10.50 s，这个阶段共 10.50 s。GPU 在算上一层最后一批专家 + 本层注意力与路由；这一层要读哪些专家还不知道"><div class="hb-bar acc" style="--w:87.52%"></div><span class="hb-v" style="--w:87.52%">10.50</span></div><div class="hb-row" role="img" aria-label="构建下一层的计算图：1.09 s" tabindex="0" data-tv="1.09 s" data-tt="构建下一层的计算图" data-tn="SSD 空闲 1.09 s，这个阶段共 1.09 s。Python 构建 hc + 注意力图（惰性）"><div class="hb-bar mute" style="--w:9.12%"></div><span class="hb-v" style="--w:9.12%">1.09</span></div><div class="hb-row" role="img" aria-label="Engram 查表与其他：0.90 s" tabindex="0" data-tv="0.90 s" data-tt="Engram 查表与其他" data-tn="SSD 空闲 0.90 s，这个阶段共 0.94 s。Engram 层主机查 n-gram 表行、请求开始的前缀匹配等"><div class="hb-bar mute" style="--w:7.50%"></div><span class="hb-v" style="--w:7.50%">0.90</span></div><div class="hb-row" role="img" aria-label="等 GPU 算完一批专家：0.89 s" tabindex="0" data-tv="0.89 s" data-tt="等 GPU 算完一批专家" data-tn="SSD 空闲 0.89 s，这个阶段共 14.73 s。层内：下一批的读盘在这批计算结束前就读完了"><div class="hb-bar mute" style="--w:7.45%"></div><span class="hb-v" style="--w:7.45%">0.89</span></div><div class="hb-row" role="img" aria-label="等这一批专家读完：0.17 s" tabindex="0" data-tv="0.17 s" data-tt="等这一批专家读完" data-tn="SSD 空闲 0.17 s，这个阶段共 60.68 s。SSD 在读，只有很短的交接空隙"><div class="hb-bar mute" style="--w:1.44%"></div><span class="hb-v" style="--w:1.44%">0.17</span></div><div class="hb-row" role="img" aria-label="构建 / 下发一批：0.12 s" tabindex="0" data-tv="0.12 s" data-tt="构建 / 下发一批" data-tn="SSD 空闲 0.12 s，这个阶段共 1.77 s。"><div class="hb-bar mute" style="--w:0.97%"></div><span class="hb-v" style="--w:0.97%">0.12</span></div><div class="hb-axis" aria-hidden="true"><span style="left:0.00%">0</span><span style="left:25.00%">3</span><span style="left:50.00%">6</span><span style="left:75.00%">9</span><span style="left:100.00%">12 s</span></div></div></div><div class="tbl" id="tbl-c" hidden><table><thead><tr><th>主线程阶段</th><th>SSD 空闲</th><th>该阶段总时长</th><th>空闲占该阶段</th></tr></thead><tbody><tr><td class="nw">每层的路由同步</td><td class="num">10.50 s</td><td class="num">10.50 s</td><td class="num">100%</td></tr><tr><td class="nw">构建下一层的计算图</td><td class="num">1.09 s</td><td class="num">1.09 s</td><td class="num">100%</td></tr><tr><td class="nw">Engram 查表与其他</td><td class="num">0.90 s</td><td class="num">0.94 s</td><td class="num">96%</td></tr><tr><td class="nw">等 GPU 算完一批专家</td><td class="num">0.89 s</td><td class="num">14.73 s</td><td class="num">6%</td></tr><tr><td class="nw">等这一批专家读完</td><td class="num">0.17 s</td><td class="num">60.68 s</td><td class="num">0%</td></tr><tr><td class="nw">构建 / 下发一批</td><td class="num">0.12 s</td><td class="num">1.77 s</td><td class="num">7%</td></tr></tbody></table></div><figcaption>最大的一块是每层的路由同步：10.5 s，同步期间 SSD 100% 空闲。原因是 prefill 只预读本层的下一批专家，本层最后一批读完以后，要等下一层算完注意力和路由、知道该读哪些专家，才会再发读盘。冷 prefill 每层要等 200–300 ms（1,585 行），合计 6.2 s，占这次 prefill 的 21%。</figcaption></figure>
+  <div class="note"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5 15 14H1z" fill="currentColor"/></svg>
+  <p>层内几乎没有空泡：「等这一批专家读完」的 61 s 里 SSD 只空了 0.17 s。不过单个 IO 线程在两个读块之间平均空约 0.7 ms（一个 2 MB 读块约 1.9 ms），8 个线程平均只有 5–6 个在读，SSD 忙时带宽 5.4–6.1 GB/s。更深的队列能不能把带宽再推高，要单独做 IO 微基准。</p></div>
+</section>
+
+<section id="lookahead" aria-labelledby="h-lookahead">
+  <h2 id="h-lookahead">跨层预读：把层交界的 SSD 空泡填上</h2>
+  <p>做法：每层算路由时，顺带用下一层的路由器对本层的输入打分，在同一次主机同步里拿回每行的 top-6，按被预测的次数排序。本层进入最后一批专家时（本层已经没有要读的了），按低优先级读入下一层最可能的 max(16, 行数 ÷ 12) 个专家。下一层路由出来以后，还没开始读的猜错项会被取消。专家批的顺序和计算都不变。只在 prefill 里生效（<code>LLM._prefill</code> / <code>_prefill_vl</code> 打开 <code>Transformer.prefilling</code>），解码与 DSpark 的多 token 前向不受影响。代码在 <code>deepinfer_mac/model/model.py</code>（<code>MoE.PREFILL_LOOKAHEAD</code>），默认打开，<code>DEEPINFER_PREFILL_LOOKAHEAD=0</code> 关闭。</p>
+  <ul class="plain">
+    <li><strong>文本 prefill：</strong><code>mk/test_prefill_lookahead.py</code> 用真实模型做「非末块 + 末块（Bounded Replay）」两块 prefill，开 / 关交替各两次：18,099,200 个 logits 四次逐位相同；耗时 32.4 / 34.1 s → 28.0 / 28.5 s，读盘 165.3 → 166.1 GB。</li>
+    <li><strong>带图 prefill：</strong><code>mk/bench_prefill_vl.py</code>（dsh 的 system 文本 + 测试图片，1,500 token）：28.3 / 27.1 / 30.5 / 27.6 s → 23.6 / 22.7 / 23.5 / 23.4 s（约 −17%）。这条路径上 prefill 本身就不能逐位复现（见下一条），按结果分组时，组别与开关无关。</li>
+    <li><strong>prefill 的运行间差异（原有）：</strong>连续 7 次带图 prefill 分成两组逐位相同的结果，组别与开关、是否清空缓存都无关；逐层校验和显示前 21 层完全相同，第一处差异在第 21 层 MoE 的输出，而它的输入、路由、共享专家都相同，槽里的专家字节也与模型文件一致。原因是 MLX 的 scatter-add（<code>y.at[r].add(o)</code>）在 GPU 上用原子加：同样的输入重复 30 次，结果就不逐位相同。记录在 <code>logs/mk/agent/prefill_nondeterminism.md</code>。</li>
+    <li><strong>单测：</strong><code>pytest tests/</code> 40/40 通过（tiny checkpoint 上的引擎、与参考实现的一致性、视觉、存储、服务端）。</li>
+    <li><strong>端到端：</strong>dsv41 test --quick 走真实启动器（这次按空闲内存选了 14 GB 缓存）7/7 通过：问答、文件创建与修改、前缀复用、带图、终端 -p、@ 引用；新会话第二个冷请求首字 26.1 s（11-24 为 30.3 s）。</li>
+    <li><strong>解码：</strong>预读只在 prefill 里；两次回放的解码均值 139.9 → 145.2 ms/token，差 +3.8%，在运行间 ±3–5% 的波动范围内（稳态 token 也差这么多，与 prefill 后的缓存内容无关）。</li>
+  </ul>
+  <figure class="fig"><div class="fig-head"><div><p class="fig-title">prefill 跨层预读：首字前时间（秒）</p><p class="fig-sub">同一段会话回放：基线（<code>DEEPINFER_PREFILL_LOOKAHEAD=0</code>）与跨层预读（默认 16：每层预读 max(16, 行数 ÷ 12) 个下一层专家）</p></div><button class="fig-btn" type="button" data-toggle="tbl-d" aria-expanded="false" aria-controls="tbl-d">显示数据表</button></div><div class="hb" role="group" aria-label="基线与跨层预读的首字前时间（秒）"><div class="hb-labels" aria-hidden="true"><div>请求 1 · 基线</div><div>请求 1 · 跨层预读</div><div>请求 2 · 基线</div><div>请求 2 · 跨层预读</div><div>请求 3 · 基线</div><div>请求 3 · 跨层预读</div><div>请求 4 · 基线</div><div>请求 4 · 跨层预读</div><div>请求 5 · 基线</div><div>请求 5 · 跨层预读</div><div>请求 6 · 基线</div><div>请求 6 · 跨层预读</div><div class="axis-gap"></div></div><div class="hb-plot"><div class="hb-base"></div><div class="hb-grid" style="left:25.00%"></div><div class="hb-grid" style="left:50.00%"></div><div class="hb-grid" style="left:75.00%"></div><div class="hb-grid" style="left:100.00%"></div><div class="hb-row" role="img" aria-label="请求 1 基线：30.7 s" tabindex="0" data-tv="30.7 s" data-tt="请求 1 基线" data-tn="新 1,586 token"><div class="hb-bar mute" style="--w:95.88%"></div><span class="hb-v" style="--w:95.88%">30.7</span></div><div class="hb-row" role="img" aria-label="请求 1 跨层预读：26.4 s" tabindex="0" data-tv="26.4 s" data-tt="请求 1 跨层预读" data-tn="-4.24 s（-14%）"><div class="hb-bar acc" style="--w:82.62%"></div><span class="hb-v" style="--w:82.62%">26.4</span></div><div class="hb-row" role="img" aria-label="请求 2 基线：15.1 s" tabindex="0" data-tv="15.1 s" data-tt="请求 2 基线" data-tn="新 176 token"><div class="hb-bar mute" style="--w:47.25%"></div><span class="hb-v" style="--w:47.25%">15.1</span></div><div class="hb-row" role="img" aria-label="请求 2 跨层预读：12.9 s" tabindex="0" data-tv="12.9 s" data-tt="请求 2 跨层预读" data-tn="-2.20 s（-15%）"><div class="hb-bar acc" style="--w:40.38%"></div><span class="hb-v" style="--w:40.38%">12.9</span></div><div class="hb-row" role="img" aria-label="请求 3 基线：20.9 s" tabindex="0" data-tv="20.9 s" data-tt="请求 3 基线" data-tn="新 325 token"><div class="hb-bar mute" style="--w:65.19%"></div><span class="hb-v" style="--w:65.19%">20.9</span></div><div class="hb-row" role="img" aria-label="请求 3 跨层预读：19.0 s" tabindex="0" data-tv="19.0 s" data-tt="请求 3 跨层预读" data-tn="-1.83 s（-9%）"><div class="hb-bar acc" style="--w:59.47%"></div><span class="hb-v" style="--w:59.47%">19.0</span></div><div class="hb-row" role="img" aria-label="请求 4 基线：4.7 s" tabindex="0" data-tv="4.7 s" data-tt="请求 4 基线" data-tn="新 15 token"><div class="hb-bar mute" style="--w:14.59%"></div><span class="hb-v" style="--w:14.59%">4.7</span></div><div class="hb-row" role="img" aria-label="请求 4 跨层预读：4.3 s" tabindex="0" data-tv="4.3 s" data-tt="请求 4 跨层预读" data-tn="-0.32 s（-7%）"><div class="hb-bar acc" style="--w:13.59%"></div><span class="hb-v" style="--w:13.59%">4.3</span></div><div class="hb-row" role="img" aria-label="请求 5 基线：4.4 s" tabindex="0" data-tv="4.4 s" data-tt="请求 5 基线" data-tn="新 14 token"><div class="hb-bar mute" style="--w:13.66%"></div><span class="hb-v" style="--w:13.66%">4.4</span></div><div class="hb-row" role="img" aria-label="请求 5 跨层预读：4.1 s" tabindex="0" data-tv="4.1 s" data-tt="请求 5 跨层预读" data-tn="-0.23 s（-5%）"><div class="hb-bar acc" style="--w:12.94%"></div><span class="hb-v" style="--w:12.94%">4.1</span></div><div class="hb-row" role="img" aria-label="请求 6 基线：17.5 s" tabindex="0" data-tv="17.5 s" data-tt="请求 6 基线" data-tn="新 183 token"><div class="hb-bar mute" style="--w:54.69%"></div><span class="hb-v" style="--w:54.69%">17.5</span></div><div class="hb-row" role="img" aria-label="请求 6 跨层预读：15.6 s" tabindex="0" data-tv="15.6 s" data-tt="请求 6 跨层预读" data-tn="-1.94 s（-11%）"><div class="hb-bar acc" style="--w:48.62%"></div><span class="hb-v" style="--w:48.62%">15.6</span></div><div class="hb-axis" aria-hidden="true"><span style="left:0.00%">0</span><span style="left:25.00%">8</span><span style="left:50.00%">16</span><span style="left:75.00%">24</span><span style="left:100.00%">32 s</span></div></div></div><div class="tbl" id="tbl-d" hidden><table><thead><tr><th>请求</th><th>新 token</th><th>基线</th><th>基线（另一次）</th><th>跨层预读</th><th>变化</th><th>路由同步时 SSD 空闲（基线 → 预读）</th><th>读盘（基线 → 预读）</th></tr></thead><tbody><tr><td class="nw">请求 1</td><td class="num">1,586</td><td class="num">30.68 s</td><td class="num">30.98 s</td><td class="num">26.44 s</td><td class="num">-13.8%</td><td class="num">6.16 → 0.91 s</td><td class="num">135.1 → 144.6 GB</td></tr><tr><td class="nw">请求 2</td><td class="num">176</td><td class="num">15.12 s</td><td class="num">13.84 s</td><td class="num">12.92 s</td><td class="num">-14.6%</td><td class="num">0.95 → 0.12 s</td><td class="num">74.4 → 75.0 GB</td></tr><tr><td class="nw">请求 3</td><td class="num">325</td><td class="num">20.86 s</td><td class="num">20.92 s</td><td class="num">19.03 s</td><td class="num">-8.8%</td><td class="num">1.84 → 0.28 s</td><td class="num">108.7 → 109.6 GB</td></tr><tr><td class="nw">请求 4</td><td class="num">15</td><td class="num">4.67 s</td><td class="num">4.61 s</td><td class="num">4.35 s</td><td class="num">-6.9%</td><td class="num">0.28 → 0.00 s</td><td class="num">25.4 → 25.9 GB</td></tr><tr><td class="nw">请求 5</td><td class="num">14</td><td class="num">4.37 s</td><td class="num">4.46 s</td><td class="num">4.14 s</td><td class="num">-5.3%</td><td class="num">0.25 → 0.01 s</td><td class="num">24.3 → 24.6 GB</td></tr><tr><td class="nw">请求 6</td><td class="num">183</td><td class="num">17.50 s</td><td class="num">16.52 s</td><td class="num">15.56 s</td><td class="num">-11.1%</td><td class="num">1.02 → 0.20 s</td><td class="num">91.2 → 91.2 GB</td></tr><tr><td class="nw">合计</td><td class="num"></td><td class="num">93.2 s</td><td class="num">91.3 s</td><td class="num">82.4 s</td><td class="num">-11.5%</td><td class="num">10.50 → 1.53 s</td><td class="num">459 → 471 GB</td></tr></tbody></table></div><figcaption>六个请求的首字前合计 93.2 → 82.4 s（-12%），冷 prefill 30.7 → 26.4 s。路由同步期间的 SSD 空闲从 10.5 s 降到 1.5 s；猜错的读取让读盘量多了 3%。只改读盘时机，不改计算：文本 prompt（600 token 两块 prefill）的 18,099,200 个 logits 开关前后逐位相同。</figcaption></figure>
+</section>
+
+<section id="decode" aria-labelledby="h-decode">
+  <h2 id="h-decode">解码：没有明显空泡，慢在缓存容量</h2>
+  <figure class="fig"><div class="fig-head"><div><p class="fig-title">解码：每个 token 的时间分解（ms）</p><p class="fig-sub">回放里的解码 token（teacher forcing），与 11-17 在 16 GiB 缓存下的 mk-7 时间线对比</p></div><button class="fig-btn" type="button" data-toggle="tbl-e" aria-expanded="false" aria-controls="tbl-e">显示数据表</button></div><div class="legend" aria-hidden="true"><span><i class="sw s1"></i>只有 GPU 忙（SSD 空着）</span><span><i class="sw s2"></i>只有 SSD 忙（GPU 在等盘）</span><span><i class="sw s3"></i>两者都忙</span><span><i class="sw sn"></i>都空闲</span></div><div class="hb" role="group" aria-label="每个解码 token 按 SSD / GPU 状态分解（毫秒）"><div class="hb-labels" aria-hidden="true"><div>11-17 · 16 GiB <small>短提示</small></div><div>请求 1 · 8 GiB <small>39 token</small></div><div>请求 2 · 8 GiB <small>40 token</small></div><div>请求 3 · 8 GiB <small>227 token</small></div><div>请求 4 · 8 GiB <small>9 token</small></div><div>请求 5 · 8 GiB <small>211 token</small></div><div>请求 6 · 8 GiB <small>177 token</small></div><div class="axis-gap"></div></div><div class="hb-plot"><div class="hb-base"></div><div class="hb-grid" style="left:25.00%"></div><div class="hb-grid" style="left:50.00%"></div><div class="hb-grid" style="left:75.00%"></div><div class="hb-grid" style="left:100.00%"></div><div class="hb-row"><div class="hb-bar stack" style="--w:51.50%"><i class="s1" style="--f:55.218%" role="img" aria-label="11-17 mk-7 trace，16 GiB · 只有 GPU 忙（SSD 空着）：45.5 ms" tabindex="0" data-tv="45.5 ms（55%）" data-tt="11-17 mk-7 trace，16 GiB · 只有 GPU 忙（SSD 空着）"></i><i class="s2" style="--f:18.932%" role="img" aria-label="11-17 mk-7 trace，16 GiB · 只有 SSD 忙（GPU 在等盘）：15.6 ms" tabindex="0" data-tv="15.6 ms（19%）" data-tt="11-17 mk-7 trace，16 GiB · 只有 SSD 忙（GPU 在等盘）"></i><i class="s3" style="--f:24.272%" role="img" aria-label="11-17 mk-7 trace，16 GiB · 两者都忙：20.0 ms" tabindex="0" data-tv="20.0 ms（24%）" data-tt="11-17 mk-7 trace，16 GiB · 两者都忙"></i><i class="sn" style="--f:1.578%" role="img" aria-label="11-17 mk-7 trace，16 GiB · 都空闲：1.3 ms" tabindex="0" data-tv="1.3 ms（2%）" data-tt="11-17 mk-7 trace，16 GiB · 都空闲"></i></div><span class="hb-v" style="--w:51.50%">82</span></div><div class="hb-row"><div class="hb-bar stack" style="--w:70.15%"><i class="s1" style="--f:27.406%" role="img" aria-label="请求 1（39 个解码 token） · 只有 GPU 忙（SSD 空着）：30.8 ms" tabindex="0" data-tv="30.8 ms（27%）" data-tt="请求 1（39 个解码 token） · 只有 GPU 忙（SSD 空着）"></i><i class="s2" style="--f:37.518%" role="img" aria-label="请求 1（39 个解码 token） · 只有 SSD 忙（GPU 在等盘）：42.1 ms" tabindex="0" data-tv="42.1 ms（38%）" data-tt="请求 1（39 个解码 token） · 只有 SSD 忙（GPU 在等盘）"></i><i class="s3" style="--f:34.203%" role="img" aria-label="请求 1（39 个解码 token） · 两者都忙：38.4 ms" tabindex="0" data-tv="38.4 ms（34%）" data-tt="请求 1（39 个解码 token） · 两者都忙"></i><i class="sn" style="--f:0.873%" role="img" aria-label="请求 1（39 个解码 token） · 都空闲：1.0 ms" tabindex="0" data-tv="1.0 ms（1%）" data-tt="请求 1（39 个解码 token） · 都空闲"></i></div><span class="hb-v" style="--w:70.15%">112</span></div><div class="hb-row"><div class="hb-bar stack" style="--w:73.14%"><i class="s1" style="--f:26.483%" role="img" aria-label="请求 2（40 个解码 token） · 只有 GPU 忙（SSD 空着）：31.0 ms" tabindex="0" data-tv="31.0 ms（26%）" data-tt="请求 2（40 个解码 token） · 只有 GPU 忙（SSD 空着）"></i><i class="s2" style="--f:38.224%" role="img" aria-label="请求 2（40 个解码 token） · 只有 SSD 忙（GPU 在等盘）：44.7 ms" tabindex="0" data-tv="44.7 ms（38%）" data-tt="请求 2（40 个解码 token） · 只有 SSD 忙（GPU 在等盘）"></i><i class="s3" style="--f:34.054%" role="img" aria-label="请求 2（40 个解码 token） · 两者都忙：39.9 ms" tabindex="0" data-tv="39.9 ms（34%）" data-tt="请求 2（40 个解码 token） · 两者都忙"></i><i class="sn" style="--f:1.239%" role="img" aria-label="请求 2（40 个解码 token） · 都空闲：1.4 ms" tabindex="0" data-tv="1.4 ms（1%）" data-tt="请求 2（40 个解码 token） · 都空闲"></i></div><span class="hb-v" style="--w:73.14%">117</span></div><div class="hb-row"><div class="hb-bar stack" style="--w:85.14%"><i class="s1" style="--f:17.296%" role="img" aria-label="请求 3（227 个解码 token） · 只有 GPU 忙（SSD 空着）：23.6 ms" tabindex="0" data-tv="23.6 ms（17%）" data-tt="请求 3（227 个解码 token） · 只有 GPU 忙（SSD 空着）"></i><i class="s2" style="--f:46.161%" role="img" aria-label="请求 3（227 个解码 token） · 只有 SSD 忙（GPU 在等盘）：62.9 ms" tabindex="0" data-tv="62.9 ms（46%）" data-tt="请求 3（227 个解码 token） · 只有 SSD 忙（GPU 在等盘）"></i><i class="s3" style="--f:35.318%" role="img" aria-label="请求 3（227 个解码 token） · 两者都忙：48.1 ms" tabindex="0" data-tv="48.1 ms（35%）" data-tt="请求 3（227 个解码 token） · 两者都忙"></i><i class="sn" style="--f:1.226%" role="img" aria-label="请求 3（227 个解码 token） · 都空闲：1.7 ms" tabindex="0" data-tv="1.7 ms（1%）" data-tt="请求 3（227 个解码 token） · 都空闲"></i></div><span class="hb-v" style="--w:85.14%">136</span></div><div class="hb-row"><div class="hb-bar stack" style="--w:93.45%"><i class="s1" style="--f:14.072%" role="img" aria-label="请求 4（9 个解码 token） · 只有 GPU 忙（SSD 空着）：21.0 ms" tabindex="0" data-tv="21.0 ms（14%）" data-tt="请求 4（9 个解码 token） · 只有 GPU 忙（SSD 空着）"></i><i class="s2" style="--f:51.324%" role="img" aria-label="请求 4（9 个解码 token） · 只有 SSD 忙（GPU 在等盘）：76.7 ms" tabindex="0" data-tv="76.7 ms（51%）" data-tt="请求 4（9 个解码 token） · 只有 SSD 忙（GPU 在等盘）"></i><i class="s3" style="--f:33.842%" role="img" aria-label="请求 4（9 个解码 token） · 两者都忙：50.6 ms" tabindex="0" data-tv="50.6 ms（34%）" data-tt="请求 4（9 个解码 token） · 两者都忙"></i><i class="sn" style="--f:0.762%" role="img" aria-label="请求 4（9 个解码 token） · 都空闲：1.1 ms" tabindex="0" data-tv="1.1 ms（1%）" data-tt="请求 4（9 个解码 token） · 都空闲"></i></div><span class="hb-v" style="--w:93.45%">150</span></div><div class="hb-row"><div class="hb-bar stack" style="--w:91.28%"><i class="s1" style="--f:13.236%" role="img" aria-label="请求 5（211 个解码 token） · 只有 GPU 忙（SSD 空着）：19.3 ms" tabindex="0" data-tv="19.3 ms（13%）" data-tt="请求 5（211 个解码 token） · 只有 GPU 忙（SSD 空着）"></i><i class="s2" style="--f:50.199%" role="img" aria-label="请求 5（211 个解码 token） · 只有 SSD 忙（GPU 在等盘）：73.3 ms" tabindex="0" data-tv="73.3 ms（50%）" data-tt="请求 5（211 个解码 token） · 只有 SSD 忙（GPU 在等盘）"></i><i class="s3" style="--f:35.627%" role="img" aria-label="请求 5（211 个解码 token） · 两者都忙：52.0 ms" tabindex="0" data-tv="52.0 ms（36%）" data-tt="请求 5（211 个解码 token） · 两者都忙"></i><i class="sn" style="--f:0.938%" role="img" aria-label="请求 5（211 个解码 token） · 都空闲：1.4 ms" tabindex="0" data-tv="1.4 ms（1%）" data-tt="请求 5（211 个解码 token） · 都空闲"></i></div><span class="hb-v" style="--w:91.28%">146</span></div><div class="hb-row"><div class="hb-bar stack" style="--w:92.47%"><i class="s1" style="--f:12.072%" role="img" aria-label="请求 6（177 个解码 token） · 只有 GPU 忙（SSD 空着）：17.9 ms" tabindex="0" data-tv="17.9 ms（12%）" data-tt="请求 6（177 个解码 token） · 只有 GPU 忙（SSD 空着）"></i><i class="s2" style="--f:51.632%" role="img" aria-label="请求 6（177 个解码 token） · 只有 SSD 忙（GPU 在等盘）：76.4 ms" tabindex="0" data-tv="76.4 ms（52%）" data-tt="请求 6（177 个解码 token） · 只有 SSD 忙（GPU 在等盘）"></i><i class="s3" style="--f:35.532%" role="img" aria-label="请求 6（177 个解码 token） · 两者都忙：52.6 ms" tabindex="0" data-tv="52.6 ms（36%）" data-tt="请求 6（177 个解码 token） · 两者都忙"></i><i class="sn" style="--f:0.764%" role="img" aria-label="请求 6（177 个解码 token） · 都空闲：1.1 ms" tabindex="0" data-tv="1.1 ms（1%）" data-tt="请求 6（177 个解码 token） · 都空闲"></i></div><span class="hb-v" style="--w:92.47%">148</span></div><div class="hb-axis" aria-hidden="true"><span style="left:0.00%">0</span><span style="left:25.00%">40</span><span style="left:50.00%">80</span><span style="left:75.00%">120</span><span style="left:100.00%">160 ms</span></div></div></div><div class="tbl" id="tbl-e" hidden><table><thead><tr><th></th><th>ms/token</th><th>tok/s</th><th>只有 GPU 忙</th><th>只有 SSD 忙</th><th>两者都忙</th><th>都空闲</th><th>每 token 读盘</th><th>前 5 个 / 其余</th></tr></thead><tbody><tr><td class="nw">11-17 · 16 GiB（短提示）</td><td class="num">82.4</td><td class="num">12.1</td><td class="num">45.5</td><td class="num">15.6</td><td class="num">20.0</td><td class="num">1.3</td><td class="num">—</td><td class="num">—</td></tr><tr><td class="nw">请求 1 · 8 GiB</td><td class="num">112.2</td><td class="num">8.9</td><td class="num">30.8</td><td class="num">42.1</td><td class="num">38.4</td><td class="num">1.0</td><td class="num">0.49 GB</td><td class="num">131 / 110</td></tr><tr><td class="nw">请求 2 · 8 GiB</td><td class="num">117.0</td><td class="num">8.5</td><td class="num">31.0</td><td class="num">44.7</td><td class="num">39.9</td><td class="num">1.4</td><td class="num">0.52 GB</td><td class="num">146 / 113</td></tr><tr><td class="nw">请求 3 · 8 GiB</td><td class="num">136.2</td><td class="num">7.3</td><td class="num">23.6</td><td class="num">62.9</td><td class="num">48.1</td><td class="num">1.7</td><td class="num">0.67 GB</td><td class="num">146 / 136</td></tr><tr><td class="nw">请求 4 · 8 GiB</td><td class="num">149.6</td><td class="num">6.7</td><td class="num">21.0</td><td class="num">76.7</td><td class="num">50.6</td><td class="num">1.1</td><td class="num">0.76 GB</td><td class="num">170 / 124</td></tr><tr><td class="nw">请求 5 · 8 GiB</td><td class="num">146.0</td><td class="num">6.8</td><td class="num">19.3</td><td class="num">73.3</td><td class="num">52.0</td><td class="num">1.4</td><td class="num">0.77 GB</td><td class="num">142 / 146</td></tr><tr><td class="nw">请求 6 · 8 GiB</td><td class="num">147.9</td><td class="num">6.8</td><td class="num">17.9</td><td class="num">76.4</td><td class="num">52.6</td><td class="num">1.1</td><td class="num">0.79 GB</td><td class="num">160 / 148</td></tr></tbody></table></div><figcaption>解码没有明显的流水线空泡：两者都空闲每 token 只有 1–2 ms。8 GiB 缓存下每 token 要读 0.5–0.8 GB，GPU 等盘 42–77 ms，是 16 GiB 时（15.6 ms）的 3–5 倍，所以 agent 里只有 6.7–8.9 tok/s。这是缓存容量问题，不是调度气泡。prefill 之后的前 5 个解码 token 在多数请求里还要再慢 10–45 ms（缓存被 prefill 冲掉了）。</figcaption></figure>
+</section>
+
+<section id="next" aria-labelledby="h-next">
+  <h2 id="h-next">气泡与重复工作：按收益排序</h2>
+  <div class="tbl"><table><thead><tr><th>气泡 / 重复工作</th><th>本次会话里的量</th><th>做法</th><th>对输出的影响</th><th>状态</th></tr></thead><tbody><tr><td class="txt">每层 prefill 的路由同步：SSD 等下一层路由</td><td class="txt">10.5 s（prefill 的 12%）</td><td class="txt">跨层预读（本次实现，默认打开）</td><td class="txt">无损：只改读盘时机，不改计算</td><td class="txt">已测：首字前合计 -12%，带图约 −17%</td></tr><tr><td class="txt">新会话重算同一段 system + 工具定义（约 1,489 token）</td><td class="txt">冷 prefill 约 31 s / 新会话</td><td class="txt">缓存这段共享前缀的状态（锚点快照），新会话直接复用</td><td class="txt">无损：与同会话多轮复用相同的语义</td><td class="txt">下一步</td></tr><tr><td class="txt">prefill 之后的首个输出 token 走解码路径、缓存是冷的</td><td class="txt">470–743 ms / 请求，读 2.6–3.3 GB</td><td class="txt">把最后一个 prompt token 的专家留在缓存里 / 预读</td><td class="txt">无损</td><td class="txt">待评估</td></tr><tr><td class="txt">层交界处的 Python 建图、Engram 查表</td><td class="txt">2.0 s</td><td class="txt">跨层预读同时覆盖（读盘在这段时间继续）</td><td class="txt">无损</td><td class="txt">随第一项</td></tr><tr><td class="txt">prefill 结果不能逐位复现（MLX scatter-add 原子加）</td><td class="txt">带图 prompt 两次运行 logits 最多差 1.125，top-5 顺序会变</td><td class="txt">每批按专家名次分开 scatter（每次索引唯一），或先写进 [行, 6, dim] 再求和</td><td class="txt">让无损模式的 prefill 可复现</td><td class="txt">待做</td></tr><tr><td class="txt">解码在 8 GiB 缓存下等盘</td><td class="txt">42–77 ms/token</td><td class="txt">更大的专家缓存（关掉其他应用，dsv41 按空闲内存选 6–16 GiB）</td><td class="txt">—</td><td class="txt">容量问题，不是气泡</td></tr></tbody></table></div>
+</section>
+
+<section id="viewer" aria-labelledby="h-viewer">
+  <h2 id="h-viewer">时间线查看器</h2>
+  <p><a href="trace/AGENT_TRACE.html">trace/AGENT_TRACE.html</a> 是这段会话的逐层时间线（与 <code>trace/DECODE_TRACE.html</code> 同一个查看器，约 22 MB，由 <code>trace/agent_page.py</code> 从 <code>logs/mk/agent/</code> 的回放数据生成）：两组回放（基线、跨层预读）。在「Token」里可以选某个请求的 prefill、首个输出 token 或前 4 个解码 token；prefill 段里同一 IO 线程上间隔不到 2 ms 的读块合并成一条占用条。每个 2 MB 读块的完整事件在 Perfetto JSON 里（<code>logs/mk/agent/agent-fast-c8*.perfetto.json</code>，可拖进 ui.perfetto.dev）。</p>
+</section>
+
+<section id="repro" aria-labelledby="h-repro">
+  <h2 id="h-repro">复现</h2>
+  <div class="cmds">
+    <div class="cmd"><div class="cmd-head"><span>1. 录一段会话（另一个终端里用 <code>dsv41 -p</code> 驱动，完成后 Ctrl+C）</span></div>
+      <pre>cd ~/Models/DeepInfer-Mac
+.venv/bin/python mac-deploy-tests/mk/agent_capture.py ~/Models/logs/mk/agent/capture.jsonl --cache-gb 8</pre></div>
+    <div class="cmd"><div class="cmd-head"><span>2. 回放并记录（基线 / 跨层预读）</span></div>
+      <pre>DEEPINFER_PREFILL_LOOKAHEAD=0 .venv/bin/python mac-deploy-tests/mk/trace_agent.py ~/Models/logs/mk/agent/capture.jsonl base.json --cache-gb 8
+.venv/bin/python mac-deploy-tests/mk/trace_agent.py ~/Models/logs/mk/agent/capture.jsonl look.json --cache-gb 8</pre></div>
+    <div class="cmd"><div class="cmd-head"><span>3. 逐位一致检查、页面</span></div>
+      <pre>.venv/bin/python mac-deploy-tests/mk/test_prefill_lookahead.py --tokens 600
+python3 mac-deploy-tests/trace/agent_page.py mac-deploy-tests/trace/AGENT_TRACE.html base.json look.json
+python3 mac-deploy-tests/trace/pipeline_report.py mac-deploy-tests/DSV41_PIPELINE_REPORT.html capture.jsonl base.json look.json</pre></div>
+  </div>
+</section>
+
+<footer class="foot"><span>DeepInfer-Mac · deepinfer-mac-dsv41-flash</span><span>2026-11-27</span><span>前作：DSV41_MAC_REPORT.html · MK_REPORT.html · DSV41_OPT_REPORT.html</span></footer>
+</main>
+<div class="tip" id="tip" role="tooltip" hidden></div>
+<script>
+(function () {
+  "use strict";
+  var tip = document.getElementById("tip");
+  function fill(el) {
+    tip.replaceChildren();
+    var v = document.createElement("div"); v.className = "tv"; v.textContent = el.getAttribute("data-tv") || "";
+    var t = document.createElement("div"); t.className = "tt"; t.textContent = el.getAttribute("data-tt") || "";
+    tip.append(v, t);
+    var n = el.getAttribute("data-tn");
+    if (n) { var ne = document.createElement("div"); ne.className = "tn"; ne.textContent = n; tip.append(ne); }
+    tip.hidden = false;
+  }
+  function place(x, y) {
+    var r = tip.getBoundingClientRect(), left = x + 14, top = y + 14;
+    if (left + r.width > window.innerWidth - 8) left = x - r.width - 14;
+    if (top + r.height > window.innerHeight - 8) top = y - r.height - 14;
+    tip.style.left = Math.max(8, left) + "px"; tip.style.top = Math.max(8, top) + "px";
+  }
+  function hide() { tip.hidden = true; }
+  function showAt(el) { fill(el); var b = el.getBoundingClientRect(); place(b.left + b.width / 2, b.top + b.height / 2); }
+  document.querySelectorAll("[data-tv]").forEach(function (el) {
+    el.addEventListener("pointerenter", function (ev) { fill(el); place(ev.clientX, ev.clientY); });
+    el.addEventListener("pointermove", function (ev) { if (!tip.hidden) place(ev.clientX, ev.clientY); });
+    el.addEventListener("pointerleave", function (ev) { if (ev.pointerType !== "touch") hide(); });
+    el.addEventListener("click", function () { showAt(el); });
+    el.addEventListener("focus", function () { showAt(el); });
+    el.addEventListener("blur", hide);
+  });
+  document.addEventListener("pointerdown", function (ev) { var t = ev.target; if (!(t && t.closest && t.closest("[data-tv]"))) hide(); });
+  window.addEventListener("scroll", hide, { passive: true });
+  document.addEventListener("keydown", function (ev) { if (ev.key === "Escape") hide(); });
+  document.querySelectorAll("[data-toggle]").forEach(function (b) {
+    var t = document.getElementById(b.getAttribute("data-toggle"));
+    if (!t) return;
+    b.addEventListener("click", function () {
+      t.hidden = !t.hidden; b.setAttribute("aria-expanded", String(!t.hidden));
+      b.textContent = t.hidden ? "显示数据表" : "隐藏数据表";
+    });
+  });
+})();
+</script>
+</body>
+</html>
