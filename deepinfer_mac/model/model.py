@@ -743,7 +743,8 @@ class MoE:
     # reads move; the batches and the arithmetic are unchanged. 0 = off.
     # The gap grows with the chunk (its attention and its last batch): ~25 ms a layer at 176 rows, 200-300 ms at 1,585,
     # where ~350 of 384 experts are needed anyway. So read max(PREFILL_LOOKAHEAD, rows // PREFILL_LOOKAHEAD_ROWS)
-    # experts; guesses not yet started when the layer has routed are cancelled (cancel_unneeded).
+    # experts, at most half the target slab and never into the room EXPERT_BATCH reserves; guesses not yet started
+    # when the layer has routed are cancelled (cancel_unneeded).
     PREFILL_LOOKAHEAD = int(os.environ.get("DEEPINFER_PREFILL_LOOKAHEAD", "16"))
     PREFILL_LOOKAHEAD_ROWS = int(os.environ.get("DEEPINFER_PREFILL_LOOKAHEAD_ROWS", "12"))
     look_from = None  # set by Transformer.forward in a prefill: the rows of this chunk the next layer processes (None: off)
@@ -1133,6 +1134,12 @@ class MoE:
             if look is not None:
                 mx.eval(idx, look)  # the same host sync as the routing
                 k = max(self.PREFILL_LOOKAHEAD, look.shape[0] // max(1, self.PREFILL_LOOKAHEAD_ROWS))
+                slab = getattr(self.experts, "slabs", {}).get(nxt.key)
+                if slab is not None:
+                    # guesses in flight cannot be evicted: leave the slab room for this layer's last batch, the two
+                    # pinned calls and the next layer's first batches (EXPERT_BATCH's invariant), or a demand read
+                    # finds no slot (MemoryError; seen with 4,096-row chunks of a 12K-token prompt at 8 GiB)
+                    k = min(k, slab.slots // 2, max(0, slab.slots - 5 * self.EXPERT_BATCH))
                 self._look = (nxt.key, self._look_ids(nxt.key, np.array(look), k))
             idx_np = np.array(idx)  # the one host sync per layer: which experts to fetch
         if sub:
